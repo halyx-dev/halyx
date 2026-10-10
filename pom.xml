@@ -24,6 +24,7 @@
         <module>cirrus-spring-boot-autoconfigure</module>
         <module>cirrus-spring-boot-starter</module>
         <module>cirrus-spring-boot4-tests</module>
+        <module>cirrus-benchmarks</module>
     </modules>
 
     <properties>

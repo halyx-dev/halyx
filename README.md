@@ -478,6 +478,7 @@ runs on both: `cirrus-spring-boot-autoconfigure` tests on 3.5, and the unpublish
 | `cirrus-vault` | HashiCorp Vault (KV v2): parameters and secrets |
 | `cirrus-spring-boot-autoconfigure` | Spring Boot auto-configuration, properties, health, observations |
 | `cirrus-spring-boot-starter` | The dependency Spring Boot applications add |
+| `cirrus-benchmarks` | JMH benchmarks and a load-test harness for real buckets (not published) |
 
 Add `cirrus-core` plus the provider jars you need; providers are discovered with `ServiceLoader`.
 
@@ -594,6 +595,46 @@ Not verified locally: GCP Parameter Manager against real GCP (see above), Vault 
 against real Vault auth backends, Vault Kubernetes
 login, Entra ID logins to Key Vault and App Configuration (the emulator accepts any token), and an IAM *login* end to end (the released Floci images cannot attach IAM users to
 a cache yet), Entra ID logins (Floci-az does not emulate them), and failover of a managed cluster.
+
+## Benchmarks
+
+```bash
+mvn -pl cirrus-benchmarks -am package -DskipTests
+java -jar cirrus-benchmarks/target/benchmarks.jar                      # all JMH benchmarks
+java -jar cirrus-benchmarks/target/benchmarks.jar TransferBenchmark -p latencyMillis=50
+```
+
+The JMH benchmarks measure Cirrus itself, so they need no cloud account. `TransferBenchmark` and
+`BulkBenchmark` run against a simulated network: every request pays a round-trip latency, and each
+connection is capped at a bandwidth. That shows what the parallel engines buy without depending on
+your network. One short run on a laptop (20 ms latency, 100 MB/s per connection):
+
+| Benchmark | Sequential | Cirrus | Speed-up |
+|---|---|---|---|
+| 64 MiB download, 8 MiB ranges | 1,004 ms | 310 ms (parallelism 4), 219 ms (8) | 3.2x, 4.6x |
+| 64 MiB upload, 8 MiB parts | 1,125 ms | 445 ms (concurrency 4), 228 ms (8) | 2.5x, 4.9x |
+| Delete 500 keys, no batch API | 10,934 ms | 705 ms (16 at a time) | 15x |
+| List 5,000 keys in 5 pages, 20 µs work per key | 291 ms | 194 ms (next page prefetched) | 1.5x |
+| Checksum one 8 MiB part | MD5: 660 MiB/s | CRC32C: about 16 GiB/s | about 25x |
+
+Calling the portable API costs about a microsecond more per call than calling the driver directly
+(`CoreBenchmark`): noise next to any network round trip. These runs were short, with wide error bars;
+rerun them on your own hardware before relying on the figures.
+
+Emulators don't behave like cloud storage under load, so tune against a real bucket with `LoadTest`.
+Each cloud's default credential chain is used, and the test deletes its objects afterwards:
+
+```bash
+java -cp cirrus-benchmarks/target/benchmarks.jar \
+  -Dprovider=aws -Dbucket=my-bench-bucket -Dregion=eu-west-1 \
+  -Dconcurrency=64 -Dduration=60s -Dsize=1MiB -Dmix=put:20,get:70,head:10 \
+  -Dcirrus.http.max-connections=256 \
+  org.kamranzafar.cirrus.benchmarks.LoadTest
+```
+
+It prints count, ops/s, MB/s, p50/p90/p99/max latency and errors for each operation. Any `cirrus.*`
+property goes to the provider (for example `-Dcirrus.aws.retry-mode=standard`). Use
+`-Dparallelism=8` for parallel ranged gets, and `-Dendpoint=...` for S3-compatible stores.
 
 ## Roadmap
 
