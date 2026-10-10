@@ -252,10 +252,18 @@ public record StratumProperties(Map<String, Provider> providers, Map<String, Blo
      * @param location   Key Vault URL or App Configuration endpoint on Azure, KV mount on Vault
      * @param prefix     name prefix of every value in the store
      * @param cacheTtl   how long reads are cached in this JVM; none when omitted
+     * @param nativeNames use the backend's own names as they are (see {@code ParameterStoreConfig.nativeNames})
+     * @param expandJson  for {@code spring.config.import}: also expose the fields of JSON object values as
+     *                    properties ({@code db/creds} holding {@code {"password":...}} adds {@code db.creds.password})
+     * @param reloadInterval for {@code spring.config.import}: poll for changes this often and update the imported
+     *                    properties in place; no reloading when omitted
+     * @param startupAttempts for {@code spring.config.import}: attempts when the backend is temporarily unavailable
      * @param properties provider-specific settings, such as {@code aws.ssm.secure}
      */
     public record ParameterStoreProperties(String provider, @DefaultValue("secrets") ParameterKind kind, String location,
                                            @DefaultValue("") String prefix, Duration cacheTtl,
+                                           @DefaultValue("false") boolean nativeNames, @DefaultValue("true") boolean expandJson,
+                                           Duration reloadInterval, @DefaultValue("3") int startupAttempts,
                                            Map<String, String> properties) {
 
         public ParameterStoreProperties {
@@ -263,7 +271,7 @@ public record StratumProperties(Map<String, Provider> providers, Map<String, Blo
         }
 
         public ParameterStoreConfig toStoreConfig() {
-            ParameterStoreConfig.Builder config = ParameterStoreConfig.builder(kind).prefix(prefix);
+            ParameterStoreConfig.Builder config = ParameterStoreConfig.builder(kind).prefix(prefix).nativeNames(nativeNames);
             if (location != null) {
                 config.location(location);
             }

@@ -1,6 +1,7 @@
 package org.kamranzafar.stratum.spring.autoconfigure.actuate;
 
 import org.kamranzafar.stratum.cache.Cache;
+import org.kamranzafar.stratum.parameters.ParameterStore;
 import org.kamranzafar.stratum.spring.autoconfigure.StratumAutoConfiguration;
 import org.kamranzafar.stratum.spring.autoconfigure.StratumResourcesCondition;
 import org.kamranzafar.stratum.storage.BlobStore;
@@ -31,10 +32,12 @@ public class StratumActuatorHealthContributorAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean(name = "stratumHealthContributor")
-    public HealthContributor stratumHealthContributor(Map<String, BlobStore> blobStores, Map<String, Cache<?>> caches) {
+    public HealthContributor stratumHealthContributor(Map<String, BlobStore> blobStores, Map<String, Cache<?>> caches,
+                                                      Map<String, ParameterStore> parameterStores) {
         Map<String, HealthContributor> contributors = new TreeMap<>();
         blobStores.forEach((name, store) -> contributors.put(name, new ActuatorBlobStoreHealthIndicator(store)));
         caches.forEach((name, cache) -> contributors.put(name, new ActuatorCacheHealthIndicator(cache)));
+        parameterStores.forEach((name, store) -> contributors.put(name, new ActuatorParameterStoreHealthIndicator(store)));
         return CompositeHealthContributor.fromMap(contributors);
     }
 }

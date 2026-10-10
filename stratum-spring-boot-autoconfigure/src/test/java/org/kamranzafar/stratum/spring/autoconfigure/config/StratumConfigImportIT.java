@@ -6,10 +6,14 @@ import org.junit.jupiter.api.io.TempDir;
 import org.kamranzafar.stratum.Stratum;
 import org.kamranzafar.stratum.config.Credentials;
 import org.kamranzafar.stratum.config.ProviderConfig;
+import org.kamranzafar.stratum.parameters.ParameterStore;
 import org.kamranzafar.stratum.parameters.ParameterStoreConfig;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.WebApplicationType;
+import org.kamranzafar.stratum.spring.autoconfigure.StratumAutoConfiguration;
 import org.springframework.boot.SpringBootConfiguration;
+import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
+import org.springframework.context.ApplicationListener;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
@@ -20,6 +24,9 @@ import org.testcontainers.utility.DockerImageName;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -42,7 +49,9 @@ class StratumConfigImportIT {
     @TempDir
     static Path dir;
 
+    /** Like an application's @SpringBootApplication, with only Stratum's auto-configuration. */
     @SpringBootConfiguration
+    @ImportAutoConfiguration(StratumAutoConfiguration.class)
     static class App {
     }
 
@@ -58,20 +67,38 @@ class StratumConfigImportIT {
             store.put("db/url", "jdbc:postgresql://db:5432/orders");
             store.put("db/password", "s3cr3t");
             store.put("feature/new-checkout", "true");
+            store.put("rds/creds", "{\"username\":\"app\",\"password\":\"rds-pw\",\"port\":5432}");
+            stratum.provider("vault").parameterStore(ParameterStoreConfig.secrets().prefix("legacy-svc/").nativeNames(true).build())
+                    .put("db_password", "legacy-pw");
         }
     }
 
+    private static ParameterStore vaultStore(String prefix) {
+        Stratum stratum = Stratum.builder().register("vault", ProviderConfig.of("vault").endpoint(address())
+                .credentials(Credentials.of("token", "root-token"))).build();
+        return stratum.provider("vault").parameterStore(ParameterStoreConfig.secrets().prefix(prefix).build());
+    }
+
     private static ConfigurableApplicationContext start(String imports) throws Exception {
-        Path file = Files.writeString(dir.resolve("application-" + Math.abs(imports.hashCode()) + ".properties"), """
+        return start(imports, "", event -> { });
+    }
+
+    private static ConfigurableApplicationContext start(String imports, String extra,
+                                                        ApplicationListener<StratumParametersChangedEvent> listener) throws Exception {
+        Path file = Files.writeString(dir.resolve("application-" + Math.abs((imports + extra).hashCode()) + ".properties"), """
                 stratum.providers.vault.type=vault
                 stratum.providers.vault.endpoint=%s
                 stratum.providers.vault.credentials.type=static
                 stratum.providers.vault.credentials.id=token
                 stratum.providers.vault.credentials.secret=root-token
                 stratum.parameter-stores.app.prefix=orders-svc
+                stratum.parameter-stores.legacy.prefix=legacy-svc/
+                stratum.parameter-stores.legacy.native-names=true
+                %s
                 spring.config.import=%s
-                """.formatted(address(), imports));
+                """.formatted(address(), extra, imports));
         SpringApplication application = new SpringApplication(App.class);
+        application.addListeners(listener);
         application.setWebApplicationType(WebApplicationType.NONE);
         return application.run("--spring.config.location=file:" + file);
     }
@@ -84,6 +111,45 @@ class StratumConfigImportIT {
             assertThat(env.getProperty("db.url")).isEqualTo("jdbc:postgresql://db:5432/orders");
             assertThat(env.getProperty("db.password")).isEqualTo("s3cr3t");
             assertThat(env.getProperty("feature.new-checkout", Boolean.class)).isTrue();
+        }
+    }
+
+    @Test
+    void jsonSecretsAreExpandedIntoFields() throws Exception {
+        try (var context = start("stratum:app")) {
+            var env = context.getEnvironment();
+
+            assertThat(env.getProperty("rds.creds.password")).isEqualTo("rds-pw");
+            assertThat(env.getProperty("rds.creds.port", Integer.class)).isEqualTo(5432);
+            assertThat(env.getProperty("rds.creds")).startsWith("{");
+        }
+    }
+
+    @Test
+    void nativeNamesAreImportedAsTheyAre() throws Exception {
+        try (var context = start("stratum:legacy")) {
+            assertThat(context.getEnvironment().getProperty("db_password")).isEqualTo("legacy-pw");
+        }
+    }
+
+    @Test
+    void reloadUpdatesPropertiesAndPublishesAnEvent() throws Exception {
+        BlockingQueue<StratumParametersChangedEvent> events = new LinkedBlockingQueue<>();
+        ParameterStore store = vaultStore("orders-svc");
+        store.put("rotating/password", "before");
+        try (var context = start("stratum:app", "stratum.parameter-stores.app.reload-interval=PT0.3S", events::add)) {
+            var env = context.getEnvironment();
+            assertThat(env.getProperty("rotating.password")).isEqualTo("before");
+
+            store.put("rotating/password", "after");
+
+            StratumParametersChangedEvent event = events.poll(15, TimeUnit.SECONDS);
+            assertThat(event).as("change event").isNotNull();
+            assertThat(event.store()).isEqualTo("app");
+            assertThat(event.keys()).contains("rotating.password");
+            assertThat(env.getProperty("rotating.password")).isEqualTo("after");
+        } finally {
+            store.delete("rotating/password");
         }
     }
 

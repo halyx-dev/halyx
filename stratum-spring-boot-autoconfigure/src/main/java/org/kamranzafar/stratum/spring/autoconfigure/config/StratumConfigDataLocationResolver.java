@@ -56,7 +56,8 @@ public class StratumConfigDataLocationResolver implements ConfigDataLocationReso
             throw new IllegalStateException("stratum.parameter-stores." + storeName + ".provider refers to unknown provider '"
                     + provider + "'. Configured providers: " + providers.keySet());
         }
-        return List.of(new StratumConfigDataResource(location.toString(), provider,
-                providerProperties.toProviderConfig(provider), store.toStoreConfig(), subPrefix, location.isOptional()));
+        return List.of(new StratumConfigDataResource(location.toString(), storeName, provider,
+                providerProperties.toProviderConfig(provider), store.toStoreConfig(), subPrefix, location.isOptional(),
+                store.expandJson(), store.reloadInterval(), Math.max(1, store.startupAttempts())));
     }
 }

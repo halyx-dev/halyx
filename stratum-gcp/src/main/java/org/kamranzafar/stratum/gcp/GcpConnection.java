@@ -83,12 +83,13 @@ final class GcpConnection implements ProviderConnection {
             String location = storeConfig.location().orElse("global");
             ParameterManagerClient client = parameterManagers.computeIfAbsent(location, this::parameterManagerClient);
             return new ParameterManagerDriver(client, project, location,
-                    Boolean.parseBoolean(storeConfig.property(ParameterManagerDriver.RENDER).orElse("false")));
+                    Boolean.parseBoolean(storeConfig.property(ParameterManagerDriver.RENDER).orElse("false")),
+                    storeConfig.nativeNames());
         }
         if (secretManager == null) {
             secretManager = secretManagerClient();
         }
-        return new SecretManagerDriver(secretManager, project);
+        return new SecretManagerDriver(secretManager, project, storeConfig.nativeNames());
     }
 
     /** Regional locations are served by regional endpoints; an endpoint override (emulator or fake) wins. */

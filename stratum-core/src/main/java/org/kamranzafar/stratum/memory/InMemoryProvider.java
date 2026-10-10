@@ -3,12 +3,14 @@ package org.kamranzafar.stratum.memory;
 import org.kamranzafar.stratum.cache.CacheConfig;
 import org.kamranzafar.stratum.cache.spi.CacheDriver;
 import org.kamranzafar.stratum.config.ProviderConfig;
+import org.kamranzafar.stratum.parameters.Parameter;
 import org.kamranzafar.stratum.parameters.ParameterStoreConfig;
 import org.kamranzafar.stratum.parameters.spi.ParameterDriver;
 import org.kamranzafar.stratum.spi.CloudProvider;
 import org.kamranzafar.stratum.spi.ProviderConnection;
 import org.kamranzafar.stratum.storage.spi.BlobStoreDriver;
 
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentNavigableMap;
@@ -39,7 +41,7 @@ public final class InMemoryProvider implements CloudProvider {
                 new ConcurrentHashMap<>();
         /** One store per endpoint, shared by every namespace on it, like a Redis server. */
         private final Map<String, CacheDriver> caches = new ConcurrentHashMap<>();
-        private final Map<String, ParameterDriver> parameters = new ConcurrentHashMap<>();
+        private final Map<String, ConcurrentSkipListMap<String, List<Parameter>>> parameters = new ConcurrentHashMap<>();
 
         @Override
         public BlobStoreDriver blobStore(String bucket) {
@@ -54,8 +56,9 @@ public final class InMemoryProvider implements CloudProvider {
 
         @Override
         public ParameterDriver parameterStore(ParameterStoreConfig config) {
-            return parameters.computeIfAbsent(config.kind() + "|" + config.location().orElse(""),
-                    k -> new InMemoryParameterDriver());
+            var values = parameters.computeIfAbsent(config.kind() + "|" + config.location().orElse(""),
+                    k -> new ConcurrentSkipListMap<>());
+            return new InMemoryParameterDriver(values, config.nativeNames());
         }
 
         @Override

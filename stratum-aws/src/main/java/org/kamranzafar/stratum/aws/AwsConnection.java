@@ -81,7 +81,8 @@ final class AwsConnection implements ProviderConnection {
                     ssm = builder.build();
                 }
                 yield new SsmParameterDriver(ssm,
-                        Boolean.parseBoolean(storeConfig.property(SsmParameterDriver.SECURE).orElse("false")));
+                        Boolean.parseBoolean(storeConfig.property(SsmParameterDriver.SECURE).orElse("false")),
+                        storeConfig.nativeNames());
             }
             case SECRETS -> {
                 if (secretsManager == null) {
@@ -89,7 +90,7 @@ final class AwsConnection implements ProviderConnection {
                     config.endpoint().ifPresent(builder::endpointOverride);
                     secretsManager = builder.build();
                 }
-                yield new SecretsManagerDriver(secretsManager);
+                yield new SecretsManagerDriver(secretsManager, storeConfig.nativeNames());
             }
         };
     }

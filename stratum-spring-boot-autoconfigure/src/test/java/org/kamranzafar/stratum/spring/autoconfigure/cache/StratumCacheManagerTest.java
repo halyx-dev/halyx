@@ -213,6 +213,24 @@ class StratumCacheManagerTest {
     }
 
     @Test
+    void parameterStoreReadsArePublishedAsMicrometerMeters() {
+        runner.withBean(MeterRegistry.class, SimpleMeterRegistry::new)
+                .withPropertyValues("stratum.parameter-stores.config.kind=parameters",
+                        "stratum.parameter-stores.config.cache-ttl=5m").run(context -> {
+                    var store = context.getBean("config", org.kamranzafar.stratum.parameters.ParameterStore.class);
+                    store.put("flag", "on");
+                    store.get("flag");
+                    store.get("flag");
+                    MeterRegistry registry = context.getBean(MeterRegistry.class);
+
+                    assertThat(registry.get("stratum.parameters.reads").tags("store", "config", "source", "backend")
+                            .functionCounter().count()).isEqualTo(1);
+                    assertThat(registry.get("stratum.parameters.reads").tags("store", "config", "source", "cache")
+                            .functionCounter().count()).isEqualTo(1);
+                });
+    }
+
+    @Test
     void hitsAndMissesArePublishedAsMicrometerMeters() {
         runner.withBean(MeterRegistry.class, SimpleMeterRegistry::new)
                 .withPropertyValues("stratum.caches.sessions.endpoint=redis://localhost:6379").run(context -> {

@@ -17,10 +17,11 @@ import java.util.concurrent.ConcurrentSkipListMap;
 /** In-memory parameters with numbered versions, like SSM Parameter Store. */
 final class InMemoryParameterDriver extends AbstractParameterDriver {
 
-    private final ConcurrentSkipListMap<String, List<Parameter>> values = new ConcurrentSkipListMap<>();
+    private final ConcurrentSkipListMap<String, List<Parameter>> values;
 
-    InMemoryParameterDriver() {
-        super(InMemoryProvider.ID, Capabilities.of(ParameterCapability.VERSIONS));
+    InMemoryParameterDriver(ConcurrentSkipListMap<String, List<Parameter>> values, boolean nativeNames) {
+        super(InMemoryProvider.ID, Capabilities.of(ParameterCapability.VERSIONS), nativeNames);
+        this.values = values;
     }
 
     @Override
@@ -40,7 +41,7 @@ final class InMemoryParameterDriver extends AbstractParameterDriver {
     public Map<String, Parameter> list(String prefix) {
         Map<String, Parameter> found = new LinkedHashMap<>();
         values.forEach((name, versions) -> {
-            if (under(name, prefix)) {
+            if (matches(name, prefix)) {
                 found.put(name, versions.getLast());
             }
         });

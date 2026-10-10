@@ -1,12 +1,23 @@
 package org.kamranzafar.stratum.vault;
 
+import org.kamranzafar.stratum.json.Json;
+
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManagerFactory;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.GeneralSecurityException;
+import java.security.KeyStore;
+import java.security.cert.Certificate;
+import java.security.cert.CertificateFactory;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
@@ -22,14 +33,38 @@ final class VaultClient implements AutoCloseable {
     private final URI address;
     private final Optional<String> namespace;
     private final VaultLogin login;
-    private final HttpClient http = HttpClient.newBuilder().connectTimeout(TIMEOUT).build();
+    private final HttpClient http;
     private VaultLogin.Token token;
 
-    VaultClient(URI address, Optional<String> namespace, VaultLogin login) {
+    VaultClient(URI address, Optional<String> namespace, VaultLogin login, Optional<Path> caCertificate) {
         String base = address.toString();
         this.address = URI.create(base.endsWith("/") ? base : base + "/");
         this.namespace = namespace;
         this.login = login;
+        HttpClient.Builder builder = HttpClient.newBuilder().connectTimeout(TIMEOUT);
+        caCertificate.ifPresent(pem -> builder.sslContext(trusting(pem)));
+        this.http = builder.build();
+    }
+
+    /** An SSL context trusting only the CA certificates in a PEM file. */
+    private static SSLContext trusting(Path pem) {
+        try (InputStream in = Files.newInputStream(pem)) {
+            KeyStore store = KeyStore.getInstance(KeyStore.getDefaultType());
+            store.load(null, null);
+            int i = 0;
+            for (Certificate certificate : CertificateFactory.getInstance("X.509").generateCertificates(in)) {
+                store.setCertificateEntry("ca-" + i++, certificate);
+            }
+            TrustManagerFactory trust = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+            trust.init(store);
+            SSLContext context = SSLContext.getInstance("TLS");
+            context.init(null, trust.getTrustManagers(), null);
+            return context;
+        } catch (IOException e) {
+            throw new UncheckedIOException("Cannot read the Vault CA certificate " + pem, e);
+        } catch (GeneralSecurityException e) {
+            throw new IllegalArgumentException("Invalid Vault CA certificate " + pem, e);
+        }
     }
 
     /** Calls {@code /v1/<path>} and returns the parsed JSON; 404 and empty responses return null. */

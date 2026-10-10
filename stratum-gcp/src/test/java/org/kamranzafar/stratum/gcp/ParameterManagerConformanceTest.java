@@ -58,6 +58,11 @@ class ParameterManagerConformanceTest {
         protected ParameterStoreConfig.Builder config() {
             return ParameterStoreConfig.parameters();
         }
+
+        @Override
+        protected String nativePrefix(String unique) {
+            return unique + "_";
+        }
     }
 
     @Nested
@@ -70,6 +75,11 @@ class ParameterManagerConformanceTest {
         @Override
         protected ParameterStoreConfig.Builder config() {
             return ParameterStoreConfig.parameters().location("europe-west2");
+        }
+
+        @Override
+        protected String nativePrefix(String unique) {
+            return unique + "_";
         }
     }
 

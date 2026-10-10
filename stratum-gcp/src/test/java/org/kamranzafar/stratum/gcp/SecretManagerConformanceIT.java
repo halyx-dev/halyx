@@ -63,6 +63,11 @@ class SecretManagerConformanceIT {
         protected ParameterStoreConfig.Builder config() {
             return ParameterStoreConfig.secrets();
         }
+
+        @Override
+        protected String nativePrefix(String unique) {
+            return unique + "_";
+        }
     }
 
     @Test

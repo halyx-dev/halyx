@@ -63,6 +63,11 @@ class AwsParameterStoreConformanceIT {
         protected ParameterStoreConfig.Builder config() {
             return ParameterStoreConfig.parameters();
         }
+
+        @Override
+        protected String nativePrefix(String unique) {
+            return "/" + unique + "/";
+        }
     }
 
     @Nested

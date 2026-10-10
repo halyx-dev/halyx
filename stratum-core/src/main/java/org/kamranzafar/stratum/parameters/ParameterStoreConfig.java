@@ -21,9 +21,11 @@ public final class ParameterStoreConfig {
     private final String location;
     private final String prefix;
     private final Duration cacheTtl;
+    private final boolean nativeNames;
     private final Map<String, String> properties;
 
     private ParameterStoreConfig(Builder b) {
+        this.nativeNames = b.nativeNames;
         this.kind = b.kind;
         this.location = b.location;
         this.prefix = b.prefix;
@@ -60,6 +62,16 @@ public final class ParameterStoreConfig {
         return prefix;
     }
 
+    /**
+     * Whether names are the backend's own, used exactly as given: no portable-name validation, no
+     * separator translation, and the prefix is a literal string prefix (include any separator in it).
+     * Use it to read existing values whose names do not follow {@link ParameterName}, such as
+     * {@code /app/db_password} or AWS-managed {@code rds!db-...} secrets.
+     */
+    public boolean nativeNames() {
+        return nativeNames;
+    }
+
     /** How long reads are cached in this JVM; zero (the default) disables caching. */
     public Duration cacheTtl() {
         return cacheTtl;
@@ -83,6 +95,7 @@ public final class ParameterStoreConfig {
         private String location;
         private String prefix = "";
         private Duration cacheTtl = Duration.ZERO;
+        private boolean nativeNames;
         private final Map<String, String> properties = new LinkedHashMap<>();
 
         private Builder(ParameterKind kind) {
@@ -95,7 +108,12 @@ public final class ParameterStoreConfig {
         }
 
         public Builder prefix(String prefix) {
-            this.prefix = prefix.isEmpty() ? "" : ParameterName.validate(prefix);
+            this.prefix = Objects.requireNonNull(prefix, "prefix");
+            return this;
+        }
+
+        public Builder nativeNames(boolean nativeNames) {
+            this.nativeNames = nativeNames;
             return this;
         }
 
@@ -114,6 +132,9 @@ public final class ParameterStoreConfig {
         }
 
         public ParameterStoreConfig build() {
+            if (!nativeNames && !prefix.isEmpty()) {
+                ParameterName.validate(prefix);
+            }
             return new ParameterStoreConfig(this);
         }
     }

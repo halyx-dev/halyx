@@ -78,6 +78,17 @@ class AzureParameterStoreConformanceIT {
         protected ParameterStoreConfig.Builder config() {
             return keyVault();
         }
+
+        /** Key Vault names allow only letters, digits and dashes; "--" is native but not portable. */
+        @Override
+        protected String nativePrefix(String unique) {
+            return unique + "-";
+        }
+
+        @Override
+        protected String nativeName() {
+            return "db--password";
+        }
     }
 
     @Nested

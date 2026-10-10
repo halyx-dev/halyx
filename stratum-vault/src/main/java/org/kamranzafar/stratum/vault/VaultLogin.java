@@ -1,11 +1,16 @@
 package org.kamranzafar.stratum.vault;
 
+import org.kamranzafar.stratum.json.Json;
+
 import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 
@@ -59,6 +64,48 @@ interface VaultLogin {
             } catch (IOException e) {
                 throw new UncheckedIOException("Cannot read the Kubernetes service account token " + jwtFile, e);
             }
+        };
+    }
+
+    /** Reads the token from a file (a Vault Agent sink) on every login, so rotations are picked up. */
+    static VaultLogin tokenFile(Path file) {
+        return client -> {
+            try {
+                return new Token(Files.readString(file).trim(), Instant.now(), Optional.empty());
+            } catch (IOException e) {
+                throw new UncheckedIOException("Cannot read the Vault token file " + file, e);
+            }
+        };
+    }
+
+    /** GCP auth (iam type, with a metadata-server identity token as the signed JWT). */
+    static VaultLogin gcp(String path, String role, String metadataUrl) {
+        return client -> {
+            String jwt = Metadata.get(metadataUrl + "/computeMetadata/v1/instance/service-accounts/default/identity?audience="
+                    + URLEncoder.encode("http://vault/" + role, StandardCharsets.UTF_8) + "&format=full",
+                    "Metadata-Flavor", "Google").trim();
+            return fromAuth(client.unauthenticated("POST", "auth/" + path + "/login", Map.of("role", role, "jwt", jwt)));
+        };
+    }
+
+    /** Azure auth: a managed identity access token plus the VM's identity from the instance metadata service. */
+    static VaultLogin azure(String path, String role, String resource, String metadataUrl) {
+        return client -> {
+            Object token = Json.parse(Metadata.get(metadataUrl + "/metadata/identity/oauth2/token?api-version=2018-02-01&resource="
+                    + URLEncoder.encode(resource, StandardCharsets.UTF_8), "Metadata", "true"));
+            Object instance = Json.parse(Metadata.get(metadataUrl + "/metadata/instance?api-version=2021-02-01", "Metadata", "true"));
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("role", role);
+            body.put("jwt", String.valueOf(Json.at(token, "access_token")));
+            body.put("subscription_id", String.valueOf(Json.at(instance, "compute", "subscriptionId")));
+            body.put("resource_group_name", String.valueOf(Json.at(instance, "compute", "resourceGroupName")));
+            Object scaleSet = Json.at(instance, "compute", "vmScaleSetName");
+            if (scaleSet instanceof String vmss && !vmss.isEmpty()) {
+                body.put("vmss_name", vmss);
+            } else {
+                body.put("vm_name", String.valueOf(Json.at(instance, "compute", "name")));
+            }
+            return fromAuth(client.unauthenticated("POST", "auth/" + path + "/login", body));
         };
     }
 

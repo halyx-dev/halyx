@@ -51,6 +51,11 @@ class GcpParameterStoreIT {
         protected ParameterStoreConfig.Builder config() {
             return ParameterStoreConfig.secrets();
         }
+
+        @Override
+        protected String nativePrefix(String unique) {
+            return unique + "_";
+        }
     }
 
     @Nested
@@ -63,6 +68,11 @@ class GcpParameterStoreIT {
         @Override
         protected ParameterStoreConfig.Builder config() {
             return ParameterStoreConfig.parameters().location(location());
+        }
+
+        @Override
+        protected String nativePrefix(String unique) {
+            return unique + "_";
         }
     }
 }

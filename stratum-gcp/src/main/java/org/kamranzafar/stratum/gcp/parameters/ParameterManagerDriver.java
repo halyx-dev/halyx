@@ -50,20 +50,21 @@ public final class ParameterManagerDriver extends AbstractParameterDriver {
     private final String location;
     private final boolean render;
 
-    public ParameterManagerDriver(ParameterManagerClient client, String project, String location, boolean render) {
-        super(GcpProvider.ID, Capabilities.of(ParameterCapability.VERSIONS));
+    public ParameterManagerDriver(ParameterManagerClient client, String project, String location, boolean render,
+                                  boolean nativeNames) {
+        super(GcpProvider.ID, Capabilities.of(ParameterCapability.VERSIONS), nativeNames);
         this.client = client;
         this.project = project;
         this.location = location;
         this.render = render;
     }
 
-    static String encode(String name) {
-        return name.replace("/", "__");
+    String encode(String name) {
+        return nativeNames ? name : name.replace("/", "__");
     }
 
-    static String decode(String id) {
-        return id.replace("__", "/");
+    String decode(String id) {
+        return nativeNames ? id : id.replace("__", "/");
     }
 
     /** Version ids that sort in creation order: {@code v} + 13-digit epoch millis + random suffix. */
@@ -132,7 +133,7 @@ public final class ParameterManagerDriver extends AbstractParameterDriver {
         List<String> names = new ArrayList<>();
         client.listParameters(LocationName.of(project, location)).iterateAll().forEach(p -> {
             String name = decode(ParameterName.parse(p.getName()).getParameter());
-            if (under(name, prefix)) {
+            if (matches(name, prefix)) {
                 names.add(name);
             }
         });

@@ -8,6 +8,7 @@ import org.kamranzafar.stratum.CloudContext;
 import org.kamranzafar.stratum.error.NotFoundException;
 import org.kamranzafar.stratum.parameters.Parameter;
 import org.kamranzafar.stratum.parameters.ParameterCapability;
+import org.kamranzafar.stratum.parameters.ParameterChanges;
 import org.kamranzafar.stratum.parameters.ParameterKind;
 import org.kamranzafar.stratum.parameters.ParameterStore;
 import org.kamranzafar.stratum.parameters.ParameterStoreConfig;
@@ -17,6 +18,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -190,6 +194,111 @@ public abstract class ParameterStoreConformanceTest {
         cached.put("own", "v2");
 
         assertThat(cached.require("own")).isEqualTo("v2");
+    }
+
+    // --- JSON secrets --------------------------------------------------------------------------
+
+    @Test
+    void jsonFieldsCanBeRead() {
+        store().put("db/creds", "{\"username\":\"app\",\"password\":\"pw\",\"port\":5432,\"replica\":{\"host\":\"r1\"}}");
+
+        Parameter creds = store().get("db/creds").orElseThrow();
+        assertThat(creds.field("password")).hasValue("pw");
+        assertThat(creds.field("replica.host")).hasValue("r1");
+        assertThat(creds.fields()).containsEntry("port", "5432").containsEntry("username", "app");
+        assertThat(store().require("db/creds", "username")).isEqualTo("app");
+        assertThatThrownBy(() -> store().require("db/creds", "missing")).isInstanceOf(NotFoundException.class);
+    }
+
+    @Test
+    void plainValuesHaveNoFields() {
+        store().put("plain", "not json");
+
+        assertThat(store().get("plain").orElseThrow().fields()).isEmpty();
+    }
+
+    // --- native names --------------------------------------------------------------------------
+
+    /** A native prefix for this backend under the test's unique prefix, separator included. */
+    protected String nativePrefix(String unique) {
+        return unique + "/";
+    }
+
+    /** A name the portable rules reject but this backend accepts. */
+    protected String nativeName() {
+        return "db_password";
+    }
+
+    @Test
+    void nativeNamesAreUsedAsTheyAre() {
+        String nativePrefix = nativePrefix(prefix);
+        ParameterStore nativeStore = context().parameterStore(config().prefix(nativePrefix).nativeNames(true).build());
+        assertThatThrownBy(() -> store().put(nativeName(), "v")).isInstanceOf(IllegalArgumentException.class);
+        try {
+            nativeStore.put(nativeName(), "native-value");
+
+            assertThat(nativeStore.require(nativeName())).isEqualTo("native-value");
+            assertThat(nativeStore.getAll("")).containsOnlyKeys(nativeName());
+            ParameterStore unprefixed = context().parameterStore(config().nativeNames(true).build());
+            assertThat(unprefixed.require(nativePrefix + nativeName())).isEqualTo("native-value");
+        } finally {
+            nativeStore.delete(nativeName());
+        }
+        assertThat(nativeStore.get(nativeName())).isEmpty();
+    }
+
+    // --- watching ------------------------------------------------------------------------------
+
+    @Test
+    void watchReportsAddedUpdatedAndRemovedValues() throws Exception {
+        store().put("watched/a", "1");
+        BlockingQueue<ParameterChanges> events = new LinkedBlockingQueue<>();
+        try (AutoCloseable watch = store().watch("watched", Duration.ofMillis(200), events::add)) {
+            store().put("watched/b", "2");
+            assertThat(poll(events).added()).containsOnlyKeys("watched/b");
+
+            store().put("watched/a", "1-rotated");
+            ParameterChanges rotated = poll(events);
+            assertThat(rotated.updated()).containsOnlyKeys("watched/a");
+            assertThat(rotated.updated().get("watched/a").value()).isEqualTo("1-rotated");
+
+            store().delete("watched/b");
+            assertThat(poll(events).removed()).containsExactly("watched/b");
+        }
+        assertThat(store().statistics().changesDetected()).isZero(); // counted on the watching instance
+    }
+
+    private static ParameterChanges poll(BlockingQueue<ParameterChanges> events) throws InterruptedException {
+        ParameterChanges changes = events.poll(15, TimeUnit.SECONDS);
+        assertThat(changes).as("change notification").isNotNull();
+        return changes;
+    }
+
+    @Test
+    void watchedChangesInvalidateTheCache() throws Exception {
+        ParameterStore cached = cachingStore(Duration.ofMinutes(5));
+        store().put("cfg/flag", "off");
+        assertThat(cached.require("cfg/flag")).isEqualTo("off");
+        BlockingQueue<ParameterChanges> events = new LinkedBlockingQueue<>();
+        try (AutoCloseable watch = cached.watch("cfg", Duration.ofMillis(200), events::add)) {
+            store().put("cfg/flag", "on");
+            poll(events);
+
+            assertThat(cached.require("cfg/flag")).isEqualTo("on");
+            assertThat(cached.statistics().changesDetected()).isEqualTo(1);
+        }
+    }
+
+    @Test
+    void statisticsCountCacheHits() {
+        ParameterStore cached = cachingStore(Duration.ofMinutes(5));
+        store().put("counted", "v");
+        cached.get("counted");
+        cached.get("counted");
+        cached.get("counted");
+
+        assertThat(cached.statistics().backendReads()).isEqualTo(1);
+        assertThat(cached.statistics().cacheHits()).isEqualTo(2);
     }
 
     @Test

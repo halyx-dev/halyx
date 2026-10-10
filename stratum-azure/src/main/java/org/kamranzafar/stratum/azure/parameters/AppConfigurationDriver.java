@@ -26,8 +26,8 @@ public final class AppConfigurationDriver extends AbstractParameterDriver {
     private final ConfigurationClient client;
     private final String label;
 
-    public AppConfigurationDriver(ConfigurationClient client, String label) {
-        super(AzureProvider.ID, Capabilities.none());
+    public AppConfigurationDriver(ConfigurationClient client, String label, boolean nativeNames) {
+        super(AzureProvider.ID, Capabilities.none(), nativeNames);
         this.client = client;
         this.label = label;
     }
@@ -51,7 +51,7 @@ public final class AppConfigurationDriver extends AbstractParameterDriver {
                 .setLabelFilter(label == null ? "\0" : label);
         Map<String, Parameter> found = new LinkedHashMap<>();
         client.listConfigurationSettings(selector).forEach(setting -> {
-            if (under(setting.getKey(), prefix)) {
+            if (matches(setting.getKey(), prefix)) {
                 found.put(setting.getKey(), toPortable(setting));
             }
         });

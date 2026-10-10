@@ -4,7 +4,9 @@ import org.kamranzafar.stratum.config.ProviderConfig;
 import org.kamranzafar.stratum.parameters.ParameterStoreConfig;
 import org.springframework.boot.context.config.ConfigDataResource;
 
+import java.time.Duration;
 import java.util.Objects;
+import java.util.Optional;
 
 /** One {@code stratum:<store>[/<prefix>]} import, resolved to its provider and store configuration. */
 public final class StratumConfigDataResource extends ConfigDataResource {
@@ -14,18 +16,43 @@ public final class StratumConfigDataResource extends ConfigDataResource {
     private final ProviderConfig providerConfig;
     private final ParameterStoreConfig storeConfig;
     private final String subPrefix;
+    private final String storeName;
+    private final boolean expandJson;
+    private final Duration reloadInterval;
+    private final int startupAttempts;
 
-    StratumConfigDataResource(String location, String providerName, ProviderConfig providerConfig,
-                              ParameterStoreConfig storeConfig, String subPrefix, boolean optional) {
+    StratumConfigDataResource(String location, String storeName, String providerName, ProviderConfig providerConfig,
+                              ParameterStoreConfig storeConfig, String subPrefix, boolean optional, boolean expandJson,
+                              Duration reloadInterval, int startupAttempts) {
         super(optional);
         this.location = location;
+        this.storeName = storeName;
         this.providerName = providerName;
         this.providerConfig = providerConfig;
         this.storeConfig = storeConfig;
         this.subPrefix = subPrefix;
+        this.expandJson = expandJson;
+        this.reloadInterval = reloadInterval;
+        this.startupAttempts = startupAttempts;
     }
 
-    String providerName() {
+    public String storeName() {
+        return storeName;
+    }
+
+    boolean expandJson() {
+        return expandJson;
+    }
+
+    Optional<Duration> reloadInterval() {
+        return Optional.ofNullable(reloadInterval);
+    }
+
+    int startupAttempts() {
+        return startupAttempts;
+    }
+
+    public String providerName() {
         return providerName;
     }
 
@@ -33,11 +60,11 @@ public final class StratumConfigDataResource extends ConfigDataResource {
         return providerConfig;
     }
 
-    ParameterStoreConfig storeConfig() {
+    public ParameterStoreConfig storeConfig() {
         return storeConfig;
     }
 
-    String subPrefix() {
+    public String subPrefix() {
         return subPrefix;
     }
 

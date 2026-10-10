@@ -1,4 +1,4 @@
-package org.kamranzafar.stratum.vault;
+package org.kamranzafar.stratum.json;
 
 import org.junit.jupiter.api.Test;
 
@@ -37,6 +37,22 @@ class JsonTest {
 
         assertThat(written).startsWith("{\"text\":\"tab\\there \\\"quoted\\\" \\\\ \\u0001\"");
         assertThat(Json.parse(written)).isEqualTo(value);
+    }
+
+    @Test
+    void flattensNestedObjectsLikeSpringProperties() {
+        var object = Json.parseObject("{\"username\":\"app\",\"port\":5432,\"db\":{\"host\":\"h\",\"ssl\":true},\"hosts\":[\"a\",\"b\"],\"x\":null}").orElseThrow();
+
+        assertThat(Json.flatten(object)).containsExactly(
+                Map.entry("username", "app"), Map.entry("port", "5432"), Map.entry("db.host", "h"),
+                Map.entry("db.ssl", "true"), Map.entry("hosts[0]", "a"), Map.entry("hosts[1]", "b"));
+    }
+
+    @Test
+    void parseObjectIgnoresNonObjects() {
+        assertThat(Json.parseObject("plain text")).isEmpty();
+        assertThat(Json.parseObject("[1,2]")).isEmpty();
+        assertThat(Json.parseObject("{broken")).isEmpty();
     }
 
     @Test

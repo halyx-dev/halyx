@@ -1,15 +1,17 @@
-package org.kamranzafar.stratum.vault;
+package org.kamranzafar.stratum.json;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
- * A small JSON reader and writer for Vault's API, so this module needs no JSON library. Objects become
- * {@code Map<String, Object>}, arrays {@code List<Object>}, numbers {@code Long} or {@code Double}.
+ * A small JSON reader and writer, so core and the Vault provider need no JSON library (which could
+ * clash with the cloud SDKs' own). Objects become {@code Map<String, Object>}, arrays
+ * {@code List<Object>}, numbers {@code Long} or {@code Double}.
  */
-final class Json {
+public final class Json {
 
     private final String text;
     private int pos;
@@ -18,7 +20,7 @@ final class Json {
         this.text = text;
     }
 
-    static Object parse(String text) {
+    public static Object parse(String text) {
         Json json = new Json(text);
         json.whitespace();
         Object value = json.value();
@@ -31,7 +33,7 @@ final class Json {
 
     /** Walks a path of object keys; returns null if any step is missing or not an object. */
     @SuppressWarnings("unchecked")
-    static Object at(Object root, String... keys) {
+    public static Object at(Object root, String... keys) {
         Object current = root;
         for (String key : keys) {
             if (!(current instanceof Map<?, ?> map)) {
@@ -42,10 +44,48 @@ final class Json {
         return current;
     }
 
-    static String write(Object value) {
+    public static String write(Object value) {
         StringBuilder out = new StringBuilder();
         write(value, out);
         return out.toString();
+    }
+
+    /** Parses {@code text} if it is a JSON object, or returns empty. */
+    @SuppressWarnings("unchecked")
+    public static Optional<Map<String, Object>> parseObject(String text) {
+        String trimmed = text.strip();
+        if (!trimmed.startsWith("{")) {
+            return Optional.empty();
+        }
+        try {
+            return parse(trimmed) instanceof Map<?, ?> map ? Optional.of((Map<String, Object>) map) : Optional.empty();
+        } catch (IllegalArgumentException | IndexOutOfBoundsException e) {
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * Flattens an object into dotted keys, like Spring property names: {@code {"db":{"host":"h"}}}
+     * becomes {@code db.host=h}, arrays become {@code list[0]}. Nulls are skipped.
+     */
+    public static Map<String, String> flatten(Map<String, Object> object) {
+        Map<String, String> flat = new LinkedHashMap<>();
+        flatten("", object, flat);
+        return flat;
+    }
+
+    private static void flatten(String path, Object value, Map<String, String> out) {
+        switch (value) {
+            case null -> { }
+            case Map<?, ?> map -> map.forEach((k, v) -> flatten(path.isEmpty() ? String.valueOf(k) : path + "." + k, v, out));
+            case List<?> list -> {
+                for (int i = 0; i < list.size(); i++) {
+                    flatten(path + "[" + i + "]", list.get(i), out);
+                }
+            }
+            case Double d when d == Math.rint(d) && !Double.isInfinite(d) -> out.put(path, String.valueOf(d.longValue()));
+            default -> out.put(path, String.valueOf(value));
+        }
     }
 
     private static void write(Object value, StringBuilder out) {
@@ -238,6 +278,6 @@ final class Json {
     }
 
     private IllegalArgumentException error(String message) {
-        return new IllegalArgumentException(message + " at offset " + pos + " of Vault response");
+        return new IllegalArgumentException(message + " at offset " + pos + " of JSON");
     }
 }

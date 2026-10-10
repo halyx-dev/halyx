@@ -58,6 +58,17 @@ class StratumHealthTest {
     }
 
     @Test
+    void parameterStoresHaveIndicators() {
+        runner.withPropertyValues("stratum.providers.local.type=memory", "stratum.parameter-stores.secrets.prefix=app")
+                .run(context -> {
+                    var composite = context.getBean("stratumHealthContributor", CompositeHealthContributor.class);
+                    var secrets = ((HealthIndicator) composite.getContributor("secrets")).health();
+                    assertThat(secrets.getStatus()).isEqualTo(Status.UP);
+                    assertThat(secrets.getDetails()).containsEntry("kind", "secrets");
+                });
+    }
+
+    @Test
     void cachesAloneEnableHealth() {
         runner.withPropertyValues("stratum.providers.local.type=memory",
                         "stratum.caches.sessions.endpoint=redis://localhost:6379")

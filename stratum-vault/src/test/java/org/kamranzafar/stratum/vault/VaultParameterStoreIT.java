@@ -4,6 +4,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.kamranzafar.stratum.CloudContext;
 import org.kamranzafar.stratum.Stratum;
 import org.kamranzafar.stratum.config.Credentials;
@@ -19,6 +20,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -110,6 +113,26 @@ class VaultParameterStoreIT {
             Thread.sleep(6000); // the first token has expired
             assertThat(store.require("token-test")).isEqualTo("v1");
             store.delete("token-test");
+        }
+    }
+
+    @Test
+    void tokenFileIsReadAgainWhenTheTokenIsRevoked(@TempDir Path dir) throws Exception {
+        String first = field(root("POST", "auth/token/create", "{\"policies\":[\"root\"]}"), "client_token");
+        Path tokenFile = Files.writeString(dir.resolve("token"), first + "\n");
+        try (Stratum agent = Stratum.builder().register("vault", ProviderConfig.of("vault").endpoint(address())
+                .property(VaultProperties.AUTH, "token-file")
+                .property(VaultProperties.TOKEN_FILE, tokenFile.toString())).build()) {
+            ParameterStore store = agent.provider("vault").parameterStore(ParameterStoreConfig.secrets().prefix("agent").build());
+            store.put("rotating", "v1");
+
+            // Vault Agent writes a new token to its sink; the old one is revoked.
+            String second = field(root("POST", "auth/token/create", "{\"policies\":[\"root\"]}"), "client_token");
+            Files.writeString(tokenFile, second);
+            root("POST", "auth/token/revoke", "{\"token\":\"" + first + "\"}");
+
+            assertThat(store.require("rotating")).isEqualTo("v1");
+            store.delete("rotating");
         }
     }
 

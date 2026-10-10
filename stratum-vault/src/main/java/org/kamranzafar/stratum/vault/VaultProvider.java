@@ -27,11 +27,12 @@ public final class VaultProvider implements CloudProvider {
     public ProviderConnection connect(ProviderConfig config) {
         URI address = config.endpoint().orElseThrow(() ->
                 new IllegalArgumentException("The vault provider needs the Vault address as its endpoint"));
-        VaultClient client = new VaultClient(address, config.property(VaultProperties.NAMESPACE), login(config));
+        VaultClient client = new VaultClient(address, config.property(VaultProperties.NAMESPACE), login(config),
+                config.property(VaultProperties.CA_CERTIFICATE).map(Path::of));
         return new ProviderConnection() {
             @Override
             public ParameterDriver parameterStore(ParameterStoreConfig storeConfig) {
-                return new VaultKvDriver(client, storeConfig.location().orElse("secret"));
+                return new VaultKvDriver(client, storeConfig.location().orElse("secret"), storeConfig.nativeNames());
             }
 
             @Override
@@ -61,8 +62,16 @@ public final class VaultProvider implements CloudProvider {
             case "kubernetes" -> VaultLogin.kubernetes(config.property(VaultProperties.AUTH_PATH).orElse("kubernetes"),
                     required(config, VaultProperties.KUBERNETES_ROLE),
                     Path.of(config.property(VaultProperties.KUBERNETES_JWT_PATH).orElse(VaultProperties.DEFAULT_JWT_PATH)));
+            case "token-file" -> VaultLogin.tokenFile(Path.of(required(config, VaultProperties.TOKEN_FILE)));
+            case "gcp" -> VaultLogin.gcp(config.property(VaultProperties.AUTH_PATH).orElse("gcp"),
+                    required(config, VaultProperties.GCP_ROLE),
+                    config.property(VaultProperties.GCP_METADATA_URL).orElse("http://metadata.google.internal"));
+            case "azure" -> VaultLogin.azure(config.property(VaultProperties.AUTH_PATH).orElse("azure"),
+                    required(config, VaultProperties.AZURE_ROLE),
+                    config.property(VaultProperties.AZURE_RESOURCE).orElse("https://management.azure.com/"),
+                    config.property(VaultProperties.AZURE_METADATA_URL).orElse("http://169.254.169.254"));
             default -> throw new IllegalArgumentException("Unknown " + VaultProperties.AUTH + ": " + method
-                    + " (token, approle or kubernetes)");
+                    + " (token, token-file, approle, kubernetes, gcp or azure)");
         };
     }
 

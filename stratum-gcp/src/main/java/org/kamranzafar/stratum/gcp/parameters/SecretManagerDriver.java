@@ -36,18 +36,18 @@ public final class SecretManagerDriver extends AbstractParameterDriver {
     private final SecretManagerServiceClient client;
     private final String project;
 
-    public SecretManagerDriver(SecretManagerServiceClient client, String project) {
-        super(GcpProvider.ID, Capabilities.of(ParameterCapability.VERSIONS));
+    public SecretManagerDriver(SecretManagerServiceClient client, String project, boolean nativeNames) {
+        super(GcpProvider.ID, Capabilities.of(ParameterCapability.VERSIONS), nativeNames);
         this.client = client;
         this.project = project;
     }
 
-    static String encode(String name) {
-        return name.replace("/", "__");
+    String encode(String name) {
+        return nativeNames ? name : name.replace("/", "__");
     }
 
-    static String decode(String secretId) {
-        return secretId.replace("__", "/");
+    String decode(String secretId) {
+        return nativeNames ? secretId : secretId.replace("__", "/");
     }
 
     @Override
@@ -80,7 +80,7 @@ public final class SecretManagerDriver extends AbstractParameterDriver {
         List<String> names = new ArrayList<>();
         client.listSecrets(ProjectName.of(project)).iterateAll().forEach(secret -> {
             String name = decode(SecretName.parse(secret.getName()).getSecret());
-            if (under(name, prefix)) {
+            if (matches(name, prefix)) {
                 names.add(name);
             }
         });

@@ -14,11 +14,19 @@ import java.util.Optional;
 public abstract class AbstractParameterDriver implements ParameterDriver {
 
     protected final String provider;
+    /** Names are the backend's own: no separator translation, and prefixes match literally. */
+    protected final boolean nativeNames;
     private final Capabilities capabilities;
 
-    protected AbstractParameterDriver(String provider, Capabilities capabilities) {
+    protected AbstractParameterDriver(String provider, Capabilities capabilities, boolean nativeNames) {
         this.provider = Objects.requireNonNull(provider, "provider");
         this.capabilities = Objects.requireNonNull(capabilities, "capabilities");
+        this.nativeNames = nativeNames;
+    }
+
+    /** Whether {@code name} belongs to {@code prefix}: by segment for portable names, literally for native ones. */
+    protected boolean matches(String name, String prefix) {
+        return nativeNames ? name.startsWith(prefix) : under(name, prefix);
     }
 
     protected abstract Optional<CloudException> translateNative(Throwable error);

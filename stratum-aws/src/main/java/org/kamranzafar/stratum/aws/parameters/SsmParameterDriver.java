@@ -12,6 +12,7 @@ import software.amazon.awssdk.services.ssm.model.ParameterNotFoundException;
 import software.amazon.awssdk.services.ssm.model.ParameterType;
 import software.amazon.awssdk.services.ssm.model.ParameterVersionNotFoundException;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,20 +30,32 @@ public final class SsmParameterDriver extends AbstractParameterDriver {
     private final SsmClient ssm;
     private final boolean secure;
 
-    public SsmParameterDriver(SsmClient ssm, boolean secure) {
-        super(AwsProvider.ID, Capabilities.of(ParameterCapability.VERSIONS));
+    /** GetParameters accepts up to 10 names. */
+    private static final int BATCH = 10;
+
+    public SsmParameterDriver(SsmClient ssm, boolean secure, boolean nativeNames) {
+        super(AwsProvider.ID, Capabilities.of(ParameterCapability.VERSIONS), nativeNames);
         this.ssm = ssm;
         this.secure = secure;
     }
 
+    /** Portable names gain a leading slash; native names are used as they are. */
+    private String ssmName(String name) {
+        return nativeNames ? name : "/" + name;
+    }
+
+    private String portable(String ssmName) {
+        return nativeNames || !ssmName.startsWith("/") ? ssmName : ssmName.substring(1);
+    }
+
     @Override
     public Optional<Parameter> get(String name) {
-        return fetch("/" + name);
+        return fetch(ssmName(name));
     }
 
     @Override
     public Optional<Parameter> get(String name, String version) {
-        return fetch("/" + name + ":" + version);
+        return fetch(ssmName(name) + ":" + version);
     }
 
     private Optional<Parameter> fetch(String selector) {
@@ -56,6 +69,9 @@ public final class SsmParameterDriver extends AbstractParameterDriver {
 
     @Override
     public Map<String, Parameter> list(String prefix) {
+        if (nativeNames) {
+            return listByNamePrefix(prefix);
+        }
         Map<String, Parameter> found = new LinkedHashMap<>();
         if (!prefix.isEmpty()) {
             get(prefix).ifPresent(p -> found.put(p.name(), p)); // the prefix itself is not returned by path queries
@@ -63,16 +79,37 @@ public final class SsmParameterDriver extends AbstractParameterDriver {
         ssm.getParametersByPathPaginator(b -> b.path("/" + prefix).recursive(true).withDecryption(true))
                 .stream().flatMap(page -> page.parameters().stream()).forEach(p -> {
                     Parameter portable = toPortable(p);
-                    if (under(portable.name(), prefix)) {
+                    if (matches(portable.name(), prefix)) {
                         found.put(portable.name(), portable);
                     }
                 });
         return found;
     }
 
+    /** Native names need not be paths: find them by name prefix, then fetch in batches. */
+    private Map<String, Parameter> listByNamePrefix(String prefix) {
+        List<String> names = new ArrayList<>();
+        ssm.describeParametersPaginator(b -> {
+            if (!prefix.isEmpty()) {
+                b.parameterFilters(f -> f.key("Name").option("BeginsWith").values(prefix));
+            }
+        }).stream().flatMap(page -> page.parameters().stream()).forEach(meta -> {
+            if (meta.name().startsWith(prefix)) {
+                names.add(meta.name());
+            }
+        });
+        Map<String, Parameter> found = new LinkedHashMap<>();
+        for (int from = 0; from < names.size(); from += BATCH) {
+            List<String> batch = names.subList(from, Math.min(from + BATCH, names.size()));
+            ssm.getParameters(b -> b.names(batch).withDecryption(true)).parameters()
+                    .forEach(p -> found.put(p.name(), toPortable(p)));
+        }
+        return found;
+    }
+
     @Override
     public Parameter put(String name, String value) {
-        var response = ssm.putParameter(b -> b.name("/" + name).value(value).overwrite(true)
+        var response = ssm.putParameter(b -> b.name(ssmName(name)).value(value).overwrite(true)
                 .type(secure ? ParameterType.SECURE_STRING : ParameterType.STRING));
         return new Parameter(name, value, String.valueOf(response.version()), null);
     }
@@ -80,15 +117,14 @@ public final class SsmParameterDriver extends AbstractParameterDriver {
     @Override
     public void delete(String name) {
         try {
-            ssm.deleteParameter(b -> b.name("/" + name));
+            ssm.deleteParameter(b -> b.name(ssmName(name)));
         } catch (ParameterNotFoundException ignored) {
             // already gone
         }
     }
 
-    private static Parameter toPortable(software.amazon.awssdk.services.ssm.model.Parameter p) {
-        String name = p.name().startsWith("/") ? p.name().substring(1) : p.name();
-        return new Parameter(name, p.value(), String.valueOf(p.version()), p.lastModifiedDate());
+    private Parameter toPortable(software.amazon.awssdk.services.ssm.model.Parameter p) {
+        return new Parameter(portable(p.name()), p.value(), String.valueOf(p.version()), p.lastModifiedDate());
     }
 
     @Override

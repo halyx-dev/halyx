@@ -33,17 +33,17 @@ public final class KeyVaultSecretDriver extends AbstractParameterDriver {
 
     private final SecretClient secrets;
 
-    public KeyVaultSecretDriver(SecretClient secrets) {
-        super(AzureProvider.ID, Capabilities.of(ParameterCapability.VERSIONS));
+    public KeyVaultSecretDriver(SecretClient secrets, boolean nativeNames) {
+        super(AzureProvider.ID, Capabilities.of(ParameterCapability.VERSIONS), nativeNames);
         this.secrets = secrets;
     }
 
-    static String encode(String name) {
-        return name.replace("/", "--");
+    String encode(String name) {
+        return nativeNames ? name : name.replace("/", "--");
     }
 
-    static String decode(String vaultName) {
-        return vaultName.replace("--", "/");
+    String decode(String vaultName) {
+        return nativeNames ? vaultName : vaultName.replace("--", "/");
     }
 
     @Override
@@ -69,7 +69,7 @@ public final class KeyVaultSecretDriver extends AbstractParameterDriver {
         List<String> names = new ArrayList<>();
         secrets.listPropertiesOfSecrets().forEach(properties -> {
             String name = decode(properties.getName());
-            if (Boolean.TRUE.equals(properties.isEnabled()) && under(name, prefix)) {
+            if (Boolean.TRUE.equals(properties.isEnabled()) && matches(name, prefix)) {
                 names.add(name);
             }
         });

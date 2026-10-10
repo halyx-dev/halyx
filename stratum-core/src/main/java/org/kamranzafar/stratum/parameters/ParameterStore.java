@@ -3,8 +3,10 @@ package org.kamranzafar.stratum.parameters;
 import org.kamranzafar.stratum.capability.Capabilities;
 import org.kamranzafar.stratum.error.NotFoundException;
 
+import java.time.Duration;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Consumer;
 import java.util.function.Function;
 
 /**
@@ -30,6 +32,16 @@ public interface ParameterStore {
                 .orElseThrow(() -> new NotFoundException("No " + kind().name().toLowerCase() + " named '" + name + "'"));
     }
 
+    /**
+     * One field of a JSON secret, failing if the secret or field is absent:
+     * {@code require("orders/db", "password")} for an RDS-managed secret.
+     */
+    default String require(String name, String field) {
+        return get(name).flatMap(p -> p.field(field))
+                .orElseThrow(() -> new NotFoundException("No field '" + field + "' in " + kind().name().toLowerCase()
+                        + " '" + name + "'"));
+    }
+
     /** The current value converted, such as {@code get("pool/size", Integer::valueOf)}. */
     default <T> Optional<T> get(String name, Function<String, T> converter) {
         return get(name).map(Parameter::value).map(converter);
@@ -46,6 +58,17 @@ public interface ParameterStore {
 
     /** Drops cached reads, so the next read goes to the backend. */
     void refresh();
+
+    /**
+     * Polls {@code prefix} (empty for all) every {@code interval} and reports added, updated and removed
+     * values to {@code listener}, so applications can follow rotations without restarting. The first
+     * poll establishes the baseline. Polling failures are logged and retried at the next interval.
+     * Close the returned handle to stop.
+     */
+    AutoCloseable watch(String prefix, Duration interval, Consumer<ParameterChanges> listener);
+
+    /** Read and cache counters of this store instance. */
+    ParameterStoreStatistics statistics();
 
     Capabilities capabilities();
 

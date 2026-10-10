@@ -209,6 +209,10 @@ String password = secrets.require("db/password");          // Secrets Manager se
 Map<String, Parameter> db = secrets.getAll("db");           // everything under orders-svc/db
 secrets.put("api/key", newKey);                            // a new version
 Optional<Integer> pool = config.get("db/pool/size", Integer::valueOf);
+String rdsPassword = secrets.require("db/rds", "password");  // a field of a JSON secret
+
+try (AutoCloseable watch = secrets.watch("db", Duration.ofMinutes(1), changes ->
+        changes.updated().forEach((name, p) -> pool.rotateCredentials(p.fields())))) { ... }
 ```
 
 | `ParameterKind` | AWS | Azure | GCP | Vault |
@@ -228,12 +232,27 @@ with ids that sort by creation time, and reads take the newest enabled version b
 which is also correct for versions written by other tools. A read lists versions and then fetches
 one, so give Parameter Manager stores a `cacheTtl`. Deletes remove all versions, then the parameter.
 
+**JSON secrets.** `Parameter.field("password")`, `fields()` (flattened as `db.host`, `hosts[0]`) and
+`require(name, field)` read JSON object values, such as RDS/Aurora-managed secrets or multi-field Vault
+secrets.
+
+**Native names.** `ParameterStoreConfig.nativeNames(true)` uses the backend's own names as they are
+(no validation, no separator translation; the prefix is a literal string prefix). Use it to read
+existing values like `/app/db_password` or AWS-managed `rds!db-...` secrets.
+
+**Changes and rotations.** `watch(prefix, interval, listener)` polls versions and reports added,
+updated and removed values. One daemon thread serves all watchers. Changes also invalidate the
+store's cache, and failed polls are logged and retried. `statistics()` counts cache hits, backend
+reads, detected changes and watch failures.
+
 Deletes are idempotent. On Secrets Manager they skip the recovery window. On Key Vault they are soft
 deletes; writing a soft-deleted name recovers it first, so names can be reused without the purge
 permission. On Vault they remove all versions.
 
-**`stratum-vault`** supports token auth (or `VAULT_TOKEN`), AppRole and Kubernetes login, Vault
-namespaces, and renews tokens before they expire (in the last fifth of their life, at most 30 s
+**`stratum-vault`** supports token auth (or `VAULT_TOKEN`), a token file (Vault Agent sink; read
+again when the token is rejected), AppRole, Kubernetes, GCP (metadata-server identity token) and Azure
+(managed identity) login, Vault namespaces, a private CA (`vault.ca-certificate`; untrusted
+certificates are a non-retryable `AccessDeniedException`), and renews tokens before they expire (in the last fifth of their life, at most 30 s
 early). It uses the JDK HTTP client and a built-in JSON codec, so it adds no dependencies that
 could clash with the cloud SDKs. Secrets written by other tools without a `value` field are read as
 their JSON data.
@@ -286,6 +305,10 @@ stratum:
       kind: secrets                # secrets | parameters
       prefix: orders-svc
       cache-ttl: 5m
+      reload-interval: 1m          # for stratum: imports; omit for read-once at startup
+      # native-names: true         # use existing backend names as they are
+      # expand-json: true          # (default) JSON values also become db.creds.password etc.
+      # startup-attempts: 3        # (default) retries when the backend is briefly unavailable
   retry:
     enabled: false                 # the SDKs already retry; enable for uniform retries
 ```
@@ -305,13 +328,15 @@ What the starter provides:
 | `BlobStore` beans | One per `stratum.blob-stores` entry, named after the entry. |
 | `Cache<String>` beans | One per `stratum.caches` entry, named after the entry. |
 | `ParameterStore` beans | One per `stratum.parameter-stores` entry, named after the entry. |
-| Config import | `spring.config.import=stratum:app-secrets` (or `stratum:app-secrets/db`, `optional:stratum:...`) loads a store into the `Environment` at startup. Names become property keys with `/` replaced by `.`, so `db/password` becomes `db.password`. The providers and stores must be defined in the same or an earlier config file. Values are read once at startup. |
+| Config import | `spring.config.import=stratum:app-secrets` (or `stratum:app-secrets/db`, `optional:stratum:...`) loads a store into the `Environment` at startup. Names become property keys with `/` replaced by `.`, so `db/password` becomes `db.password`, and JSON values add their fields (`db.creds.password`). The providers and stores must be defined in the same or an earlier config file. A briefly unavailable backend is retried with backoff (`startup-attempts`). |
+| Reload | With `reload-interval`, imported properties are updated in place when values change or rotate. Stratum publishes a `StratumParametersChangedEvent` (store name and changed keys), and Spring Cloud's `EnvironmentChangeEvent` when Spring Cloud Context is present, so `@ConfigurationProperties` and `@RefreshScope` beans follow. Without Spring Cloud, `Environment` reads and event listeners see changes; `@Value` fields keep their startup values. |
 | `CacheManager` | `stratum.cache-manager.*` backs `@Cacheable`, `@CachePut` and `@CacheEvict` (including `allEntries` and `sync = true`): per-cache TTLs, cached nulls, JDK or JSON values. JSON stores `{"@class", "v"}` and only reads back types from `trusted-packages` (no unsafe polymorphic typing); the JDK codec applies the same allow-list through an `ObjectInputFilter`. Async/reactive `@Cacheable` is not supported. |
+| Parameter metrics | `stratum.parameters.reads{store, source=cache\|backend}`, `stratum.parameters.changes{store}`, `stratum.parameters.watch.failures{store}`. |
 | Cache metrics | With a `MeterRegistry`: Micrometer's standard `cache.gets{result=hit\|miss}`, `cache.puts`, `cache.evictions`, plus `cache.loads{result}` and `cache.fail.open`, tagged `cache=<name>`, for `Cache` beans and `CacheManager` caches. |
 | Interceptors | Every `Interceptor` bean is applied in `@Order` order. Order of application, outermost first: observations, your interceptors, retries. |
 | Customisation | `StratumBuilderCustomizer` beans can add plugins or registrations. |
 | Observations | With Micrometer, every operation records a `stratum.operation` observation (timer + span) tagged with `stratum.service`, `stratum.operation`, `stratum.provider` and `error`. Disable with `stratum.observations.enabled=false`. |
-| Health | A `stratum` health contributor with one indicator per blob store (lists one item) and per cache (runs an authenticated command). Disable with `management.health.stratum.enabled=false`. |
+| Health | A `stratum` health contributor with one indicator per blob store (lists one item), per cache (runs an authenticated command) and per parameter store (an authenticated read). Disable with `management.health.stratum.enabled=false`. |
 | Fail fast | Startup fails, naming the property, for an unknown provider type (with the module to add), an unknown or ambiguous `provider` reference, or incomplete static credentials. |
 | IDE support | Configuration metadata is generated, so `stratum.*` keys autocomplete. |
 
@@ -428,7 +453,8 @@ Cache tests:
 | shared driver | TLS-only Valkey with a private CA | full cache TCK over `rediss://` trusting the CA; an untrusted certificate is a non-retryable `AccessDeniedException` |
 | shared driver | unreachable server | fail-open misses and loader fallback, strict operations still fail, breaker short-circuits, recovery once the server starts |
 
-Parameter store tests (the same 16-test TCK everywhere):
+Parameter store tests (the same 22-test TCK everywhere: CRUD, versions, prefixes, caching, JSON
+fields, native names, watching):
 
 | Backend | Server | Notes |
 |---|---|---|
@@ -436,8 +462,8 @@ Parameter store tests (the same 16-test TCK everywhere):
 | Azure Key Vault, App Configuration | Floci-az | plus Key Vault name encoding and App Configuration labels; App Configuration skips the versions test |
 | GCP Secret Manager | Floci-gcp (gRPC) | plus name encoding |
 | GCP Parameter Manager | an in-process fake gRPC server (no emulator exists) | global and regional; latest-version selection with foreign version ids, rendering, name encoding. This checks the driver's use of the real client, not GCP's exact behaviour |
-| HashiCorp Vault | Vault dev server | plus AppRole login with token renewal, wrong tokens, multi-field secrets |
-| Spring `spring.config.import` | Vault dev server | on Boot 3.5 and 4.1 |
+| HashiCorp Vault | Vault dev server (plain and TLS with a private CA) | plus AppRole with token renewal, token-file rotation, wrong tokens, multi-field secrets, CA trust; GCP and Azure login requests against a fake metadata service |
+| Spring `spring.config.import` | Vault dev server | on Boot 3.5 and 4.1: JSON expansion, native names, live reload with change events, prefixes, optional imports |
 
 **On real GCP:** `GcpParameterStoreIT` runs the same TCK against Secret Manager and Parameter
 Manager in a real project, using Application Default Credentials. It is skipped unless the variables
@@ -447,7 +473,8 @@ are set:
 STRATUM_GCP_PROJECT=my-project STRATUM_GCP_LOCATION=global mvn verify -pl stratum-gcp -Dit.test=GcpParameterStoreIT
 ```
 
-Not verified locally: GCP Parameter Manager against real GCP (see above), Vault Kubernetes
+Not verified locally: GCP Parameter Manager against real GCP (see above), Vault GCP/Azure login
+against real Vault auth backends, Vault Kubernetes
 login, Entra ID logins to Key Vault and App Configuration (the emulator accepts any token), and an IAM *login* end to end (the released Floci images cannot attach IAM users to
 a cache yet), Entra ID logins (Floci-az does not emulate them), and failover of a managed cluster.
 

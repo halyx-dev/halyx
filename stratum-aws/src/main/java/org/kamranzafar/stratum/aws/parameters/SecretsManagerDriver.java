@@ -29,8 +29,8 @@ public final class SecretsManagerDriver extends AbstractParameterDriver {
 
     private final SecretsManagerClient secrets;
 
-    public SecretsManagerDriver(SecretsManagerClient secrets) {
-        super(AwsProvider.ID, Capabilities.of(ParameterCapability.VERSIONS));
+    public SecretsManagerDriver(SecretsManagerClient secrets, boolean nativeNames) {
+        super(AwsProvider.ID, Capabilities.of(ParameterCapability.VERSIONS), nativeNames);
         this.secrets = secrets;
     }
 
@@ -60,7 +60,7 @@ public final class SecretsManagerDriver extends AbstractParameterDriver {
                 b.filters(f -> f.key(FilterNameStringType.NAME).values(prefix));
             }
         }).stream().flatMap(page -> page.secretList().stream()).forEach(entry -> {
-            if (under(entry.name(), prefix)) {
+            if (matches(entry.name(), prefix)) {
                 names.add(entry.name());
             }
         });

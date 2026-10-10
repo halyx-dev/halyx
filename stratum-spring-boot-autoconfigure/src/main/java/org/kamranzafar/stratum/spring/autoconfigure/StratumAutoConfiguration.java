@@ -8,7 +8,10 @@ import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.kamranzafar.stratum.spring.autoconfigure.config.StratumConfigReloader;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
+import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.context.annotation.Import;
 
 /**
@@ -36,6 +39,14 @@ public class StratumAutoConfiguration {
         }
         customizers.orderedStream().forEach(customizer -> customizer.customize(builder));
         return builder.build();
+    }
+
+    /** Keeps reloadable {@code stratum:} config imports up to date; idle when there are none. */
+    @Bean
+    @ConditionalOnMissingBean
+    public StratumConfigReloader stratumConfigReloader(ConfigurableEnvironment environment, Stratum stratum,
+                                                       ApplicationContext context) {
+        return new StratumConfigReloader(environment, stratum, context);
     }
 
     @Bean(BlobStoreBeanRegistrar.FACTORY_BEAN)

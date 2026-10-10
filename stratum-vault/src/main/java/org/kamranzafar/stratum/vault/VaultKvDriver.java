@@ -1,5 +1,7 @@
 package org.kamranzafar.stratum.vault;
 
+import org.kamranzafar.stratum.json.Json;
+
 import org.kamranzafar.stratum.capability.Capabilities;
 import org.kamranzafar.stratum.error.AccessDeniedException;
 import org.kamranzafar.stratum.error.CloudException;
@@ -11,6 +13,7 @@ import org.kamranzafar.stratum.parameters.Parameter;
 import org.kamranzafar.stratum.parameters.ParameterCapability;
 import org.kamranzafar.stratum.parameters.spi.AbstractParameterDriver;
 
+import javax.net.ssl.SSLHandshakeException;
 import java.io.UncheckedIOException;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -30,8 +33,8 @@ final class VaultKvDriver extends AbstractParameterDriver {
     private final VaultClient client;
     private final String mount;
 
-    VaultKvDriver(VaultClient client, String mount) {
-        super(VaultProvider.ID, Capabilities.of(ParameterCapability.VERSIONS));
+    VaultKvDriver(VaultClient client, String mount, boolean nativeNames) {
+        super(VaultProvider.ID, Capabilities.of(ParameterCapability.VERSIONS), nativeNames);
         this.client = client;
         this.mount = mount;
     }
@@ -60,6 +63,12 @@ final class VaultKvDriver extends AbstractParameterDriver {
     @Override
     public Map<String, Parameter> list(String prefix) {
         Map<String, Parameter> found = new LinkedHashMap<>();
+        if (nativeNames) {
+            // A literal prefix may end mid-segment: list from its folder and filter.
+            collect(prefix.substring(0, prefix.lastIndexOf('/') + 1), found);
+            found.keySet().removeIf(name -> !name.startsWith(prefix));
+            return found;
+        }
         if (!prefix.isEmpty()) {
             get(prefix).ifPresent(p -> found.put(p.name(), p));
         }
@@ -107,6 +116,12 @@ final class VaultKvDriver extends AbstractParameterDriver {
             });
         }
         if (error instanceof UncheckedIOException) {
+            for (Throwable t = error; t != null; t = t.getCause()) {
+                if (t instanceof SSLHandshakeException) {
+                    return Optional.of(new AccessDeniedException("TLS handshake with Vault failed (" + t.getMessage()
+                            + "); if Vault uses a private CA, set '" + VaultProperties.CA_CERTIFICATE + "'", error, provider, "TLS"));
+                }
+            }
             return Optional.of(new UnavailableException(error.getMessage(), error, provider, null));
         }
         return Optional.empty();

@@ -17,7 +17,10 @@ public interface ParameterDriver {
 
     Optional<Parameter> get(String name, String version);
 
-    /** Every parameter whose name equals {@code prefix} or starts with {@code prefix + "/"}; all for "". */
+    /**
+     * Every parameter whose name equals {@code prefix} or starts with {@code prefix + "/"} (all for "");
+     * with native names, every parameter whose name starts with {@code prefix}.
+     */
     Map<String, Parameter> list(String prefix);
 
     Parameter put(String name, String value);
