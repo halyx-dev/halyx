@@ -14,6 +14,15 @@ public final class AwsProperties {
 
     public static final long DEFAULT_MULTIPART_THRESHOLD = 64L * 1024 * 1024;
 
+    /**
+     * SDK retry mode for S3, SSM and Secrets Manager: {@code adaptive} (default), {@code standard} or
+     * {@code legacy}. Adaptive adds a client-side rate limiter that slows requests down while the service
+     * is throttling (S3 503 SlowDown), instead of retrying at full speed. Its rate limiter is shared by
+     * everything the client calls, so a throttled bucket also slows calls to other buckets on the same
+     * connection; use {@code standard} if that matters more than throttling recovery.
+     */
+    public static final String RETRY_MODE = "aws.retry-mode";
+
     /** Cache property: replication group id or serverless cache name, signed into ElastiCache IAM tokens. */
     public static final String ELASTICACHE_CACHE_NAME = "aws.elasticache.cache-name";
 

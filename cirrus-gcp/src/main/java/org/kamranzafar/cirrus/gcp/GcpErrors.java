@@ -1,5 +1,6 @@
 package org.kamranzafar.cirrus.gcp;
 
+import com.google.api.client.http.HttpResponseException;
 import com.google.api.gax.rpc.ApiException;
 import com.google.cloud.BaseServiceException;
 import org.kamranzafar.cirrus.error.AccessDeniedException;
@@ -13,6 +14,7 @@ import org.kamranzafar.cirrus.error.UnavailableException;
 import org.kamranzafar.cirrus.error.UnsupportedFeatureException;
 
 import java.io.UncheckedIOException;
+import java.time.Duration;
 import java.util.Optional;
 
 /** Translates Google Cloud exceptions to the portable error model. Shared by all GCP service drivers. */
@@ -32,7 +34,7 @@ public final class GcpErrors {
                 case 409 -> new AlreadyExistsException(message, e, provider, reason);
                 case 401, 403 -> new AccessDeniedException(message, e, provider, reason);
                 case 400, 416 -> new InvalidArgumentException(message, e, provider, reason);
-                case 429 -> new ThrottledException(message, e, provider, reason);
+                case 429 -> new ThrottledException(message, e, provider, reason, retryAfter(e));
                 case 501 -> new UnsupportedFeatureException(message, e, provider, reason);
                 // Code 0 means the request never got an HTTP response (network failure).
                 case 0 -> new UnavailableException(message, e, provider, reason);
@@ -59,5 +61,15 @@ public final class GcpErrors {
             return Optional.of(new UnavailableException(error.getMessage(), error, provider, null));
         }
         return Optional.empty();
+    }
+
+    /** The HTTP clients keep the response headers on the underlying HttpResponseException. */
+    private static Duration retryAfter(Throwable error) {
+        for (Throwable t = error; t != null; t = t.getCause()) {
+            if (t instanceof HttpResponseException http) {
+                return ThrottledException.parseRetryAfter(http.getHeaders().getFirstHeaderStringValue("Retry-After"));
+            }
+        }
+        return null;
     }
 }

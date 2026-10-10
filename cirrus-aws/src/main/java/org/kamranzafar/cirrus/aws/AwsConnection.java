@@ -20,6 +20,8 @@ import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
+import software.amazon.awssdk.core.retry.RetryMode;
 import software.amazon.awssdk.http.SdkHttpClient;
 import software.amazon.awssdk.http.apache5.Apache5HttpClient;
 import software.amazon.awssdk.regions.Region;
@@ -29,6 +31,8 @@ import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
 import software.amazon.awssdk.services.ssm.SsmClient;
 import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
+
+import java.util.Locale;
 
 /**
  * Owns the AWS SDK clients for one configuration. Clients are created lazily and shared by all buckets,
@@ -56,7 +60,7 @@ final class AwsConnection implements ProviderConnection {
             boolean pathStyle = config.booleanProperty(AwsProperties.S3_PATH_STYLE, false);
 
             var client = S3Client.builder().region(region).credentialsProvider(credentials).forcePathStyle(pathStyle)
-                    .httpClient(http());
+                    .httpClient(http()).overrideConfiguration(overrides());
             var signer = S3Presigner.builder().region(region).credentialsProvider(credentials)
                     .serviceConfiguration(S3Configuration.builder().pathStyleAccessEnabled(pathStyle).build());
             config.endpoint().ifPresent(endpoint -> {
@@ -85,7 +89,7 @@ final class AwsConnection implements ProviderConnection {
             case PARAMETERS -> {
                 if (ssm == null) {
                     var builder = SsmClient.builder().region(region()).credentialsProvider(credentials())
-                            .httpClient(http());
+                            .httpClient(http()).overrideConfiguration(overrides());
                     config.endpoint().ifPresent(builder::endpointOverride);
                     ssm = builder.build();
                 }
@@ -96,7 +100,7 @@ final class AwsConnection implements ProviderConnection {
             case SECRETS -> {
                 if (secretsManager == null) {
                     var builder = SecretsManagerClient.builder().region(region()).credentialsProvider(credentials())
-                            .httpClient(http());
+                            .httpClient(http()).overrideConfiguration(overrides());
                     config.endpoint().ifPresent(builder::endpointOverride);
                     secretsManager = builder.build();
                 }
@@ -125,6 +129,18 @@ final class AwsConnection implements ProviderConnection {
             case Credentials.Static s -> StaticCredentialsProvider.create(AwsBasicCredentials.create(s.id(), s.secret()));
             case Credentials.Anonymous ignored -> AnonymousCredentialsProvider.create();
         };
+    }
+
+    private ClientOverrideConfiguration overrides() {
+        String mode = config.property(AwsProperties.RETRY_MODE).orElse("adaptive").trim().toLowerCase(Locale.ROOT);
+        RetryMode retryMode = switch (mode) {
+            case "adaptive" -> RetryMode.ADAPTIVE_V2;
+            case "standard" -> RetryMode.STANDARD;
+            case "legacy" -> RetryMode.LEGACY;
+            default -> throw new IllegalArgumentException(AwsProperties.RETRY_MODE
+                    + " must be adaptive, standard or legacy, not '" + mode + "'");
+        };
+        return ClientOverrideConfiguration.builder().retryStrategy(retryMode).build();
     }
 
     private SdkHttpClient http() {

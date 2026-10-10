@@ -13,6 +13,7 @@ import org.kamranzafar.cirrus.error.UnsupportedFeatureException;
 import software.amazon.awssdk.awscore.exception.AwsServiceException;
 import software.amazon.awssdk.core.exception.SdkClientException;
 
+import java.time.Duration;
 import java.util.Optional;
 import java.util.Set;
 
@@ -51,7 +52,7 @@ public final class AwsErrors {
             String message = e.getMessage();
             int status = e.statusCode();
             if (status == 429 || (code != null && THROTTLING_CODES.contains(code)) || e.isThrottlingException()) {
-                return Optional.of(new ThrottledException(message, e, provider, code));
+                return Optional.of(new ThrottledException(message, e, provider, code, retryAfter(e)));
             }
             if (code != null && NOT_FOUND_CODES.contains(code)) {
                 return Optional.of(new NotFoundException(message, e, provider, code));
@@ -77,5 +78,14 @@ public final class AwsErrors {
             return Optional.of(new UnavailableException(e.getMessage(), e, provider, null));
         }
         return Optional.empty();
+    }
+
+    private static Duration retryAfter(AwsServiceException e) {
+        var details = e.awsErrorDetails();
+        if (details == null || details.sdkHttpResponse() == null) {
+            return null;
+        }
+        return details.sdkHttpResponse().firstMatchingHeader("Retry-After")
+                .map(ThrottledException::parseRetryAfter).orElse(null);
     }
 }

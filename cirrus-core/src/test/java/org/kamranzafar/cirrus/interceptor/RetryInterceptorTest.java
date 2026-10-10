@@ -35,6 +35,48 @@ class RetryInterceptorTest {
     }
 
     @Test
+    void waitsAtLeastTheRetryAfterDelay() {
+        var patient = new InterceptorChain(List.of(
+                new RetryInterceptor(new RetryPolicy(2, Duration.ofMillis(1), Duration.ofSeconds(1), 2.0))));
+        AtomicInteger calls = new AtomicInteger();
+        long started = System.nanoTime();
+
+        String result = patient.execute(context(true), () -> {
+            if (calls.incrementAndGet() == 1) {
+                throw new ThrottledException("slow down", null, "test", "429", Duration.ofMillis(150));
+            }
+            return "ok";
+        });
+
+        assertThat(result).isEqualTo("ok");
+        assertThat(Duration.ofNanos(System.nanoTime() - started)).isGreaterThanOrEqualTo(Duration.ofMillis(150));
+    }
+
+    @Test
+    void retryAfterBeyondMaxBackoffFailsFast() {
+        AtomicInteger calls = new AtomicInteger();
+
+        assertThatThrownBy(() -> chain.execute(context(true), () -> {
+            calls.incrementAndGet();
+            throw new ThrottledException("slow down", null, "test", "429", Duration.ofMinutes(1));
+        })).isInstanceOf(ThrottledException.class);
+        assertThat(calls).hasValue(1);
+    }
+
+    @Test
+    void parsesRetryAfterSecondsAndDates() {
+        assertThat(ThrottledException.parseRetryAfter("120")).isEqualTo(Duration.ofSeconds(120));
+        assertThat(ThrottledException.parseRetryAfter(" 3 ")).isEqualTo(Duration.ofSeconds(3));
+        String inTenSeconds = java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME
+                .format(java.time.ZonedDateTime.now(java.time.ZoneOffset.UTC).plusSeconds(10));
+        assertThat(ThrottledException.parseRetryAfter(inTenSeconds)).isBetween(Duration.ofSeconds(8), Duration.ofSeconds(10));
+        assertThat(ThrottledException.parseRetryAfter("Wed, 21 Oct 2015 07:28:00 GMT")).isEqualTo(Duration.ZERO);
+        assertThat(ThrottledException.parseRetryAfter("soon")).isNull();
+        assertThat(ThrottledException.parseRetryAfter(null)).isNull();
+        assertThat(new ThrottledException("x").retryAfter()).isEmpty();
+    }
+
+    @Test
     void givesUpAfterMaxAttempts() {
         AtomicInteger calls = new AtomicInteger();
         assertThatThrownBy(() -> chain.execute(context(true), () -> {

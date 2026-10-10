@@ -1,6 +1,8 @@
 package org.kamranzafar.cirrus.azure;
 
 import com.azure.core.exception.HttpResponseException;
+import com.azure.core.http.HttpHeaderName;
+import com.azure.core.http.HttpResponse;
 import com.azure.storage.blob.models.BlobStorageException;
 import org.kamranzafar.cirrus.error.AccessDeniedException;
 import org.kamranzafar.cirrus.error.AlreadyExistsException;
@@ -14,10 +16,13 @@ import org.kamranzafar.cirrus.error.UnsupportedFeatureException;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.time.Duration;
 import java.util.Optional;
 
 /** Translates Azure SDK exceptions to the portable error model. Shared by all Azure service drivers. */
 public final class AzureErrors {
+
+    private static final HttpHeaderName RETRY_AFTER_MS = HttpHeaderName.fromString("x-ms-retry-after-ms");
 
     private AzureErrors() {
     }
@@ -35,7 +40,7 @@ public final class AzureErrors {
                 case 400, 416 -> new InvalidArgumentException(message, e, provider, code);
                 case 501 -> new UnsupportedFeatureException(message, e, provider, code);
                 // Azure Storage signals throttling with 503 ServerBusy as well as 429.
-                case 429, 503 -> new ThrottledException(message, e, provider, code);
+                case 429, 503 -> new ThrottledException(message, e, provider, code, retryAfter(e.getResponse()));
                 default -> e.getResponse().getStatusCode() >= 500 ? new UnavailableException(message, e, provider, code) : null;
             };
             return Optional.ofNullable(mapped);
@@ -44,5 +49,18 @@ public final class AzureErrors {
             return Optional.of(new UnavailableException(error.getMessage(), error, provider, null));
         }
         return Optional.empty();
+    }
+
+    /** Azure sends Retry-After (seconds) and, on some services, x-ms-retry-after-ms. */
+    private static Duration retryAfter(HttpResponse response) {
+        String millis = response.getHeaderValue(RETRY_AFTER_MS);
+        if (millis != null) {
+            try {
+                return Duration.ofMillis(Long.parseLong(millis.trim()));
+            } catch (NumberFormatException ignored) {
+                // fall back to Retry-After
+            }
+        }
+        return ThrottledException.parseRetryAfter(response.getHeaderValue(HttpHeaderName.RETRY_AFTER));
     }
 }

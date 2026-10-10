@@ -1,6 +1,7 @@
 package org.kamranzafar.cirrus.interceptor;
 
 import org.kamranzafar.cirrus.error.CloudException;
+import org.kamranzafar.cirrus.error.ThrottledException;
 
 import java.util.Objects;
 import java.util.concurrent.ThreadLocalRandom;
@@ -12,6 +13,10 @@ import java.util.concurrent.ThreadLocalRandom;
  * <p>Not installed by default: the cloud SDKs already retry transient failures internally, and
  * stacking two retry layers multiplies attempts. Add this one when you want uniform, provider-neutral
  * retry behaviour on top of (or instead of) SDK retries.
+ *
+ * <p>When a {@link ThrottledException} carries a {@code Retry-After} delay, the retry waits at least that
+ * long. If the provider asks for longer than {@link RetryPolicy#maxBackoff()}, the error is rethrown
+ * straight away instead of retrying early or blocking the caller for that long.
  */
 public final class RetryInterceptor implements Interceptor {
 
@@ -31,15 +36,28 @@ public final class RetryInterceptor implements Interceptor {
                 if (!context.idempotent() || !e.isRetryable() || attempt >= policy.maxAttempts()) {
                     throw e;
                 }
-                sleep(policy.backoffBound(attempt).toMillis(), e);
+                long backoff = jittered(policy.backoffBound(attempt).toMillis());
+                if (e instanceof ThrottledException throttled && throttled.retryAfter().isPresent()) {
+                    long asked = throttled.retryAfter().get().toMillis();
+                    if (asked > policy.maxBackoff().toMillis()) {
+                        throw e;
+                    }
+                    backoff = Math.max(backoff, asked);
+                }
+                sleep(backoff, e);
                 attempt++;
             }
         }
     }
 
-    private static void sleep(long boundMillis, CloudException cause) {
+    /** Full jitter: a random delay up to the bound, so throttled clients don't retry in lockstep. */
+    private static long jittered(long boundMillis) {
+        return boundMillis <= 0 ? 0 : ThreadLocalRandom.current().nextLong(boundMillis + 1);
+    }
+
+    private static void sleep(long millis, CloudException cause) {
         try {
-            Thread.sleep(boundMillis <= 0 ? 0 : ThreadLocalRandom.current().nextLong(boundMillis + 1));
+            Thread.sleep(millis);
         } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
             cause.addSuppressed(ie);

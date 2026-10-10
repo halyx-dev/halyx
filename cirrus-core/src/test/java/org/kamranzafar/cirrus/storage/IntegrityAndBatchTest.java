@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -115,8 +116,8 @@ class IntegrityAndBatchTest {
 
         BatchDeleteResult result = store(driver).deleteAll(keys);
 
-        assertThat(driver.batchSizes).containsExactly(3, 3, 1);
-        assertThat(result.deleted()).containsExactlyElementsOf(keys);
+        assertThat(driver.batchSizes).containsExactlyInAnyOrder(3, 3, 1);
+        assertThat(result.deleted()).containsExactlyElementsOf(keys); // results keep key order
     }
 
     @Test
@@ -128,7 +129,8 @@ class IntegrityAndBatchTest {
         BatchDeleteResult result = store(driver).deleteAll(List.of(BlobKey.of("a"), BlobKey.of("b")));
 
         assertThat(result.isComplete()).isTrue();
-        assertThat(driver.singleDeletes).containsExactly("a", "b");
+        assertThat(driver.singleDeletes).containsExactlyInAnyOrder("a", "b");
+        assertThat(result.deleted()).containsExactly(BlobKey.of("a"), BlobKey.of("b"));
     }
 
     @Test
@@ -153,8 +155,9 @@ class IntegrityAndBatchTest {
         int batchLimit;
         boolean batchUnsupported;
         final List<String> deletedConditionally = new ArrayList<>();
-        final List<String> singleDeletes = new ArrayList<>();
-        final List<Integer> batchSizes = new ArrayList<>();
+        // deleteAll sends batches and single deletes concurrently.
+        final List<String> singleDeletes = new CopyOnWriteArrayList<>();
+        final List<Integer> batchSizes = new CopyOnWriteArrayList<>();
 
         FakeDriver() {
             super("fake", "bucket", Capabilities.of(StorageCapability.values()));

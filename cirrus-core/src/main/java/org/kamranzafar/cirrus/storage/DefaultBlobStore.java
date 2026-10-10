@@ -59,6 +59,11 @@ public final class DefaultBlobStore implements BlobStore {
         return provider;
     }
 
+    /** Batch requests {@link #deleteAll} keeps in flight at once. */
+    static final int DELETE_BATCH_CONCURRENCY = 4;
+    /** Single deletes {@link #deleteAll} keeps in flight on providers without a batch API. */
+    static final int DELETE_CONCURRENCY = 16;
+
     @Override
     public String bucket() {
         return bucket;
@@ -298,47 +303,48 @@ public final class DefaultBlobStore implements BlobStore {
             return deleteOneByOne(unique);
         }
         int size = driver.maxBatchSize();
-        List<BatchDeleteResult> results = new ArrayList<>();
+        List<List<BlobKey>> batches = new ArrayList<>();
         for (int from = 0; from < unique.size(); from += size) {
-            List<BlobKey> batch = unique.subList(from, Math.min(from + size, unique.size()));
-            OperationContext context = new OperationContext(SERVICE, "deleteBatch", provider,
-                    bucket + "/[" + batch.size() + " keys]", true);
-            try {
-                BatchDeleteResult result = interceptors.execute(context, () -> translated(() -> driver.deleteBatch(batch)));
-                // An endpoint without the batch API (an emulator or S3-compatible store) rejects every
-                // sub-request as not implemented: delete those keys individually instead.
-                if (!result.failed().isEmpty()
-                        && result.failed().values().stream().allMatch(UnsupportedFeatureException.class::isInstance)) {
-                    Set<BlobKey> unsupported = result.failed().keySet();
-                    result = BatchDeleteResult.merge(List.of(
-                            new BatchDeleteResult(result.deleted(), Map.of()),
-                            deleteOneByOne(batch.stream().filter(unsupported::contains).toList())));
-                }
-                results.add(result);
-            } catch (UnsupportedFeatureException e) {
-                results.add(deleteOneByOne(batch));
-            } catch (CloudException e) {
-                // The whole request failed (for example access denied): report it against every key.
-                Map<BlobKey, CloudException> failed = new LinkedHashMap<>();
-                batch.forEach(k -> failed.put(k, e));
-                results.add(new BatchDeleteResult(List.of(), failed));
-            }
+            batches.add(unique.subList(from, Math.min(from + size, unique.size())));
         }
-        return BatchDeleteResult.merge(results);
+        return BatchDeleteResult.merge(Bounded.map(batches, DELETE_BATCH_CONCURRENCY, this::deleteBatch));
     }
 
+    private BatchDeleteResult deleteBatch(List<BlobKey> batch) {
+        OperationContext context = new OperationContext(SERVICE, "deleteBatch", provider,
+                bucket + "/[" + batch.size() + " keys]", true);
+        try {
+            BatchDeleteResult result = interceptors.execute(context, () -> translated(() -> driver.deleteBatch(batch)));
+            // An endpoint without the batch API (an emulator or S3-compatible store) rejects every
+            // sub-request as not implemented: delete those keys individually instead.
+            if (!result.failed().isEmpty()
+                    && result.failed().values().stream().allMatch(UnsupportedFeatureException.class::isInstance)) {
+                Set<BlobKey> unsupported = result.failed().keySet();
+                result = BatchDeleteResult.merge(List.of(
+                        new BatchDeleteResult(result.deleted(), Map.of()),
+                        deleteOneByOne(batch.stream().filter(unsupported::contains).toList())));
+            }
+            return result;
+        } catch (UnsupportedFeatureException e) {
+            return deleteOneByOne(batch);
+        } catch (CloudException e) {
+            // The whole request failed (for example access denied): report it against every key.
+            Map<BlobKey, CloudException> failed = new LinkedHashMap<>();
+            batch.forEach(k -> failed.put(k, e));
+            return new BatchDeleteResult(List.of(), failed);
+        }
+    }
+
+    /** Without a batch API, keys are deleted with up to {@value #DELETE_CONCURRENCY} requests at once. */
     private BatchDeleteResult deleteOneByOne(List<BlobKey> keys) {
-        List<BlobKey> deleted = new ArrayList<>();
-        Map<BlobKey, CloudException> failed = new LinkedHashMap<>();
-        for (BlobKey key : keys) {
+        return BatchDeleteResult.merge(Bounded.map(keys, DELETE_CONCURRENCY, key -> {
             try {
                 delete(key);
-                deleted.add(key);
+                return new BatchDeleteResult(List.of(key), Map.of());
             } catch (CloudException e) {
-                failed.put(key, e);
+                return new BatchDeleteResult(List.of(), Map.of(key, e));
             }
-        }
-        return new BatchDeleteResult(deleted, failed);
+        }));
     }
 
     @Override

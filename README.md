@@ -98,6 +98,28 @@ client and Azure its default (Netty) client. GCS uses an Apache transport instea
 `HttpURLConnection`, which keeps only 5 idle connections. Google's gRPC clients (Secret Manager,
 Parameter Manager) multiplex over HTTP/2 and are not affected.
 
+### Throttling
+
+Throttling surfaces as `ThrottledException`. When the service says how long to wait (`Retry-After`, or
+Azure's `x-ms-retry-after-ms`), `retryAfter()` carries it. `RetryInterceptor` waits at least that long
+before retrying. If the wait is longer than the policy's `maxBackoff`, it rethrows at once instead of
+retrying early. AWS clients use the SDK's **adaptive** retry mode by default (`aws.retry-mode`:
+`adaptive`, `standard` or `legacy`). It adds a client-side rate limiter that backs off while S3 returns
+503 SlowDown. The limiter is per connection, so a throttled bucket also slows other buckets on that
+connection; choose `standard` if that matters more.
+
+S3 limits request rates per key prefix: about 3,500 writes and 5,500 reads per second. To go beyond
+that, spread hot keys across prefixes rather than adding one sequential prefix:
+
+```java
+// orders/2026-10-10/123.json would put a whole day's writes on one prefix
+String shard = Integer.toHexString(Math.floorMod(orderId.hashCode(), 16));   // 0..f
+BlobKey key = BlobKey.of("orders/" + shard + "/2026-10-10/" + orderId + ".json");
+```
+
+Azure and GCS scale per account or bucket rather than per prefix. They still ramp up gradually, so
+increase the load on a new bucket over minutes, not seconds.
+
 ### Folder-style listing
 
 ```java
@@ -140,8 +162,12 @@ BatchDeleteResult result = store.deleteAll(keys);           // per-key failures,
 ```
 
 `deleteAll` splits keys into each provider's batch limit: S3 `DeleteObjects` (1,000), Azure Blob Batch
-(256), GCS JSON batch (100). Missing keys count as deleted. If an endpoint doesn't implement the batch
-API, Cirrus falls back to deleting keys one at a time.
+(256), GCS JSON batch (100). Up to 4 batches are in flight at once, and results keep the order of
+your keys. Missing keys count as deleted. If an endpoint doesn't implement the batch API, Cirrus falls
+back to single deletes, 16 at a time.
+
+`listAll(prefix)` fetches the next page in the background while you work through the current one, so
+long listings wait for the network about once per page.
 
 ### Metadata updates
 
