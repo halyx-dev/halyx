@@ -3,6 +3,10 @@ package org.kamranzafar.cirrus.memory;
 import org.kamranzafar.cirrus.cache.CacheConfig;
 import org.kamranzafar.cirrus.cache.spi.CacheDriver;
 import org.kamranzafar.cirrus.config.ProviderConfig;
+import org.kamranzafar.cirrus.messaging.SubscriptionConfig;
+import org.kamranzafar.cirrus.messaging.TopicConfig;
+import org.kamranzafar.cirrus.messaging.spi.PublisherDriver;
+import org.kamranzafar.cirrus.messaging.spi.SubscriptionDriver;
 import org.kamranzafar.cirrus.parameters.Parameter;
 import org.kamranzafar.cirrus.parameters.ParameterStoreConfig;
 import org.kamranzafar.cirrus.parameters.spi.ParameterDriver;
@@ -42,6 +46,7 @@ public final class InMemoryProvider implements CloudProvider {
         /** One store per endpoint, shared by every namespace on it, like a Redis server. */
         private final Map<String, CacheDriver> caches = new ConcurrentHashMap<>();
         private final Map<String, ConcurrentSkipListMap<String, List<Parameter>>> parameters = new ConcurrentHashMap<>();
+        private final InMemoryBroker broker = new InMemoryBroker();
 
         @Override
         public BlobStoreDriver blobStore(String bucket) {
@@ -62,7 +67,18 @@ public final class InMemoryProvider implements CloudProvider {
         }
 
         @Override
+        public PublisherDriver publisher(TopicConfig config) {
+            return broker.publisher(config);
+        }
+
+        @Override
+        public SubscriptionDriver subscription(SubscriptionConfig config) {
+            return broker.subscription(config);
+        }
+
+        @Override
         public void close() {
+            broker.clear();
             buckets.clear();
             caches.clear();
             parameters.clear();

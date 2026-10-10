@@ -9,6 +9,12 @@ import org.kamranzafar.cirrus.parameters.DefaultParameterStore;
 import org.kamranzafar.cirrus.parameters.ParameterStore;
 import org.kamranzafar.cirrus.parameters.ParameterStoreConfig;
 import org.kamranzafar.cirrus.interceptor.InterceptorChain;
+import org.kamranzafar.cirrus.messaging.DefaultPublisher;
+import org.kamranzafar.cirrus.messaging.DefaultSubscription;
+import org.kamranzafar.cirrus.messaging.Publisher;
+import org.kamranzafar.cirrus.messaging.Subscription;
+import org.kamranzafar.cirrus.messaging.SubscriptionConfig;
+import org.kamranzafar.cirrus.messaging.TopicConfig;
 import org.kamranzafar.cirrus.spi.CloudProvider;
 import org.kamranzafar.cirrus.spi.ProviderConnection;
 import org.kamranzafar.cirrus.sql.Database;
@@ -76,6 +82,24 @@ public final class CloudContext implements AutoCloseable {
     /** A portable parameter or secret store. */
     public ParameterStore parameterStore(ParameterStoreConfig config) {
         return new DefaultParameterStore(provider.id(), config, connection().parameterStore(config), interceptors);
+    }
+
+    /** A publisher to an existing topic or queue. Cheap to keep: create one per topic and share it. */
+    public Publisher publisher(TopicConfig config) {
+        return new DefaultPublisher(connection().publisher(config), config, interceptors);
+    }
+
+    public Publisher publisher(String topic) {
+        return publisher(TopicConfig.of(topic));
+    }
+
+    /** A consumer of an existing subscription or queue: pull with {@code receive} or run {@code listen}. */
+    public Subscription subscription(SubscriptionConfig config) {
+        return new DefaultSubscription(connection().subscription(config), config, interceptors);
+    }
+
+    public Subscription subscription(String name) {
+        return subscription(SubscriptionConfig.of(name));
     }
 
     /**

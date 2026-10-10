@@ -3,6 +3,10 @@ package org.kamranzafar.cirrus.spi;
 import org.kamranzafar.cirrus.cache.CacheConfig;
 import org.kamranzafar.cirrus.cache.spi.CacheDriver;
 import org.kamranzafar.cirrus.error.UnsupportedFeatureException;
+import org.kamranzafar.cirrus.messaging.SubscriptionConfig;
+import org.kamranzafar.cirrus.messaging.TopicConfig;
+import org.kamranzafar.cirrus.messaging.spi.PublisherDriver;
+import org.kamranzafar.cirrus.messaging.spi.SubscriptionDriver;
 import org.kamranzafar.cirrus.parameters.ParameterStoreConfig;
 import org.kamranzafar.cirrus.parameters.spi.ParameterDriver;
 import org.kamranzafar.cirrus.sql.Database;
@@ -39,6 +43,16 @@ public interface ProviderConnection extends AutoCloseable {
      */
     default Database database(SqlConfig config) {
         throw new UnsupportedFeatureException("SQL databases are not supported by this provider");
+    }
+
+    /** A driver publishing to {@code config.name()}. */
+    default PublisherDriver publisher(TopicConfig config) {
+        throw new UnsupportedFeatureException("Messaging is not supported by this provider");
+    }
+
+    /** A driver consuming from {@code config.name()}. */
+    default SubscriptionDriver subscription(SubscriptionConfig config) {
+        throw new UnsupportedFeatureException("Messaging is not supported by this provider");
     }
 
     @Override
