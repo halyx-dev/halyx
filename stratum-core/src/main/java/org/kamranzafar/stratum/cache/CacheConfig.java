@@ -28,9 +28,11 @@ public final class CacheConfig {
     private final Duration defaultTtl;
     private final boolean cluster;
     private final CacheAuth auth;
+    private final boolean failOpen;
     private final Map<String, String> properties;
 
     private CacheConfig(Builder b) {
+        this.failOpen = b.failOpen;
         this.endpoint = b.endpoint;
         this.namespace = b.namespace;
         this.defaultTtl = b.defaultTtl;
@@ -70,6 +72,11 @@ public final class CacheConfig {
         return auth;
     }
 
+    /** Whether an unavailable server degrades to cache misses instead of failing calls. */
+    public boolean failOpen() {
+        return failOpen;
+    }
+
     public Optional<String> property(String key) {
         return Optional.ofNullable(properties.get(key));
     }
@@ -90,6 +97,7 @@ public final class CacheConfig {
         private Duration defaultTtl;
         private boolean cluster;
         private CacheAuth auth = CacheAuth.none();
+        private boolean failOpen;
         private final Map<String, String> properties = new LinkedHashMap<>();
 
         private Builder(URI endpoint) {
@@ -121,6 +129,19 @@ public final class CacheConfig {
 
         public Builder auth(CacheAuth auth) {
             this.auth = Objects.requireNonNull(auth, "auth");
+            return this;
+        }
+
+        /**
+         * Treat the cache as best effort: when the server is unavailable (connection failures,
+         * timeouts, throttling), reads return misses, {@code getOrLoad} calls the loader, and plain
+         * writes and deletes are skipped. After repeated failures calls skip the server entirely for a
+         * few seconds (circuit breaker), so a dead cache does not add a timeout to every request.
+         * Operations whose result matters for correctness (putIfAbsent, replace, getAndDelete,
+         * deleteIfEquals, increment, locks) still fail.
+         */
+        public Builder failOpen(boolean failOpen) {
+            this.failOpen = failOpen;
             return this;
         }
 

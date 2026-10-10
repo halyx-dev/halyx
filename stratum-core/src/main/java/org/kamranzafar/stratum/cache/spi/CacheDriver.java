@@ -36,6 +36,25 @@ public interface CacheDriver {
 
     long increment(String key, long delta);
 
+    /** INCRBY, then PEXPIRE if the key has no TTL, atomically. */
+    long increment(String key, long delta, Duration ttl);
+
+    /** SET XX KEEPTTL. */
+    boolean setIfPresent(String key, byte[] value);
+
+    /** Replace if the current value equals {@code expected}, keeping the TTL, atomically. */
+    boolean replaceIfEquals(String key, byte[] expected, byte[] value);
+
+    Optional<byte[]> getAndDelete(String key);
+
+    boolean deleteIfEquals(String key, byte[] expected);
+
+    /** PEXPIRE only if the current value equals {@code expected}, atomically. */
+    boolean expireIfEquals(String key, byte[] expected, Duration ttl);
+
+    /** Deletes every key starting with {@code prefix} (non-empty) and returns how many. */
+    long deleteByPrefix(String prefix);
+
     CloudException translate(Throwable error);
 
     <T> T unwrap(Class<T> nativeType);

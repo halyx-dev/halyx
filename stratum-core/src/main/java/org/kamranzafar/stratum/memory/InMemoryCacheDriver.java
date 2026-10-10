@@ -6,6 +6,7 @@ import org.kamranzafar.stratum.error.InvalidArgumentException;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -121,6 +122,100 @@ final class InMemoryCacheDriver extends AbstractCacheDriver {
             return new Entry(encoded, present ? existing.expiresAtNanos() : Entry.NEVER);
         });
         return result[0];
+    }
+
+    @Override
+    public long increment(String key, long delta, Duration ttl) {
+        long[] result = new long[1];
+        entries.compute(key, (k, existing) -> {
+            boolean present = existing != null && !existing.expired(System.nanoTime());
+            long current = present ? parse(existing.value()) : 0;
+            result[0] = Math.addExact(current, delta);
+            byte[] encoded = Long.toString(result[0]).getBytes(StandardCharsets.US_ASCII);
+            long expiry = present && existing.expiresAtNanos() != Entry.NEVER ? existing.expiresAtNanos() : expiry(Optional.of(ttl));
+            return new Entry(encoded, expiry);
+        });
+        return result[0];
+    }
+
+    @Override
+    public boolean setIfPresent(String key, byte[] value) {
+        boolean[] updated = {false};
+        entries.computeIfPresent(key, (k, existing) -> {
+            if (existing.expired(System.nanoTime())) {
+                return null;
+            }
+            updated[0] = true;
+            return new Entry(value.clone(), existing.expiresAtNanos());
+        });
+        return updated[0];
+    }
+
+    @Override
+    public boolean replaceIfEquals(String key, byte[] expected, byte[] value) {
+        boolean[] replaced = {false};
+        entries.computeIfPresent(key, (k, existing) -> {
+            if (existing.expired(System.nanoTime())) {
+                return null;
+            }
+            if (Arrays.equals(existing.value(), expected)) {
+                replaced[0] = true;
+                return new Entry(value.clone(), existing.expiresAtNanos());
+            }
+            return existing;
+        });
+        return replaced[0];
+    }
+
+    @Override
+    public Optional<byte[]> getAndDelete(String key) {
+        Entry entry = entries.remove(key);
+        return entry == null || entry.expired(System.nanoTime()) ? Optional.empty() : Optional.of(entry.value());
+    }
+
+    @Override
+    public boolean deleteIfEquals(String key, byte[] expected) {
+        boolean[] deleted = {false};
+        entries.computeIfPresent(key, (k, existing) -> {
+            if (existing.expired(System.nanoTime())) {
+                return null;
+            }
+            if (Arrays.equals(existing.value(), expected)) {
+                deleted[0] = true;
+                return null;
+            }
+            return existing;
+        });
+        return deleted[0];
+    }
+
+    @Override
+    public boolean expireIfEquals(String key, byte[] expected, Duration ttl) {
+        boolean[] extended = {false};
+        entries.computeIfPresent(key, (k, existing) -> {
+            if (existing.expired(System.nanoTime())) {
+                return null;
+            }
+            if (Arrays.equals(existing.value(), expected)) {
+                extended[0] = true;
+                return new Entry(existing.value(), expiry(Optional.of(ttl)));
+            }
+            return existing;
+        });
+        return extended[0];
+    }
+
+    @Override
+    public long deleteByPrefix(String prefix) {
+        long now = System.nanoTime();
+        long removed = 0;
+        for (var entry : entries.entrySet()) {
+            if (entry.getKey().startsWith(prefix) && entries.remove(entry.getKey(), entry.getValue())
+                    && !entry.getValue().expired(now)) {
+                removed++;
+            }
+        }
+        return removed;
     }
 
     @Override

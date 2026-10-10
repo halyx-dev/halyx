@@ -40,6 +40,8 @@
         -->
         <spring-boot3.version>3.5.16</spring-boot3.version>
         <spring-boot4.version>4.1.1</spring-boot4.version>
+        <!-- Jackson 3 (tools.jackson), Boot 4's JSON library; compile-only for the cache codec -->
+        <jackson3.version>3.1.5</jackson3.version>
 
         <!-- Redis/Valkey client: the 6.x line stays on Netty 4.1, like the AWS and Azure SDKs -->
         <lettuce.version>6.8.2.RELEASE</lettuce.version>

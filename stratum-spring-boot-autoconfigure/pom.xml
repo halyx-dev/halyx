@@ -59,6 +59,42 @@
             <artifactId>micrometer-observation</artifactId>
             <optional>true</optional>
         </dependency>
+        <!-- Cache metrics -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-core</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <!-- JSON cache values: Jackson 2 (Boot 3) or Jackson 3 (Boot 4), whichever the application has -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-core</artifactId>
+            <version>${jackson3.version}</version>
+            <optional>true</optional>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson3.version}</version>
+            <optional>true</optional>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
         <!-- Boot 3 health: org.springframework.boot.actuate.health -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -166,6 +202,8 @@
                 <configuration>
                     <classpathDependencyExcludes>
                         <classpathDependencyExclude>org.springframework.boot:spring-boot-health</classpathDependencyExclude>
+                        <classpathDependencyExclude>tools.jackson.core:jackson-databind</classpathDependencyExclude>
+                        <classpathDependencyExclude>tools.jackson.core:jackson-core</classpathDependencyExclude>
                     </classpathDependencyExcludes>
                 </configuration>
             </plugin>
@@ -175,6 +213,8 @@
                 <configuration>
                     <classpathDependencyExcludes>
                         <classpathDependencyExclude>org.springframework.boot:spring-boot-health</classpathDependencyExclude>
+                        <classpathDependencyExclude>tools.jackson.core:jackson-databind</classpathDependencyExclude>
+                        <classpathDependencyExclude>tools.jackson.core:jackson-core</classpathDependencyExclude>
                     </classpathDependencyExcludes>
                 </configuration>
             </plugin>

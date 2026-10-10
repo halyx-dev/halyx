@@ -12,6 +12,7 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -38,12 +39,13 @@ import java.util.Map;
  * @param providers   named provider connections
  * @param blobStores  {@code BlobStore} beans to create, keyed by bean name
  * @param caches      {@code Cache<String>} beans to create, keyed by bean name
+ * @param cacheManager a Spring {@code CacheManager} for {@code @Cacheable}, enabled by setting its endpoint
  * @param retry       provider-neutral retries on top of the SDKs' own
  * @param observations Micrometer observations of every operation
  */
 @ConfigurationProperties("stratum")
 public record StratumProperties(Map<String, Provider> providers, Map<String, BlobStoreProperties> blobStores,
-                                Map<String, CacheProperties> caches,
+                                Map<String, CacheProperties> caches, @DefaultValue CacheManagerProperties cacheManager,
                                 @DefaultValue Retry retry, @DefaultValue Observations observations) {
 
     public StratumProperties {
@@ -135,12 +137,13 @@ public record StratumProperties(Map<String, Provider> providers, Map<String, Blo
      * @param namespace  key prefix ({@code namespace:key}); defaults to the bean name, empty for none
      * @param defaultTtl expiry for writes that do not give one; none when omitted
      * @param cluster    whether the server runs in cluster mode
+     * @param failOpen   treat the cache as best effort when the server is unavailable (see {@code CacheConfig.failOpen})
      * @param auth       how to log in
      * @param properties provider-specific settings, such as {@code aws.elasticache.cache-name}
      */
     public record CacheProperties(String provider, URI endpoint, String namespace, Duration defaultTtl,
-                                  @DefaultValue("false") boolean cluster, @DefaultValue CacheAuthProperties auth,
-                                  Map<String, String> properties) {
+                                  @DefaultValue("false") boolean cluster, @DefaultValue("false") boolean failOpen,
+                                  @DefaultValue CacheAuthProperties auth, Map<String, String> properties) {
 
         public CacheProperties {
             properties = ordered(properties);
@@ -153,6 +156,7 @@ public record StratumProperties(Map<String, Provider> providers, Map<String, Blo
             CacheConfig.Builder config = CacheConfig.builder(endpoint)
                     .namespace(namespace == null ? name : namespace)
                     .cluster(cluster)
+                    .failOpen(failOpen)
                     .auth(auth.toCacheAuth(name));
             if (defaultTtl != null) {
                 config.defaultTtl(defaultTtl);
@@ -183,6 +187,56 @@ public record StratumProperties(Map<String, Provider> providers, Map<String, Blo
                     yield username == null ? CacheAuth.password(password) : CacheAuth.password(username, password);
                 }
             };
+        }
+    }
+
+    /**
+     * The Spring {@code CacheManager} behind {@code @Cacheable}, {@code @CachePut} and {@code @CacheEvict}.
+     * Each Spring cache becomes a Stratum cache whose namespace is {@code namespace-prefix + name}.
+     *
+     * @param provider        the provider name; may be omitted when exactly one provider is configured
+     * @param endpoint        {@code redis://} or {@code rediss://} server; setting it enables the cache manager
+     * @param auth            how to log in
+     * @param cluster         whether the server runs in cluster mode
+     * @param failOpen        treat the cache as best effort: an unavailable server makes cached methods run uncached
+     * @param properties      provider-specific settings, such as {@code aws.elasticache.cache-name}
+     * @param defaultTtl      expiry of entries; none when omitted
+     * @param ttl             per-cache expiry overriding {@code default-ttl}, keyed by cache name
+     * @param namespacePrefix prefix of every cache's namespace, for sharing a server between applications
+     * @param cacheNames      caches to create up front; when set, unknown names are rejected
+     * @param allowNullValues whether {@code null} results are cached
+     * @param codec           {@code jdk} (Java serialization) or {@code json} (Jackson 3 on Boot 4, Jackson 2 on Boot 3)
+     * @param trustedPackages packages whose classes may be deserialized; required for {@code json}, and
+     *                        restricts {@code jdk} too when set ({@code java.*} is always allowed)
+     */
+    public record CacheManagerProperties(String provider, URI endpoint, @DefaultValue CacheAuthProperties auth,
+                                         @DefaultValue("false") boolean cluster, @DefaultValue("false") boolean failOpen,
+                                         Map<String, String> properties, Duration defaultTtl, Map<String, Duration> ttl,
+                                         @DefaultValue("") String namespacePrefix, List<String> cacheNames,
+                                         @DefaultValue("true") boolean allowNullValues,
+                                         @DefaultValue("jdk") Codec codec, List<String> trustedPackages) {
+
+        public enum Codec { JDK, JSON }
+
+        public CacheManagerProperties {
+            properties = ordered(properties);
+            ttl = ordered(ttl);
+            cacheNames = cacheNames == null ? List.of() : List.copyOf(cacheNames);
+            trustedPackages = trustedPackages == null ? List.of() : List.copyOf(trustedPackages);
+        }
+
+        public CacheConfig toCacheConfig(String cacheName) {
+            CacheConfig.Builder config = CacheConfig.builder(endpoint)
+                    .namespace(namespacePrefix + cacheName)
+                    .cluster(cluster)
+                    .failOpen(failOpen)
+                    .auth(auth.toCacheAuth("cache-manager"));
+            Duration expiry = ttl.getOrDefault(cacheName, defaultTtl);
+            if (expiry != null) {
+                config.defaultTtl(expiry);
+            }
+            properties.forEach(config::property);
+            return config.build();
         }
     }
 

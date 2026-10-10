@@ -67,6 +67,46 @@ public interface Cache<V> {
      */
     long increment(String key, long delta);
 
+    /**
+     * Like {@link #increment(String, long)}, and gives the counter {@code ttl} if it has no expiry yet,
+     * in the same atomic step. This is the building block of fixed-window rate limits:
+     *
+     * <pre>{@code
+     * long calls = cache.increment("rate:" + clientId + ":" + minute, 1, Duration.ofMinutes(1));
+     * if (calls > 100) reject();
+     * }</pre>
+     */
+    long increment(String key, long delta, Duration ttl);
+
+    /** Replaces the value of an existing key, keeping its TTL. Returns false (and stores nothing) if absent. */
+    boolean update(String key, V value);
+
+    /** Atomically replaces the value only if it currently equals {@code expected}, keeping the TTL. */
+    boolean replace(String key, V expected, V value);
+
+    /** Atomically reads and removes a value (for one-time tokens). */
+    Optional<V> getAndDelete(String key);
+
+    /** Atomically deletes the key only if its value equals {@code expected}. */
+    boolean deleteIfEquals(String key, V expected);
+
+    /**
+     * Deletes every key in this cache's namespace and returns how many. Uses incremental scanning, so
+     * it does not block the server, but it is not atomic with concurrent writes.
+     *
+     * @throws IllegalStateException if the cache has no namespace, which would delete the whole server
+     */
+    long clear();
+
+    /** Tries once to take the lock {@code name} for {@code lease}. */
+    Optional<CacheLock> tryLock(String name, Duration lease);
+
+    /** Waits up to {@code wait} for the lock {@code name}, retrying with backoff. */
+    Optional<CacheLock> lock(String name, Duration lease, Duration wait);
+
+    /** Hit, miss and load counters for this cache instance. */
+    CacheStatistics statistics();
+
     /** Escape hatch to the native client, such as Lettuce's {@code StatefulRedisConnection}. */
     <T> T unwrap(Class<T> nativeType);
 }

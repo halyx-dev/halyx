@@ -2,3 +2,5 @@ org.kamranzafar.stratum.spring.autoconfigure.StratumAutoConfiguration
 org.kamranzafar.stratum.spring.autoconfigure.observation.StratumObservationAutoConfiguration
 org.kamranzafar.stratum.spring.autoconfigure.actuate.StratumActuatorHealthContributorAutoConfiguration
 org.kamranzafar.stratum.spring.autoconfigure.health.StratumHealthContributorAutoConfiguration
+org.kamranzafar.stratum.spring.autoconfigure.cache.StratumCacheManagerAutoConfiguration
+org.kamranzafar.stratum.spring.autoconfigure.metrics.StratumCacheMetricsAutoConfiguration

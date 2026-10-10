@@ -10,6 +10,8 @@ import org.kamranzafar.stratum.error.InvalidArgumentException;
 import org.kamranzafar.stratum.error.UnavailableException;
 import org.kamranzafar.stratum.error.UnknownCloudException;
 
+import javax.net.ssl.SSLHandshakeException;
+import java.security.cert.CertificateException;
 import java.util.Optional;
 import java.util.Set;
 
@@ -43,6 +45,12 @@ public final class RedisErrors {
             for (Throwable t = e.getCause(); t != null; t = t.getCause()) {
                 if (t instanceof RedisCommandExecutionException auth && AUTH.contains(code(auth.getMessage()))) {
                     return Optional.of(new AccessDeniedException(auth.getMessage(), e, provider, code(auth.getMessage())));
+                }
+                // An untrusted server certificate is a configuration problem, not a transient one.
+                if (t instanceof SSLHandshakeException || t instanceof CertificateException) {
+                    return Optional.of(new AccessDeniedException("TLS handshake failed (" + t.getMessage()
+                            + "); if the server uses a private CA, set the '" + RedisCaches.CA_CERTIFICATE
+                            + "' cache property", e, provider, "TLS"));
                 }
             }
             return Optional.of(new UnavailableException(e.getMessage(), e, provider, null));

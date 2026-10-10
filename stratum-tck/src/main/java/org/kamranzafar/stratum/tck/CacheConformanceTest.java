@@ -6,6 +6,8 @@ import org.junit.jupiter.api.TestInfo;
 import org.kamranzafar.stratum.CloudContext;
 import org.kamranzafar.stratum.cache.Cache;
 import org.kamranzafar.stratum.cache.CacheConfig;
+import org.kamranzafar.stratum.cache.CacheLock;
+import org.kamranzafar.stratum.cache.CacheStatistics;
 import org.kamranzafar.stratum.cache.Codec;
 import org.kamranzafar.stratum.error.InvalidArgumentException;
 
@@ -16,6 +18,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -353,6 +356,190 @@ public abstract class CacheConformanceTest {
 
         assertThat(cache().exists("broken")).isFalse();
         assertThat(cache().getOrLoad("broken", () -> "recovered")).isEqualTo("recovered");
+    }
+
+    // --- atomic operations ---------------------------------------------------------------------
+
+    @Test
+    void updateReplacesExistingValueAndKeepsTtl() {
+        cache().put("session", "v1", Duration.ofSeconds(60));
+
+        assertThat(cache().update("session", "v2")).isTrue();
+        assertThat(cache().get("session")).hasValue("v2");
+        assertThat(cache().ttl("session")).hasValueSatisfying(ttl -> assertThat(ttl).isGreaterThan(Duration.ofSeconds(50)));
+    }
+
+    @Test
+    void updateOfMissingKeyStoresNothing() {
+        assertThat(cache().update("missing", "v")).isFalse();
+        assertThat(cache().exists("missing")).isFalse();
+    }
+
+    @Test
+    void replaceIsCompareAndSet() {
+        cache().put("state", "draft", Duration.ofSeconds(60));
+
+        assertThat(cache().replace("state", "published", "archived")).isFalse();
+        assertThat(cache().replace("state", "draft", "published")).isTrue();
+        assertThat(cache().get("state")).hasValue("published");
+        assertThat(cache().ttl("state")).as("TTL kept").isPresent();
+        assertThat(cache().replace("missing", "a", "b")).isFalse();
+    }
+
+    @Test
+    void getAndDeleteConsumesOnce() {
+        cache().put("otp", "123456");
+
+        assertThat(cache().getAndDelete("otp")).hasValue("123456");
+        assertThat(cache().getAndDelete("otp")).isEmpty();
+        assertThat(cache().exists("otp")).isFalse();
+    }
+
+    @Test
+    void deleteIfEqualsOnlyDeletesMatchingValue() {
+        cache().put("owner", "a");
+
+        assertThat(cache().deleteIfEquals("owner", "b")).isFalse();
+        assertThat(cache().exists("owner")).isTrue();
+        assertThat(cache().deleteIfEquals("owner", "a")).isTrue();
+        assertThat(cache().exists("owner")).isFalse();
+    }
+
+    @Test
+    void incrementWithTtlStartsAWindowOnce() throws Exception {
+        assertThat(cache().increment("window", 1, Duration.ofMillis(800))).isEqualTo(1);
+        Duration first = cache().ttl("window").orElseThrow();
+        Thread.sleep(200);
+        assertThat(cache().increment("window", 1, Duration.ofMillis(800))).isEqualTo(2);
+
+        assertThat(cache().ttl("window").orElseThrow()).as("window not extended").isLessThan(first);
+        awaitAbsent(cache(), "window");
+        assertThat(cache().increment("window", 1, Duration.ofSeconds(60))).as("new window").isEqualTo(1);
+    }
+
+    // --- clear ---------------------------------------------------------------------------------
+
+    @Test
+    void clearRemovesOnlyThisNamespace() {
+        Cache<String> mine = cache();
+        Cache<String> other = context().cache(config().namespace(namespace + "-other").build());
+        Map<String, String> entries = new LinkedHashMap<>();
+        for (int i = 0; i < 1200; i++) {
+            entries.put("k" + i, "v");
+        }
+        mine.putAll(entries);
+        other.put("k0", "kept");
+
+        assertThat(mine.clear()).isEqualTo(1200);
+        assertThat(mine.exists("k0")).isFalse();
+        assertThat(mine.exists("k1199")).isFalse();
+        assertThat(other.get("k0")).hasValue("kept");
+    }
+
+    @Test
+    void clearMatchesNamespaceLiterally() {
+        Cache<String> globby = context().cache(config().namespace(namespace + "-a*").build());
+        Cache<String> lookalike = context().cache(config().namespace(namespace + "-ab").build());
+        globby.put("k", "v");
+        lookalike.put("k", "v");
+
+        assertThat(globby.clear()).isEqualTo(1);
+        assertThat(lookalike.exists("k")).isTrue();
+    }
+
+    @Test
+    void clearWithoutNamespaceIsRefused() {
+        Cache<String> global = context().cache(config().build());
+
+        assertThatThrownBy(global::clear).isInstanceOf(IllegalStateException.class);
+    }
+
+    // --- locks ---------------------------------------------------------------------------------
+
+    @Test
+    void lockIsExclusiveUntilReleased() {
+        Optional<CacheLock> first = cache().tryLock("job", Duration.ofSeconds(30));
+
+        assertThat(first).isPresent();
+        assertThat(cache().tryLock("job", Duration.ofSeconds(30))).isEmpty();
+        assertThat(first.get().release()).isTrue();
+        assertThat(cache().tryLock("job", Duration.ofSeconds(30))).isPresent();
+    }
+
+    @Test
+    void expiredLeaseCannotReleaseTheNextHoldersLock() throws Exception {
+        CacheLock stale = cache().tryLock("job", Duration.ofMillis(300)).orElseThrow();
+        Instant deadline = Instant.now().plusSeconds(5);
+        Optional<CacheLock> next = Optional.empty();
+        while (next.isEmpty()) {
+            assertThat(Instant.now()).isBefore(deadline);
+            Thread.sleep(50);
+            next = cache().tryLock("job", Duration.ofSeconds(30));
+        }
+
+        assertThat(stale.release()).isFalse();
+        assertThat(stale.extend(Duration.ofSeconds(30))).isFalse();
+        assertThat(cache().tryLock("job", Duration.ofSeconds(30))).as("still held by next").isEmpty();
+        assertThat(next.get().release()).isTrue();
+    }
+
+    @Test
+    void extendKeepsTheLockAlive() throws Exception {
+        CacheLock lock = cache().tryLock("job", Duration.ofMillis(400)).orElseThrow();
+
+        assertThat(lock.extend(Duration.ofSeconds(30))).isTrue();
+        Thread.sleep(600);
+        assertThat(cache().tryLock("job", Duration.ofSeconds(1))).isEmpty();
+        lock.release();
+    }
+
+    @Test
+    void lockWaitsForTheHolder() throws Exception {
+        CacheLock holder = cache().tryLock("job", Duration.ofSeconds(30)).orElseThrow();
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        try {
+            Future<Optional<CacheLock>> waiter = pool.submit(() -> cache().lock("job", Duration.ofSeconds(30), Duration.ofSeconds(5)));
+            Thread.sleep(300);
+            holder.release();
+
+            Optional<CacheLock> acquired = waiter.get();
+            assertThat(acquired).isPresent();
+            acquired.get().release();
+        } finally {
+            pool.shutdownNow();
+        }
+        assertThat(cache().lock("job2", Duration.ofSeconds(30), Duration.ofMillis(10))).isPresent();
+    }
+
+    @Test
+    void lockGivesUpAfterWaiting() {
+        CacheLock holder = cache().tryLock("busy", Duration.ofSeconds(30)).orElseThrow();
+        try {
+            assertThat(cache().lock("busy", Duration.ofSeconds(30), Duration.ofMillis(200))).isEmpty();
+        } finally {
+            holder.release();
+        }
+    }
+
+    // --- statistics ----------------------------------------------------------------------------
+
+    @Test
+    void statisticsCountHitsMissesAndLoads() {
+        Cache<String> c = cache();
+        c.put("a", "1");
+        c.get("a");
+        c.get("missing");
+        c.getAll(List.of("a", "b"));
+        c.getOrLoad("loaded", () -> "x");
+        c.delete("a");
+
+        CacheStatistics stats = c.statistics();
+        assertThat(stats.hits()).isEqualTo(2);
+        assertThat(stats.misses()).isEqualTo(3);
+        assertThat(stats.loads()).isEqualTo(1);
+        assertThat(stats.puts()).isEqualTo(2);
+        assertThat(stats.evictions()).isEqualTo(1);
+        assertThat(stats.hitRatio()).isEqualTo(0.4);
     }
 
     // --- misc ----------------------------------------------------------------------------------

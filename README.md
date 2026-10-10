@@ -155,9 +155,32 @@ User user = users.getOrLoad("user-42", () -> repository.load(42));   // one load
 long hits = sessions.increment("hits", 1);
 ```
 
-Operations: `get`/`getAll`, `put` with optional TTL, `putIfAbsent`, `putAll`, `getOrLoad` (cache-aside;
-concurrent misses in one JVM share a single load), `delete`/`deleteAll`, `exists`, `ttl`/`expire` and
-`increment`. Values go through a `Codec<V>`: `Codec.string()`, `Codec.bytes()` or `Codec.of(...)`.
+Operations:
+
+| Kind | Operations |
+|---|---|
+| Basic | `get`/`getAll`, `put` with optional TTL, `putAll`, `delete`/`deleteAll`, `exists`, `ttl`/`expire` |
+| Cache-aside | `getOrLoad`: concurrent misses in one JVM share a single load |
+| Atomic | `putIfAbsent`, `update` (keeps TTL), `replace` (compare-and-set), `getAndDelete` (one-time tokens), `deleteIfEquals` |
+| Counters | `increment(key, delta)`, `increment(key, delta, ttl)` (fixed-window rate limits: the TTL is set once, atomically) |
+| Locks | `tryLock(name, lease)` / `lock(name, lease, wait)`: lease locks with a random token, so release and extend only work for the current holder |
+| Maintenance | `clear()` deletes the namespace with non-blocking SCAN + UNLINK across all cluster nodes (refused without a namespace) |
+| Observability | `statistics()`: hits, misses, puts, evictions, loads, load failures, fail-open skips |
+
+Values go through a `Codec<V>`: `Codec.string()`, `Codec.bytes()` or `Codec.of(...)`. Atomic operations
+run as single-key Lua scripts, so they behave the same in cluster mode.
+
+**Fail-open.** With `failOpen(true)`, an unavailable server (connection failure, timeout, throttling)
+turns reads into misses, makes `getOrLoad` call the loader, and skips plain writes. After 5 failures
+in a row, calls skip the server for 10 s (circuit breaker), so a dead cache doesn't add a timeout to
+every request. Operations whose result matters (putIfAbsent, replace, getAndDelete, deleteIfEquals,
+counters, locks) still fail. Connections are opened lazily and retried, so an application starts
+even while its cache is down. The default command timeout is 2 s (`redis.command-timeout`).
+
+**TLS.** `rediss://` endpoints use TLS with hostname verification. For servers with a private CA,
+such as Memorystore in-transit encryption, set `redis.ca-certificate` to a PEM file. Untrusted
+certificates are reported as `AccessDeniedException` (a configuration error, never treated as a
+miss under fail-open).
 
 | `CacheAuth` | AWS | Azure | GCP |
 |---|---|---|---|
@@ -170,8 +193,9 @@ runs standalone or cluster mode (`cluster(true)`, with topology refresh), TLS vi
 connection per endpoint and auth. IAM tokens are minted again before they expire, and open
 connections re-authenticate with them, so long-lived connections survive token rotation.
 
-Not included yet: endpoint discovery by cache name (you configure the endpoint URI), and a Spring
-`CacheManager` for `@Cacheable`.
+Not included yet: endpoint discovery by cache name (you configure the endpoint URI), stampede
+protection across instances (TTL jitter, early refresh), negative-result caching outside Spring,
+read-from-replica, near caching, and data structures beyond strings (use `unwrap()`).
 
 ## Spring Boot
 
@@ -207,6 +231,15 @@ stratum:
       default-ttl: 30m
       auth: { type: iam, username: sessions-app }      # none | password | iam
       properties: { aws.elasticache.cache-name: sessions }
+  cache-manager:                   # Spring CacheManager for @Cacheable (with @EnableCaching)
+    endpoint: rediss://master.app.abc123.euw2.cache.amazonaws.com:6379
+    auth: { type: password, password: ${CACHE_AUTH_TOKEN} }
+    default-ttl: 10m
+    ttl: { users: 1h }             # per-cache override
+    namespace-prefix: "orders-svc:"
+    fail-open: true                # cached methods run uncached while the cache is down
+    codec: json                    # jdk (default) | json (Jackson 3 on Boot 4, Jackson 2 on Boot 3)
+    trusted-packages: com.example.orders
   retry:
     enabled: false                 # the SDKs already retry; enable for uniform retries
 ```
@@ -225,6 +258,8 @@ What the starter provides:
 | `Stratum` bean | Built from `stratum.providers`, closed with the context. Define your own `Stratum` bean to replace it. |
 | `BlobStore` beans | One per `stratum.blob-stores` entry, named after the entry. |
 | `Cache<String>` beans | One per `stratum.caches` entry, named after the entry. |
+| `CacheManager` | `stratum.cache-manager.*` backs `@Cacheable`, `@CachePut` and `@CacheEvict` (including `allEntries` and `sync = true`): per-cache TTLs, cached nulls, JDK or JSON values. JSON stores `{"@class", "v"}` and only reads back types from `trusted-packages` (no unsafe polymorphic typing); the JDK codec applies the same allow-list through an `ObjectInputFilter`. Async/reactive `@Cacheable` is not supported. |
+| Cache metrics | With a `MeterRegistry`: Micrometer's standard `cache.gets{result=hit\|miss}`, `cache.puts`, `cache.evictions`, plus `cache.loads{result}` and `cache.fail.open`, tagged `cache=<name>`, for `Cache` beans and `CacheManager` caches. |
 | Interceptors | Every `Interceptor` bean is applied in `@Order` order. Order of application, outermost first: observations, your interceptors, retries. |
 | Customisation | `StratumBuilderCustomizer` beans can add plugins or registrations. |
 | Observations | With Micrometer, every operation records a `stratum.operation` observation (timer + span) tagged with `stratum.service`, `stratum.operation`, `stratum.provider` and `error`. Disable with `stratum.observations.enabled=false`. |
@@ -340,13 +375,17 @@ Cache tests:
 | Azure | Floci-az Azure Cache for Redis (real Valkey, provisioned over ARM) | full cache TCK with the access key |
 | GCP | Valkey container (Floci has no Memorystore) | full cache TCK with an AUTH string |
 
+| shared driver | 3-master Valkey cluster | full cache TCK in cluster mode; keys spread over all masters; cross-slot bulk operations and `clear` |
+| shared driver | TLS-only Valkey with a private CA | full cache TCK over `rediss://` trusting the CA; an untrusted certificate is a non-retryable `AccessDeniedException` |
+| shared driver | unreachable server | fail-open misses and loader fallback, strict operations still fail, breaker short-circuits, recovery once the server starts |
+
 Not verified locally: an IAM *login* end to end (the released Floci images cannot attach IAM users to
-a cache yet), Entra ID logins (Floci-az does not emulate them), and cluster mode.
+a cache yet), Entra ID logins (Floci-az does not emulate them), and failover of a managed cluster.
 
 ## Roadmap
 
 1. ~~Core, SPI, storage on AWS/Azure/GCP, TCK, Floci tests~~
-2. ~~Cache: one Redis/Valkey driver plus cloud auth (ElastiCache IAM, Entra ID, Memorystore IAM)~~ (next: Spring `CacheManager`, endpoint discovery, cluster-mode tests)
+2. ~~Cache: one Redis/Valkey driver plus cloud auth (ElastiCache IAM, Entra ID, Memorystore IAM)~~ (next: endpoint discovery, cross-instance stampede protection)
 3. SQL: `DataSource` factory with cloud IAM auth and token refresh (RDS IAM, Entra ID, Cloud SQL connector)
 4. Search/index: OpenSearch, Azure AI Search, GCP backend to be decided
 5. ~~Spring Boot starter: `stratum.*` properties, auto-configuration, health and Micrometer~~

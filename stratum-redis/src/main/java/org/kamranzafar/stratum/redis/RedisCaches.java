@@ -3,6 +3,7 @@ package org.kamranzafar.stratum.redis;
 import io.lettuce.core.ClientOptions;
 import io.lettuce.core.RedisClient;
 import io.lettuce.core.RedisURI;
+import io.lettuce.core.SslOptions;
 import io.lettuce.core.SslVerifyMode;
 import io.lettuce.core.TimeoutOptions;
 import io.lettuce.core.api.StatefulRedisConnection;
@@ -18,6 +19,7 @@ import org.kamranzafar.stratum.cache.CacheConfig;
 import org.kamranzafar.stratum.cache.spi.CacheDriver;
 import org.kamranzafar.stratum.error.UnsupportedFeatureException;
 
+import java.io.File;
 import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -32,14 +34,22 @@ import java.util.function.Function;
  * connection per distinct endpoint and auth, shared by every cache namespace on it. Providers call
  * {@link #driver} from {@code ProviderConnection.cache} and close this with the connection.
  *
- * <p>Cache properties understood here: {@code redis.command-timeout} (ISO-8601 duration, default
- * {@code PT10S}) and {@code redis.verify-peer} ({@code false} to skip TLS certificate checks, for
- * local tunnels only).
+ * <p>Cache properties understood here:
+ * <ul>
+ *   <li>{@code redis.command-timeout}: ISO-8601 duration, default {@code PT2S}. Keep it short: a cache
+ *       that answers slowly should fail fast (and, with fail-open, degrade to a miss).</li>
+ *   <li>{@code redis.ca-certificate}: path to a PEM file of CA certificates to trust for TLS, for
+ *       servers whose certificates are not signed by a public CA, such as Memorystore's
+ *       in-transit encryption.</li>
+ *   <li>{@code redis.verify-peer}: {@code false} skips TLS certificate checks, for local tunnels only.</li>
+ * </ul>
  */
 public final class RedisCaches implements AutoCloseable {
 
     public static final String COMMAND_TIMEOUT = "redis.command-timeout";
     public static final String VERIFY_PEER = "redis.verify-peer";
+    public static final String CA_CERTIFICATE = "redis.ca-certificate";
+    static final Duration DEFAULT_COMMAND_TIMEOUT = Duration.ofSeconds(2);
 
     private record Key(URI endpoint, boolean cluster, CacheAuth auth, Map<String, String> properties) {
     }
@@ -48,9 +58,26 @@ public final class RedisCaches implements AutoCloseable {
                           RefreshingCredentialsProvider credentials) {
     }
 
+    /** One per endpoint and auth; connects lazily and keeps what it opened for closing. */
+    private final class Endpoint {
+        final LazyCacheDriver driver;
+        volatile Opened opened;
+
+        Endpoint(CacheConfig config, RedisCredentialsSource credentials) {
+            this.driver = new LazyCacheDriver(provider, () -> {
+                if (closed) {
+                    throw new IllegalStateException("Redis connections of provider '" + provider + "' are closed");
+                }
+                Opened o = connect(config, credentials);
+                opened = o;
+                return o.driver();
+            });
+        }
+    }
+
     private final String provider;
     private final ClientResources resources = DefaultClientResources.create();
-    private final Map<Key, Opened> open = new ConcurrentHashMap<>();
+    private final Map<Key, Endpoint> open = new ConcurrentHashMap<>();
     private volatile boolean closed;
 
     public RedisCaches(String provider) {
@@ -83,17 +110,23 @@ public final class RedisCaches implements AutoCloseable {
         };
     }
 
-    /** The driver for {@code config}'s server, connecting on first use. */
+    /**
+     * The driver for {@code config}'s server. It connects on first use and retries a failed connect
+     * on later calls, so creating a cache never fails because the server is down.
+     */
     public CacheDriver driver(CacheConfig config, RedisCredentialsSource credentials) {
         if (closed) {
             throw new IllegalStateException("Redis connections of provider '" + provider + "' are closed");
         }
         Key key = new Key(config.endpoint(), config.cluster(), config.auth(), config.properties());
-        return open.computeIfAbsent(key, k -> connect(config, credentials)).driver();
+        return open.computeIfAbsent(key, k -> new Endpoint(config, credentials)).driver;
     }
 
     private Opened connect(CacheConfig config, RedisCredentialsSource source) {
-        Duration timeout = config.property(COMMAND_TIMEOUT).map(Duration::parse).orElse(Duration.ofSeconds(10));
+        Duration timeout = config.property(COMMAND_TIMEOUT).map(Duration::parse).orElse(DEFAULT_COMMAND_TIMEOUT);
+        SslOptions ssl = config.property(CA_CERTIFICATE)
+                .map(path -> SslOptions.builder().jdkSslProvider().trustManager(new File(path)).build())
+                .orElseGet(SslOptions::create);
         URI endpoint = config.endpoint();
         RedisURI.Builder uri = RedisURI.builder()
                 .withHost(endpoint.getHost())
@@ -114,6 +147,7 @@ public final class RedisCaches implements AutoCloseable {
                 RedisClusterClient client = RedisClusterClient.create(resources, redisUri);
                 client.setOptions(ClusterClientOptions.builder()
                         .timeoutOptions(timeouts)
+                        .sslOptions(ssl)
                         .reauthenticateBehavior(ClientOptions.ReauthenticateBehavior.ON_NEW_CREDENTIALS)
                         // Managed clusters reshard and fail over: follow topology changes.
                         .topologyRefreshOptions(ClusterTopologyRefreshOptions.builder()
@@ -123,17 +157,18 @@ public final class RedisCaches implements AutoCloseable {
                         .build());
                 StatefulRedisClusterConnection<byte[], byte[]> connection = client.connect(ByteArrayCodec.INSTANCE);
                 RedisCacheDriver driver = new RedisCacheDriver(provider, connection.sync(), connection.sync(),
-                        connection.async(), timeout, List.of(connection, client));
+                        connection.async(), connection.sync(), timeout, List.of(connection, client));
                 return new Opened(driver, connection, client::shutdown, credentials);
             }
             RedisClient client = RedisClient.create(resources, redisUri);
             client.setOptions(ClientOptions.builder()
                     .timeoutOptions(timeouts)
+                    .sslOptions(ssl)
                     .reauthenticateBehavior(ClientOptions.ReauthenticateBehavior.ON_NEW_CREDENTIALS)
                     .build());
             StatefulRedisConnection<byte[], byte[]> connection = client.connect(ByteArrayCodec.INSTANCE);
             RedisCacheDriver driver = new RedisCacheDriver(provider, connection.sync(), connection.sync(),
-                    connection.async(), timeout, List.of(connection, client));
+                    connection.async(), connection.sync(), timeout, List.of(connection, client));
             return new Opened(driver, connection, client::shutdown, credentials);
         } catch (RuntimeException e) {
             if (credentials != null) {
@@ -147,7 +182,11 @@ public final class RedisCaches implements AutoCloseable {
     public void close() {
         closed = true;
         List<RuntimeException> failures = new ArrayList<>();
-        for (Opened opened : open.values()) {
+        for (Endpoint endpoint : open.values()) {
+            Opened opened = endpoint.opened;
+            if (opened == null) {
+                continue;
+            }
             for (AutoCloseable resource : new AutoCloseable[] {opened.connection(), opened.client(), opened.credentials()}) {
                 if (resource == null) {
                     continue;
