@@ -11,8 +11,19 @@ public final class GetOptions {
     private final ByteRange range;
     private final ETag ifMatch;
     private final boolean validateChecksum;
+    private final int parallelism;
+    private final int partSize;
+
+    /** Default size of the ranges a parallel download fetches. */
+    public static final int DEFAULT_PART_SIZE = 8 * 1024 * 1024;
+    public static final int MIN_PART_SIZE = 1024 * 1024;
+    public static final int MAX_PARALLELISM = 32;
+    /** Parallelism of {@code BlobStore.download(key, path)}. */
+    public static final int DEFAULT_DOWNLOAD_PARALLELISM = 4;
 
     private GetOptions(Builder b) {
+        this.parallelism = b.parallelism;
+        this.partSize = b.partSize;
         this.range = b.range;
         this.ifMatch = b.ifMatch;
         this.validateChecksum = b.validateChecksum;
@@ -43,18 +54,53 @@ public final class GetOptions {
      * Whether to verify the downloaded bytes against the checksum stored with the blob. The check
      * happens when the stream reaches its end, which then throws
      * {@link org.kamranzafar.cirrus.error.DataIntegrityException} on a mismatch. Not available for
-     * range reads.
+     * range reads; works with parallel reads, since the parts are verified in order.
      */
     public boolean validateChecksum() {
         return validateChecksum;
+    }
+
+    /**
+     * How many byte ranges of {@link #partSize()} are fetched at once. With more than 1, a blob larger
+     * than one part is read as concurrent ranged requests, all pinned to the same version, and handed to
+     * the caller in order. Memory use is about {@code parallelism * partSize}. 1 (the default) is a
+     * single streamed request.
+     */
+    public int parallelism() {
+        return parallelism;
+    }
+
+    /** Size of each range of a parallel read. */
+    public int partSize() {
+        return partSize;
     }
 
     public static final class Builder {
         private ByteRange range;
         private ETag ifMatch;
         private boolean validateChecksum;
+        private int parallelism = 1;
+        private int partSize = DEFAULT_PART_SIZE;
 
         private Builder() {
+        }
+
+        /** Ranges fetched at once, between 1 and {@link #MAX_PARALLELISM}. */
+        public Builder parallelism(int parallelism) {
+            if (parallelism < 1 || parallelism > MAX_PARALLELISM) {
+                throw new IllegalArgumentException("parallelism must be between 1 and " + MAX_PARALLELISM);
+            }
+            this.parallelism = parallelism;
+            return this;
+        }
+
+        /** Size of each range of a parallel read; at least {@link #MIN_PART_SIZE}. */
+        public Builder partSize(int bytes) {
+            if (bytes < MIN_PART_SIZE) {
+                throw new IllegalArgumentException("partSize must be at least " + MIN_PART_SIZE + " bytes");
+            }
+            this.partSize = bytes;
+            return this;
         }
 
         public Builder range(ByteRange range) {

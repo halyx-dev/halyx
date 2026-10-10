@@ -18,6 +18,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -49,7 +50,8 @@ class IntegrityAndBatchTest {
                 PutOptions.builder().validateChecksum().build());
 
         assertThat(result.etag()).isEqualTo(ETag.of("etag-1"));
-        assertThat(driver.expectedSeen).isEqualTo(ChecksumCalculator.of(DATA, 0, DATA.length));
+        // Only the driver's algorithms (CRC32C by default) are computed.
+        assertThat(driver.expectedSeen).isEqualTo(ChecksumCalculator.of(Set.of(ChecksumAlgorithm.CRC32C), DATA, 0, DATA.length));
     }
 
     @Test

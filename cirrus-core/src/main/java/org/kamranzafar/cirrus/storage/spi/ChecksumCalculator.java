@@ -27,13 +27,13 @@ public final class ChecksumCalculator {
         this.md5 = algorithms.contains(ChecksumAlgorithm.MD5) ? newMd5() : null;
     }
 
-    /** CRC32C and MD5: what core computes for validated uploads. */
-    public static ChecksumCalculator forUpload() {
-        return new ChecksumCalculator(Set.of(ChecksumAlgorithm.CRC32C, ChecksumAlgorithm.MD5));
+    /** CRC32C and MD5 of a byte range, as stored by providers that record both. */
+    public static Checksums of(byte[] data, int offset, int length) {
+        return of(Set.of(ChecksumAlgorithm.CRC32C, ChecksumAlgorithm.MD5), data, offset, length);
     }
 
-    public static Checksums of(byte[] data, int offset, int length) {
-        ChecksumCalculator calculator = forUpload();
+    public static Checksums of(Set<ChecksumAlgorithm> algorithms, byte[] data, int offset, int length) {
+        ChecksumCalculator calculator = new ChecksumCalculator(algorithms);
         calculator.update(data, offset, length);
         return calculator.result();
     }

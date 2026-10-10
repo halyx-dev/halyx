@@ -35,7 +35,7 @@ final class ChunkingOutputStream extends OutputStream {
         this.key = key;
         this.options = options;
         this.buffer = pool.acquire(options.partSize());
-        this.checksums = options.validateChecksum() ? ChecksumCalculator.forUpload() : null;
+        this.checksums = options.validateChecksum() ? new ChecksumCalculator(driver.uploadChecksums()) : null;
     }
 
     /** Checksums of everything written, once {@link #finish()} has run; none unless validation was requested. */

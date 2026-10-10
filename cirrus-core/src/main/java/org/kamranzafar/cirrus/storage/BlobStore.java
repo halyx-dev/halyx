@@ -2,6 +2,7 @@ package org.kamranzafar.cirrus.storage;
 
 import org.kamranzafar.cirrus.capability.Capabilities;
 
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Collection;
 import java.util.Optional;
@@ -66,6 +67,18 @@ public interface BlobStore {
      * @throws org.kamranzafar.cirrus.error.NotFoundException if there is no blob under the key
      */
     Blob get(BlobKey key, GetOptions options);
+
+    /**
+     * Downloads the blob to {@code target} with {@link GetOptions#DEFAULT_DOWNLOAD_PARALLELISM} concurrent
+     * ranges. The file is written next to the target and moved into place, so the target only ever
+     * holds a complete blob; an existing file is replaced.
+     */
+    default BlobMetadata download(BlobKey key, Path target) {
+        return download(key, target, GetOptions.builder().parallelism(GetOptions.DEFAULT_DOWNLOAD_PARALLELISM).build());
+    }
+
+    /** Downloads the blob, or the requested range, to {@code target}; see {@link GetOptions#parallelism()}. */
+    BlobMetadata download(BlobKey key, Path target, GetOptions options);
 
     default byte[] getBytes(BlobKey key) {
         try (Blob blob = get(key)) {

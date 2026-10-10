@@ -43,6 +43,7 @@ import org.kamranzafar.cirrus.storage.BlobKey;
 import org.kamranzafar.cirrus.storage.BlobMetadata;
 import org.kamranzafar.cirrus.storage.BlobPage;
 import org.kamranzafar.cirrus.storage.BlobSummary;
+import org.kamranzafar.cirrus.storage.ChecksumAlgorithm;
 import org.kamranzafar.cirrus.storage.Checksums;
 import org.kamranzafar.cirrus.storage.DeleteOptions;
 import org.kamranzafar.cirrus.storage.ETag;
@@ -69,6 +70,7 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /** Blob storage on Azure Blob Storage. A Cirrus bucket maps to a blob container. */
 public final class AzureBlobStoreDriver extends AbstractBlobStoreDriver {
@@ -135,6 +137,12 @@ public final class AzureBlobStoreDriver extends AbstractBlobStoreDriver {
             }
             throw e;
         }
+    }
+
+    /** Azure checks and stores Content-MD5 only. */
+    @Override
+    public Set<ChecksumAlgorithm> uploadChecksums() {
+        return Set.of(ChecksumAlgorithm.MD5);
     }
 
     @Override

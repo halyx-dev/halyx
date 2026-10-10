@@ -50,6 +50,23 @@ Streams of unknown length use the same path: `store.put(key, BlobContent.ofStrea
 The first failed part aborts the whole upload. Checksums are computed in order as you write, so
 `validateChecksum()` works with parallel parts.
 
+### Parallel downloads
+
+```java
+store.download(key, Path.of("/data/model.bin"));   // 4 concurrent 8 MiB ranges
+
+var options = GetOptions.builder().parallelism(8).partSize(16 * 1024 * 1024).validateChecksum().build();
+try (Blob blob = store.get(key, options)) { ... } // an ordinary InputStream, filled by 8 ranged reads
+```
+
+With `parallelism` above 1, Cirrus looks the blob up once, then fetches byte ranges concurrently on
+virtual threads, all pinned to that version (ETag or generation). It hands them to you in order.
+Memory stays at about `parallelism × partSize`, using pooled buffers. A blob of at most one part is a
+single request. Changes to the blob mid-download fail with `PreconditionFailedException` instead of
+mixing versions, and a failed range is retried on its own by the retry interceptor. `download` writes
+to a temporary file next to the target and moves it into place, so the target only ever holds a
+complete blob. It also works with `range(...)`.
+
 ### Downloads and round trips
 
 `get` costs one request on S3 and Azure: metadata comes from the download response. On Azure, `get`
@@ -104,12 +121,16 @@ store.put(key, BlobContent.ofFile(path), PutOptions.builder().validateChecksum()
 try (Blob blob = store.get(key, GetOptions.builder().validateChecksum().build())) { ... }
 ```
 
-No algorithm is stored by all three clouds, so Cirrus computes **CRC32C and MD5** itself. Each
-provider checks what it supports before committing (S3: CRC32C, including full-object CRC32C for
-multipart uploads; Azure: MD5 per request and per block; GCS: CRC32C and MD5 match conditions).
+Cirrus computes only the algorithm each provider checks and stores: **CRC32C** on S3 and GCS
+(hardware-accelerated in the JDK), **MD5** on Azure. The provider checks it before committing (S3:
+CRC32C, including full-object CRC32C for multipart uploads; Azure: MD5 per request and per block;
+GCS: a CRC32C match condition). Content is read once: a validated file larger than one part is
+checksummed while its parts upload, and a smaller one is read into memory once and sent from those
+bytes.
 Cirrus then compares the checksums the provider reports for the stored blob. A mismatch throws
 `DataIntegrityException`, and the corrupt blob is deleted if it is still the version just written.
-Downloads are verified at end of stream against the strongest stored checksum (`BlobMetadata.checksums()`).
+Downloads are verified at end of stream against the strongest stored checksum (`BlobMetadata.checksums()`),
+including parallel downloads.
 
 ### Conditional and batch delete
 

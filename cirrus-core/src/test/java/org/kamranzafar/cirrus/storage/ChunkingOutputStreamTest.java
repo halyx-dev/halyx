@@ -1,6 +1,7 @@
 package org.kamranzafar.cirrus.storage;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.kamranzafar.cirrus.capability.Capabilities;
 import org.kamranzafar.cirrus.error.CloudException;
 import org.kamranzafar.cirrus.interceptor.InterceptorChain;
@@ -8,6 +9,9 @@ import org.kamranzafar.cirrus.storage.spi.AbstractBlobStoreDriver;
 import org.kamranzafar.cirrus.storage.spi.MultipartUploadSession;
 
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -70,16 +74,42 @@ class ChunkingOutputStreamTest {
         }, options)).hasRootCauseMessage("Blob stream is closed");
     }
 
+    @Test
+    void validatedUploadsComputeOnlyTheDriversAlgorithms() {
+        store.write(BlobKey.of("k"), out -> out.write(new byte[PART + 1]),
+                PutOptions.builder().partSize(PART).uploadConcurrency(1).validateChecksum().build());
+        store.put(BlobKey.of("small"), BlobContent.ofBytes(new byte[10]), PutOptions.builder().validateChecksum().build());
+
+        assertThat(driver.expected).hasSize(2).allSatisfy(checksums ->
+                assertThat(checksums.values().keySet()).containsExactly(ChecksumAlgorithm.CRC32C));
+    }
+
+    @Test
+    void validatedLargeFileIsReadOnceThroughTheParts(@TempDir Path dir) throws IOException {
+        Path file = Files.write(dir.resolve("big"), new byte[PART + 5]);
+        Path small = Files.write(dir.resolve("small"), new byte[5]);
+        var validated = PutOptions.builder().partSize(PART).uploadConcurrency(1).validateChecksum().build();
+
+        store.put(BlobKey.of("big"), BlobContent.ofFile(file), validated);
+        store.put(BlobKey.of("small"), BlobContent.ofFile(small), validated);
+
+        assertThat(driver.calls).containsExactly("start", "part1:" + PART, "part2:5", "complete", "put:5");
+    }
+
     private static final class RecordingDriver extends AbstractBlobStoreDriver {
 
         final List<String> calls = new ArrayList<>();
+        final List<Checksums> expected = new ArrayList<>();
 
         RecordingDriver() {
-            super("test", "bucket", Capabilities.none());
+            super("test", "bucket", Capabilities.of(StorageCapability.CHECKSUM));
         }
 
         @Override
         public PutResult put(BlobKey key, BlobContent.Sized content, PutOptions options, Checksums expected) {
+            if (!expected.isEmpty()) {
+                this.expected.add(expected);
+            }
             calls.add("put:" + content.length());
             return new PutResult(key, ETag.of("e"));
         }
@@ -95,6 +125,9 @@ class ChunkingOutputStreamTest {
 
                 @Override
                 public PutResult complete(Checksums expected) {
+                    if (!expected.isEmpty()) {
+                        RecordingDriver.this.expected.add(expected);
+                    }
                     calls.add("complete");
                     return new PutResult(key, ETag.of("e"));
                 }

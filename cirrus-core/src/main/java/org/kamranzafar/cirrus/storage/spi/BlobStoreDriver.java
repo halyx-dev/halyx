@@ -4,6 +4,7 @@ import org.kamranzafar.cirrus.capability.Capabilities;
 import org.kamranzafar.cirrus.error.CloudException;
 import org.kamranzafar.cirrus.error.UnsupportedFeatureException;
 import org.kamranzafar.cirrus.storage.BatchDeleteResult;
+import org.kamranzafar.cirrus.storage.ChecksumAlgorithm;
 import org.kamranzafar.cirrus.storage.Checksums;
 import org.kamranzafar.cirrus.storage.DeleteOptions;
 import org.kamranzafar.cirrus.storage.MetadataUpdate;
@@ -14,6 +15,8 @@ import org.kamranzafar.cirrus.storage.BlobContent;
 import org.kamranzafar.cirrus.storage.BlobKey;
 import org.kamranzafar.cirrus.storage.BlobMetadata;
 import org.kamranzafar.cirrus.storage.BlobPage;
+import org.kamranzafar.cirrus.storage.ByteRange;
+import org.kamranzafar.cirrus.storage.ETag;
 import org.kamranzafar.cirrus.storage.GetOptions;
 import org.kamranzafar.cirrus.storage.ListOptions;
 import org.kamranzafar.cirrus.storage.PresignRequest;
@@ -21,8 +24,10 @@ import org.kamranzafar.cirrus.storage.PresignedUrl;
 import org.kamranzafar.cirrus.storage.PutOptions;
 import org.kamranzafar.cirrus.storage.PutResult;
 
+import java.io.InputStream;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Provider SPI for blob storage, the implementor side of the Bridge.
@@ -43,10 +48,28 @@ public interface BlobStoreDriver {
      */
     PutResult put(BlobKey key, BlobContent.Sized content, PutOptions options, Checksums expected);
 
+    /**
+     * The checksums core computes for validated uploads: the ones this provider checks on arrival and
+     * stores. Defaults to CRC32C, which the JDK computes with hardware instructions; a provider that
+     * only understands MD5 (Azure) overrides this.
+     */
+    default Set<ChecksumAlgorithm> uploadChecksums() {
+        return Set.of(ChecksumAlgorithm.CRC32C);
+    }
+
     /** Starts an upload in parts, used by core for streamed and unknown-length writes. */
     MultipartUploadSession startMultipartUpload(BlobKey key, PutOptions options);
 
     Blob get(BlobKey key, GetOptions options);
+
+    /**
+     * The bytes {@code [offset, offset + length)} of version {@code version}, for one part of a parallel
+     * read. Core already holds the metadata, so drivers whose {@link #get} looks metadata up separately
+     * override this to skip that lookup.
+     */
+    default InputStream readRange(BlobKey key, ETag version, long offset, long length) {
+        return get(key, GetOptions.builder().range(ByteRange.of(offset, length)).ifMatch(version).build()).content();
+    }
 
     Optional<BlobMetadata> head(BlobKey key);
 

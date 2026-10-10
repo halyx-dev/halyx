@@ -3,15 +3,23 @@ package org.kamranzafar.cirrus.storage;
 import org.kamranzafar.cirrus.capability.Capabilities;
 import org.kamranzafar.cirrus.error.CloudException;
 import org.kamranzafar.cirrus.error.DataIntegrityException;
+import org.kamranzafar.cirrus.error.NotFoundException;
+import org.kamranzafar.cirrus.error.PreconditionFailedException;
 import org.kamranzafar.cirrus.error.UnsupportedFeatureException;
 import org.kamranzafar.cirrus.interceptor.InterceptorChain;
 import org.kamranzafar.cirrus.interceptor.OperationContext;
 import org.kamranzafar.cirrus.storage.spi.BlobStoreDriver;
+import org.kamranzafar.cirrus.storage.spi.BufferPool;
 import org.kamranzafar.cirrus.storage.spi.ChecksumCalculator;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.io.OutputStream;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -64,9 +72,14 @@ public final class DefaultBlobStore implements BlobStore {
         return switch (content) {
             // A one-shot stream can only be checksummed while it is uploaded, which the part path does.
             case BlobContent.OfStream stream when options.validateChecksum() -> write(key, stream.stream()::transferTo, options);
+            // Checksumming a large file before uploading it would read it twice: the part path reads it once.
+            case BlobContent.OfFile file when options.validateChecksum() && file.length() > options.partSize() ->
+                    write(key, out -> Files.copy(file.path(), out), options);
             case BlobContent.Sized sized -> execute("put", key, sized.repeatable(), () -> {
-                Checksums expected = options.validateChecksum() ? checksumsOf(sized) : Checksums.none();
-                return verifyWrite(driver, key, driver.put(key, sized, options, expected), expected);
+                BlobContent.Sized body = options.validateChecksum() && sized instanceof BlobContent.OfFile file
+                        ? new BlobContent.OfBytes(readFile(file)) : sized;
+                Checksums expected = options.validateChecksum() ? checksumsOf(body) : Checksums.none();
+                return verifyWrite(driver, key, driver.put(key, body, options, expected), expected);
             });
             case BlobContent.OfUnsizedStream stream -> write(key, stream.stream()::transferTo, options);
         };
@@ -133,21 +146,21 @@ public final class DefaultBlobStore implements BlobStore {
                 + expected.values() + ", provider stored " + result.checksums().values());
     }
 
-    private static Checksums checksumsOf(BlobContent.Sized content) {
-        if (content instanceof BlobContent.OfBytes bytes) {
-            return ChecksumCalculator.of(bytes.bytes(), 0, bytes.bytes().length);
+    /** Validated puts reach here only with bytes (files are read first, streams take the part path). */
+    private Checksums checksumsOf(BlobContent.Sized content) {
+        if (!(content instanceof BlobContent.OfBytes bytes)) {
+            throw new IllegalStateException("Unexpected content for a validated put: " + content);
         }
-        ChecksumCalculator calculator = ChecksumCalculator.forUpload();
-        byte[] buffer = new byte[64 * 1024];
-        try (InputStream in = content.openStream()) {
-            int n;
-            while ((n = in.read(buffer)) > 0) {
-                calculator.update(buffer, 0, n);
-            }
+        return ChecksumCalculator.of(driver.uploadChecksums(), bytes.bytes(), 0, bytes.bytes().length);
+    }
+
+    /** A file of at most one part, read once into memory so it is checksummed and sent from the same bytes. */
+    private static byte[] readFile(BlobContent.OfFile file) {
+        try {
+            return Files.readAllBytes(file.path());
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
-        return calculator.result();
     }
 
     @Override
@@ -160,7 +173,9 @@ public final class DefaultBlobStore implements BlobStore {
         if (options.validateChecksum()) {
             require(StorageCapability.CHECKSUM);
         }
-        Blob blob = execute("get", key, true, () -> driver.get(key, options));
+        Blob blob = options.parallelism() > 1 && driver.capabilities().supports(StorageCapability.RANGE_READ)
+                ? parallelGet(key, options)
+                : execute("get", key, true, () -> driver.get(key, options));
         if (!options.validateChecksum()) {
             return blob;
         }
@@ -173,6 +188,87 @@ public final class DefaultBlobStore implements BlobStore {
         }
         String expected = stored.get(algorithm.get()).orElseThrow();
         return new Blob(blob.metadata(), new VerifyingInputStream(blob.content(), algorithm.get(), expected, provider));
+    }
+
+    /**
+     * Looks the blob up once, then reads it as concurrent ranges pinned to that version. Content of at most
+     * one part is a single pinned read, so small blobs pay no more than one extra lookup.
+     */
+    private Blob parallelGet(BlobKey key, GetOptions options) {
+        BlobMetadata metadata = head(key).orElseThrow(() ->
+                new NotFoundException("No blob " + bucket + "/" + key, null, provider, null));
+        if (options.ifMatch().isPresent() && !options.ifMatch().get().equals(metadata.etag())) {
+            throw new PreconditionFailedException("Blob " + key + " has changed", null, provider, null);
+        }
+        long start = options.range().map(ByteRange::offset).orElse(0L);
+        long end = options.range().flatMap(r -> r.length().isPresent()
+                        ? Optional.of(Math.min(metadata.size(), r.offset() + r.length().getAsLong()))
+                        : Optional.empty())
+                .orElse(metadata.size());
+        if (end - start <= options.partSize()) {
+            var single = GetOptions.builder().ifMatch(metadata.etag());
+            options.range().ifPresent(single::range);
+            Blob blob = execute("get", key, true, () -> driver.get(key, single.build()));
+            return new Blob(metadata, blob.content());
+        }
+        var content = new ParallelRangeInputStream(start, end, options.partSize(), options.parallelism(),
+                BufferPool.shared(), (offset, buffer, length) -> fetchPart(key, metadata.etag(), offset, buffer, length));
+        return new Blob(metadata, content);
+    }
+
+    /** One range of a parallel read; retried as a whole (request and body) by the interceptors. */
+    private void fetchPart(BlobKey key, ETag etag, long offset, byte[] buffer, int length) {
+        try {
+            readPart(key, etag, offset, buffer, length);
+        } catch (NotFoundException e) {
+            throw new PreconditionFailedException("Blob " + key + " changed or was deleted during a parallel read",
+                    e, provider, null);
+        }
+    }
+
+    private void readPart(BlobKey key, ETag etag, long offset, byte[] buffer, int length) {
+        execute("getPart", key, true, () -> {
+            try (InputStream in = driver.readRange(key, etag, offset, length)) {
+                int read = in.readNBytes(buffer, 0, length);
+                if (read != length) {
+                    throw new DataIntegrityException("Short read of " + key + " at " + offset + ": expected "
+                            + length + " bytes, got " + read);
+                }
+                return null;
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        });
+    }
+
+    @Override
+    public BlobMetadata download(BlobKey key, Path target, GetOptions options) {
+        Objects.requireNonNull(target, "target");
+        Path absolute = target.toAbsolutePath();
+        Path directory = absolute.getParent();
+        try {
+            Files.createDirectories(directory);
+            Path temp = Files.createTempFile(directory, "." + absolute.getFileName(), ".part");
+            try (Blob blob = get(key, options); OutputStream out = Files.newOutputStream(temp)) {
+                blob.content().transferTo(out);
+                out.close();
+                moveIntoPlace(temp, absolute);
+                return blob.metadata();
+            } finally {
+                Files.deleteIfExists(temp);
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /** The target appears complete or not at all. */
+    private static void moveIntoPlace(Path temp, Path target) throws IOException {
+        try {
+            Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch (AtomicMoveNotSupportedException e) {
+            Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
+        }
     }
 
     @Override

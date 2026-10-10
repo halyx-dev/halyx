@@ -782,6 +782,78 @@ public abstract class BlobStoreConformanceTest {
     // --- range reads ---------------------------------------------------------------------------
 
     @Test
+    void parallelReadReassemblesRangesInOrder() {
+        assumeCapability(StorageCapability.RANGE_READ);
+        BlobKey key = key("parallel-read.bin");
+        byte[] content = randomBytes(5 * GetOptions.MIN_PART_SIZE + 4321);
+        blobStore().put(key, BlobContent.ofBytes(content));
+
+        var options = GetOptions.builder().parallelism(4).partSize(GetOptions.MIN_PART_SIZE).build();
+        try (Blob blob = blobStore().get(key, options)) {
+            assertThat(blob.metadata().size()).isEqualTo(content.length);
+            assertThat(blob.readAllBytes()).isEqualTo(content);
+        }
+        var range = GetOptions.builder().parallelism(3).partSize(GetOptions.MIN_PART_SIZE)
+                .range(ByteRange.of(1000, 3L * GetOptions.MIN_PART_SIZE)).build();
+        try (Blob blob = blobStore().get(key, range)) {
+            assertThat(blob.readAllBytes())
+                    .isEqualTo(java.util.Arrays.copyOfRange(content, 1000, 1000 + 3 * GetOptions.MIN_PART_SIZE));
+        }
+    }
+
+    @Test
+    void parallelReadValidatesChecksum() {
+        assumeCapability(StorageCapability.RANGE_READ);
+        assumeCapability(StorageCapability.CHECKSUM);
+        BlobKey key = key("parallel-validated.bin");
+        byte[] content = randomBytes(3 * GetOptions.MIN_PART_SIZE + 17);
+        blobStore().put(key, BlobContent.ofBytes(content), PutOptions.builder().validateChecksum().build());
+
+        var options = GetOptions.builder().parallelism(4).partSize(GetOptions.MIN_PART_SIZE).validateChecksum().build();
+        try (Blob blob = blobStore().get(key, options)) {
+            assertThat(blob.readAllBytes()).isEqualTo(content);
+        }
+    }
+
+    @Test
+    void downloadWritesCompleteFile(@TempDir Path dir) throws IOException {
+        BlobKey key = key("download.bin");
+        byte[] content = randomBytes(2 * GetOptions.MIN_PART_SIZE + 99);
+        blobStore().put(key, BlobContent.ofBytes(content));
+        Path target = dir.resolve("nested/download.bin");
+        Files.createDirectories(target.getParent());
+        Files.writeString(target, "old contents");
+
+        BlobMetadata metadata = blobStore().download(key, target,
+                GetOptions.builder().parallelism(4).partSize(GetOptions.MIN_PART_SIZE).build());
+
+        assertThat(metadata.size()).isEqualTo(content.length);
+        assertThat(Files.readAllBytes(target)).isEqualTo(content);
+        try (var files = Files.list(target.getParent())) {
+            assertThat(files).containsExactly(target); // no temporary file left behind
+        }
+        assertThatThrownBy(() -> blobStore().download(key("missing.bin"), dir.resolve("missing.bin")))
+                .isInstanceOf(NotFoundException.class);
+        assertThat(dir.resolve("missing.bin")).doesNotExist();
+    }
+
+    @Test
+    void validatedLargeFileUploadRoundTrips(@TempDir Path dir) throws IOException {
+        assumeCapability(StorageCapability.CHECKSUM);
+        BlobKey key = key("validated-file.bin");
+        byte[] content = randomBytes(2 * PutOptions.MIN_PART_SIZE + 7);
+        Path file = dir.resolve("upload.bin");
+        Files.write(file, content);
+
+        blobStore().put(key, BlobContent.ofFile(file),
+                PutOptions.builder().partSize(PutOptions.MIN_PART_SIZE).validateChecksum().build());
+
+        try (Blob blob = blobStore().get(key, GetOptions.builder().validateChecksum().build())) {
+            assertThat(blob.readAllBytes()).isEqualTo(content);
+        }
+    }
+
+    @Test
     void rangeReadReturnsSlice() {
         assumeCapability(StorageCapability.RANGE_READ);
         BlobKey key = key("range.txt");

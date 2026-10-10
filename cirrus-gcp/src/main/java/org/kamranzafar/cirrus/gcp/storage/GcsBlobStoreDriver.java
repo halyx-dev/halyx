@@ -29,6 +29,7 @@ import org.kamranzafar.cirrus.storage.BlobKey;
 import org.kamranzafar.cirrus.storage.BlobMetadata;
 import org.kamranzafar.cirrus.storage.BlobPage;
 import org.kamranzafar.cirrus.storage.BlobSummary;
+import org.kamranzafar.cirrus.storage.ByteRange;
 import org.kamranzafar.cirrus.storage.Checksums;
 import org.kamranzafar.cirrus.storage.DeleteOptions;
 import org.kamranzafar.cirrus.storage.ETag;
@@ -170,6 +171,12 @@ public final class GcsBlobStoreDriver extends AbstractBlobStoreDriver {
             closeQuietly(content);
             throw e;
         }
+    }
+
+    /** Content only, pinned to the generation: a version that no longer exists fails on the first read. */
+    @Override
+    public InputStream readRange(BlobKey key, ETag version, long offset, long length) {
+        return open(key, generationOf(key, version), GetOptions.range(ByteRange.of(offset, length)));
     }
 
     private Long generationOf(BlobKey key, ETag etag) {
