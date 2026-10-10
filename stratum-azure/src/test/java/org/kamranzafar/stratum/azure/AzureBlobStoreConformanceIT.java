@@ -57,7 +57,16 @@ class AzureBlobStoreConformanceIT extends BlobStoreConformanceTest {
     /** Verified by sending raw HTTP requests to the emulator; the driver code path is correct. */
     @Override
     protected Map<String, String> knownEnvironmentGaps() {
-        return Map.of("writeInPartsWithIfNotExistsRejectsExistingBlob", "Floci-az 0.14.0 ignores If-None-Match on Put Block List (returns 201; Azure returns 409)");
+        String noTier = "Floci-az 0.14.0 does not report x-ms-access-tier";
+        String noSetProperties = "Floci-az 0.14.0 does not implement Set Blob Properties (501)";
+        return Map.of(
+                "writeInPartsWithIfNotExistsRejectsExistingBlob",
+                "Floci-az 0.14.0 ignores If-None-Match on Put Block List (returns 201; Azure returns 409)",
+                "setTierChangesTierButNotContent", "Floci-az 0.14.0 does not implement Set Blob Tier (501)",
+                "defaultTierIsHot", noTier,
+                "putWithTierStoresTier", noTier,
+                "updateMetadataReplacesHeadersAndMetadataButNotContent", noSetProperties,
+                "updateMetadataKeepsTier", noSetProperties);
     }
 
     @Override

@@ -1,12 +1,16 @@
 package org.kamranzafar.stratum.aws.s3;
 
 import org.kamranzafar.stratum.storage.BlobKey;
+import org.kamranzafar.stratum.storage.Checksums;
 import org.kamranzafar.stratum.storage.ETag;
 import org.kamranzafar.stratum.storage.PutOptions;
 import org.kamranzafar.stratum.storage.PutResult;
+import org.kamranzafar.stratum.storage.spi.ChecksumCalculator;
 import org.kamranzafar.stratum.storage.spi.MultipartUploadSession;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.ChecksumAlgorithm;
+import software.amazon.awssdk.services.s3.model.ChecksumType;
 import software.amazon.awssdk.services.s3.model.CompletedPart;
 import software.amazon.awssdk.services.s3.model.CreateMultipartUploadRequest;
 
@@ -39,27 +43,36 @@ final class S3MultipartUpload implements MultipartUploadSession {
         if (!options.metadata().isEmpty()) {
             request.metadata(options.metadata());
         }
+        options.tier().ifPresent(tier -> request.storageClass(S3Tiers.toNative(tier)));
+        if (options.validateChecksum()) {
+            // A full-object CRC32C (not a checksum of part checksums), so it can be validated end to end.
+            request.checksumAlgorithm(ChecksumAlgorithm.CRC32_C).checksumType(ChecksumType.FULL_OBJECT);
+        }
         this.uploadId = s3.createMultipartUpload(request.build()).uploadId();
     }
 
     @Override
     public void uploadPart(int partNumber, byte[] data, int length) {
+        String partCrc = options.validateChecksum() ? ChecksumCalculator.crc32c(data, 0, length) : null;
         var response = s3.uploadPart(b -> b.bucket(bucket).key(key.value()).uploadId(uploadId)
-                        .partNumber(partNumber).contentLength((long) length),
+                        .partNumber(partNumber).contentLength((long) length).checksumCRC32C(partCrc),
                 RequestBody.fromByteBuffer(ByteBuffer.wrap(data, 0, length)));
-        parts.add(CompletedPart.builder().partNumber(partNumber).eTag(response.eTag()).build());
+        parts.add(CompletedPart.builder().partNumber(partNumber).eTag(response.eTag())
+                .checksumCRC32C(response.checksumCRC32C()).build());
     }
 
     @Override
-    public PutResult complete() {
+    public PutResult complete(Checksums expected) {
         var response = s3.completeMultipartUpload(b -> {
             b.bucket(bucket).key(key.value()).uploadId(uploadId).multipartUpload(m -> m.parts(parts));
+            expected.crc32c().ifPresent(crc -> b.checksumCRC32C(crc).checksumType(ChecksumType.FULL_OBJECT));
             options.ifMatch().ifPresent(etag -> b.ifMatch(etag.value()));
             if (options.ifNotExists()) {
                 b.ifNoneMatch("*");
             }
         });
-        return new PutResult(key, new ETag(response.eTag()));
+        return new PutResult(key, new ETag(response.eTag()),
+                S3BlobStoreDriver.checksums(response.checksumCRC32C(), response.checksumCRC32()));
     }
 
     @Override

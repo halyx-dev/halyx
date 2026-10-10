@@ -3,6 +3,7 @@ package org.kamranzafar.stratum.storage;
 import org.kamranzafar.stratum.capability.Capabilities;
 
 import java.time.Duration;
+import java.util.Collection;
 import java.util.Optional;
 import java.util.Spliterator;
 import java.util.Spliterators;
@@ -80,7 +81,38 @@ public interface BlobStore {
     }
 
     /** Deletes a blob. Idempotent: deleting a missing blob is not an error. */
-    void delete(BlobKey key);
+    default void delete(BlobKey key) {
+        delete(key, DeleteOptions.defaults());
+    }
+
+    /**
+     * Deletes a blob, optionally only if it is at an expected version.
+     *
+     * @throws org.kamranzafar.stratum.error.PreconditionFailedException if a condition fails
+     */
+    void delete(BlobKey key, DeleteOptions options);
+
+    /**
+     * Deletes many blobs, using the provider's batch API where available (up to 1,000 keys per request
+     * on S3, 256 on Azure, 100 on GCS). Failures are reported per key rather than thrown.
+     */
+    BatchDeleteResult deleteAll(Collection<BlobKey> keys);
+
+    /**
+     * Replaces a blob's headers and user metadata without re-uploading its content. The blob's
+     * {@link ETag} may change (S3, Azure) or stay the same (GCS, where it tracks content generations).
+     * On S3 this is a server-side copy onto itself, so it is limited to blobs of up to 5 GiB.
+     *
+     * @return the blob's metadata after the update
+     */
+    BlobMetadata updateMetadata(BlobKey key, MetadataUpdate update);
+
+    /**
+     * Moves a blob to another storage tier without changing its content. Requires
+     * {@link StorageCapability#STORAGE_TIERS}. Moving out of {@link StorageTier#ARCHIVE} on S3 needs
+     * a restore first.
+     */
+    void setTier(BlobKey key, StorageTier tier);
 
     /** One page of a listing, optionally grouped by a delimiter. */
     BlobPage list(ListOptions options);

@@ -2,6 +2,13 @@ package org.kamranzafar.stratum.storage.spi;
 
 import org.kamranzafar.stratum.capability.Capabilities;
 import org.kamranzafar.stratum.error.CloudException;
+import org.kamranzafar.stratum.error.UnsupportedFeatureException;
+import org.kamranzafar.stratum.storage.BatchDeleteResult;
+import org.kamranzafar.stratum.storage.Checksums;
+import org.kamranzafar.stratum.storage.DeleteOptions;
+import org.kamranzafar.stratum.storage.MetadataUpdate;
+import org.kamranzafar.stratum.storage.StorageCapability;
+import org.kamranzafar.stratum.storage.StorageTier;
 import org.kamranzafar.stratum.storage.Blob;
 import org.kamranzafar.stratum.storage.BlobContent;
 import org.kamranzafar.stratum.storage.BlobKey;
@@ -14,6 +21,7 @@ import org.kamranzafar.stratum.storage.PresignedUrl;
 import org.kamranzafar.stratum.storage.PutOptions;
 import org.kamranzafar.stratum.storage.PutResult;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -26,8 +34,14 @@ import java.util.Optional;
  */
 public interface BlobStoreDriver {
 
-    /** Uploads content of known length. Large content may be uploaded in parts internally. */
-    PutResult put(BlobKey key, BlobContent.Sized content, PutOptions options);
+    /**
+     * Uploads content of known length. Large content may be uploaded in parts internally.
+     *
+     * @param expected checksums core computed over the content when the caller asked for validation,
+     *                 otherwise none. Drivers pass them to the provider so it rejects corrupted
+     *                 uploads, and return the checksums the provider reports in the {@link PutResult}.
+     */
+    PutResult put(BlobKey key, BlobContent.Sized content, PutOptions options, Checksums expected);
 
     /** Starts an upload in parts, used by core for streamed and unknown-length writes. */
     MultipartUploadSession startMultipartUpload(BlobKey key, PutOptions options);
@@ -36,7 +50,21 @@ public interface BlobStoreDriver {
 
     Optional<BlobMetadata> head(BlobKey key);
 
-    void delete(BlobKey key);
+    void delete(BlobKey key, DeleteOptions options);
+
+    /** Largest batch {@link #deleteBatch} accepts; only used with {@link StorageCapability#BATCH_DELETE}. */
+    default int maxBatchSize() {
+        return 1;
+    }
+
+    /** Deletes up to {@link #maxBatchSize()} keys in one request. */
+    default BatchDeleteResult deleteBatch(List<BlobKey> keys) {
+        throw new UnsupportedFeatureException("Batch delete is not supported");
+    }
+
+    BlobMetadata updateMetadata(BlobKey key, MetadataUpdate update);
+
+    void setTier(BlobKey key, StorageTier tier);
 
     BlobPage list(ListOptions options);
 

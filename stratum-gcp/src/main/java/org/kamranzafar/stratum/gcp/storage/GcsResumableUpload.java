@@ -5,6 +5,7 @@ import com.google.cloud.storage.BlobWriteSession;
 import com.google.cloud.storage.Storage;
 import com.google.cloud.storage.Storage.BlobWriteOption;
 import org.kamranzafar.stratum.storage.BlobKey;
+import org.kamranzafar.stratum.storage.Checksums;
 import org.kamranzafar.stratum.storage.ETag;
 import org.kamranzafar.stratum.storage.PutResult;
 import org.kamranzafar.stratum.storage.spi.MultipartUploadSession;
@@ -49,11 +50,13 @@ final class GcsResumableUpload implements MultipartUploadSession {
     }
 
     @Override
-    public PutResult complete() {
+    public PutResult complete(Checksums expected) {
         try {
             channel.close();
             BlobInfo written = session.getResult().get();
-            return new PutResult(key, new ETag(String.valueOf(written.getGeneration())));
+            // GCS computes CRC32C and MD5 over what it received; core compares them with its own.
+            return new PutResult(key, new ETag(String.valueOf(written.getGeneration())),
+                    Checksums.of(written.getCrc32c(), written.getMd5(), null));
         } catch (IOException e) {
             throw unwrap(e);
         } catch (ExecutionException e) {

@@ -1,11 +1,16 @@
 package org.kamranzafar.stratum.azure.blob;
 
+import com.azure.core.http.HttpHeaderName;
 import com.azure.core.http.rest.PagedResponse;
+import com.azure.core.http.rest.Response;
 import com.azure.core.util.BinaryData;
 import com.azure.core.util.Context;
 import com.azure.storage.blob.BlobClient;
 import com.azure.storage.blob.BlobContainerClient;
 import com.azure.storage.blob.BlobServiceClient;
+import com.azure.storage.blob.batch.BlobBatch;
+import com.azure.storage.blob.batch.BlobBatchClient;
+import com.azure.storage.blob.batch.BlobBatchClientBuilder;
 import com.azure.storage.blob.models.BlobErrorCode;
 import com.azure.storage.blob.models.BlobHttpHeaders;
 import com.azure.storage.blob.models.BlobItem;
@@ -14,6 +19,7 @@ import com.azure.storage.blob.models.BlobProperties;
 import com.azure.storage.blob.models.BlobRange;
 import com.azure.storage.blob.models.BlobRequestConditions;
 import com.azure.storage.blob.models.BlobStorageException;
+import com.azure.storage.blob.models.DeleteSnapshotsOptionType;
 import com.azure.storage.blob.models.ListBlobsOptions;
 import com.azure.storage.blob.models.ParallelTransferOptions;
 import com.azure.storage.blob.options.BlobInputStreamOptions;
@@ -26,6 +32,7 @@ import org.kamranzafar.stratum.azure.AzureProvider;
 import org.kamranzafar.stratum.capability.Capabilities;
 import org.kamranzafar.stratum.error.CloudException;
 import org.kamranzafar.stratum.error.PreconditionFailedException;
+import org.kamranzafar.stratum.storage.BatchDeleteResult;
 import org.kamranzafar.stratum.storage.Blob;
 import org.kamranzafar.stratum.storage.BlobContent;
 import org.kamranzafar.stratum.storage.BlobHeaders;
@@ -33,14 +40,18 @@ import org.kamranzafar.stratum.storage.BlobKey;
 import org.kamranzafar.stratum.storage.BlobMetadata;
 import org.kamranzafar.stratum.storage.BlobPage;
 import org.kamranzafar.stratum.storage.BlobSummary;
+import org.kamranzafar.stratum.storage.Checksums;
+import org.kamranzafar.stratum.storage.DeleteOptions;
 import org.kamranzafar.stratum.storage.ETag;
 import org.kamranzafar.stratum.storage.GetOptions;
 import org.kamranzafar.stratum.storage.ListOptions;
+import org.kamranzafar.stratum.storage.MetadataUpdate;
 import org.kamranzafar.stratum.storage.PresignRequest;
 import org.kamranzafar.stratum.storage.PresignedUrl;
 import org.kamranzafar.stratum.storage.PutOptions;
 import org.kamranzafar.stratum.storage.PutResult;
 import org.kamranzafar.stratum.storage.StorageCapability;
+import org.kamranzafar.stratum.storage.StorageTier;
 import org.kamranzafar.stratum.storage.spi.AbstractBlobStoreDriver;
 import org.kamranzafar.stratum.storage.spi.MultipartUploadSession;
 
@@ -51,6 +62,7 @@ import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -64,23 +76,33 @@ public final class AzureBlobStoreDriver extends AbstractBlobStoreDriver {
     private final BlobContainerClient container;
     private final boolean sharedKey;
 
+    /** Blob Batch accepts up to 256 sub-requests. */
+    private static final int MAX_BATCH = 256;
+
+    private final BlobBatchClient batch;
+
     public AzureBlobStoreDriver(String container, BlobServiceClient service, boolean sharedKey) {
         super(AzureProvider.ID, container, Capabilities.of(StorageCapability.values()));
         this.service = service;
         this.container = service.getBlobContainerClient(container);
         this.sharedKey = sharedKey;
+        this.batch = new BlobBatchClientBuilder(service).buildClient();
     }
 
     @Override
-    public PutResult put(BlobKey key, BlobContent.Sized content, PutOptions options) {
+    public PutResult put(BlobKey key, BlobContent.Sized content, PutOptions options, Checksums expected) {
         BinaryData data = switch (content) {
             case BlobContent.OfBytes bytes -> BinaryData.fromBytes(bytes.bytes());
             case BlobContent.OfFile file -> BinaryData.fromFile(file.path());
             case BlobContent.OfStream stream -> BinaryData.fromStream(stream.stream(), stream.length());
         };
         // The SDK uploads large content as parallel staged blocks of the configured part size.
+        var headers = httpHeaders(options.headers());
+        // Stored as Content-MD5; on a single-shot upload Azure also rejects content that does not match.
+        expected.md5().ifPresent(md5 -> headers.setContentMd5(Base64.getDecoder().decode(md5)));
         var upload = new BlobParallelUploadOptions(data)
-                .setHeaders(httpHeaders(options.headers()))
+                .setHeaders(headers)
+                .setComputeMd5(!expected.isEmpty())
                 .setRequestConditions(requestConditions(options))
                 .setParallelTransferOptions(new ParallelTransferOptions()
                         .setBlockSizeLong((long) options.partSize())
@@ -88,9 +110,14 @@ public final class AzureBlobStoreDriver extends AbstractBlobStoreDriver {
         if (!options.metadata().isEmpty()) {
             upload.setMetadata(options.metadata());
         }
+        options.tier().ifPresent(tier -> upload.setTier(AzureTiers.toNative(tier)));
         try {
-            var response = blob(key).uploadWithResponse(upload, null, Context.NONE);
-            return new PutResult(key, new ETag(response.getValue().getETag()));
+            var item = blob(key).uploadWithResponse(upload, null, Context.NONE).getValue();
+            // For a single-shot upload this is the service's MD5 of the stored content.
+            Checksums stored = item.getContentMd5() == null || content.length() > options.partSize()
+                    ? Checksums.none()
+                    : Checksums.of(null, Base64.getEncoder().encodeToString(item.getContentMd5()), null);
+            return new PutResult(key, new ETag(item.getETag()), stored);
         } catch (BlobStorageException e) {
             // A create-only write on an existing blob is reported as 409 BlobAlreadyExists, not 412.
             if (options.ifNotExists() && BlobErrorCode.BLOB_ALREADY_EXISTS.equals(e.getErrorCode())) {
@@ -111,9 +138,15 @@ public final class AzureBlobStoreDriver extends AbstractBlobStoreDriver {
         options.range().ifPresent(range -> read.setRange(range.length().isPresent()
                 ? new BlobRange(range.offset(), range.length().getAsLong())
                 : new BlobRange(range.offset())));
-        options.ifMatch().ifPresent(etag -> read.setRequestConditions(new BlobRequestConditions().setIfMatch(etag.value())));
+        // Read the blob's own properties first: the download responses BlobInputStream sees carry the
+        // MD5 of each range, not of the blob, and no access tier. Pinning the download to that ETag keeps
+        // content and metadata consistent.
+        var condition = new BlobRequestConditions();
+        options.ifMatch().ifPresent(etag -> condition.setIfMatch(etag.value()));
+        BlobProperties properties = blob(key).getPropertiesWithResponse(condition, null, Context.NONE).getValue();
+        read.setRequestConditions(new BlobRequestConditions().setIfMatch(properties.getETag()));
         BlobInputStream in = blob(key).openInputStream(read);
-        return new Blob(toMetadata(key, in.getProperties()), in);
+        return new Blob(toMetadata(key, properties), in);
     }
 
     @Override
@@ -129,8 +162,83 @@ public final class AzureBlobStoreDriver extends AbstractBlobStoreDriver {
     }
 
     @Override
-    public void delete(BlobKey key) {
-        blob(key).deleteIfExists();
+    public void delete(BlobKey key, DeleteOptions options) {
+        if (options.ifMatchETag().isEmpty()) {
+            blob(key).deleteIfExists();
+            return;
+        }
+        var conditions = new BlobRequestConditions().setIfMatch(options.ifMatchETag().get().value());
+        try {
+            blob(key).deleteWithResponse(DeleteSnapshotsOptionType.INCLUDE, conditions, null, Context.NONE);
+        } catch (BlobStorageException e) {
+            throw conditionalNotFound(key, e);
+        }
+    }
+
+    @Override
+    public int maxBatchSize() {
+        return MAX_BATCH;
+    }
+
+    @Override
+    public BatchDeleteResult deleteBatch(List<BlobKey> keys) {
+        BlobBatch request = batch.getBlobBatch();
+        Map<BlobKey, Response<Void>> responses = new LinkedHashMap<>();
+        for (BlobKey key : keys) {
+            responses.put(key, request.deleteBlob(bucket, key.value(), DeleteSnapshotsOptionType.INCLUDE, null));
+        }
+        batch.submitBatchWithResponse(request, false, null, Context.NONE);
+        List<BlobKey> deleted = new ArrayList<>();
+        Map<BlobKey, CloudException> failed = new LinkedHashMap<>();
+        responses.forEach((key, response) -> {
+            try {
+                response.getStatusCode();
+                deleted.add(key);
+            } catch (BlobStorageException e) {
+                if (e.getStatusCode() == 404) {
+                    deleted.add(key);
+                } else {
+                    failed.put(key, translate(e));
+                }
+            }
+        });
+        return new BatchDeleteResult(deleted, failed);
+    }
+
+    @Override
+    public BlobMetadata updateMetadata(BlobKey key, MetadataUpdate update) {
+        BlobClient blob = blob(key);
+        var read = new BlobRequestConditions();
+        update.ifMatch().ifPresent(etag -> read.setIfMatch(etag.value()));
+        BlobProperties current;
+        try {
+            current = blob.getPropertiesWithResponse(read, null, Context.NONE).getValue();
+        } catch (BlobStorageException e) {
+            throw update.ifMatch().isPresent() ? conditionalNotFound(key, e) : e;
+        }
+        // Set Blob Properties replaces every HTTP header, including Content-MD5: carry the checksum over.
+        var headers = httpHeaders(update.headers()).setContentMd5(current.getContentMd5());
+        // Headers and metadata are two requests; chaining ETags makes a concurrent write fail the second
+        // one instead of being silently overwritten.
+        var afterHeaders = blob.setHttpHeadersWithResponse(headers,
+                new BlobRequestConditions().setIfMatch(current.getETag()), null, Context.NONE);
+        String etag = afterHeaders.getHeaders().getValue(HttpHeaderName.ETAG);
+        blob.setMetadataWithResponse(update.metadata(), new BlobRequestConditions().setIfMatch(etag), null, Context.NONE);
+        return toMetadata(key, blob.getProperties());
+    }
+
+    @Override
+    public void setTier(BlobKey key, StorageTier tier) {
+        blob(key).setAccessTier(AzureTiers.toNative(tier));
+    }
+
+    /** With a version condition, a blob that no longer exists fails the condition. */
+    private RuntimeException conditionalNotFound(BlobKey key, BlobStorageException e) {
+        if (e.getStatusCode() == 404) {
+            return new PreconditionFailedException("No blob " + bucket + "/" + key, e, provider,
+                    e.getErrorCode() == null ? null : e.getErrorCode().toString());
+        }
+        return e;
     }
 
     @Override
@@ -205,7 +313,9 @@ public final class AzureBlobStoreDriver extends AbstractBlobStoreDriver {
         return new BlobMetadata(key, p.getBlobSize(), new ETag(p.getETag()), p.getLastModified().toInstant(),
                 BlobHeaders.of(p.getContentType(), p.getContentEncoding(), p.getContentDisposition(),
                         p.getContentLanguage(), p.getCacheControl()),
-                p.getMetadata());
+                p.getMetadata(), AzureTiers.fromNative(p.getAccessTier()),
+                p.getContentMd5() == null ? Checksums.none()
+                        : Checksums.of(null, Base64.getEncoder().encodeToString(p.getContentMd5()), null));
     }
 
     static BlobHttpHeaders httpHeaders(BlobHeaders headers) {
@@ -230,6 +340,6 @@ public final class AzureBlobStoreDriver extends AbstractBlobStoreDriver {
     private static BlobSummary toSummary(BlobItem item) {
         BlobItemProperties p = item.getProperties();
         return new BlobSummary(BlobKey.of(item.getName()), p.getContentLength(), new ETag(p.getETag()),
-                p.getLastModified().toInstant());
+                p.getLastModified().toInstant(), AzureTiers.fromNative(p.getAccessTier()));
     }
 }

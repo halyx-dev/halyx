@@ -5,13 +5,16 @@ import com.azure.core.util.Context;
 import com.azure.storage.blob.models.BlobErrorCode;
 import com.azure.storage.blob.models.BlobStorageException;
 import com.azure.storage.blob.options.BlockBlobCommitBlockListOptions;
+import com.azure.storage.blob.options.BlockBlobStageBlockOptions;
 import com.azure.storage.blob.specialized.BlockBlobClient;
 import org.kamranzafar.stratum.azure.AzureProvider;
 import org.kamranzafar.stratum.error.PreconditionFailedException;
 import org.kamranzafar.stratum.storage.BlobKey;
+import org.kamranzafar.stratum.storage.Checksums;
 import org.kamranzafar.stratum.storage.ETag;
 import org.kamranzafar.stratum.storage.PutOptions;
 import org.kamranzafar.stratum.storage.PutResult;
+import org.kamranzafar.stratum.storage.spi.ChecksumCalculator;
 import org.kamranzafar.stratum.storage.spi.MultipartUploadSession;
 
 import java.nio.charset.StandardCharsets;
@@ -42,15 +45,24 @@ final class AzureBlockUpload implements MultipartUploadSession {
         // Block ids must be base64 and all the same length within a blob.
         String blockId = Base64.getEncoder().encodeToString(
                 String.format("%010d", partNumber).getBytes(StandardCharsets.US_ASCII));
-        blob.stageBlock(blockId, BinaryData.fromBytes(Arrays.copyOf(data, length)));
+        var stage = new BlockBlobStageBlockOptions(blockId, BinaryData.fromBytes(Arrays.copyOf(data, length)));
+        if (options.validateChecksum()) {
+            // Azure rejects the block if it arrives corrupted.
+            stage.setContentMd5(ChecksumCalculator.md5(data, 0, length));
+        }
+        blob.stageBlockWithResponse(stage, null, Context.NONE);
         blockIds.add(blockId);
     }
 
     @Override
-    public PutResult complete() {
+    public PutResult complete(Checksums expected) {
+        var headers = AzureBlobStoreDriver.httpHeaders(options.headers());
+        // Stored as the blob's Content-MD5 so downloads can be validated (blocks were checked on staging).
+        expected.md5().ifPresent(md5 -> headers.setContentMd5(Base64.getDecoder().decode(md5)));
         var commit = new BlockBlobCommitBlockListOptions(blockIds)
-                .setHeaders(AzureBlobStoreDriver.httpHeaders(options.headers()))
+                .setHeaders(headers)
                 .setRequestConditions(AzureBlobStoreDriver.requestConditions(options));
+        options.tier().ifPresent(tier -> commit.setTier(AzureTiers.toNative(tier)));
         if (!options.metadata().isEmpty()) {
             commit.setMetadata(options.metadata());
         }

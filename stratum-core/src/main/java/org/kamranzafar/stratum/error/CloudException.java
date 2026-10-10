@@ -20,7 +20,8 @@ import java.util.Optional;
 public abstract sealed class CloudException extends RuntimeException
         permits NotFoundException, AlreadyExistsException, PreconditionFailedException,
                 InvalidArgumentException, AccessDeniedException, ThrottledException,
-                UnavailableException, UnsupportedFeatureException, UnknownCloudException {
+                UnavailableException, UnsupportedFeatureException, DataIntegrityException,
+                UnknownCloudException {
 
     private final String provider;
     private final String providerErrorCode;

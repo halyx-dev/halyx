@@ -1,5 +1,6 @@
 package org.kamranzafar.stratum.storage.spi;
 
+import org.kamranzafar.stratum.storage.Checksums;
 import org.kamranzafar.stratum.storage.PutResult;
 
 /**
@@ -12,8 +13,12 @@ public interface MultipartUploadSession {
 
     void uploadPart(int partNumber, byte[] data, int length);
 
-    /** Makes the blob visible, applying the write conditions of the upload. */
-    PutResult complete();
+    /**
+     * Makes the blob visible, applying the write conditions of the upload.
+     *
+     * @param expected checksums of the whole content when validation was requested, otherwise none
+     */
+    PutResult complete(Checksums expected);
 
     /** Discards uploaded parts. Must not throw. */
     void abort();

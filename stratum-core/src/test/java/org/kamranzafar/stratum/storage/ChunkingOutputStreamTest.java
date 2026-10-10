@@ -79,7 +79,7 @@ class ChunkingOutputStreamTest {
         }
 
         @Override
-        public PutResult put(BlobKey key, BlobContent.Sized content, PutOptions options) {
+        public PutResult put(BlobKey key, BlobContent.Sized content, PutOptions options, Checksums expected) {
             calls.add("put:" + content.length());
             return new PutResult(key, ETag.of("e"));
         }
@@ -94,7 +94,7 @@ class ChunkingOutputStreamTest {
                 }
 
                 @Override
-                public PutResult complete() {
+                public PutResult complete(Checksums expected) {
                     calls.add("complete");
                     return new PutResult(key, ETag.of("e"));
                 }
@@ -117,7 +117,12 @@ class ChunkingOutputStreamTest {
         }
 
         @Override
-        public void delete(BlobKey key) {
+        public void delete(BlobKey key, DeleteOptions options) {
+        }
+
+        @Override
+        public BlobMetadata updateMetadata(BlobKey key, MetadataUpdate update) {
+            throw new UnsupportedOperationException();
         }
 
         @Override

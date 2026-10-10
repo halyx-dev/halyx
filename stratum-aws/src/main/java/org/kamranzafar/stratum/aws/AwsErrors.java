@@ -8,6 +8,7 @@ import org.kamranzafar.stratum.error.NotFoundException;
 import org.kamranzafar.stratum.error.PreconditionFailedException;
 import org.kamranzafar.stratum.error.ThrottledException;
 import org.kamranzafar.stratum.error.UnavailableException;
+import org.kamranzafar.stratum.error.UnknownCloudException;
 import org.kamranzafar.stratum.error.UnsupportedFeatureException;
 import software.amazon.awssdk.awscore.exception.AwsServiceException;
 import software.amazon.awssdk.core.exception.SdkClientException;
@@ -24,6 +25,21 @@ public final class AwsErrors {
     private AwsErrors() {
     }
 
+    /** Maps an error code reported without an HTTP status, such as a per-key DeleteObjects error. */
+    public static CloudException fromCode(String code, String message) {
+        String provider = AwsProvider.ID;
+        if (code != null && THROTTLING_CODES.contains(code)) {
+            return new ThrottledException(message, null, provider, code);
+        }
+        return switch (code == null ? "" : code) {
+            case "AccessDenied" -> new AccessDeniedException(message, null, provider, code);
+            case "NoSuchKey", "NoSuchBucket" -> new NotFoundException(message, null, provider, code);
+            case "PreconditionFailed" -> new PreconditionFailedException(message, null, provider, code);
+            case "InternalError", "ServiceUnavailable" -> new UnavailableException(message, null, provider, code);
+            default -> new UnknownCloudException(message, null, provider, code);
+        };
+    }
+
     public static Optional<CloudException> translate(Throwable error) {
         String provider = AwsProvider.ID;
         if (error instanceof AwsServiceException e) {
@@ -32,6 +48,10 @@ public final class AwsErrors {
             int status = e.statusCode();
             if (status == 429 || (code != null && THROTTLING_CODES.contains(code)) || e.isThrottlingException()) {
                 return Optional.of(new ThrottledException(message, e, provider, code));
+            }
+            if ("InvalidObjectState".equals(code)) {
+                return Optional.of(new InvalidArgumentException(
+                        "Blob is archived and must be restored before this operation: " + message, e, provider, code));
             }
             CloudException mapped = switch (status) {
                 case 404 -> new NotFoundException(message, e, provider, code);

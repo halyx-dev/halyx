@@ -10,10 +10,12 @@ public final class GetOptions {
 
     private final ByteRange range;
     private final ETag ifMatch;
+    private final boolean validateChecksum;
 
     private GetOptions(Builder b) {
         this.range = b.range;
         this.ifMatch = b.ifMatch;
+        this.validateChecksum = b.validateChecksum;
     }
 
     public static GetOptions defaults() {
@@ -37,9 +39,20 @@ public final class GetOptions {
         return Optional.ofNullable(ifMatch);
     }
 
+    /**
+     * Whether to verify the downloaded bytes against the checksum stored with the blob. The check
+     * happens when the stream reaches its end, which then throws
+     * {@link org.kamranzafar.stratum.error.DataIntegrityException} on a mismatch. Not available for
+     * range reads.
+     */
+    public boolean validateChecksum() {
+        return validateChecksum;
+    }
+
     public static final class Builder {
         private ByteRange range;
         private ETag ifMatch;
+        private boolean validateChecksum;
 
         private Builder() {
         }
@@ -54,7 +67,15 @@ public final class GetOptions {
             return this;
         }
 
+        public Builder validateChecksum() {
+            this.validateChecksum = true;
+            return this;
+        }
+
         public GetOptions build() {
+            if (validateChecksum && range != null) {
+                throw new IllegalStateException("Checksums cover the whole blob and cannot validate a range read");
+            }
             return new GetOptions(this);
         }
     }

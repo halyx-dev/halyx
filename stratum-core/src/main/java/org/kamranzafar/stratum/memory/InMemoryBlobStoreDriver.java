@@ -12,6 +12,10 @@ import org.kamranzafar.stratum.storage.BlobKey;
 import org.kamranzafar.stratum.storage.BlobMetadata;
 import org.kamranzafar.stratum.storage.BlobPage;
 import org.kamranzafar.stratum.storage.BlobSummary;
+import org.kamranzafar.stratum.storage.Checksums;
+import org.kamranzafar.stratum.storage.DeleteOptions;
+import org.kamranzafar.stratum.storage.MetadataUpdate;
+import org.kamranzafar.stratum.storage.StorageTier;
 import org.kamranzafar.stratum.storage.ByteRange;
 import org.kamranzafar.stratum.storage.ETag;
 import org.kamranzafar.stratum.storage.GetOptions;
@@ -20,6 +24,7 @@ import org.kamranzafar.stratum.storage.PutOptions;
 import org.kamranzafar.stratum.storage.PutResult;
 import org.kamranzafar.stratum.storage.StorageCapability;
 import org.kamranzafar.stratum.storage.spi.AbstractBlobStoreDriver;
+import org.kamranzafar.stratum.storage.spi.ChecksumCalculator;
 import org.kamranzafar.stratum.storage.spi.MultipartUploadSession;
 
 import java.io.ByteArrayInputStream;
@@ -38,7 +43,12 @@ import java.util.concurrent.ConcurrentNavigableMap;
 
 final class InMemoryBlobStoreDriver extends AbstractBlobStoreDriver {
 
-    record Entry(byte[] data, BlobHeaders headers, Map<String, String> metadata, ETag etag, Instant lastModified) {
+    record Entry(byte[] data, BlobHeaders headers, Map<String, String> metadata, ETag etag, Instant lastModified,
+                 StorageTier tier, Checksums checksums) {
+
+        Entry with(BlobHeaders newHeaders, Map<String, String> newMetadata, StorageTier newTier) {
+            return new Entry(data, newHeaders, newMetadata, newETag(), Instant.now(), newTier, checksums);
+        }
     }
 
     private final ConcurrentNavigableMap<String, Entry> blobs;
@@ -48,12 +58,15 @@ final class InMemoryBlobStoreDriver extends AbstractBlobStoreDriver {
                 StorageCapability.CONDITIONAL_WRITE,
                 StorageCapability.RANGE_READ,
                 StorageCapability.SERVER_SIDE_COPY,
-                StorageCapability.USER_METADATA));
+                StorageCapability.USER_METADATA,
+                StorageCapability.CHECKSUM,
+                StorageCapability.CONDITIONAL_DELETE,
+                StorageCapability.STORAGE_TIERS));
         this.blobs = blobs;
     }
 
     @Override
-    public PutResult put(BlobKey key, BlobContent.Sized content, PutOptions options) {
+    public PutResult put(BlobKey key, BlobContent.Sized content, PutOptions options, Checksums expected) {
         return store(key, read(content), options);
     }
 
@@ -67,7 +80,7 @@ final class InMemoryBlobStoreDriver extends AbstractBlobStoreDriver {
             }
 
             @Override
-            public PutResult complete() {
+            public PutResult complete(Checksums expected) {
                 return store(key, parts.toByteArray(), options);
             }
 
@@ -88,9 +101,10 @@ final class InMemoryBlobStoreDriver extends AbstractBlobStoreDriver {
                     throw new PreconditionFailedException("ETag mismatch for " + key);
                 }
             });
-            return new Entry(data, options.headers(), options.metadata(), newETag(), Instant.now());
+            return new Entry(data, options.headers(), options.metadata(), newETag(), Instant.now(),
+                    options.tier().orElse(StorageTier.HOT), ChecksumCalculator.of(data, 0, data.length));
         });
-        return new PutResult(key, stored.etag());
+        return new PutResult(key, stored.etag(), stored.checksums());
     }
 
     @Override
@@ -111,8 +125,45 @@ final class InMemoryBlobStoreDriver extends AbstractBlobStoreDriver {
     }
 
     @Override
-    public void delete(BlobKey key) {
-        blobs.remove(key.value());
+    public void delete(BlobKey key, DeleteOptions options) {
+        if (options.ifMatchETag().isEmpty()) {
+            blobs.remove(key.value());
+            return;
+        }
+        ETag expected = options.ifMatchETag().get();
+        blobs.compute(key.value(), (k, existing) -> {
+            if (existing == null || !existing.etag().equals(expected)) {
+                throw new PreconditionFailedException("ETag mismatch for " + key);
+            }
+            return null;
+        });
+    }
+
+    @Override
+    public BlobMetadata updateMetadata(BlobKey key, MetadataUpdate update) {
+        Entry updated = blobs.compute(key.value(), (k, existing) -> {
+            if (existing == null) {
+                throw update.ifMatch().isPresent()
+                        ? new PreconditionFailedException("No blob " + key)
+                        : new NotFoundException("No blob " + bucket + "/" + key, null, provider, null);
+            }
+            if (update.ifMatch().isPresent() && !existing.etag().equals(update.ifMatch().get())) {
+                throw new PreconditionFailedException("ETag mismatch for " + key);
+            }
+            return existing.with(update.headers(), update.metadata(), existing.tier());
+        });
+        return metadata(key, updated);
+    }
+
+    @Override
+    public void setTier(BlobKey key, StorageTier tier) {
+        blobs.compute(key.value(), (k, existing) -> {
+            if (existing == null) {
+                throw new NotFoundException("No blob " + bucket + "/" + key, null, provider, null);
+            }
+            return new Entry(existing.data(), existing.headers(), existing.metadata(), existing.etag(),
+                    existing.lastModified(), tier, existing.checksums());
+        });
     }
 
     @Override
@@ -145,7 +196,8 @@ final class InMemoryBlobStoreDriver extends AbstractBlobStoreDriver {
                 last = commonPrefix;
             } else {
                 Entry entry = e.getValue();
-                items.add(new BlobSummary(BlobKey.of(key), entry.data().length, entry.etag(), entry.lastModified()));
+                items.add(new BlobSummary(BlobKey.of(key), entry.data().length, entry.etag(), entry.lastModified(),
+                        Optional.of(entry.tier())));
                 last = key;
             }
         }
@@ -164,7 +216,8 @@ final class InMemoryBlobStoreDriver extends AbstractBlobStoreDriver {
     @Override
     public PutResult copy(BlobKey source, BlobKey target) {
         Entry entry = require(source);
-        Entry copy = new Entry(entry.data(), entry.headers(), entry.metadata(), newETag(), Instant.now());
+        Entry copy = new Entry(entry.data(), entry.headers(), entry.metadata(), newETag(), Instant.now(), entry.tier(),
+                entry.checksums());
         blobs.put(target.value(), copy);
         return new PutResult(target, copy.etag());
     }
@@ -189,7 +242,7 @@ final class InMemoryBlobStoreDriver extends AbstractBlobStoreDriver {
 
     private BlobMetadata metadata(BlobKey key, Entry entry) {
         return new BlobMetadata(key, entry.data().length, entry.etag(), entry.lastModified(), entry.headers(),
-                entry.metadata());
+                entry.metadata(), Optional.of(entry.tier()), entry.checksums());
     }
 
     private static byte[] slice(byte[] data, ByteRange range) {

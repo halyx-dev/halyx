@@ -8,6 +8,7 @@ import org.kamranzafar.stratum.capability.Capability;
 import org.kamranzafar.stratum.error.NotFoundException;
 import org.kamranzafar.stratum.error.PreconditionFailedException;
 import org.kamranzafar.stratum.error.UnsupportedFeatureException;
+import org.kamranzafar.stratum.storage.BatchDeleteResult;
 import org.kamranzafar.stratum.storage.Blob;
 import org.kamranzafar.stratum.storage.BlobContent;
 import org.kamranzafar.stratum.storage.BlobHeaders;
@@ -17,13 +18,17 @@ import org.kamranzafar.stratum.storage.BlobPage;
 import org.kamranzafar.stratum.storage.BlobStore;
 import org.kamranzafar.stratum.storage.BlobSummary;
 import org.kamranzafar.stratum.storage.ByteRange;
+import org.kamranzafar.stratum.storage.Checksums;
+import org.kamranzafar.stratum.storage.DeleteOptions;
 import org.kamranzafar.stratum.storage.GetOptions;
 import org.kamranzafar.stratum.storage.ListOptions;
+import org.kamranzafar.stratum.storage.MetadataUpdate;
 import org.kamranzafar.stratum.storage.PresignRequest;
 import org.kamranzafar.stratum.storage.PresignedUrl;
 import org.kamranzafar.stratum.storage.PutOptions;
 import org.kamranzafar.stratum.storage.PutResult;
 import org.kamranzafar.stratum.storage.StorageCapability;
+import org.kamranzafar.stratum.storage.StorageTier;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -543,6 +548,235 @@ public abstract class BlobStoreConformanceTest {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    // --- checksums -----------------------------------------------------------------------------
+
+    @Test
+    void validatedPutStoresAChecksumThatValidatesOnDownload() {
+        assumeCapability(StorageCapability.CHECKSUM);
+        BlobKey key = key("checked.txt");
+
+        blobStore().put(key, BlobContent.ofString("integrity matters"), PutOptions.builder().validateChecksum().build());
+
+        assertThat(blobStore().head(key).orElseThrow().checksums().preferred()).isPresent();
+        try (Blob blob = blobStore().get(key, GetOptions.builder().validateChecksum().build())) {
+            assertThat(blob.readUtf8()).isEqualTo("integrity matters");
+        }
+    }
+
+    @Test
+    void validatedFileAndStreamUploads(@TempDir Path dir) throws Exception {
+        assumeCapability(StorageCapability.CHECKSUM);
+        byte[] data = randomBytes(300_000);
+        Path file = Files.write(dir.resolve("checked.bin"), data);
+        PutOptions validated = PutOptions.builder().validateChecksum().build();
+
+        blobStore().put(key("from-file"), BlobContent.ofFile(file), validated);
+        blobStore().put(key("from-stream"), BlobContent.ofStream(new ByteArrayInputStream(data), data.length), validated);
+
+        for (String name : List.of("from-file", "from-stream")) {
+            try (Blob blob = blobStore().get(key(name), GetOptions.builder().validateChecksum().build())) {
+                assertThat(blob.readAllBytes()).isEqualTo(data);
+            }
+        }
+    }
+
+    @Test
+    void validatedWriteInParts() {
+        assumeCapability(StorageCapability.CHECKSUM);
+        BlobKey key = key("checked-large.bin");
+        byte[] data = randomBytes(LARGE_SIZE);
+
+        blobStore().write(key, out -> out.write(data), minimumParts().validateChecksum().build());
+
+        try (Blob blob = blobStore().get(key, GetOptions.builder().validateChecksum().build())) {
+            assertThat(blob.readAllBytes()).isEqualTo(data);
+        }
+    }
+
+    @Test
+    void storedChecksumsMatchTheContent() {
+        assumeCapability(StorageCapability.CHECKSUM);
+        BlobKey key = key("known-checksum.txt");
+        byte[] data = "123456789".getBytes(StandardCharsets.UTF_8);
+
+        blobStore().put(key, BlobContent.ofBytes(data), PutOptions.builder().validateChecksum().build());
+
+        Checksums stored = blobStore().head(key).orElseThrow().checksums();
+        // CRC32C("123456789") = 0xE3069283, MD5 = 25f9e794323b453885f5181f1b624d0b
+        stored.crc32c().ifPresent(v -> assertThat(v).isEqualTo("4waSgw=="));
+        stored.md5().ifPresent(v -> assertThat(v).isEqualTo("JfnnlDI7RTiF9RgfG2JNCw=="));
+    }
+
+    // --- conditional and batch delete ----------------------------------------------------------
+
+    @Test
+    void deleteIfMatchWithCurrentETagDeletes() {
+        assumeCapability(StorageCapability.CONDITIONAL_DELETE);
+        BlobKey key = key("cond-delete.txt");
+        PutResult v1 = putText(key, "v1");
+
+        blobStore().delete(key, DeleteOptions.ifMatch(v1.etag()));
+
+        assertThat(blobStore().exists(key)).isFalse();
+    }
+
+    @Test
+    void deleteIfMatchWithStaleETagFails() {
+        assumeCapability(StorageCapability.CONDITIONAL_DELETE);
+        BlobKey key = key("cond-delete-stale.txt");
+        PutResult v1 = putText(key, "v1");
+        putText(key, "v2");
+
+        assertThatThrownBy(() -> blobStore().delete(key, DeleteOptions.ifMatch(v1.etag())))
+                .isInstanceOf(PreconditionFailedException.class);
+        assertThat(readText(key)).isEqualTo("v2");
+    }
+
+    @Test
+    void deleteIfMatchOnMissingBlobFails() {
+        assumeCapability(StorageCapability.CONDITIONAL_DELETE);
+        BlobKey key = key("cond-delete-missing.txt");
+        PutResult v1 = putText(key, "v1");
+        blobStore().delete(key);
+
+        assertThatThrownBy(() -> blobStore().delete(key, DeleteOptions.ifMatch(v1.etag())))
+                .isInstanceOf(PreconditionFailedException.class);
+    }
+
+    @Test
+    void deleteAllRemovesEveryKeyIncludingMissingOnes() {
+        List<BlobKey> keys = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            keys.add(key("batch/" + i));
+            putText(keys.get(i), "x");
+        }
+        keys.add(key("batch/never-existed"));
+
+        BatchDeleteResult result = blobStore().deleteAll(keys);
+
+        assertThat(result.isComplete()).as("failures: %s", result.failed()).isTrue();
+        assertThat(result.deleted()).containsExactlyInAnyOrderElementsOf(keys);
+        assertThat(blobStore().list(ListOptions.prefix(prefix + "batch/")).items()).isEmpty();
+    }
+
+    @Test
+    void deleteAllSpansSeveralProviderBatches() {
+        List<BlobKey> keys = new ArrayList<>();
+        for (int i = 0; i < 260; i++) {
+            keys.add(key(String.format("many/%03d", i)));
+            blobStore().put(keys.get(i), BlobContent.ofBytes(new byte[] {(byte) i}));
+        }
+
+        BatchDeleteResult result = blobStore().deleteAll(keys);
+
+        assertThat(result.isComplete()).as("failures: %s", result.failed()).isTrue();
+        assertThat(result.deleted()).hasSize(260);
+        assertThat(blobStore().listAll(prefix + "many/")).isEmpty();
+    }
+
+    @Test
+    void deleteAllWithNoKeys() {
+        BatchDeleteResult result = blobStore().deleteAll(List.of());
+
+        assertThat(result.deleted()).isEmpty();
+        assertThat(result.isComplete()).isTrue();
+    }
+
+    // --- metadata updates ----------------------------------------------------------------------
+
+    @Test
+    void updateMetadataReplacesHeadersAndMetadataButNotContent() {
+        BlobKey key = key("update-meta.txt");
+        blobStore().put(key, BlobContent.ofString("unchanged"), PutOptions.builder()
+                .contentType("text/plain")
+                .metadata("keep", "1")
+                .metadata("drop", "2")
+                .build());
+        BlobMetadata current = blobStore().head(key).orElseThrow();
+
+        BlobMetadata updated = blobStore().updateMetadata(key, MetadataUpdate.from(current)
+                .cacheControl("no-cache")
+                .contentDisposition("inline")
+                .removeMetadata("drop")
+                .metadata("added", "3")
+                .build());
+
+        assertThat(updated.headers().contentType()).hasValue("text/plain");
+        assertThat(updated.headers().cacheControl()).hasValue("no-cache");
+        assertThat(updated.userMetadata()).containsOnlyKeys("keep", "added");
+        BlobMetadata reread = blobStore().head(key).orElseThrow();
+        assertThat(reread.headers().cacheControl()).hasValue("no-cache");
+        assertThat(reread.headers().contentDisposition()).hasValue("inline");
+        assertThat(reread.userMetadata()).containsEntry("keep", "1").containsEntry("added", "3").doesNotContainKey("drop");
+        assertThat(readText(key)).isEqualTo("unchanged");
+    }
+
+    @Test
+    void updateMetadataWithStaleETagFails() {
+        BlobKey key = key("update-stale.txt");
+        PutResult v1 = putText(key, "v1");
+        putText(key, "v2");
+
+        assertThatThrownBy(() -> blobStore().updateMetadata(key, MetadataUpdate.builder()
+                .cacheControl("no-cache").ifMatch(v1.etag()).build()))
+                .isInstanceOf(PreconditionFailedException.class);
+    }
+
+    @Test
+    void updateMetadataOfMissingBlobThrowsNotFound() {
+        assertThatThrownBy(() -> blobStore().updateMetadata(key("missing"),
+                MetadataUpdate.builder().cacheControl("no-cache").build()))
+                .isInstanceOf(NotFoundException.class);
+    }
+
+    // --- storage tiers -------------------------------------------------------------------------
+
+    @Test
+    void defaultTierIsHot() {
+        assumeCapability(StorageCapability.STORAGE_TIERS);
+        BlobKey key = key("default-tier.txt");
+        putText(key, "x");
+
+        assertThat(blobStore().head(key).orElseThrow().tier()).hasValue(StorageTier.HOT);
+    }
+
+    @Test
+    void putWithTierStoresTier() {
+        assumeCapability(StorageCapability.STORAGE_TIERS);
+        BlobKey key = key("cool.txt");
+        blobStore().put(key, BlobContent.ofString("cool"), PutOptions.builder().tier(StorageTier.COOL).build());
+
+        assertThat(blobStore().head(key).orElseThrow().tier()).hasValue(StorageTier.COOL);
+        assertThat(blobStore().list(ListOptions.prefix(prefix)).items())
+                .singleElement().satisfies(s -> assertThat(s.tier()).hasValue(StorageTier.COOL));
+        assertThat(readText(key)).isEqualTo("cool");
+    }
+
+    @Test
+    void setTierChangesTierButNotContent() {
+        assumeCapability(StorageCapability.STORAGE_TIERS);
+        BlobKey key = key("retier.txt");
+        blobStore().put(key, BlobContent.ofString("content"), PutOptions.builder().contentType("text/plain").build());
+
+        blobStore().setTier(key, StorageTier.COLD);
+
+        BlobMetadata metadata = blobStore().head(key).orElseThrow();
+        assertThat(metadata.tier()).hasValue(StorageTier.COLD);
+        assertThat(metadata.contentType()).hasValue("text/plain");
+        assertThat(readText(key)).isEqualTo("content");
+    }
+
+    @Test
+    void updateMetadataKeepsTier() {
+        assumeCapability(StorageCapability.STORAGE_TIERS);
+        BlobKey key = key("tier-kept.txt");
+        blobStore().put(key, BlobContent.ofString("x"), PutOptions.builder().tier(StorageTier.COOL).build());
+
+        blobStore().updateMetadata(key, MetadataUpdate.builder().cacheControl("no-cache").build());
+
+        assertThat(blobStore().head(key).orElseThrow().tier()).hasValue(StorageTier.COOL);
     }
 
     // --- range reads ---------------------------------------------------------------------------

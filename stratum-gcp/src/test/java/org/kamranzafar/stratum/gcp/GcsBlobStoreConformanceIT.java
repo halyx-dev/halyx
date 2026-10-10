@@ -55,7 +55,11 @@ class GcsBlobStoreConformanceIT extends BlobStoreConformanceTest {
     /** Verified by sending raw HTTP requests to the emulator; the driver code path is correct. */
     @Override
     protected Map<String, String> knownEnvironmentGaps() {
-        return Map.of("copyPreservesHttpHeaders", "Floci-gcp 0.10.0 drops cacheControl on copy/rewrite (GCS preserves all metadata)");
+        return Map.of(
+                "copyPreservesHttpHeaders",
+                "Floci-gcp 0.10.0 drops cacheControl on copy/rewrite (GCS preserves all metadata)",
+                "updateMetadataReplacesHeadersAndMetadataButNotContent",
+                "Floci-gcp 0.10.0 PATCH replaces the metadata map and stores null values instead of removing keys");
     }
 
     @Override

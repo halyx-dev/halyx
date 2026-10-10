@@ -60,6 +60,56 @@ the blob is served through presigned URLs or a CDN. Bytes are always stored and 
 uploaded: a `gzip`-encoded blob comes back compressed on every provider, because GCS decompressive
 transcoding is turned off.
 
+### Checksums
+
+```java
+store.put(key, BlobContent.ofFile(path), PutOptions.builder().validateChecksum().build());
+try (Blob blob = store.get(key, GetOptions.builder().validateChecksum().build())) { ... }
+```
+
+No algorithm is stored by all three clouds, so Stratum computes **CRC32C and MD5** itself. Each
+provider checks what it supports before committing (S3: CRC32C, including full-object CRC32C for
+multipart uploads; Azure: MD5 per request and per block; GCS: CRC32C and MD5 match conditions).
+Stratum then compares the checksums the provider reports for the stored blob. A mismatch throws
+`DataIntegrityException`, and the corrupt blob is deleted if it is still the version just written.
+Downloads are verified at end of stream against the strongest stored checksum (`BlobMetadata.checksums()`).
+
+### Conditional and batch delete
+
+```java
+store.delete(key, DeleteOptions.ifMatch(etag));            // fails if the blob changed or is gone
+BatchDeleteResult result = store.deleteAll(keys);           // per-key failures, never thrown
+```
+
+`deleteAll` splits keys into each provider's batch limit: S3 `DeleteObjects` (1,000), Azure Blob Batch
+(256), GCS JSON batch (100). Missing keys count as deleted. If an endpoint doesn't implement the batch
+API, Stratum falls back to deleting keys one at a time.
+
+### Metadata updates
+
+```java
+BlobMetadata current = store.head(key).orElseThrow();
+store.updateMetadata(key, MetadataUpdate.from(current).cacheControl("no-cache").ifMatch(current.etag()).build());
+```
+
+Replaces headers and user metadata without re-uploading. S3 does this as a server-side copy onto
+itself (limited to 5 GiB, storage class preserved). Azure uses Set Blob Properties plus Set Blob
+Metadata, chained by ETag and keeping the stored Content-MD5. GCS uses a generation-matched patch.
+
+### Storage tiers
+
+| `StorageTier` | AWS S3 | Azure | GCS |
+|---|---|---|---|
+| `HOT` | STANDARD | Hot | STANDARD |
+| `COOL` | STANDARD_IA | Cool | NEARLINE |
+| `COLD` | GLACIER_IR | Cold | COLDLINE |
+| `ARCHIVE` | GLACIER | Archive | ARCHIVE |
+
+Set it with `PutOptions.tier(...)`, change it with `setTier(key, tier)`, and read it from
+`BlobMetadata.tier()` / `BlobSummary.tier()`. `ARCHIVE` blobs on S3 and Azure are offline until
+restored (restoring isn't in the API yet); on GCS they stay readable. On GCS, changing the tier
+rewrites the object, which changes its ETag.
+
 ### Presigned URLs
 
 Let browsers, mobile apps or other services download or upload a blob directly, without cloud
@@ -172,6 +222,8 @@ reason, so the TCK itself stays strict for runs against real clouds:
 | Floci-az 0.14.0 | ignores `If-None-Match` on Put Block List | `writeInPartsWithIfNotExistsRejectsExistingBlob` |
 | Floci-az 0.14.0 | no server-side copy (Stratum falls back to download + upload) | n/a |
 | Floci-gcp 0.10.0 | drops `cacheControl` on copy | `copyPreservesHttpHeaders` |
+| Floci-az 0.14.0 | no Set Blob Tier, Set Blob Properties or Blob Batch (501); no `x-ms-access-tier` | tier and metadata-update tests (batch delete falls back to single deletes) |
+| Floci-gcp 0.10.0 | metadata PATCH replaces the map and stores `null` instead of removing keys | `updateMetadataReplacesHeadersAndMetadataButNotContent` |
 
 ## Roadmap
 
@@ -180,5 +232,5 @@ reason, so the TCK itself stays strict for runs against real clouds:
 3. SQL: `DataSource` factory with cloud IAM auth and token refresh (RDS IAM, Entra ID, Cloud SQL connector)
 4. Search/index: OpenSearch, Azure AI Search, GCP backend to be decided
 5. Spring Boot starter: `stratum.*` properties, auto-configuration, health and Micrometer
-6. Blob: checksums, conditional and batch delete, storage tiers, KMS encryption, versioning, tags
+6. Blob: archive restore, KMS encryption, versioning, tags, retention
 7. JPMS module descriptors, japicmp API compatibility checks, real-cloud CI profile

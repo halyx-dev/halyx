@@ -7,6 +7,11 @@ import com.google.cloud.storage.BlobInfo;
 import com.google.cloud.storage.HttpMethod;
 import com.google.cloud.storage.Storage;
 import com.google.cloud.storage.Storage.BlobListOption;
+import com.google.cloud.storage.Storage.BlobSourceOption;
+import com.google.cloud.storage.Storage.BlobTargetOption;
+import com.google.cloud.storage.StorageBatch;
+import com.google.cloud.storage.StorageBatchResult;
+import com.google.cloud.storage.StorageException;
 import com.google.cloud.storage.Storage.BlobWriteOption;
 import com.google.cloud.storage.Storage.CopyRequest;
 import com.google.cloud.storage.Storage.SignUrlOption;
@@ -16,6 +21,7 @@ import org.kamranzafar.stratum.error.NotFoundException;
 import org.kamranzafar.stratum.error.PreconditionFailedException;
 import org.kamranzafar.stratum.gcp.GcpErrors;
 import org.kamranzafar.stratum.gcp.GcpProvider;
+import org.kamranzafar.stratum.storage.BatchDeleteResult;
 import org.kamranzafar.stratum.storage.Blob;
 import org.kamranzafar.stratum.storage.BlobContent;
 import org.kamranzafar.stratum.storage.BlobHeaders;
@@ -23,14 +29,18 @@ import org.kamranzafar.stratum.storage.BlobKey;
 import org.kamranzafar.stratum.storage.BlobMetadata;
 import org.kamranzafar.stratum.storage.BlobPage;
 import org.kamranzafar.stratum.storage.BlobSummary;
+import org.kamranzafar.stratum.storage.Checksums;
+import org.kamranzafar.stratum.storage.DeleteOptions;
 import org.kamranzafar.stratum.storage.ETag;
 import org.kamranzafar.stratum.storage.GetOptions;
 import org.kamranzafar.stratum.storage.ListOptions;
+import org.kamranzafar.stratum.storage.MetadataUpdate;
 import org.kamranzafar.stratum.storage.PresignRequest;
 import org.kamranzafar.stratum.storage.PresignedUrl;
 import org.kamranzafar.stratum.storage.PutOptions;
 import org.kamranzafar.stratum.storage.PutResult;
 import org.kamranzafar.stratum.storage.StorageCapability;
+import org.kamranzafar.stratum.storage.StorageTier;
 import org.kamranzafar.stratum.storage.spi.AbstractBlobStoreDriver;
 import org.kamranzafar.stratum.storage.spi.MultipartUploadSession;
 
@@ -42,6 +52,7 @@ import java.nio.channels.Channels;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -61,6 +72,9 @@ public final class GcsBlobStoreDriver extends AbstractBlobStoreDriver {
     private final Storage storage;
     private final boolean customEndpoint;
 
+    /** GCS JSON batch requests carry at most 100 calls. */
+    private static final int MAX_BATCH = 100;
+
     public GcsBlobStoreDriver(String bucket, Storage storage, boolean customEndpoint) {
         super(GcpProvider.ID, bucket, capabilities(storage));
         this.storage = storage;
@@ -68,12 +82,23 @@ public final class GcsBlobStoreDriver extends AbstractBlobStoreDriver {
     }
 
     @Override
-    public PutResult put(BlobKey key, BlobContent.Sized content, PutOptions options) {
+    public PutResult put(BlobKey key, BlobContent.Sized content, PutOptions options, Checksums expected) {
+        BlobInfo info = blobInfo(key, options);
+        List<BlobWriteOption> conditions = new ArrayList<>(List.of(writeConditions(options)));
+        if (!expected.isEmpty()) {
+            // GCS rejects the upload before committing if the content does not match.
+            BlobInfo.Builder checked = info.toBuilder();
+            expected.crc32c().ifPresent(checked::setCrc32c);
+            expected.md5().ifPresent(checked::setMd5);
+            info = checked.build();
+            expected.crc32c().ifPresent(crc -> conditions.add(BlobWriteOption.crc32cMatch()));
+            expected.md5().ifPresent(md5 -> conditions.add(BlobWriteOption.md5Match()));
+        }
         // createFrom uses a resumable upload in chunks of the part size, so large content is fine.
         try (InputStream in = content.openStream()) {
-            com.google.cloud.storage.Blob written = storage.createFrom(blobInfo(key, options), in,
-                    options.partSize(), writeConditions(options));
-            return new PutResult(key, etagOf(written));
+            com.google.cloud.storage.Blob written = storage.createFrom(info, in, options.partSize(),
+                    conditions.toArray(BlobWriteOption[]::new));
+            return new PutResult(key, etagOf(written), checksumsOf(written));
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
@@ -97,6 +122,7 @@ public final class GcsBlobStoreDriver extends AbstractBlobStoreDriver {
         if (!options.metadata().isEmpty()) {
             info.setMetadata(options.metadata());
         }
+        options.tier().ifPresent(tier -> info.setStorageClass(GcsTiers.toNative(tier)));
         return info.build();
     }
 
@@ -141,8 +167,91 @@ public final class GcsBlobStoreDriver extends AbstractBlobStoreDriver {
     }
 
     @Override
-    public void delete(BlobKey key) {
-        storage.delete(BlobId.of(bucket, key.value()));
+    public void delete(BlobKey key, DeleteOptions options) {
+        if (options.ifMatchETag().isEmpty()) {
+            storage.delete(BlobId.of(bucket, key.value()));
+            return;
+        }
+        long generation = generation(key, options.ifMatchETag().get());
+        boolean deleted = storage.delete(BlobId.of(bucket, key.value(), generation), BlobSourceOption.generationMatch());
+        if (!deleted) {
+            throw new PreconditionFailedException("No blob " + bucket + "/" + key + " at generation " + generation,
+                    null, provider, "notFound");
+        }
+    }
+
+    @Override
+    public int maxBatchSize() {
+        return MAX_BATCH;
+    }
+
+    @Override
+    public BatchDeleteResult deleteBatch(List<BlobKey> keys) {
+        StorageBatch batch = storage.batch();
+        Map<BlobKey, StorageBatchResult<Boolean>> results = new LinkedHashMap<>();
+        for (BlobKey key : keys) {
+            results.put(key, batch.delete(BlobId.of(bucket, key.value())));
+        }
+        batch.submit();
+        List<BlobKey> deleted = new ArrayList<>();
+        Map<BlobKey, CloudException> failed = new LinkedHashMap<>();
+        results.forEach((key, result) -> {
+            try {
+                result.get(); // false means it did not exist, which counts as deleted
+                deleted.add(key);
+            } catch (StorageException e) {
+                if (e.getCode() == 404) {
+                    deleted.add(key);
+                } else {
+                    failed.put(key, translate(e));
+                }
+            }
+        });
+        return new BatchDeleteResult(deleted, failed);
+    }
+
+    @Override
+    public BlobMetadata updateMetadata(BlobKey key, MetadataUpdate update) {
+        com.google.cloud.storage.Blob current = storage.get(BlobId.of(bucket, key.value()));
+        if (current == null) {
+            throw update.ifMatch().isPresent()
+                    ? new PreconditionFailedException("No blob " + bucket + "/" + key, null, provider, "notFound")
+                    : new NotFoundException("No blob " + bucket + "/" + key, null, provider, "notFound");
+        }
+        // A metadata patch merges keys: map keys that should disappear to null to remove them.
+        Map<String, String> metadata = new HashMap<>();
+        if (current.getMetadata() != null) {
+            current.getMetadata().keySet().forEach(k -> metadata.put(k, null));
+        }
+        metadata.putAll(update.metadata());
+        var headers = update.headers();
+        long generation = update.ifMatch().map(etag -> generation(key, etag)).orElse(current.getGeneration());
+        BlobInfo patch = BlobInfo.newBuilder(BlobId.of(bucket, key.value(), generation))
+                .setContentType(headers.contentType().orElse(null))
+                .setContentEncoding(headers.contentEncoding().orElse(null))
+                .setContentDisposition(headers.contentDisposition().orElse(null))
+                .setContentLanguage(headers.contentLanguage().orElse(null))
+                .setCacheControl(headers.cacheControl().orElse(null))
+                .setMetadata(metadata)
+                .build();
+        // Generation match: fail rather than patch a blob that was replaced meanwhile.
+        com.google.cloud.storage.Blob updated = storage.update(patch, BlobTargetOption.generationMatch());
+        return toMetadata(key, updated);
+    }
+
+    @Override
+    public void setTier(BlobKey key, StorageTier tier) {
+        com.google.cloud.storage.Blob current = storage.get(BlobId.of(bucket, key.value()));
+        if (current == null) {
+            throw new NotFoundException("No blob " + bucket + "/" + key, null, provider, "notFound");
+        }
+        // Changing the storage class rewrites the object in place, keeping its metadata.
+        BlobInfo target = current.toBuilder().setBlobId(BlobId.of(bucket, key.value()))
+                .setStorageClass(GcsTiers.toNative(tier)).build();
+        storage.copy(CopyRequest.newBuilder()
+                .setSource(BlobId.of(bucket, key.value(), current.getGeneration()))
+                .setTarget(target, BlobTargetOption.generationMatch(current.getGeneration()))
+                .build()).getResult();
     }
 
     @Override
@@ -160,7 +269,8 @@ public final class GcsBlobStoreDriver extends AbstractBlobStoreDriver {
             if (b.isDirectory()) {
                 prefixes.add(b.getName());
             } else {
-                items.add(new BlobSummary(BlobKey.of(b.getName()), b.getSize(), etagOf(b), lastModified(b)));
+                items.add(new BlobSummary(BlobKey.of(b.getName()), b.getSize(), etagOf(b), lastModified(b),
+                        GcsTiers.fromNative(b.getStorageClass())));
             }
         }
         return new BlobPage(items, prefixes, Optional.ofNullable(page.getNextPageToken()));
@@ -245,6 +355,10 @@ public final class GcsBlobStoreDriver extends AbstractBlobStoreDriver {
         return new BlobMetadata(key, blob.getSize() == null ? 0 : blob.getSize(), etagOf(blob), lastModified(blob),
                 BlobHeaders.of(blob.getContentType(), blob.getContentEncoding(), blob.getContentDisposition(),
                         blob.getContentLanguage(), blob.getCacheControl()),
-                blob.getMetadata());
+                blob.getMetadata(), GcsTiers.fromNative(blob.getStorageClass()), checksumsOf(blob));
+    }
+
+    private static Checksums checksumsOf(BlobInfo blob) {
+        return Checksums.of(blob.getCrc32c(), blob.getMd5(), null);
     }
 }

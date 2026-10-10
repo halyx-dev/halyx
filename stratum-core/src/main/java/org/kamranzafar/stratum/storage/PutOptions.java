@@ -21,8 +21,12 @@ public final class PutOptions {
     private final ETag ifMatch;
     private final boolean ifNotExists;
     private final int partSize;
+    private final StorageTier tier;
+    private final boolean validateChecksum;
 
     private PutOptions(Builder b) {
+        this.tier = b.tier;
+        this.validateChecksum = b.validateChecksum;
         this.headers = b.headers;
         this.metadata = Map.copyOf(b.metadata);
         this.ifMatch = b.ifMatch;
@@ -73,14 +77,41 @@ public final class PutOptions {
         return partSize;
     }
 
+    /** Storage tier of the new blob; the bucket default when empty. */
+    public Optional<StorageTier> tier() {
+        return Optional.ofNullable(tier);
+    }
+
+    /**
+     * Whether to verify the upload end to end. Stratum computes CRC32C and MD5 of the content, the
+     * provider rejects the upload where it can check them before committing, and the checksums the
+     * provider reports for the stored blob are compared afterwards. Costs one extra read of file
+     * content. Requires {@link StorageCapability#CHECKSUM}.
+     */
+    public boolean validateChecksum() {
+        return validateChecksum;
+    }
+
     public static final class Builder {
         private BlobHeaders headers = BlobHeaders.none();
         private final Map<String, String> metadata = new LinkedHashMap<>();
         private ETag ifMatch;
         private boolean ifNotExists;
         private int partSize = DEFAULT_PART_SIZE;
+        private StorageTier tier;
+        private boolean validateChecksum;
 
         private Builder() {
+        }
+
+        public Builder tier(StorageTier tier) {
+            this.tier = Objects.requireNonNull(tier, "tier");
+            return this;
+        }
+
+        public Builder validateChecksum() {
+            this.validateChecksum = true;
+            return this;
         }
 
         public Builder headers(BlobHeaders headers) {

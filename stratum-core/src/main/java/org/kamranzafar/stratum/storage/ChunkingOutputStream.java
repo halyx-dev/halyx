@@ -1,6 +1,7 @@
 package org.kamranzafar.stratum.storage;
 
 import org.kamranzafar.stratum.storage.spi.BlobStoreDriver;
+import org.kamranzafar.stratum.storage.spi.ChecksumCalculator;
 import org.kamranzafar.stratum.storage.spi.MultipartUploadSession;
 
 import java.io.IOException;
@@ -23,14 +24,22 @@ final class ChunkingOutputStream extends OutputStream {
     private final byte[] buffer;
     private int count;
     private int partNumber;
+    private final ChecksumCalculator checksums;
     private MultipartUploadSession session;
     private boolean closed;
+    private Checksums expected = Checksums.none();
 
     ChunkingOutputStream(BlobStoreDriver driver, BlobKey key, PutOptions options) {
         this.driver = driver;
         this.key = key;
         this.options = options;
         this.buffer = new byte[options.partSize()];
+        this.checksums = options.validateChecksum() ? ChecksumCalculator.forUpload() : null;
+    }
+
+    /** Checksums of everything written, once {@link #finish()} has run; none unless validation was requested. */
+    Checksums expectedChecksums() {
+        return expected;
     }
 
     @Override
@@ -68,13 +77,20 @@ final class ChunkingOutputStream extends OutputStream {
         closed = true;
         try {
             if (session == null) {
-                return driver.put(key, new BlobContent.OfBytes(Arrays.copyOf(buffer, count)), options);
+                byte[] content = Arrays.copyOf(buffer, count);
+                if (checksums != null) {
+                    checksums.update(content, 0, content.length);
+                    expected = checksums.result();
+                }
+                return driver.put(key, new BlobContent.OfBytes(content), options, expected);
             }
             if (count > 0) {
-                session.uploadPart(++partNumber, buffer, count);
-                count = 0;
+                uploadPart();
             }
-            return session.complete();
+            if (checksums != null) {
+                expected = checksums.result();
+            }
+            return session.complete(expected);
         } catch (RuntimeException e) {
             throw driver.translate(e);
         }
@@ -92,11 +108,18 @@ final class ChunkingOutputStream extends OutputStream {
             if (session == null) {
                 session = driver.startMultipartUpload(key, options);
             }
-            session.uploadPart(++partNumber, buffer, count);
-            count = 0;
+            uploadPart();
         } catch (RuntimeException e) {
             throw driver.translate(e);
         }
+    }
+
+    private void uploadPart() {
+        if (checksums != null) {
+            checksums.update(buffer, 0, count);
+        }
+        session.uploadPart(++partNumber, buffer, count);
+        count = 0;
     }
 
     private void ensureOpen() throws IOException {

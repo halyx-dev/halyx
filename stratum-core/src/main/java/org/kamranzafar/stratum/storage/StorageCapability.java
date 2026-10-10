@@ -13,5 +13,13 @@ public enum StorageCapability implements Capability {
     /** Presigned download and upload URLs ({@code presign}, {@code presignDownload}, {@code presignUpload}). */
     PRESIGNED_URL,
     /** {@link PutOptions#metadata()}. */
-    USER_METADATA
+    USER_METADATA,
+    /** Checksum validation of uploads and downloads ({@code validateChecksum}). */
+    CHECKSUM,
+    /** {@link DeleteOptions#ifMatch(ETag)}. */
+    CONDITIONAL_DELETE,
+    /** Native batch deletes. Without it, {@code deleteAll} deletes keys one at a time. */
+    BATCH_DELETE,
+    /** {@link PutOptions#tier()} and {@code setTier}. */
+    STORAGE_TIERS
 }

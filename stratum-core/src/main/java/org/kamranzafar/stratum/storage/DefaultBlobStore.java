@@ -1,13 +1,23 @@
 package org.kamranzafar.stratum.storage;
 
 import org.kamranzafar.stratum.capability.Capabilities;
+import org.kamranzafar.stratum.error.CloudException;
+import org.kamranzafar.stratum.error.DataIntegrityException;
 import org.kamranzafar.stratum.error.UnsupportedFeatureException;
 import org.kamranzafar.stratum.interceptor.InterceptorChain;
 import org.kamranzafar.stratum.interceptor.OperationContext;
 import org.kamranzafar.stratum.storage.spi.BlobStoreDriver;
+import org.kamranzafar.stratum.storage.spi.ChecksumCalculator;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
@@ -49,15 +59,14 @@ public final class DefaultBlobStore implements BlobStore {
     public PutResult put(BlobKey key, BlobContent content, PutOptions options) {
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(content, "content");
-        Objects.requireNonNull(options, "options");
-        if (options.isConditional()) {
-            require(StorageCapability.CONDITIONAL_WRITE);
-        }
-        if (!options.metadata().isEmpty()) {
-            require(StorageCapability.USER_METADATA);
-        }
+        checkWrite(options);
         return switch (content) {
-            case BlobContent.Sized sized -> execute("put", key, sized.repeatable(), () -> driver.put(key, sized, options));
+            // A one-shot stream can only be checksummed while it is uploaded, which the part path does.
+            case BlobContent.OfStream stream when options.validateChecksum() -> write(key, stream.stream()::transferTo, options);
+            case BlobContent.Sized sized -> execute("put", key, sized.repeatable(), () -> {
+                Checksums expected = options.validateChecksum() ? checksumsOf(sized) : Checksums.none();
+                return verifyWrite(driver, key, driver.put(key, sized, options, expected), expected);
+            });
             case BlobContent.OfUnsizedStream stream -> write(key, stream.stream()::transferTo, options);
         };
     }
@@ -66,13 +75,7 @@ public final class DefaultBlobStore implements BlobStore {
     public PutResult write(BlobKey key, BlobSink sink, PutOptions options) {
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(sink, "sink");
-        Objects.requireNonNull(options, "options");
-        if (options.isConditional()) {
-            require(StorageCapability.CONDITIONAL_WRITE);
-        }
-        if (!options.metadata().isEmpty()) {
-            require(StorageCapability.USER_METADATA);
-        }
+        checkWrite(options);
         OperationContext context = new OperationContext(SERVICE, "write", provider, bucket + "/" + key, false);
         return interceptors.execute(context, () -> {
             ChunkingOutputStream out = new ChunkingOutputStream(driver, key, options);
@@ -85,8 +88,65 @@ public final class DefaultBlobStore implements BlobStore {
                 out.abort();
                 throw e;
             }
-            return out.finish();
+            PutResult result = out.finish();
+            return verifyWrite(driver, key, result, out.expectedChecksums());
         });
+    }
+
+    private void checkWrite(PutOptions options) {
+        Objects.requireNonNull(options, "options");
+        if (options.isConditional()) {
+            require(StorageCapability.CONDITIONAL_WRITE);
+        }
+        if (!options.metadata().isEmpty()) {
+            require(StorageCapability.USER_METADATA);
+        }
+        if (options.tier().isPresent()) {
+            require(StorageCapability.STORAGE_TIERS);
+        }
+        if (options.validateChecksum()) {
+            require(StorageCapability.CHECKSUM);
+        }
+    }
+
+    /**
+     * Compares what core computed with what the provider reports it stored. On a mismatch the corrupt
+     * blob is removed (only if it is still the version just written) and the write fails.
+     */
+    static PutResult verifyWrite(BlobStoreDriver driver, BlobKey key, PutResult result, Checksums expected) {
+        if (expected.isEmpty()) {
+            return result;
+        }
+        var mismatched = expected.mismatches(result.checksums());
+        if (mismatched.isEmpty()) {
+            return result;
+        }
+        if (driver.capabilities().supports(StorageCapability.CONDITIONAL_DELETE)) {
+            try {
+                driver.delete(key, DeleteOptions.ifMatch(result.etag()));
+            } catch (RuntimeException ignored) {
+                // Replaced concurrently, or already gone: nothing of ours to clean up.
+            }
+        }
+        throw new DataIntegrityException("Upload of " + key + " failed " + mismatched + " validation: sent "
+                + expected.values() + ", provider stored " + result.checksums().values());
+    }
+
+    private static Checksums checksumsOf(BlobContent.Sized content) {
+        if (content instanceof BlobContent.OfBytes bytes) {
+            return ChecksumCalculator.of(bytes.bytes(), 0, bytes.bytes().length);
+        }
+        ChecksumCalculator calculator = ChecksumCalculator.forUpload();
+        byte[] buffer = new byte[64 * 1024];
+        try (InputStream in = content.openStream()) {
+            int n;
+            while ((n = in.read(buffer)) > 0) {
+                calculator.update(buffer, 0, n);
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        return calculator.result();
     }
 
     @Override
@@ -96,7 +156,22 @@ public final class DefaultBlobStore implements BlobStore {
         if (options.range().isPresent()) {
             require(StorageCapability.RANGE_READ);
         }
-        return execute("get", key, true, () -> driver.get(key, options));
+        if (options.validateChecksum()) {
+            require(StorageCapability.CHECKSUM);
+        }
+        Blob blob = execute("get", key, true, () -> driver.get(key, options));
+        if (!options.validateChecksum()) {
+            return blob;
+        }
+        Checksums stored = blob.metadata().checksums();
+        Optional<ChecksumAlgorithm> algorithm = stored.preferred();
+        if (algorithm.isEmpty()) {
+            blob.close();
+            throw new UnsupportedFeatureException("Blob " + key + " has no stored checksum to validate against; "
+                    + "write it with PutOptions.validateChecksum()", null, provider, null);
+        }
+        String expected = stored.get(algorithm.get()).orElseThrow();
+        return new Blob(blob.metadata(), new VerifyingInputStream(blob.content(), algorithm.get(), expected, provider));
     }
 
     @Override
@@ -106,10 +181,85 @@ public final class DefaultBlobStore implements BlobStore {
     }
 
     @Override
-    public void delete(BlobKey key) {
+    public void delete(BlobKey key, DeleteOptions options) {
         Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(options, "options");
+        if (options.isConditional()) {
+            require(StorageCapability.CONDITIONAL_DELETE);
+        }
         execute("delete", key, true, () -> {
-            driver.delete(key);
+            driver.delete(key, options);
+            return null;
+        });
+    }
+
+    @Override
+    public BatchDeleteResult deleteAll(Collection<BlobKey> keys) {
+        Objects.requireNonNull(keys, "keys");
+        List<BlobKey> unique = List.copyOf(new LinkedHashSet<>(keys));
+        if (!capabilities().supports(StorageCapability.BATCH_DELETE)) {
+            return deleteOneByOne(unique);
+        }
+        int size = driver.maxBatchSize();
+        List<BatchDeleteResult> results = new ArrayList<>();
+        for (int from = 0; from < unique.size(); from += size) {
+            List<BlobKey> batch = unique.subList(from, Math.min(from + size, unique.size()));
+            OperationContext context = new OperationContext(SERVICE, "deleteBatch", provider,
+                    bucket + "/[" + batch.size() + " keys]", true);
+            try {
+                BatchDeleteResult result = interceptors.execute(context, () -> translated(() -> driver.deleteBatch(batch)));
+                // An endpoint without the batch API (an emulator or S3-compatible store) rejects every
+                // sub-request as not implemented: delete those keys individually instead.
+                if (!result.failed().isEmpty()
+                        && result.failed().values().stream().allMatch(UnsupportedFeatureException.class::isInstance)) {
+                    result = BatchDeleteResult.merge(List.of(
+                            new BatchDeleteResult(result.deleted(), Map.of()),
+                            deleteOneByOne(List.copyOf(result.failed().keySet()))));
+                }
+                results.add(result);
+            } catch (UnsupportedFeatureException e) {
+                results.add(deleteOneByOne(batch));
+            } catch (CloudException e) {
+                // The whole request failed (for example access denied): report it against every key.
+                Map<BlobKey, CloudException> failed = new LinkedHashMap<>();
+                batch.forEach(k -> failed.put(k, e));
+                results.add(new BatchDeleteResult(List.of(), failed));
+            }
+        }
+        return BatchDeleteResult.merge(results);
+    }
+
+    private BatchDeleteResult deleteOneByOne(List<BlobKey> keys) {
+        List<BlobKey> deleted = new ArrayList<>();
+        Map<BlobKey, CloudException> failed = new LinkedHashMap<>();
+        for (BlobKey key : keys) {
+            try {
+                delete(key);
+                deleted.add(key);
+            } catch (CloudException e) {
+                failed.put(key, e);
+            }
+        }
+        return new BatchDeleteResult(deleted, failed);
+    }
+
+    @Override
+    public BlobMetadata updateMetadata(BlobKey key, MetadataUpdate update) {
+        Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(update, "update");
+        if (!update.metadata().isEmpty()) {
+            require(StorageCapability.USER_METADATA);
+        }
+        return execute("updateMetadata", key, true, () -> driver.updateMetadata(key, update));
+    }
+
+    @Override
+    public void setTier(BlobKey key, StorageTier tier) {
+        Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(tier, "tier");
+        require(StorageCapability.STORAGE_TIERS);
+        execute("setTier", key, true, () -> {
+            driver.setTier(key, tier);
             return null;
         });
     }

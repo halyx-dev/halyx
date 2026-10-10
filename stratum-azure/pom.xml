@@ -25,6 +25,10 @@
         </dependency>
         <dependency>
             <groupId>com.azure</groupId>
+            <artifactId>azure-storage-blob-batch</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.azure</groupId>
             <artifactId>azure-identity</artifactId>
         </dependency>
         <!-- Tests: TCK against the Floci emulator in Docker (run with mvn verify) -->

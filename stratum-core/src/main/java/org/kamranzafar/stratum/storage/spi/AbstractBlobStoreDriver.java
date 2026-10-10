@@ -6,6 +6,7 @@ import org.kamranzafar.stratum.error.UnknownCloudException;
 import org.kamranzafar.stratum.error.UnsupportedFeatureException;
 import org.kamranzafar.stratum.storage.BlobKey;
 import org.kamranzafar.stratum.storage.PresignRequest;
+import org.kamranzafar.stratum.storage.StorageTier;
 import org.kamranzafar.stratum.storage.PresignedUrl;
 
 import java.util.List;
@@ -48,6 +49,11 @@ public abstract class AbstractBlobStoreDriver implements BlobStoreDriver {
     @Override
     public PresignedUrl presign(BlobKey key, PresignRequest request) {
         throw new UnsupportedFeatureException("presign is not supported by " + provider, null, provider, null);
+    }
+
+    @Override
+    public void setTier(BlobKey key, StorageTier tier) {
+        throw new UnsupportedFeatureException("Storage tiers are not supported by " + provider, null, provider, null);
     }
 
     @Override
