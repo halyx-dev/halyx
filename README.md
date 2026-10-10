@@ -136,6 +136,65 @@ send exactly that value. Expiry is capped at 7 days, the longest every provider 
 `capabilities().supports(PRESIGNED_URL)` reflects the configured credentials: on GCP it is false for
 user or anonymous credentials, which cannot sign.
 
+## Spring Boot
+
+Add the starter plus the provider modules you use:
+
+```xml
+<dependency>
+  <groupId>org.kamranzafar</groupId>
+  <artifactId>stratum-spring-boot-starter</artifactId>
+</dependency>
+<dependency>
+  <groupId>org.kamranzafar</groupId>
+  <artifactId>stratum-aws</artifactId>
+</dependency>
+```
+
+```yaml
+stratum:
+  providers:
+    orders:
+      type: aws                    # aws | azure | gcp | memory
+      region: eu-west-2
+      # endpoint: http://localhost:4566
+      # credentials: { type: static, id: ..., secret: ... }   # default | static | anonymous
+      # properties: { aws.s3.path-style: true }
+  blob-stores:
+    invoices:                      # bean name
+      bucket: acme-invoices        # defaults to the bean name
+      # provider: orders           # optional when only one provider is configured
+  retry:
+    enabled: false                 # the SDKs already retry; enable for uniform retries
+```
+
+```java
+@Service
+class InvoiceService {
+    InvoiceService(@Qualifier("invoices") BlobStore invoices) { ... }
+}
+```
+
+What the starter provides:
+
+| Feature | Details |
+|---|---|
+| `Stratum` bean | Built from `stratum.providers`, closed with the context. Define your own `Stratum` bean to replace it. |
+| `BlobStore` beans | One per `stratum.blob-stores` entry, named after the entry. |
+| Interceptors | Every `Interceptor` bean is applied in `@Order` order. Order of application, outermost first: observations, your interceptors, retries. |
+| Customisation | `StratumBuilderCustomizer` beans can add plugins or registrations. |
+| Observations | With Micrometer, every operation records a `stratum.operation` observation (timer + span) tagged with `stratum.service`, `stratum.operation`, `stratum.provider` and `error`. Disable with `stratum.observations.enabled=false`. |
+| Health | A `stratum` health contributor with one indicator per blob store, which lists one item from the bucket. Disable with `management.health.stratum.enabled=false`. |
+| Fail fast | Startup fails, naming the property, for an unknown provider type (with the module to add), an unknown or ambiguous `provider` reference, or incomplete static credentials. |
+| IDE support | Configuration metadata is generated, so `stratum.*` keys autocomplete. |
+
+**Supports Spring Boot 3.5.x and 4.x** (Java 21) with the same starter: your application's Boot
+parent or BOM picks the Spring versions. The auto-configuration is compiled against Boot 3.5. Health
+is wired with Actuator's `org.springframework.boot.actuate.health` on Boot 3, and with the new
+`org.springframework.boot.health` module on Boot 4; exactly one of the two activates. The test suite
+runs on both: `stratum-spring-boot-autoconfigure` tests on 3.5, and the unpublished
+`stratum-spring-boot4-tests` module runs the same shared tests on 4.1.
+
 ## Modules
 
 | Module | Purpose |
@@ -146,6 +205,8 @@ user or anonymous credentials, which cannot sign.
 | `stratum-aws` | AWS SDK v2: S3 |
 | `stratum-azure` | Azure SDK: Blob Storage |
 | `stratum-gcp` | Google Cloud: Cloud Storage |
+| `stratum-spring-boot-autoconfigure` | Spring Boot auto-configuration, properties, health, observations |
+| `stratum-spring-boot-starter` | The dependency Spring Boot applications add |
 
 Add `stratum-core` plus the provider jars you need; providers are discovered with `ServiceLoader`.
 
@@ -231,6 +292,6 @@ reason, so the TCK itself stays strict for runs against real clouds:
 2. Cache: one Redis/Valkey driver plus cloud auth (ElastiCache IAM, Entra ID, Memorystore IAM)
 3. SQL: `DataSource` factory with cloud IAM auth and token refresh (RDS IAM, Entra ID, Cloud SQL connector)
 4. Search/index: OpenSearch, Azure AI Search, GCP backend to be decided
-5. Spring Boot starter: `stratum.*` properties, auto-configuration, health and Micrometer
+5. ~~Spring Boot starter: `stratum.*` properties, auto-configuration, health and Micrometer~~
 6. Blob: archive restore, KMS encryption, versioning, tags, retention
 7. JPMS module descriptors, japicmp API compatibility checks, real-cloud CI profile
