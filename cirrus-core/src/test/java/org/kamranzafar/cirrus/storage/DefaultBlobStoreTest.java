@@ -30,6 +30,16 @@ class DefaultBlobStoreTest {
     }
 
     @Test
+    void presignedMultipartNeedsTheCapability() {
+        assertThat(store.capabilities().supports(StorageCapability.PRESIGNED_MULTIPART)).isFalse();
+        assertThatThrownBy(() -> store.startPresignedUpload(BlobKey.of("k"), PutOptions.defaults()))
+                .isInstanceOf(UnsupportedFeatureException.class)
+                .hasMessageContaining("PRESIGNED_MULTIPART");
+        assertThatThrownBy(() -> new UploadedPart(0, "e")).isInstanceOf(IllegalArgumentException.class);
+        assertThat(new UploadedPart(1, " ").etag()).isNull();
+    }
+
+    @Test
     void unsupportedCapabilityIsRejectedBeforeReachingDriver() {
         assertThat(store.capabilities().supports(StorageCapability.PRESIGNED_URL)).isFalse();
         assertThatThrownBy(() -> store.presignDownload(BlobKey.of("k"), Duration.ofMinutes(1)))

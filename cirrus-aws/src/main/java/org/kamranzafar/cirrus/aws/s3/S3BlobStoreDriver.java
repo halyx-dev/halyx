@@ -4,6 +4,7 @@ import org.kamranzafar.cirrus.aws.AwsErrors;
 import org.kamranzafar.cirrus.aws.AwsProvider;
 import org.kamranzafar.cirrus.capability.Capabilities;
 import org.kamranzafar.cirrus.error.CloudException;
+import org.kamranzafar.cirrus.error.InvalidArgumentException;
 import org.kamranzafar.cirrus.error.NotFoundException;
 import org.kamranzafar.cirrus.error.PreconditionFailedException;
 import org.kamranzafar.cirrus.storage.BatchDeleteResult;
@@ -21,11 +22,13 @@ import org.kamranzafar.cirrus.storage.GetOptions;
 import org.kamranzafar.cirrus.storage.ListOptions;
 import org.kamranzafar.cirrus.storage.MetadataUpdate;
 import org.kamranzafar.cirrus.storage.PresignRequest;
+import org.kamranzafar.cirrus.storage.PresignedUpload;
 import org.kamranzafar.cirrus.storage.PresignedUrl;
 import org.kamranzafar.cirrus.storage.PutOptions;
 import org.kamranzafar.cirrus.storage.PutResult;
 import org.kamranzafar.cirrus.storage.StorageCapability;
 import org.kamranzafar.cirrus.storage.StorageTier;
+import org.kamranzafar.cirrus.storage.UploadedPart;
 import org.kamranzafar.cirrus.storage.spi.AbstractBlobStoreDriver;
 import org.kamranzafar.cirrus.storage.spi.BufferPool;
 import org.kamranzafar.cirrus.storage.spi.MultipartUploadSession;
@@ -36,6 +39,7 @@ import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.ChecksumMode;
 import software.amazon.awssdk.services.s3.model.CommonPrefix;
+import software.amazon.awssdk.services.s3.model.CompletedPart;
 import software.amazon.awssdk.services.s3.model.CopyObjectRequest;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
@@ -54,6 +58,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.net.URISyntaxException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -310,6 +315,47 @@ public final class S3BlobStoreDriver extends AbstractBlobStoreDriver {
     }
 
     @Override
+    public PresignedUpload startPresignedUpload(BlobKey key, PutOptions options) {
+        String uploadId = s3.createMultipartUpload(S3MultipartUpload.createRequest(bucket, key, options).build()).uploadId();
+        return new PresignedUpload(key, uploadId);
+    }
+
+    @Override
+    public PresignedUrl presignUploadPart(PresignedUpload upload, int partNumber, Duration expiry) {
+        PresignedRequest presigned = presigner.presignUploadPart(p -> p.signatureDuration(expiry)
+                .uploadPartRequest(u -> u.bucket(bucket).key(upload.key().value())
+                        .uploadId(upload.uploadId()).partNumber(partNumber)));
+        return toPresignedUrl(PresignRequest.Method.PUT, presigned);
+    }
+
+    @Override
+    public PutResult completePresignedUpload(PresignedUpload upload, List<UploadedPart> parts) {
+        List<CompletedPart> completed = new ArrayList<>(parts.size());
+        for (UploadedPart part : parts) {
+            if (part.etag() == null) {
+                throw new InvalidArgumentException("S3 needs the ETag of every part; part " + part.partNumber()
+                        + " has none (expose the ETag header in the bucket's CORS rules)", null, provider, null);
+            }
+            completed.add(CompletedPart.builder().partNumber(part.partNumber()).eTag(part.etag()).build());
+        }
+        var response = s3.completeMultipartUpload(b -> b.bucket(bucket).key(upload.key().value())
+                .uploadId(upload.uploadId()).multipartUpload(m -> m.parts(completed)));
+        return new PutResult(upload.key(), new ETag(response.eTag()),
+                checksums(response.checksumCRC32C(), response.checksumCRC32()));
+    }
+
+    @Override
+    public void abortPresignedUpload(PresignedUpload upload) {
+        try {
+            s3.abortMultipartUpload(b -> b.bucket(bucket).key(upload.key().value()).uploadId(upload.uploadId()));
+        } catch (S3Exception e) {
+            if (e.statusCode() != 404) { // NoSuchUpload: already completed or aborted
+                throw e;
+            }
+        }
+    }
+
+    @Override
     public PresignedUrl presign(BlobKey key, PresignRequest request) {
         PresignedRequest presigned = switch (request.method()) {
             case GET -> presigner.presignGetObject(p -> p.signatureDuration(request.expiry())
@@ -320,6 +366,10 @@ public final class S3BlobStoreDriver extends AbstractBlobStoreDriver {
                         request.contentType().ifPresent(put::contentType);
                     }));
         };
+        return toPresignedUrl(request.method(), presigned);
+    }
+
+    private static PresignedUrl toPresignedUrl(PresignRequest.Method method, PresignedRequest presigned) {
         // Signed headers other than Host (which HTTP clients set themselves) must be sent verbatim,
         // for example the Content-Type of an upload.
         Map<String, String> headers = new LinkedHashMap<>();
@@ -329,7 +379,7 @@ public final class S3BlobStoreDriver extends AbstractBlobStoreDriver {
             }
         });
         try {
-            return new PresignedUrl(request.method(), presigned.url().toURI(), presigned.expiration(), headers);
+            return new PresignedUrl(method, presigned.url().toURI(), presigned.expiration(), headers);
         } catch (URISyntaxException e) {
             throw new IllegalStateException("S3 presigner returned an invalid URL: " + presigned.url(), e);
         }

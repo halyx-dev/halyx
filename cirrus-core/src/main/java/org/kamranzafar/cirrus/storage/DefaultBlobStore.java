@@ -3,6 +3,7 @@ package org.kamranzafar.cirrus.storage;
 import org.kamranzafar.cirrus.capability.Capabilities;
 import org.kamranzafar.cirrus.error.CloudException;
 import org.kamranzafar.cirrus.error.DataIntegrityException;
+import org.kamranzafar.cirrus.error.InvalidArgumentException;
 import org.kamranzafar.cirrus.error.NotFoundException;
 import org.kamranzafar.cirrus.error.PreconditionFailedException;
 import org.kamranzafar.cirrus.error.UnsupportedFeatureException;
@@ -20,8 +21,10 @@ import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -396,6 +399,68 @@ public final class DefaultBlobStore implements BlobStore {
             PutOptions options = PutOptions.builder().headers(metadata.headers()).metadata(metadata.userMetadata()).build();
             return put(target, BlobContent.ofStream(blob.content(), metadata.size()), options);
         }
+    }
+
+    @Override
+    public PresignedUpload startPresignedUpload(BlobKey key, PutOptions options) {
+        Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(options, "options");
+        require(StorageCapability.PRESIGNED_MULTIPART);
+        if (options.isConditional() || options.validateChecksum()) {
+            throw new InvalidArgumentException("Presigned uploads support neither conditional writes nor "
+                    + "checksum validation: the bytes go straight from the client to storage", null, provider, null);
+        }
+        if (!options.metadata().isEmpty()) {
+            require(StorageCapability.USER_METADATA);
+        }
+        if (options.tier().isPresent()) {
+            require(StorageCapability.STORAGE_TIERS);
+        }
+        // Creating an upload is not idempotent (each call starts a new one), so it is never retried.
+        return execute("startPresignedUpload", key, false, () -> driver.startPresignedUpload(key, options));
+    }
+
+    @Override
+    public PresignedUrl presignUploadPart(PresignedUpload upload, int partNumber, Duration expiry) {
+        Objects.requireNonNull(upload, "upload");
+        Objects.requireNonNull(expiry, "expiry");
+        require(StorageCapability.PRESIGNED_MULTIPART);
+        if (partNumber < 1 || partNumber > PresignedUploads.MAX_PARTS) {
+            throw new IllegalArgumentException("partNumber must be between 1 and " + PresignedUploads.MAX_PARTS);
+        }
+        if (expiry.isNegative() || expiry.isZero()) {
+            throw new IllegalArgumentException("expiry must be positive");
+        }
+        return execute("presignUploadPart", upload.key(), true,
+                () -> driver.presignUploadPart(upload, partNumber, expiry));
+    }
+
+    @Override
+    public PutResult completePresignedUpload(PresignedUpload upload, List<UploadedPart> parts) {
+        Objects.requireNonNull(upload, "upload");
+        Objects.requireNonNull(parts, "parts");
+        require(StorageCapability.PRESIGNED_MULTIPART);
+        if (parts.isEmpty()) {
+            throw new IllegalArgumentException("parts must not be empty");
+        }
+        List<UploadedPart> sorted = parts.stream().sorted(Comparator.comparingInt(UploadedPart::partNumber)).toList();
+        for (int i = 1; i < sorted.size(); i++) {
+            if (sorted.get(i).partNumber() == sorted.get(i - 1).partNumber()) {
+                throw new IllegalArgumentException("Duplicate part number " + sorted.get(i).partNumber());
+            }
+        }
+        return execute("completePresignedUpload", upload.key(), true,
+                () -> driver.completePresignedUpload(upload, sorted));
+    }
+
+    @Override
+    public void abortPresignedUpload(PresignedUpload upload) {
+        Objects.requireNonNull(upload, "upload");
+        require(StorageCapability.PRESIGNED_MULTIPART);
+        execute("abortPresignedUpload", upload.key(), true, () -> {
+            driver.abortPresignedUpload(upload);
+            return null;
+        });
     }
 
     @Override

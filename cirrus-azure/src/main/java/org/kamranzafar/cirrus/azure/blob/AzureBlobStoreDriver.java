@@ -28,6 +28,7 @@ import com.azure.storage.blob.models.DownloadRetryOptions;
 import com.azure.storage.blob.models.ListBlobsOptions;
 import com.azure.storage.blob.models.ParallelTransferOptions;
 import com.azure.storage.blob.options.BlobParallelUploadOptions;
+import com.azure.storage.blob.options.BlockBlobCommitBlockListOptions;
 import com.azure.storage.blob.sas.BlobSasPermission;
 import com.azure.storage.blob.sas.BlobServiceSasSignatureValues;
 import org.kamranzafar.cirrus.azure.AzureErrors;
@@ -51,17 +52,21 @@ import org.kamranzafar.cirrus.storage.GetOptions;
 import org.kamranzafar.cirrus.storage.ListOptions;
 import org.kamranzafar.cirrus.storage.MetadataUpdate;
 import org.kamranzafar.cirrus.storage.PresignRequest;
+import org.kamranzafar.cirrus.storage.PresignedUpload;
 import org.kamranzafar.cirrus.storage.PresignedUrl;
 import org.kamranzafar.cirrus.storage.PutOptions;
 import org.kamranzafar.cirrus.storage.PutResult;
 import org.kamranzafar.cirrus.storage.StorageCapability;
 import org.kamranzafar.cirrus.storage.StorageTier;
+import org.kamranzafar.cirrus.storage.UploadedPart;
 import org.kamranzafar.cirrus.storage.spi.AbstractBlobStoreDriver;
 import org.kamranzafar.cirrus.storage.spi.MultipartUploadSession;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
@@ -316,6 +321,52 @@ public final class AzureBlobStoreDriver extends AbstractBlobStoreDriver {
         return new PutResult(target, new ETag(to.getProperties().getETag()));
     }
 
+    /** Shared-key accounts sign locally; Entra ID identities need a user delegation key. */
+    private String sas(BlobClient blob, BlobSasPermission permission, OffsetDateTime expiry) {
+        var values = new BlobServiceSasSignatureValues(expiry, permission);
+        return sharedKey
+                ? blob.generateSas(values)
+                : blob.generateUserDelegationSas(values, service.getUserDelegationKey(OffsetDateTime.now(), expiry));
+    }
+
+    /** No request: the upload exists only as staged blocks until it is committed. */
+    @Override
+    public PresignedUpload startPresignedUpload(BlobKey key, PutOptions options) {
+        return new PresignedUpload(key, AzurePresignedUpload.start(options).encode());
+    }
+
+    /** A Put Block URL: the blob's SAS plus the block id this part is staged under. */
+    @Override
+    public PresignedUrl presignUploadPart(PresignedUpload upload, int partNumber, Duration expiry) {
+        String blockId = AzurePresignedUpload.decode(upload.uploadId()).blockId(partNumber);
+        BlobClient blob = blob(upload.key());
+        OffsetDateTime expiresAt = OffsetDateTime.now().plus(expiry);
+        String sas = sas(blob, new BlobSasPermission().setWritePermission(true), expiresAt);
+        URI uri = URI.create(blob.getBlobUrl() + "?" + sas + "&comp=block&blockid="
+                + URLEncoder.encode(blockId, StandardCharsets.UTF_8));
+        return new PresignedUrl(PresignRequest.Method.PUT, uri, expiresAt.toInstant(), Map.of());
+    }
+
+    @Override
+    public PutResult completePresignedUpload(PresignedUpload upload, List<UploadedPart> parts) {
+        AzurePresignedUpload state = AzurePresignedUpload.decode(upload.uploadId());
+        var commit = new BlockBlobCommitBlockListOptions(
+                parts.stream().map(part -> state.blockId(part.partNumber())).toList())
+                .setHeaders(httpHeaders(state.headers()));
+        state.tier().ifPresent(tier -> commit.setTier(AzureTiers.toNative(tier)));
+        if (!state.metadata().isEmpty()) {
+            commit.setMetadata(state.metadata());
+        }
+        var response = blob(upload.key()).getBlockBlobClient().commitBlockListWithResponse(commit, null, Context.NONE);
+        return new PutResult(upload.key(), new ETag(response.getValue().getETag()));
+    }
+
+    /** Uncommitted blocks never affect the blob and are discarded by the service (after a week). */
+    @Override
+    public void abortPresignedUpload(PresignedUpload upload) {
+        AzurePresignedUpload.decode(upload.uploadId());
+    }
+
     @Override
     public PresignedUrl presign(BlobKey key, PresignRequest request) {
         BlobClient blob = blob(key);
@@ -324,11 +375,7 @@ public final class AzureBlobStoreDriver extends AbstractBlobStoreDriver {
             case GET -> new BlobSasPermission().setReadPermission(true);
             case PUT -> new BlobSasPermission().setCreatePermission(true).setWritePermission(true);
         };
-        var values = new BlobServiceSasSignatureValues(expiry, permission);
-        // Shared-key accounts sign locally; Entra ID identities need a user delegation key.
-        String sas = sharedKey
-                ? blob.generateSas(values)
-                : blob.generateUserDelegationSas(values, service.getUserDelegationKey(OffsetDateTime.now(), expiry));
+        String sas = sas(blob, permission, expiry);
         // Put Blob requires the blob type header; the content type is applied from the upload request.
         Map<String, String> headers = new LinkedHashMap<>();
         if (request.method() == PresignRequest.Method.PUT) {

@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInfo;
 import org.junit.jupiter.api.io.TempDir;
 import org.kamranzafar.cirrus.capability.Capability;
+import org.kamranzafar.cirrus.error.InvalidArgumentException;
 import org.kamranzafar.cirrus.error.NotFoundException;
 import org.kamranzafar.cirrus.error.PreconditionFailedException;
 import org.kamranzafar.cirrus.error.UnsupportedFeatureException;
@@ -24,11 +25,14 @@ import org.kamranzafar.cirrus.storage.GetOptions;
 import org.kamranzafar.cirrus.storage.ListOptions;
 import org.kamranzafar.cirrus.storage.MetadataUpdate;
 import org.kamranzafar.cirrus.storage.PresignRequest;
+import org.kamranzafar.cirrus.storage.PresignedUpload;
+import org.kamranzafar.cirrus.storage.PresignedUploads;
 import org.kamranzafar.cirrus.storage.PresignedUrl;
 import org.kamranzafar.cirrus.storage.PutOptions;
 import org.kamranzafar.cirrus.storage.PutResult;
 import org.kamranzafar.cirrus.storage.StorageCapability;
 import org.kamranzafar.cirrus.storage.StorageTier;
+import org.kamranzafar.cirrus.storage.UploadedPart;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -986,6 +990,56 @@ public abstract class BlobStoreConformanceTest {
         assertThat(url.method()).isEqualTo(PresignRequest.Method.GET);
         assertThat(response.statusCode()).isEqualTo(200);
         assertThat(response.body()).isEqualTo("shared via url");
+    }
+
+    @Test
+    void presignedMultipartUploadAssemblesPartsInOrder() throws Exception {
+        assumeCapability(StorageCapability.PRESIGNED_MULTIPART);
+        BlobKey key = key("presigned-multipart.bin");
+        int partSize = PresignedUploads.MIN_PART_SIZE;
+        byte[] content = randomBytes(2 * partSize + 1234);
+        PresignedUpload upload = blobStore().startPresignedUpload(key,
+                PutOptions.builder().contentType("application/x-test").metadata("origin", "browser").build());
+
+        // Parts may arrive in any order, as they do from a browser uploading several at once.
+        List<UploadedPart> parts = new ArrayList<>();
+        for (int part : new int[] {3, 1, 2}) {
+            int from = (part - 1) * partSize;
+            int length = Math.min(partSize, content.length - from);
+            PresignedUrl url = blobStore().presignUploadPart(upload, part, Duration.ofMinutes(10));
+            HttpResponse<String> response = PresignedRequests.send(url,
+                    HttpRequest.BodyPublishers.ofByteArray(content, from, length));
+            assertThat(response.statusCode()).as(response.body()).isBetween(200, 299);
+            parts.add(new UploadedPart(part, response.headers().firstValue("ETag").orElse(null)));
+        }
+        assertThat(blobStore().exists(key)).isFalse(); // nothing visible until completed
+
+        PutResult result = blobStore().completePresignedUpload(upload, parts);
+
+        BlobMetadata metadata = blobStore().head(key).orElseThrow();
+        assertThat(metadata.etag()).isEqualTo(result.etag());
+        assertThat(metadata.size()).isEqualTo(content.length);
+        assertThat(metadata.contentType()).hasValue("application/x-test");
+        assertThat(metadata.userMetadata()).containsEntry("origin", "browser");
+        assertThat(blobStore().getBytes(key)).isEqualTo(content);
+    }
+
+    @Test
+    void abortedPresignedUploadCreatesNoBlob() throws Exception {
+        assumeCapability(StorageCapability.PRESIGNED_MULTIPART);
+        BlobKey key = key("presigned-aborted.bin");
+        PresignedUpload upload = blobStore().startPresignedUpload(key, PutOptions.defaults());
+        HttpResponse<String> response = PresignedRequests.send(
+                blobStore().presignUploadPart(upload, 1, Duration.ofMinutes(10)),
+                HttpRequest.BodyPublishers.ofString("part one"));
+        assertThat(response.statusCode()).as(response.body()).isBetween(200, 299);
+
+        blobStore().abortPresignedUpload(upload);
+        blobStore().abortPresignedUpload(upload); // idempotent
+
+        assertThat(blobStore().exists(key)).isFalse();
+        assertThatThrownBy(() -> blobStore().startPresignedUpload(key, PutOptions.builder().ifNotExists().build()))
+                .isInstanceOf(InvalidArgumentException.class);
     }
 
     @Test

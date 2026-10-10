@@ -28,7 +28,7 @@ public final class GcpErrors {
         if (error instanceof BaseServiceException e) {
             String reason = e.getReason();
             String message = e.getMessage();
-            CloudException mapped = switch (e.getCode()) {
+            CloudException mapped = switch (statusOf(e)) {
                 case 404 -> new NotFoundException(message, e, provider, reason);
                 case 412 -> new PreconditionFailedException(message, e, provider, reason);
                 case 409 -> new AlreadyExistsException(message, e, provider, reason);
@@ -38,7 +38,7 @@ public final class GcpErrors {
                 case 501 -> new UnsupportedFeatureException(message, e, provider, reason);
                 // Code 0 means the request never got an HTTP response (network failure).
                 case 0 -> new UnavailableException(message, e, provider, reason);
-                default -> e.getCode() >= 500 ? new UnavailableException(message, e, provider, reason) : null;
+                default -> statusOf(e) >= 500 ? new UnavailableException(message, e, provider, reason) : null;
             };
             return Optional.ofNullable(mapped);
         }
@@ -61,6 +61,22 @@ public final class GcpErrors {
             return Optional.of(new UnavailableException(error.getMessage(), error, provider, null));
         }
         return Optional.empty();
+    }
+
+    /**
+     * Some clients (the XML multipart client) report HTTP errors with code 0, which otherwise means "no
+     * response"; the real status is on the underlying HttpResponseException.
+     */
+    private static int statusOf(BaseServiceException e) {
+        if (e.getCode() != 0) {
+            return e.getCode();
+        }
+        for (Throwable t = e.getCause(); t != null; t = t.getCause()) {
+            if (t instanceof HttpResponseException http) {
+                return http.getStatusCode();
+            }
+        }
+        return 0;
     }
 
     /** The HTTP clients keep the response headers on the underlying HttpResponseException. */

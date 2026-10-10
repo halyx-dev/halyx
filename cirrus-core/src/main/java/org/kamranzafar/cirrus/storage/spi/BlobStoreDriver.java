@@ -20,11 +20,14 @@ import org.kamranzafar.cirrus.storage.ETag;
 import org.kamranzafar.cirrus.storage.GetOptions;
 import org.kamranzafar.cirrus.storage.ListOptions;
 import org.kamranzafar.cirrus.storage.PresignRequest;
+import org.kamranzafar.cirrus.storage.PresignedUpload;
 import org.kamranzafar.cirrus.storage.PresignedUrl;
 import org.kamranzafar.cirrus.storage.PutOptions;
 import org.kamranzafar.cirrus.storage.PutResult;
+import org.kamranzafar.cirrus.storage.UploadedPart;
 
 import java.io.InputStream;
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -78,6 +81,24 @@ public interface BlobStoreDriver {
     /** Largest batch {@link #deleteBatch} accepts; only used with {@link StorageCapability#BATCH_DELETE}. */
     default int maxBatchSize() {
         return 1;
+    }
+
+    /** See {@link org.kamranzafar.cirrus.storage.BlobStore#startPresignedUpload}; core has validated the options. */
+    default PresignedUpload startPresignedUpload(BlobKey key, PutOptions options) {
+        throw new UnsupportedFeatureException("Presigned multipart upload is not supported");
+    }
+
+    default PresignedUrl presignUploadPart(PresignedUpload upload, int partNumber, Duration expiry) {
+        throw new UnsupportedFeatureException("Presigned multipart upload is not supported");
+    }
+
+    /** {@code parts} is non-empty, sorted by part number, without duplicates. */
+    default PutResult completePresignedUpload(PresignedUpload upload, List<UploadedPart> parts) {
+        throw new UnsupportedFeatureException("Presigned multipart upload is not supported");
+    }
+
+    default void abortPresignedUpload(PresignedUpload upload) {
+        throw new UnsupportedFeatureException("Presigned multipart upload is not supported");
     }
 
     /** Deletes up to {@link #maxBatchSize()} keys in one request. */

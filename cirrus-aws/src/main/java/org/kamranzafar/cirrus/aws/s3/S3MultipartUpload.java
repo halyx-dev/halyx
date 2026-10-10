@@ -35,6 +35,16 @@ final class S3MultipartUpload implements MultipartUploadSession {
         this.bucket = bucket;
         this.key = key;
         this.options = options;
+        var request = createRequest(bucket, key, options);
+        if (options.validateChecksum()) {
+            // A full-object CRC32C (not a checksum of part checksums), so it can be validated end to end.
+            request.checksumAlgorithm(ChecksumAlgorithm.CRC32_C).checksumType(ChecksumType.FULL_OBJECT);
+        }
+        this.uploadId = s3.createMultipartUpload(request.build()).uploadId();
+    }
+
+    /** CreateMultipartUpload carrying the blob's headers, metadata and storage class. */
+    static CreateMultipartUploadRequest.Builder createRequest(String bucket, BlobKey key, PutOptions options) {
         var request = CreateMultipartUploadRequest.builder().bucket(bucket).key(key.value());
         var headers = options.headers();
         headers.contentType().ifPresent(request::contentType);
@@ -46,11 +56,7 @@ final class S3MultipartUpload implements MultipartUploadSession {
             request.metadata(options.metadata());
         }
         options.tier().ifPresent(tier -> request.storageClass(S3Tiers.toNative(tier)));
-        if (options.validateChecksum()) {
-            // A full-object CRC32C (not a checksum of part checksums), so it can be validated end to end.
-            request.checksumAlgorithm(ChecksumAlgorithm.CRC32_C).checksumType(ChecksumType.FULL_OBJECT);
-        }
-        this.uploadId = s3.createMultipartUpload(request.build()).uploadId();
+        return request;
     }
 
     @Override

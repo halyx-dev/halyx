@@ -5,6 +5,9 @@ import com.google.cloud.ReadChannel;
 import com.google.cloud.storage.BlobId;
 import com.google.cloud.storage.BlobInfo;
 import com.google.cloud.storage.HttpMethod;
+import com.google.cloud.storage.HttpStorageOptions;
+import com.google.cloud.storage.MultipartUploadClient;
+import com.google.cloud.storage.MultipartUploadSettings;
 import com.google.cloud.storage.Storage;
 import com.google.cloud.storage.Storage.BlobListOption;
 import com.google.cloud.storage.Storage.BlobSourceOption;
@@ -15,8 +18,14 @@ import com.google.cloud.storage.StorageException;
 import com.google.cloud.storage.Storage.BlobWriteOption;
 import com.google.cloud.storage.Storage.CopyRequest;
 import com.google.cloud.storage.Storage.SignUrlOption;
+import com.google.cloud.storage.multipartupload.model.AbortMultipartUploadRequest;
+import com.google.cloud.storage.multipartupload.model.CompleteMultipartUploadRequest;
+import com.google.cloud.storage.multipartupload.model.CompletedMultipartUpload;
+import com.google.cloud.storage.multipartupload.model.CompletedPart;
+import com.google.cloud.storage.multipartupload.model.CreateMultipartUploadRequest;
 import org.kamranzafar.cirrus.capability.Capabilities;
 import org.kamranzafar.cirrus.error.CloudException;
+import org.kamranzafar.cirrus.error.InvalidArgumentException;
 import org.kamranzafar.cirrus.error.NotFoundException;
 import org.kamranzafar.cirrus.error.PreconditionFailedException;
 import org.kamranzafar.cirrus.gcp.GcpErrors;
@@ -37,11 +46,13 @@ import org.kamranzafar.cirrus.storage.GetOptions;
 import org.kamranzafar.cirrus.storage.ListOptions;
 import org.kamranzafar.cirrus.storage.MetadataUpdate;
 import org.kamranzafar.cirrus.storage.PresignRequest;
+import org.kamranzafar.cirrus.storage.PresignedUpload;
 import org.kamranzafar.cirrus.storage.PresignedUrl;
 import org.kamranzafar.cirrus.storage.PutOptions;
 import org.kamranzafar.cirrus.storage.PutResult;
 import org.kamranzafar.cirrus.storage.StorageCapability;
 import org.kamranzafar.cirrus.storage.StorageTier;
+import org.kamranzafar.cirrus.storage.UploadedPart;
 import org.kamranzafar.cirrus.storage.spi.AbstractBlobStoreDriver;
 import org.kamranzafar.cirrus.storage.spi.MultipartUploadSession;
 
@@ -50,6 +61,7 @@ import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.net.URISyntaxException;
 import java.nio.channels.Channels;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.EnumSet;
@@ -75,6 +87,8 @@ public final class GcsBlobStoreDriver extends AbstractBlobStoreDriver {
 
     private final Storage storage;
     private final boolean customEndpoint;
+    /** The XML API's S3-style multipart uploads, which (unlike resumable uploads) take parts in any order. */
+    private volatile MultipartUploadClient multipart;
 
     /** GCS JSON batch requests carry at most 100 calls. */
     private static final int MAX_BATCH = 100;
@@ -337,6 +351,90 @@ public final class GcsBlobStoreDriver extends AbstractBlobStoreDriver {
     }
 
     @Override
+    public PresignedUpload startPresignedUpload(BlobKey key, PutOptions options) {
+        var request = CreateMultipartUploadRequest.builder().bucket(bucket).key(key.value());
+        var headers = options.headers();
+        headers.contentType().ifPresent(request::contentType);
+        headers.contentEncoding().ifPresent(request::contentEncoding);
+        headers.contentDisposition().ifPresent(request::contentDisposition);
+        headers.contentLanguage().ifPresent(request::contentLanguage);
+        headers.cacheControl().ifPresent(request::cacheControl);
+        if (!options.metadata().isEmpty()) {
+            request.metadata(options.metadata());
+        }
+        options.tier().ifPresent(tier -> request.storageClass(GcsTiers.toNative(tier)));
+        return new PresignedUpload(key, multipart().createMultipartUpload(request.build()).uploadId());
+    }
+
+    /** A V4-signed XML API UploadPart URL. */
+    @Override
+    public PresignedUrl presignUploadPart(PresignedUpload upload, int partNumber, Duration expiry) {
+        List<SignUrlOption> options = new ArrayList<>(List.of(SignUrlOption.httpMethod(HttpMethod.PUT),
+                SignUrlOption.withV4Signature(),
+                SignUrlOption.withQueryParams(Map.of("partNumber", String.valueOf(partNumber),
+                        "uploadId", upload.uploadId()))));
+        if (customEndpoint) {
+            options.add(SignUrlOption.withHostName(storage.getOptions().getHost()));
+        }
+        Instant expiresAt = Instant.now().plus(expiry);
+        var url = storage.signUrl(BlobInfo.newBuilder(bucket, upload.key().value()).build(), expiry.toSeconds(),
+                TimeUnit.SECONDS, options.toArray(SignUrlOption[]::new));
+        try {
+            return new PresignedUrl(PresignRequest.Method.PUT, url.toURI(), expiresAt, Map.of());
+        } catch (URISyntaxException e) {
+            throw new IllegalStateException("GCS returned an invalid signed URL: " + url, e);
+        }
+    }
+
+    @Override
+    public PutResult completePresignedUpload(PresignedUpload upload, List<UploadedPart> parts) {
+        List<CompletedPart> completed = new ArrayList<>(parts.size());
+        for (UploadedPart part : parts) {
+            if (part.etag() == null) {
+                throw new InvalidArgumentException("GCS needs the ETag of every part; part " + part.partNumber()
+                        + " has none (expose the ETag header in the bucket's CORS configuration)", null, provider, null);
+            }
+            completed.add(CompletedPart.builder().partNumber(part.partNumber()).eTag(part.etag()).build());
+        }
+        multipart().completeMultipartUpload(CompleteMultipartUploadRequest.builder()
+                .bucket(bucket).key(upload.key().value()).uploadId(upload.uploadId())
+                .multipartUpload(CompletedMultipartUpload.builder().parts(completed).build())
+                .build());
+        // Cirrus ETags on GCS are generations, which the XML API response doesn't carry.
+        com.google.cloud.storage.Blob written = storage.get(BlobId.of(bucket, upload.key().value()));
+        if (written == null) {
+            throw new NotFoundException("Blob vanished after completing upload: " + upload.key(), null, provider, null);
+        }
+        return new PutResult(upload.key(), etagOf(written), checksumsOf(written));
+    }
+
+    @Override
+    public void abortPresignedUpload(PresignedUpload upload) {
+        try {
+            multipart().abortMultipartUpload(AbortMultipartUploadRequest.builder()
+                    .bucket(bucket).key(upload.key().value()).uploadId(upload.uploadId()).build());
+        } catch (RuntimeException e) {
+            if (!(translate(e) instanceof NotFoundException)) { // already completed or aborted
+                throw e;
+            }
+        }
+    }
+
+    private MultipartUploadClient multipart() {
+        MultipartUploadClient client = multipart;
+        if (client == null) {
+            synchronized (this) {
+                if (multipart == null) {
+                    multipart = MultipartUploadClient.create(
+                            MultipartUploadSettings.of((HttpStorageOptions) storage.getOptions()));
+                }
+                client = multipart;
+            }
+        }
+        return client;
+    }
+
+    @Override
     public PresignedUrl presign(BlobKey key, PresignRequest request) {
         var method = switch (request.method()) {
             case GET -> HttpMethod.GET;
@@ -383,6 +481,7 @@ public final class GcsBlobStoreDriver extends AbstractBlobStoreDriver {
         Set<StorageCapability> supported = EnumSet.allOf(StorageCapability.class);
         if (!(storage.getOptions().getCredentials() instanceof ServiceAccountSigner)) {
             supported.remove(StorageCapability.PRESIGNED_URL);
+            supported.remove(StorageCapability.PRESIGNED_MULTIPART);
         }
         return Capabilities.of(supported.toArray(StorageCapability[]::new));
     }

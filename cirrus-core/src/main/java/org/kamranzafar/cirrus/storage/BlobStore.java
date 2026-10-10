@@ -5,6 +5,7 @@ import org.kamranzafar.cirrus.capability.Capabilities;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.Spliterator;
 import java.util.Spliterators;
@@ -153,6 +154,31 @@ public interface BlobStore {
      * }</pre>
      */
     PresignedUrl presign(BlobKey key, PresignRequest request);
+
+    /**
+     * Starts a multipart upload that a client, such as a browser, sends straight to storage: the service
+     * hands out one presigned URL per part and never touches the bytes.
+     *
+     * <pre>{@code
+     * PresignedUpload upload = store.startPresignedUpload(key, PutOptions.builder().contentType("video/mp4").build());
+     * PresignedUrl part1 = store.presignUploadPart(upload, 1, Duration.ofMinutes(30));
+     * // the client PUTs each part (at least 5 MiB, except the last) and reports back each response's ETag
+     * store.completePresignedUpload(upload, List.of(new UploadedPart(1, etag1), new UploadedPart(2, etag2)));
+     * }</pre>
+     *
+     * Headers, metadata and tier from {@code options} apply to the finished blob. Conditional writes and
+     * checksum validation are not available, since the bytes never pass through Cirrus.
+     */
+    PresignedUpload startPresignedUpload(BlobKey key, PutOptions options);
+
+    /** A URL the client PUTs part {@code partNumber} (1 to {@value PresignedUploads#MAX_PARTS}) to. */
+    PresignedUrl presignUploadPart(PresignedUpload upload, int partNumber, Duration expiry);
+
+    /** Assembles the uploaded parts, in part-number order, into the blob. */
+    PutResult completePresignedUpload(PresignedUpload upload, List<UploadedPart> parts);
+
+    /** Discards the upload and any parts already sent. Idempotent. */
+    void abortPresignedUpload(PresignedUpload upload);
 
     /** A URL to download the blob. */
     default PresignedUrl presignDownload(BlobKey key, Duration expiry) {

@@ -21,5 +21,7 @@ public enum StorageCapability implements Capability {
     /** Native batch deletes. Without it, {@code deleteAll} deletes keys one at a time. */
     BATCH_DELETE,
     /** {@link PutOptions#tier()} and {@code setTier}. */
-    STORAGE_TIERS
+    STORAGE_TIERS,
+    /** Multipart uploads sent by clients through presigned part URLs ({@code startPresignedUpload}). */
+    PRESIGNED_MULTIPART
 }

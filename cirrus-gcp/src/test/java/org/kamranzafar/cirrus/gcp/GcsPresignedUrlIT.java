@@ -1,5 +1,8 @@
 package org.kamranzafar.cirrus.gcp;
 
+import com.google.auth.ServiceAccountSigner;
+import com.google.auth.oauth2.AccessToken;
+import com.google.auth.oauth2.GoogleCredentials;
 import com.google.auth.oauth2.ServiceAccountCredentials;
 import com.google.cloud.storage.BucketInfo;
 import com.google.cloud.storage.Storage;
@@ -16,8 +19,13 @@ import org.kamranzafar.cirrus.storage.BlobContent;
 import org.kamranzafar.cirrus.storage.BlobKey;
 import org.kamranzafar.cirrus.storage.BlobStore;
 import org.kamranzafar.cirrus.storage.DefaultBlobStore;
+import org.kamranzafar.cirrus.storage.PresignedUpload;
+import org.kamranzafar.cirrus.storage.PresignedUploads;
 import org.kamranzafar.cirrus.storage.PresignedUrl;
+import org.kamranzafar.cirrus.storage.PutOptions;
+import org.kamranzafar.cirrus.storage.PutResult;
 import org.kamranzafar.cirrus.storage.StorageCapability;
+import org.kamranzafar.cirrus.storage.UploadedPart;
 import org.kamranzafar.cirrus.tck.PresignedRequests;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
@@ -30,6 +38,11 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.security.KeyPairGenerator;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
+import java.util.Random;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -78,7 +91,7 @@ class GcsPresignedUrlIT {
         Storage signingClient = StorageOptions.http()
                 .setHost(endpoint.toString())
                 .setProjectId(PROJECT)
-                .setCredentials(signer)
+                .setCredentials(new OfflineSigner(signer))
                 .build()
                 .getService();
         signingStore = new DefaultBlobStore(GcpProvider.ID, BUCKET,
@@ -136,5 +149,74 @@ class GcsPresignedUrlIT {
         assertThat(url.headers()).containsEntry("Content-Type", "application/json");
         assertThat(response.statusCode()).as(response.body()).isBetween(200, 299);
         assertThat(store.head(key)).get().satisfies(m -> assertThat(m.contentType()).hasValue("application/json"));
+    }
+
+    @Test
+    void presignedMultipartUploadAssemblesParts() throws Exception {
+        assertThat(store.capabilities().supports(StorageCapability.PRESIGNED_MULTIPART)).isFalse();
+        BlobKey key = newKey();
+        byte[] content = new byte[PresignedUploads.MIN_PART_SIZE + 4321];
+        new Random(3).nextBytes(content);
+        PresignedUpload upload = signingStore.startPresignedUpload(key,
+                PutOptions.builder().contentType("application/x-test").build());
+
+        List<UploadedPart> parts = new ArrayList<>();
+        for (int part : new int[] {2, 1}) {
+            int from = (part - 1) * PresignedUploads.MIN_PART_SIZE;
+            int length = Math.min(PresignedUploads.MIN_PART_SIZE, content.length - from);
+            PresignedUrl url = signingStore.presignUploadPart(upload, part, Duration.ofMinutes(5));
+            HttpResponse<String> response = PresignedRequests.send(url,
+                    HttpRequest.BodyPublishers.ofByteArray(content, from, length));
+            assertThat(url.uri().getQuery()).contains("uploadId=").contains("partNumber=" + part);
+            assertThat(response.statusCode()).as(response.body()).isBetween(200, 299);
+            parts.add(new UploadedPart(part, response.headers().firstValue("ETag").orElse(null)));
+        }
+
+        PutResult result = signingStore.completePresignedUpload(upload, parts);
+
+        assertThat(store.head(key)).get().satisfies(m -> {
+            assertThat(m.etag()).isEqualTo(result.etag());
+            assertThat(m.contentType()).hasValue("application/x-test");
+        });
+        assertThat(store.getBytes(key)).isEqualTo(content);
+    }
+
+    @Test
+    void abortedPresignedUploadCreatesNoBlob() {
+        BlobKey key = newKey();
+        PresignedUpload upload = signingStore.startPresignedUpload(key, PutOptions.defaults());
+
+        signingStore.abortPresignedUpload(upload);
+        signingStore.abortPresignedUpload(upload);
+
+        assertThat(store.exists(key)).isFalse();
+    }
+
+    /**
+     * Signs URLs with the throwaway key, but never asks Google for an access token: the emulator accepts
+     * any bearer token, and API calls (starting a multipart upload) would otherwise try a real token exchange.
+     */
+    private static final class OfflineSigner extends GoogleCredentials implements ServiceAccountSigner {
+
+        private final ServiceAccountCredentials key;
+
+        OfflineSigner(ServiceAccountCredentials key) {
+            this.key = key;
+        }
+
+        @Override
+        public AccessToken refreshAccessToken() {
+            return new AccessToken("floci", Date.from(Instant.now().plus(Duration.ofHours(1))));
+        }
+
+        @Override
+        public String getAccount() {
+            return key.getAccount();
+        }
+
+        @Override
+        public byte[] sign(byte[] toSign) {
+            return key.sign(toSign);
+        }
     }
 }

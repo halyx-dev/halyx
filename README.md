@@ -21,6 +21,39 @@ try (Cirrus cirrus = Cirrus.builder()
 }
 ```
 
+### Presigned multipart uploads
+
+For files too big for one presigned PUT (5 GiB on S3), or to let a browser upload parts in parallel
+and resume after a failure, hand out one URL per part. The bytes never pass through your service:
+
+```java
+// Server: start the upload and presign the parts
+PresignedUpload upload = store.startPresignedUpload(key, PutOptions.builder().contentType("video/mp4").build());
+List<PresignedUrl> urls = IntStream.rangeClosed(1, partCount)
+        .mapToObj(n -> store.presignUploadPart(upload, n, Duration.ofHours(1)))
+        .toList();
+
+// Client: PUT each part (at least 5 MiB, except the last) and report back each response's ETag
+
+// Server: assemble the parts into the blob, or abort
+store.completePresignedUpload(upload, List.of(new UploadedPart(1, etag1), new UploadedPart(2, etag2)));
+store.abortPresignedUpload(upload);
+```
+
+| Provider | Upload | Part URL | Complete |
+|---|---|---|---|
+| AWS | S3 multipart upload | presigned UploadPart | CompleteMultipartUpload (needs part ETags) |
+| Azure | none: blocks are staged against the blob | SAS URL for Put Block | Put Block List (ETags not needed) |
+| GCP | XML API multipart upload | V4-signed UploadPart | CompleteMultipartUpload (needs part ETags) |
+
+Browsers can only read the `ETag` response header if the bucket's CORS rules expose it (S3
+`ExposeHeaders: ETag`, GCS `responseHeader: ["ETag"]`). Headers, metadata and tier from the options
+apply to the finished blob. Conditional writes and checksum validation are rejected, because Cirrus
+never sees the bytes. The `uploadId` is opaque: on Azure it encodes the blob's headers and metadata,
+so keep it server-side or treat it as untrusted input. Abandoned uploads cost storage until cleaned
+up: add a lifecycle rule that aborts incomplete multipart uploads on S3 and GCS. Azure discards
+uncommitted blocks after a week. On GCS, as with presigned URLs, the credentials must be able to sign.
+
 ### Large and streamed uploads
 
 `write` streams a blob of any size in parts (8 MiB by default, configurable with
