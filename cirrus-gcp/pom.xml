@@ -38,6 +38,11 @@
             <groupId>com.google.cloud</groupId>
             <artifactId>google-cloud-secretmanager</artifactId>
         </dependency>
+        <!-- NoSQL -->
+        <dependency>
+            <groupId>com.google.cloud</groupId>
+            <artifactId>google-cloud-firestore</artifactId>
+        </dependency>
         <!-- Messaging -->
         <dependency>
             <groupId>com.google.cloud</groupId>

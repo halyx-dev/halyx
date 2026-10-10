@@ -6,6 +6,8 @@ import com.google.api.gax.rpc.ClientSettings;
 import com.google.api.gax.rpc.FixedTransportChannelProvider;
 import com.google.cloud.NoCredentials;
 import com.google.cloud.ServiceOptions;
+import com.google.cloud.firestore.Firestore;
+import com.google.cloud.firestore.FirestoreOptions;
 import com.google.cloud.parametermanager.v1.ParameterManagerClient;
 import com.google.cloud.parametermanager.v1.ParameterManagerSettings;
 import com.google.cloud.secretmanager.v1.SecretManagerServiceClient;
@@ -25,12 +27,15 @@ import org.kamranzafar.cirrus.config.ProviderConfig;
 import org.kamranzafar.cirrus.error.UnsupportedFeatureException;
 import org.kamranzafar.cirrus.jdbc.JdbcDatabases;
 import org.kamranzafar.cirrus.messaging.SubscriptionConfig;
+import org.kamranzafar.cirrus.nosql.TableConfig;
+import org.kamranzafar.cirrus.nosql.spi.DocumentStoreDriver;
 import org.kamranzafar.cirrus.messaging.TopicConfig;
 import org.kamranzafar.cirrus.messaging.spi.PublisherDriver;
 import org.kamranzafar.cirrus.messaging.spi.SubscriptionDriver;
 import org.kamranzafar.cirrus.cache.CacheAuth;
 import org.kamranzafar.cirrus.cache.CacheConfig;
 import org.kamranzafar.cirrus.cache.spi.CacheDriver;
+import org.kamranzafar.cirrus.gcp.firestore.FirestoreDocumentStoreDriver;
 import org.kamranzafar.cirrus.gcp.memorystore.MemorystoreIamTokens;
 import org.kamranzafar.cirrus.gcp.parameters.ParameterManagerDriver;
 import org.kamranzafar.cirrus.gcp.pubsub.PubSubPublisherDriver;
@@ -67,6 +72,7 @@ final class GcpConnection implements ProviderConnection {
     private Storage storage;
     private JdbcDatabases databases;
     private TopicAdminClient topicAdmin;
+    private Firestore firestore;
     private SubscriptionAdminClient subscriptionAdmin;
     private RedisCaches caches;
     private SecretManagerServiceClient secretManager;
@@ -158,6 +164,24 @@ final class GcpConnection implements ProviderConnection {
     }
 
     /** With an endpoint override (an emulator), Secret Manager is reached over plaintext gRPC on the same host and port. */
+    /** A Firestore collection; with an endpoint override, the Firestore emulator at that host and port. */
+    @Override
+    public synchronized DocumentStoreDriver documentStore(TableConfig table) {
+        if (firestore == null) {
+            var options = FirestoreOptions.newBuilder();
+            config.property(GcpProperties.PROJECT_ID).ifPresent(options::setProjectId);
+            config.property(GcpProperties.FIRESTORE_DATABASE).ifPresent(options::setDatabaseId);
+            if (config.endpoint().isPresent()) {
+                var endpoint = config.endpoint().get();
+                options.setEmulatorHost(endpoint.getHost() + ":" + endpoint.getPort());
+            } else if (config.credentials() instanceof Credentials.Anonymous) {
+                options.setCredentials(NoCredentials.getInstance());
+            }
+            firestore = options.build().getService();
+        }
+        return new FirestoreDocumentStoreDriver(firestore, table);
+    }
+
     /** A Pub/Sub topic: a topic id in the configured project, or {@code projects/<p>/topics/<id>}. */
     @Override
     public synchronized PublisherDriver publisher(TopicConfig topic) {
@@ -275,6 +299,14 @@ final class GcpConnection implements ProviderConnection {
         if (databases != null) {
             databases.close();
             databases = null;
+        }
+        if (firestore != null) {
+            try {
+                firestore.close();
+            } catch (Exception ignored) {
+                // closing anyway
+            }
+            firestore = null;
         }
         if (topicAdmin != null) {
             topicAdmin.close();
