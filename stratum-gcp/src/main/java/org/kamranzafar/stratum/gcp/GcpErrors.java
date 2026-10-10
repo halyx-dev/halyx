@@ -1,5 +1,6 @@
 package org.kamranzafar.stratum.gcp;
 
+import com.google.api.gax.rpc.ApiException;
 import com.google.cloud.BaseServiceException;
 import org.kamranzafar.stratum.error.AccessDeniedException;
 import org.kamranzafar.stratum.error.AlreadyExistsException;
@@ -36,6 +37,21 @@ public final class GcpErrors {
                 // Code 0 means the request never got an HTTP response (network failure).
                 case 0 -> new UnavailableException(message, e, provider, reason);
                 default -> e.getCode() >= 500 ? new UnavailableException(message, e, provider, reason) : null;
+            };
+            return Optional.ofNullable(mapped);
+        }
+        if (error instanceof ApiException e) {
+            String reason = e.getStatusCode().getCode().name();
+            String message = e.getMessage();
+            CloudException mapped = switch (e.getStatusCode().getCode()) {
+                case NOT_FOUND -> new NotFoundException(message, e, provider, reason);
+                case ALREADY_EXISTS -> new AlreadyExistsException(message, e, provider, reason);
+                case PERMISSION_DENIED, UNAUTHENTICATED -> new AccessDeniedException(message, e, provider, reason);
+                case INVALID_ARGUMENT, FAILED_PRECONDITION, OUT_OF_RANGE -> new InvalidArgumentException(message, e, provider, reason);
+                case RESOURCE_EXHAUSTED -> new ThrottledException(message, e, provider, reason);
+                case UNAVAILABLE, DEADLINE_EXCEEDED, INTERNAL, ABORTED -> new UnavailableException(message, e, provider, reason);
+                case UNIMPLEMENTED -> new UnsupportedFeatureException(message, e, provider, reason);
+                default -> null;
             };
             return Optional.ofNullable(mapped);
         }

@@ -49,6 +49,11 @@
             </dependency>
             <dependency>
                 <groupId>org.kamranzafar</groupId>
+                <artifactId>stratum-vault</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.kamranzafar</groupId>
                 <artifactId>stratum-spring-boot-autoconfigure</artifactId>
                 <version>${project.version}</version>
             </dependency>

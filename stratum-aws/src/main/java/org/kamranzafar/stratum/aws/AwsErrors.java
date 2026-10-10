@@ -22,6 +22,10 @@ public final class AwsErrors {
     private static final Set<String> THROTTLING_CODES =
             Set.of("SlowDown", "Throttling", "ThrottlingException", "RequestLimitExceeded", "TooManyRequestsException");
 
+    /** Services that report a missing resource with 400 and a specific code. */
+    private static final Set<String> NOT_FOUND_CODES =
+            Set.of("ParameterNotFound", "ParameterVersionNotFound", "ResourceNotFoundException");
+
     private AwsErrors() {
     }
 
@@ -48,6 +52,9 @@ public final class AwsErrors {
             int status = e.statusCode();
             if (status == 429 || (code != null && THROTTLING_CODES.contains(code)) || e.isThrottlingException()) {
                 return Optional.of(new ThrottledException(message, e, provider, code));
+            }
+            if (code != null && NOT_FOUND_CODES.contains(code)) {
+                return Optional.of(new NotFoundException(message, e, provider, code));
             }
             if ("InvalidObjectState".equals(code)) {
                 return Optional.of(new InvalidArgumentException(

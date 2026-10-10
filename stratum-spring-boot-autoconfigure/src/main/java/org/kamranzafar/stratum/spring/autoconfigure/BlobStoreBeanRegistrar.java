@@ -1,6 +1,7 @@
 package org.kamranzafar.stratum.spring.autoconfigure;
 
 import org.kamranzafar.stratum.cache.Cache;
+import org.kamranzafar.stratum.parameters.ParameterStore;
 import org.kamranzafar.stratum.storage.BlobStore;
 import org.springframework.beans.factory.support.BeanDefinitionRegistry;
 import org.springframework.beans.factory.support.RootBeanDefinition;
@@ -54,6 +55,19 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
             definition.setDescription("Stratum cache " + provider + " " + cache.endpoint());
             registry.registerBeanDefinition(name, definition);
         });
+        binder.bind("stratum.parameter-stores", Bindable.mapOf(String.class, StratumProperties.ParameterStoreProperties.class))
+                .orElse(Map.of())
+                .forEach((name, store) -> {
+                    String provider = resolveProvider("stratum.parameter-stores." + name, store.provider(), providers);
+                    RootBeanDefinition definition = new RootBeanDefinition(ParameterStore.class);
+                    definition.setFactoryBeanName(FACTORY_BEAN);
+                    definition.setFactoryMethodName("parameterStore");
+                    definition.getConstructorArgumentValues().addIndexedArgumentValue(0, provider);
+                    definition.getConstructorArgumentValues().addIndexedArgumentValue(1, store.toStoreConfig());
+                    definition.setTargetType(ParameterStore.class);
+                    definition.setDescription("Stratum " + store.kind().name().toLowerCase() + " store " + provider);
+                    registry.registerBeanDefinition(name, definition);
+                });
         stores.forEach((name, store) -> {
             String provider = resolveProvider("stratum.blob-stores." + name, store.provider(), providers);
             String bucket = store.bucket() == null || store.bucket().isBlank() ? name : store.bucket();
@@ -68,7 +82,7 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
         });
     }
 
-    private static String resolveProvider(String property, String provider,
+    static String resolveProvider(String property, String provider,
                                           Map<String, StratumProperties.Provider> providers) {
         if (provider == null) {
             if (providers.size() == 1) {

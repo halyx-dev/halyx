@@ -3,6 +3,8 @@ package org.kamranzafar.stratum.memory;
 import org.kamranzafar.stratum.cache.CacheConfig;
 import org.kamranzafar.stratum.cache.spi.CacheDriver;
 import org.kamranzafar.stratum.config.ProviderConfig;
+import org.kamranzafar.stratum.parameters.ParameterStoreConfig;
+import org.kamranzafar.stratum.parameters.spi.ParameterDriver;
 import org.kamranzafar.stratum.spi.CloudProvider;
 import org.kamranzafar.stratum.spi.ProviderConnection;
 import org.kamranzafar.stratum.storage.spi.BlobStoreDriver;
@@ -37,6 +39,7 @@ public final class InMemoryProvider implements CloudProvider {
                 new ConcurrentHashMap<>();
         /** One store per endpoint, shared by every namespace on it, like a Redis server. */
         private final Map<String, CacheDriver> caches = new ConcurrentHashMap<>();
+        private final Map<String, ParameterDriver> parameters = new ConcurrentHashMap<>();
 
         @Override
         public BlobStoreDriver blobStore(String bucket) {
@@ -50,9 +53,16 @@ public final class InMemoryProvider implements CloudProvider {
         }
 
         @Override
+        public ParameterDriver parameterStore(ParameterStoreConfig config) {
+            return parameters.computeIfAbsent(config.kind() + "|" + config.location().orElse(""),
+                    k -> new InMemoryParameterDriver());
+        }
+
+        @Override
         public void close() {
             buckets.clear();
             caches.clear();
+            parameters.clear();
         }
     }
 }

@@ -1,7 +1,11 @@
 package org.kamranzafar.stratum.aws;
 
 import org.kamranzafar.stratum.aws.elasticache.ElastiCacheIamTokens;
+import org.kamranzafar.stratum.aws.parameters.SecretsManagerDriver;
+import org.kamranzafar.stratum.aws.parameters.SsmParameterDriver;
 import org.kamranzafar.stratum.aws.s3.S3BlobStoreDriver;
+import org.kamranzafar.stratum.parameters.ParameterStoreConfig;
+import org.kamranzafar.stratum.parameters.spi.ParameterDriver;
 import org.kamranzafar.stratum.cache.CacheAuth;
 import org.kamranzafar.stratum.cache.CacheConfig;
 import org.kamranzafar.stratum.cache.spi.CacheDriver;
@@ -18,6 +22,8 @@ import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.regions.providers.DefaultAwsRegionProviderChain;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
+import software.amazon.awssdk.services.ssm.SsmClient;
 import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 
@@ -28,6 +34,8 @@ final class AwsConnection implements ProviderConnection {
     private S3Client s3;
     private S3Presigner presigner;
     private RedisCaches caches;
+    private SsmClient ssm;
+    private SecretsManagerClient secretsManager;
 
     AwsConnection(ProviderConfig config) {
         this.config = config;
@@ -63,6 +71,29 @@ final class AwsConnection implements ProviderConnection {
         return caches.driver(cacheConfig, RedisCaches.credentials(cacheConfig.auth(), iam -> iamTokens(cacheConfig, iam)));
     }
 
+    @Override
+    public synchronized ParameterDriver parameterStore(ParameterStoreConfig storeConfig) {
+        return switch (storeConfig.kind()) {
+            case PARAMETERS -> {
+                if (ssm == null) {
+                    var builder = SsmClient.builder().region(region()).credentialsProvider(credentials());
+                    config.endpoint().ifPresent(builder::endpointOverride);
+                    ssm = builder.build();
+                }
+                yield new SsmParameterDriver(ssm,
+                        Boolean.parseBoolean(storeConfig.property(SsmParameterDriver.SECURE).orElse("false")));
+            }
+            case SECRETS -> {
+                if (secretsManager == null) {
+                    var builder = SecretsManagerClient.builder().region(region()).credentialsProvider(credentials());
+                    config.endpoint().ifPresent(builder::endpointOverride);
+                    secretsManager = builder.build();
+                }
+                yield new SecretsManagerDriver(secretsManager);
+            }
+        };
+    }
+
     private ElastiCacheIamTokens iamTokens(CacheConfig cacheConfig, CacheAuth.Iam iam) {
         String userId = iam.username().orElseThrow(() -> new IllegalArgumentException(
                 "ElastiCache IAM auth needs the ElastiCache user id: CacheAuth.iam(\"<user-id>\")"));
@@ -90,6 +121,14 @@ final class AwsConnection implements ProviderConnection {
         if (caches != null) {
             caches.close();
             caches = null;
+        }
+        if (ssm != null) {
+            ssm.close();
+            ssm = null;
+        }
+        if (secretsManager != null) {
+            secretsManager.close();
+            secretsManager = null;
         }
         if (s3 != null) {
             s3.close();

@@ -20,6 +20,7 @@
         <module>stratum-aws</module>
         <module>stratum-azure</module>
         <module>stratum-gcp</module>
+        <module>stratum-vault</module>
         <module>stratum-spring-boot-autoconfigure</module>
         <module>stratum-spring-boot-starter</module>
         <module>stratum-spring-boot4-tests</module>
@@ -46,6 +47,7 @@
         <!-- Redis/Valkey client: the 6.x line stays on Netty 4.1, like the AWS and Azure SDKs -->
         <lettuce.version>6.8.2.RELEASE</lettuce.version>
         <valkey.image>valkey/valkey:9.1.2-alpine</valkey.image>
+        <vault.image>hashicorp/vault:2.1.2</vault.image>
 
         <!-- Common -->
         <slf4j.version>2.0.20</slf4j.version>
@@ -100,6 +102,11 @@
             <dependency>
                 <groupId>org.kamranzafar</groupId>
                 <artifactId>stratum-spring-boot-autoconfigure</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.kamranzafar</groupId>
+                <artifactId>stratum-vault</artifactId>
                 <version>${project.version}</version>
             </dependency>
 
@@ -190,6 +197,7 @@
                             <floci.azure.image>${floci.azure.image}</floci.azure.image>
                             <floci.gcp.image>${floci.gcp.image}</floci.gcp.image>
                             <valkey.image>${valkey.image}</valkey.image>
+                            <vault.image>${vault.image}</vault.image>
                         </systemPropertyVariables>
                     </configuration>
                     <executions>

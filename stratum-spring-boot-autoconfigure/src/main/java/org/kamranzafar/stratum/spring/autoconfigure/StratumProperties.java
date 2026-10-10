@@ -5,6 +5,8 @@ import org.kamranzafar.stratum.cache.CacheConfig;
 import org.kamranzafar.stratum.config.Credentials;
 import org.kamranzafar.stratum.config.ProviderConfig;
 import org.kamranzafar.stratum.interceptor.RetryPolicy;
+import org.kamranzafar.stratum.parameters.ParameterKind;
+import org.kamranzafar.stratum.parameters.ParameterStoreConfig;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
@@ -40,18 +42,22 @@ import java.util.Map;
  * @param blobStores  {@code BlobStore} beans to create, keyed by bean name
  * @param caches      {@code Cache<String>} beans to create, keyed by bean name
  * @param cacheManager a Spring {@code CacheManager} for {@code @Cacheable}, enabled by setting its endpoint
+ * @param parameterStores {@code ParameterStore} beans to create, keyed by bean name; also the names used by
+ *                    {@code spring.config.import=stratum:<name>}
  * @param retry       provider-neutral retries on top of the SDKs' own
  * @param observations Micrometer observations of every operation
  */
 @ConfigurationProperties("stratum")
 public record StratumProperties(Map<String, Provider> providers, Map<String, BlobStoreProperties> blobStores,
                                 Map<String, CacheProperties> caches, @DefaultValue CacheManagerProperties cacheManager,
+                                Map<String, ParameterStoreProperties> parameterStores,
                                 @DefaultValue Retry retry, @DefaultValue Observations observations) {
 
     public StratumProperties {
         providers = ordered(providers);
         blobStores = ordered(blobStores);
         caches = ordered(caches);
+        parameterStores = ordered(parameterStores);
     }
 
     private static <V> Map<String, V> ordered(Map<String, V> map) {
@@ -76,7 +82,7 @@ public record StratumProperties(Map<String, Provider> providers, Map<String, Blo
             properties = ordered(properties);
         }
 
-        ProviderConfig toProviderConfig(String name) {
+        public ProviderConfig toProviderConfig(String name) {
             if (type == null || type.isBlank()) {
                 throw new IllegalStateException("stratum.providers." + name + ".type is required (aws, azure, gcp or memory)");
             }
@@ -234,6 +240,35 @@ public record StratumProperties(Map<String, Provider> providers, Map<String, Blo
             Duration expiry = ttl.getOrDefault(cacheName, defaultTtl);
             if (expiry != null) {
                 config.defaultTtl(expiry);
+            }
+            properties.forEach(config::property);
+            return config.build();
+        }
+    }
+
+    /**
+     * @param provider   the provider name; may be omitted when exactly one provider is configured
+     * @param kind       {@code parameters} or {@code secrets}
+     * @param location   Key Vault URL or App Configuration endpoint on Azure, KV mount on Vault
+     * @param prefix     name prefix of every value in the store
+     * @param cacheTtl   how long reads are cached in this JVM; none when omitted
+     * @param properties provider-specific settings, such as {@code aws.ssm.secure}
+     */
+    public record ParameterStoreProperties(String provider, @DefaultValue("secrets") ParameterKind kind, String location,
+                                           @DefaultValue("") String prefix, Duration cacheTtl,
+                                           Map<String, String> properties) {
+
+        public ParameterStoreProperties {
+            properties = ordered(properties);
+        }
+
+        public ParameterStoreConfig toStoreConfig() {
+            ParameterStoreConfig.Builder config = ParameterStoreConfig.builder(kind).prefix(prefix);
+            if (location != null) {
+                config.location(location);
+            }
+            if (cacheTtl != null) {
+                config.cacheTtl(cacheTtl);
             }
             properties.forEach(config::property);
             return config.build();

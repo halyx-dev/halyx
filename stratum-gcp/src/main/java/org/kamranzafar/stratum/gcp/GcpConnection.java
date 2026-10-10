@@ -1,6 +1,13 @@
 package org.kamranzafar.stratum.gcp;
 
+import com.google.api.gax.core.NoCredentialsProvider;
+import com.google.api.gax.grpc.GrpcTransportChannel;
+import com.google.api.gax.rpc.FixedTransportChannelProvider;
 import com.google.cloud.NoCredentials;
+import com.google.cloud.ServiceOptions;
+import com.google.cloud.secretmanager.v1.SecretManagerServiceClient;
+import com.google.cloud.secretmanager.v1.SecretManagerServiceSettings;
+import io.grpc.ManagedChannelBuilder;
 import com.google.cloud.storage.Storage;
 import com.google.cloud.storage.StorageOptions;
 import org.kamranzafar.stratum.config.Credentials;
@@ -9,10 +16,18 @@ import org.kamranzafar.stratum.cache.CacheAuth;
 import org.kamranzafar.stratum.cache.CacheConfig;
 import org.kamranzafar.stratum.cache.spi.CacheDriver;
 import org.kamranzafar.stratum.gcp.memorystore.MemorystoreIamTokens;
+import org.kamranzafar.stratum.error.UnsupportedFeatureException;
+import org.kamranzafar.stratum.gcp.parameters.SecretManagerDriver;
 import org.kamranzafar.stratum.gcp.storage.GcsBlobStoreDriver;
+import org.kamranzafar.stratum.parameters.ParameterKind;
+import org.kamranzafar.stratum.parameters.ParameterStoreConfig;
+import org.kamranzafar.stratum.parameters.spi.ParameterDriver;
 import org.kamranzafar.stratum.redis.RedisCaches;
 import org.kamranzafar.stratum.spi.ProviderConnection;
 import org.kamranzafar.stratum.storage.spi.BlobStoreDriver;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
 
 /** Owns the Google Cloud clients for one configuration. Clients are created lazily and shared by all buckets. */
 final class GcpConnection implements ProviderConnection {
@@ -20,6 +35,7 @@ final class GcpConnection implements ProviderConnection {
     private final ProviderConfig config;
     private Storage storage;
     private RedisCaches caches;
+    private SecretManagerServiceClient secretManager;
 
     GcpConnection(ProviderConfig config) {
         this.config = config;
@@ -51,6 +67,40 @@ final class GcpConnection implements ProviderConnection {
         return caches.driver(cacheConfig, RedisCaches.credentials(cacheConfig.auth(), this::iamTokens));
     }
 
+    @Override
+    public synchronized ParameterDriver parameterStore(ParameterStoreConfig storeConfig) {
+        if (storeConfig.kind() == ParameterKind.PARAMETERS) {
+            throw new UnsupportedFeatureException("GCP Parameter Manager is not supported yet; use Secret Manager "
+                    + "(ParameterStoreConfig.secrets())", null, GcpProvider.ID, null);
+        }
+        if (secretManager == null) {
+            secretManager = secretManagerClient();
+        }
+        String project = config.property(GcpProperties.PROJECT_ID).orElseGet(ServiceOptions::getDefaultProjectId);
+        if (project == null) {
+            throw new IllegalArgumentException("Secret Manager needs a project: set the '" + GcpProperties.PROJECT_ID + "' property");
+        }
+        return new SecretManagerDriver(secretManager, project);
+    }
+
+    /** With an endpoint override (an emulator), Secret Manager is reached over plaintext gRPC on the same host and port. */
+    private SecretManagerServiceClient secretManagerClient() {
+        try {
+            var settings = SecretManagerServiceSettings.newBuilder();
+            if (config.endpoint().isPresent()) {
+                var endpoint = config.endpoint().get();
+                var channel = ManagedChannelBuilder.forAddress(endpoint.getHost(), endpoint.getPort()).usePlaintext().build();
+                settings.setTransportChannelProvider(FixedTransportChannelProvider.create(GrpcTransportChannel.create(channel)))
+                        .setCredentialsProvider(NoCredentialsProvider.create());
+            } else if (config.credentials() instanceof Credentials.Anonymous) {
+                settings.setCredentialsProvider(NoCredentialsProvider.create());
+            }
+            return SecretManagerServiceClient.create(settings.build());
+        } catch (IOException e) {
+            throw new UncheckedIOException("Could not create the Secret Manager client", e);
+        }
+    }
+
     private MemorystoreIamTokens iamTokens(CacheAuth.Iam iam) {
         if (!(config.credentials() instanceof Credentials.DefaultChain)) {
             throw new IllegalArgumentException("Memorystore IAM authentication uses Application Default Credentials; "
@@ -64,6 +114,10 @@ final class GcpConnection implements ProviderConnection {
         if (caches != null) {
             caches.close();
             caches = null;
+        }
+        if (secretManager != null) {
+            secretManager.close();
+            secretManager = null;
         }
         if (storage != null) {
             try {

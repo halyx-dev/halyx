@@ -5,6 +5,9 @@ import org.kamranzafar.stratum.cache.CacheConfig;
 import org.kamranzafar.stratum.cache.Codec;
 import org.kamranzafar.stratum.cache.DefaultCache;
 import org.kamranzafar.stratum.config.ProviderConfig;
+import org.kamranzafar.stratum.parameters.DefaultParameterStore;
+import org.kamranzafar.stratum.parameters.ParameterStore;
+import org.kamranzafar.stratum.parameters.ParameterStoreConfig;
 import org.kamranzafar.stratum.interceptor.InterceptorChain;
 import org.kamranzafar.stratum.spi.CloudProvider;
 import org.kamranzafar.stratum.spi.ProviderConnection;
@@ -66,6 +69,11 @@ public final class CloudContext implements AutoCloseable {
     /** A cache of strings. */
     public Cache<String> cache(CacheConfig config) {
         return cache(config, Codec.string());
+    }
+
+    /** A portable parameter or secret store. */
+    public ParameterStore parameterStore(ParameterStoreConfig config) {
+        return new DefaultParameterStore(provider.id(), config, connection().parameterStore(config), interceptors);
     }
 
     private ProviderConnection connection() {

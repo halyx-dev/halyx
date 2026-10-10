@@ -31,6 +31,15 @@
             <groupId>com.azure</groupId>
             <artifactId>azure-identity</artifactId>
         </dependency>
+        <!-- Parameters and secrets -->
+        <dependency>
+            <groupId>com.azure</groupId>
+            <artifactId>azure-security-keyvault-secrets</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.azure</groupId>
+            <artifactId>azure-data-appconfiguration</artifactId>
+        </dependency>
         <!-- Caches: shared Redis driver, with Entra ID tokens for Azure Cache for Redis / Azure Managed Redis -->
         <dependency>
             <groupId>org.kamranzafar</groupId>

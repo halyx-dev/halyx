@@ -197,6 +197,42 @@ Not included yet: endpoint discovery by cache name (you configure the endpoint U
 protection across instances (TTL jitter, early refresh), negative-result caching outside Spring,
 read-from-replica, near caching, and data structures beyond strings (use `unwrap()`).
 
+## Parameters and secrets
+
+One API for configuration values and secrets on every cloud and on HashiCorp Vault:
+
+```java
+ParameterStore secrets = stratum.provider("aws").parameterStore(
+        ParameterStoreConfig.secrets().prefix("orders-svc").cacheTtl(Duration.ofMinutes(5)).build());
+
+String password = secrets.require("db/password");          // Secrets Manager secret "orders-svc/db/password"
+Map<String, Parameter> db = secrets.getAll("db");           // everything under orders-svc/db
+secrets.put("api/key", newKey);                            // a new version
+Optional<Integer> pool = config.get("db/pool/size", Integer::valueOf);
+```
+
+| `ParameterKind` | AWS | Azure | GCP | Vault |
+|---|---|---|---|---|
+| `PARAMETERS` | SSM Parameter Store (`SecureString` with `aws.ssm.secure=true`) | App Configuration (optional label; no reads by version) | Parameter Manager: **not supported yet** | KV v2 |
+| `SECRETS` | Secrets Manager | Key Vault (location = vault URL) | Secret Manager | KV v2 |
+
+Names are portable: segments of letters, digits and single dashes separated by `/`
+(`orders/db/password`). Each backend stores them in its own naming scheme: SSM uses a leading `/`,
+Key Vault `--`, Secret Manager `__`, and Vault, App Configuration and Secrets Manager use the name as
+it is. `getAll` returns everything at or below a prefix, and never matches partial segments (`db`
+does not match `dbx/...`). Reads can be cached per store (`cacheTtl`; `refresh()` clears the cache).
+Earlier versions are readable where the backend keeps them (`get(name, version)`).
+
+Deletes are idempotent. On Secrets Manager they skip the recovery window. On Key Vault they are soft
+deletes; writing a soft-deleted name recovers it first, so names can be reused without the purge
+permission. On Vault they remove all versions.
+
+**`stratum-vault`** supports token auth (or `VAULT_TOKEN`), AppRole and Kubernetes login, Vault
+namespaces, and renews tokens before they expire (in the last fifth of their life, at most 30 s
+early). It uses the JDK HTTP client and a built-in JSON codec, so it adds no dependencies that
+could clash with the cloud SDKs. Secrets written by other tools without a `value` field are read as
+their JSON data.
+
 ## Spring Boot
 
 Add the starter plus the provider modules you use:
@@ -240,6 +276,11 @@ stratum:
     fail-open: true                # cached methods run uncached while the cache is down
     codec: json                    # jdk (default) | json (Jackson 3 on Boot 4, Jackson 2 on Boot 3)
     trusted-packages: com.example.orders
+  parameter-stores:
+    app-secrets:                   # ParameterStore bean name, and the name used by stratum: imports
+      kind: secrets                # secrets | parameters
+      prefix: orders-svc
+      cache-ttl: 5m
   retry:
     enabled: false                 # the SDKs already retry; enable for uniform retries
 ```
@@ -258,6 +299,8 @@ What the starter provides:
 | `Stratum` bean | Built from `stratum.providers`, closed with the context. Define your own `Stratum` bean to replace it. |
 | `BlobStore` beans | One per `stratum.blob-stores` entry, named after the entry. |
 | `Cache<String>` beans | One per `stratum.caches` entry, named after the entry. |
+| `ParameterStore` beans | One per `stratum.parameter-stores` entry, named after the entry. |
+| Config import | `spring.config.import=stratum:app-secrets` (or `stratum:app-secrets/db`, `optional:stratum:...`) loads a store into the `Environment` at startup. Names become property keys with `/` replaced by `.`, so `db/password` becomes `db.password`. The providers and stores must be defined in the same or an earlier config file. Values are read once at startup. |
 | `CacheManager` | `stratum.cache-manager.*` backs `@Cacheable`, `@CachePut` and `@CacheEvict` (including `allEntries` and `sync = true`): per-cache TTLs, cached nulls, JDK or JSON values. JSON stores `{"@class", "v"}` and only reads back types from `trusted-packages` (no unsafe polymorphic typing); the JDK codec applies the same allow-list through an `ObjectInputFilter`. Async/reactive `@Cacheable` is not supported. |
 | Cache metrics | With a `MeterRegistry`: Micrometer's standard `cache.gets{result=hit\|miss}`, `cache.puts`, `cache.evictions`, plus `cache.loads{result}` and `cache.fail.open`, tagged `cache=<name>`, for `Cache` beans and `CacheManager` caches. |
 | Interceptors | Every `Interceptor` bean is applied in `@Order` order. Order of application, outermost first: observations, your interceptors, retries. |
@@ -282,9 +325,10 @@ runs on both: `stratum-spring-boot-autoconfigure` tests on 3.5, and the unpublis
 | `stratum-core` | Portable API, provider SPI, error model, interceptors, in-memory provider. No cloud SDKs (enforced) |
 | `stratum-tck` | Conformance test kit every provider must pass |
 | `stratum-redis` | Shared Redis/Valkey cache driver (Lettuce) used by every provider |
-| `stratum-aws` | AWS SDK v2: S3, ElastiCache IAM auth |
-| `stratum-azure` | Azure SDK: Blob Storage, Entra ID cache auth |
-| `stratum-gcp` | Google Cloud: Cloud Storage, Memorystore IAM auth |
+| `stratum-aws` | AWS SDK v2: S3, SSM Parameter Store, Secrets Manager, ElastiCache IAM auth |
+| `stratum-azure` | Azure SDK: Blob Storage, Key Vault, App Configuration, Entra ID cache auth |
+| `stratum-gcp` | Google Cloud: Cloud Storage, Secret Manager, Memorystore IAM auth |
+| `stratum-vault` | HashiCorp Vault (KV v2): parameters and secrets |
 | `stratum-spring-boot-autoconfigure` | Spring Boot auto-configuration, properties, health, observations |
 | `stratum-spring-boot-starter` | The dependency Spring Boot applications add |
 
@@ -379,7 +423,18 @@ Cache tests:
 | shared driver | TLS-only Valkey with a private CA | full cache TCK over `rediss://` trusting the CA; an untrusted certificate is a non-retryable `AccessDeniedException` |
 | shared driver | unreachable server | fail-open misses and loader fallback, strict operations still fail, breaker short-circuits, recovery once the server starts |
 
-Not verified locally: an IAM *login* end to end (the released Floci images cannot attach IAM users to
+Parameter store tests (the same 16-test TCK everywhere):
+
+| Backend | Server | Notes |
+|---|---|---|
+| AWS SSM Parameter Store, Secrets Manager | Floci | plus `SecureString` writes |
+| Azure Key Vault, App Configuration | Floci-az | plus Key Vault name encoding and App Configuration labels; App Configuration skips the versions test |
+| GCP Secret Manager | Floci-gcp (gRPC) | plus name encoding |
+| HashiCorp Vault | Vault dev server | plus AppRole login with token renewal, wrong tokens, multi-field secrets |
+| Spring `spring.config.import` | Vault dev server | on Boot 3.5 and 4.1 |
+
+Not verified locally: GCP Parameter Manager (no emulator, so not implemented yet), Vault Kubernetes
+login, Entra ID logins to Key Vault and App Configuration (the emulator accepts any token), and an IAM *login* end to end (the released Floci images cannot attach IAM users to
 a cache yet), Entra ID logins (Floci-az does not emulate them), and failover of a managed cluster.
 
 ## Roadmap
@@ -387,7 +442,8 @@ a cache yet), Entra ID logins (Floci-az does not emulate them), and failover of 
 1. ~~Core, SPI, storage on AWS/Azure/GCP, TCK, Floci tests~~
 2. ~~Cache: one Redis/Valkey driver plus cloud auth (ElastiCache IAM, Entra ID, Memorystore IAM)~~ (next: endpoint discovery, cross-instance stampede protection)
 3. SQL: `DataSource` factory with cloud IAM auth and token refresh (RDS IAM, Entra ID, Cloud SQL connector)
-4. Parameters and secrets: one portable API for configuration values and secrets
+4. ~~Parameters and secrets: one portable API for configuration values and secrets~~ (next: GCP
+   Parameter Manager, change notifications, labels on SSM and Secret Manager)
    - Providers: AWS SSM Parameter Store and Secrets Manager; Azure App Configuration and Key Vault;
      GCP Parameter Manager and Secret Manager; HashiCorp Vault (KV v2), in a separate
      `stratum-vault` module because it is not tied to a cloud

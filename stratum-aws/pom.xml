@@ -32,6 +32,15 @@
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>http-auth-aws</artifactId>
         </dependency>
+        <!-- Parameters and secrets -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>ssm</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>secretsmanager</artifactId>
+        </dependency>
         <!-- Tests: TCK against the Floci emulator in Docker (run with mvn verify) -->
         <dependency>
             <groupId>org.kamranzafar</groupId>

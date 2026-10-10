@@ -5,6 +5,8 @@ import io.micrometer.observation.tck.TestObservationRegistryAssert;
 import org.junit.jupiter.api.Test;
 import org.kamranzafar.stratum.Stratum;
 import org.kamranzafar.stratum.cache.Cache;
+import org.kamranzafar.stratum.parameters.ParameterKind;
+import org.kamranzafar.stratum.parameters.ParameterStore;
 import org.kamranzafar.stratum.config.ProviderConfig;
 import org.kamranzafar.stratum.error.ThrottledException;
 import org.kamranzafar.stratum.interceptor.Interceptor;
@@ -108,6 +110,20 @@ class StratumAutoConfigurationTest {
                         "stratum.caches.c.endpoint=redis://localhost:6379", "stratum.caches.c.auth.type=password")
                 .run(context -> assertThat(context).hasFailed().getFailure()
                         .hasMessageContaining("stratum.caches.c.auth.password is required"));
+    }
+
+    @Test
+    void registersParameterStoreBeans() {
+        runner.withPropertyValues("stratum.providers.local.type=memory",
+                "stratum.parameter-stores.app-secrets.prefix=orders",
+                "stratum.parameter-stores.app-config.kind=parameters").run(context -> {
+            ParameterStore secrets = context.getBean("app-secrets", ParameterStore.class);
+            secrets.put("db/password", "pw");
+
+            assertThat(secrets.kind()).isEqualTo(ParameterKind.SECRETS);
+            assertThat(secrets.require("db/password")).isEqualTo("pw");
+            assertThat(context.getBean("app-config", ParameterStore.class).kind()).isEqualTo(ParameterKind.PARAMETERS);
+        });
     }
 
     @Test

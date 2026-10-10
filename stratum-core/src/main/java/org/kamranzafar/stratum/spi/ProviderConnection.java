@@ -3,6 +3,8 @@ package org.kamranzafar.stratum.spi;
 import org.kamranzafar.stratum.cache.CacheConfig;
 import org.kamranzafar.stratum.cache.spi.CacheDriver;
 import org.kamranzafar.stratum.error.UnsupportedFeatureException;
+import org.kamranzafar.stratum.parameters.ParameterStoreConfig;
+import org.kamranzafar.stratum.parameters.spi.ParameterDriver;
 import org.kamranzafar.stratum.storage.spi.BlobStoreDriver;
 
 /**
@@ -22,6 +24,11 @@ public interface ProviderConnection extends AutoCloseable {
     /** A driver for the cache at {@code config.endpoint()}, shared by caches with the same endpoint and auth. */
     default CacheDriver cache(CacheConfig config) {
         throw new UnsupportedFeatureException("Caches are not supported by this provider");
+    }
+
+    /** A driver for the parameter or secret store described by {@code config}. */
+    default ParameterDriver parameterStore(ParameterStoreConfig config) {
+        throw new UnsupportedFeatureException("Parameter stores are not supported by this provider");
     }
 
     @Override
