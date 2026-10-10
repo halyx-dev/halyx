@@ -5,6 +5,9 @@ import org.kamranzafar.cirrus.cache.CacheConfig;
 import org.kamranzafar.cirrus.cache.Codec;
 import org.kamranzafar.cirrus.cache.DefaultCache;
 import org.kamranzafar.cirrus.config.ProviderConfig;
+import org.kamranzafar.cirrus.nosql.DefaultDocumentStore;
+import org.kamranzafar.cirrus.nosql.DocumentStore;
+import org.kamranzafar.cirrus.nosql.TableConfig;
 import org.kamranzafar.cirrus.parameters.DefaultParameterStore;
 import org.kamranzafar.cirrus.parameters.ParameterStore;
 import org.kamranzafar.cirrus.parameters.ParameterStoreConfig;
@@ -82,6 +85,11 @@ public final class CloudContext implements AutoCloseable {
     /** A portable parameter or secret store. */
     public ParameterStore parameterStore(ParameterStoreConfig config) {
         return new DefaultParameterStore(provider.id(), config, connection().parameterStore(config), interceptors);
+    }
+
+    /** A portable document store over an existing table, container or collection. Share one per table. */
+    public DocumentStore documentStore(TableConfig config) {
+        return new DefaultDocumentStore(connection().documentStore(config), interceptors);
     }
 
     /** A publisher to an existing topic or queue. Cheap to keep: create one per topic and share it. */

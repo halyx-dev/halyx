@@ -7,6 +7,8 @@ import org.kamranzafar.cirrus.messaging.SubscriptionConfig;
 import org.kamranzafar.cirrus.messaging.TopicConfig;
 import org.kamranzafar.cirrus.messaging.spi.PublisherDriver;
 import org.kamranzafar.cirrus.messaging.spi.SubscriptionDriver;
+import org.kamranzafar.cirrus.nosql.TableConfig;
+import org.kamranzafar.cirrus.nosql.spi.DocumentStoreDriver;
 import org.kamranzafar.cirrus.parameters.Parameter;
 import org.kamranzafar.cirrus.parameters.ParameterStoreConfig;
 import org.kamranzafar.cirrus.parameters.spi.ParameterDriver;
@@ -47,6 +49,7 @@ public final class InMemoryProvider implements CloudProvider {
         private final Map<String, CacheDriver> caches = new ConcurrentHashMap<>();
         private final Map<String, ConcurrentSkipListMap<String, List<Parameter>>> parameters = new ConcurrentHashMap<>();
         private final InMemoryBroker broker = new InMemoryBroker();
+        private final Map<String, InMemoryDocumentStoreDriver.Table> tables = new ConcurrentHashMap<>();
 
         @Override
         public BlobStoreDriver blobStore(String bucket) {
@@ -77,7 +80,14 @@ public final class InMemoryProvider implements CloudProvider {
         }
 
         @Override
+        public DocumentStoreDriver documentStore(TableConfig config) {
+            return new InMemoryDocumentStoreDriver(config,
+                    tables.computeIfAbsent(config.name(), t -> new InMemoryDocumentStoreDriver.Table()));
+        }
+
+        @Override
         public void close() {
+            tables.clear();
             broker.clear();
             buckets.clear();
             caches.clear();
