@@ -1,7 +1,7 @@
 # Cirrus
 
 A cloud-agnostic Java 21 API that gives microservices one consistent way to use storage, SQL,
-search and cache across **AWS**, **Azure** and **GCP**.
+caches, messaging, and parameters and secrets across **AWS**, **Azure** and **GCP**.
 
 ```java
 try (Cirrus cirrus = Cirrus.builder()
@@ -708,7 +708,20 @@ property goes to the provider (for example `-Dcirrus.aws.retry-mode=standard`). 
      and use secrets for cache and SQL credentials
    - Tests: Floci for AWS (SSM, Secrets Manager), Azure (App Configuration, Key Vault) and GCP
      (Secret Manager); a Vault dev-server container
-5. Search/index: OpenSearch, Azure AI Search, GCP backend to be decided
+5. NoSQL: one portable API for document and key-value stores
+   - Providers: Amazon DynamoDB, Azure Cosmos DB (NoSQL API), Google Cloud Firestore (native mode)
+   - Model: items in a table, container or collection, addressed by a partition key and an optional sort
+     key, held as a portable document (nested maps, lists, strings, numbers, booleans, binary) and mapped
+     to records through a codec
+   - Operations: get, put, update and delete; conditional writes for optimistic concurrency (DynamoDB
+     condition expressions, Cosmos ETags, Firestore update times); batch reads and writes; queries within a
+     partition by sort-key range, with pagination; per-item TTL
+   - Portable semantics documented where stores differ: read consistency, item size limits (400 KB on
+     DynamoDB, 2 MB on Cosmos DB, 1 MiB on Firestore), transaction scope and secondary indexes, with
+     `unwrap` for native queries
+   - Spring: `DocumentStore` beans from `cirrus.document-stores`, health and Micrometer metrics
+   - Tests: a conformance kit on Floci (DynamoDB), Floci-az or the Cosmos DB emulator, and the Firestore
+     emulator
 6. ~~Spring Boot starter: `cirrus.*` properties, auto-configuration, health and Micrometer~~
 7. Blob: archive restore, KMS encryption, versioning, tags, retention
 8. JPMS module descriptors, japicmp API compatibility checks, real-cloud CI profile
