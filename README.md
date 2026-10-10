@@ -387,7 +387,17 @@ a cache yet), Entra ID logins (Floci-az does not emulate them), and failover of 
 1. ~~Core, SPI, storage on AWS/Azure/GCP, TCK, Floci tests~~
 2. ~~Cache: one Redis/Valkey driver plus cloud auth (ElastiCache IAM, Entra ID, Memorystore IAM)~~ (next: endpoint discovery, cross-instance stampede protection)
 3. SQL: `DataSource` factory with cloud IAM auth and token refresh (RDS IAM, Entra ID, Cloud SQL connector)
-4. Search/index: OpenSearch, Azure AI Search, GCP backend to be decided
-5. ~~Spring Boot starter: `stratum.*` properties, auto-configuration, health and Micrometer~~
-6. Blob: archive restore, KMS encryption, versioning, tags, retention
-7. JPMS module descriptors, japicmp API compatibility checks, real-cloud CI profile
+4. Parameters and secrets: one portable API for configuration values and secrets
+   - Providers: AWS SSM Parameter Store and Secrets Manager; Azure App Configuration and Key Vault;
+     GCP Parameter Manager and Secret Manager; HashiCorp Vault (KV v2), in a separate
+     `stratum-vault` module because it is not tied to a cloud
+   - API: get by name or path prefix, versions and labels, typed values, cached reads with refresh,
+     and rotation notifications where the backend supports them
+   - Spring: load `stratum` parameters and secrets as a property source (`spring.config.import`),
+     and use secrets for cache and SQL credentials
+   - Tests: Floci for AWS (SSM, Secrets Manager), Azure (App Configuration, Key Vault) and GCP
+     (Secret Manager); a Vault dev-server container
+5. Search/index: OpenSearch, Azure AI Search, GCP backend to be decided
+6. ~~Spring Boot starter: `stratum.*` properties, auto-configuration, health and Micrometer~~
+7. Blob: archive restore, KMS encryption, versioning, tags, retention
+8. JPMS module descriptors, japicmp API compatibility checks, real-cloud CI profile
