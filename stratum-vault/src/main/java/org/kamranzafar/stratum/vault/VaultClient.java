@@ -88,7 +88,16 @@ final class VaultClient implements AutoCloseable {
 
     private synchronized String currentToken() {
         if (token == null || token.expiringSoon(Instant.now())) {
-            token = login.login(this);
+            try {
+                token = login.login(this);
+            } catch (VaultHttpException e) {
+                // Vault rejects bad logins with 400 (for example an unknown role) as well as 403:
+                // either way the credentials were refused.
+                if (e.status() >= 400 && e.status() < 500) {
+                    throw new VaultHttpException(403, "login rejected: " + e.getMessage());
+                }
+                throw e;
+            }
         }
         return token.token();
     }
