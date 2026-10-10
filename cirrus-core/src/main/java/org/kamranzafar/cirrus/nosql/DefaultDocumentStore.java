@@ -81,11 +81,18 @@ public final class DefaultDocumentStore implements DocumentStore {
                 throw e;
             }
             // An expired item the store hasn't removed yet still blocks the condition: remove it and retry once.
+            // If it is already gone (the store's TTL sweep got there first), just retry.
             Optional<Item> existing = execute("get", key, true, () -> driver.get(key));
-            if (existing.isEmpty() || live(existing.get())) {
+            if (existing.isPresent() && live(existing.get())) {
                 throw e;
             }
-            execute("delete", key, false, () -> driver.delete(key, Optional.of(existing.get().version())));
+            if (existing.isPresent()) {
+                try {
+                    execute("delete", key, false, () -> driver.delete(key, Optional.of(existing.get().version())));
+                } catch (PreconditionFailedException replaced) {
+                    throw e; // someone wrote a new item meanwhile
+                }
+            }
             version = execute("put", key, false, () -> driver.put(key, document, condition, expiresAt));
         }
         return new Item(key, document, version, Optional.ofNullable(expiresAt));

@@ -1,5 +1,6 @@
 package org.kamranzafar.cirrus.aws;
 
+import org.kamranzafar.cirrus.aws.dynamodb.DynamoDocumentStoreDriver;
 import org.kamranzafar.cirrus.aws.elasticache.ElastiCacheIamTokens;
 import org.kamranzafar.cirrus.aws.messaging.SnsPublisherDriver;
 import org.kamranzafar.cirrus.aws.messaging.SqsPublisherDriver;
@@ -19,6 +20,8 @@ import org.kamranzafar.cirrus.config.ProviderConfig;
 import org.kamranzafar.cirrus.error.UnsupportedFeatureException;
 import org.kamranzafar.cirrus.jdbc.JdbcDatabases;
 import org.kamranzafar.cirrus.messaging.SubscriptionConfig;
+import org.kamranzafar.cirrus.nosql.TableConfig;
+import org.kamranzafar.cirrus.nosql.spi.DocumentStoreDriver;
 import org.kamranzafar.cirrus.messaging.TopicConfig;
 import org.kamranzafar.cirrus.messaging.spi.PublisherDriver;
 import org.kamranzafar.cirrus.messaging.spi.SubscriptionDriver;
@@ -40,6 +43,7 @@ import software.amazon.awssdk.http.SdkHttpClient;
 import software.amazon.awssdk.http.apache5.Apache5HttpClient;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.regions.providers.DefaultAwsRegionProviderChain;
+import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
 import software.amazon.awssdk.services.sns.SnsClient;
@@ -60,6 +64,7 @@ final class AwsConnection implements ProviderConnection {
     private SdkHttpClient http;
     private JdbcDatabases databases;
     private SnsClient sns;
+    private DynamoDbClient dynamo;
     private SqsClient sqs;
     private S3Client s3;
     private S3Presigner presigner;
@@ -148,6 +153,18 @@ final class AwsConnection implements ProviderConnection {
             case Credentials.Static s -> StaticCredentialsProvider.create(AwsBasicCredentials.create(s.id(), s.secret()));
             case Credentials.Anonymous ignored -> AnonymousCredentialsProvider.create();
         };
+    }
+
+    /** A DynamoDB table. */
+    @Override
+    public synchronized DocumentStoreDriver documentStore(TableConfig table) {
+        if (dynamo == null) {
+            var builder = DynamoDbClient.builder().region(region()).credentialsProvider(credentials())
+                    .httpClient(http()).overrideConfiguration(overrides());
+            config.endpoint().ifPresent(builder::endpointOverride);
+            dynamo = builder.build();
+        }
+        return new DynamoDocumentStoreDriver(dynamo, table);
     }
 
     /** An SNS topic, or with {@code aws.target=sqs} an SQS queue. */
@@ -247,6 +264,10 @@ final class AwsConnection implements ProviderConnection {
         if (sns != null) {
             sns.close();
             sns = null;
+        }
+        if (dynamo != null) {
+            dynamo.close();
+            dynamo = null;
         }
         if (sqs != null) {
             sqs.close();

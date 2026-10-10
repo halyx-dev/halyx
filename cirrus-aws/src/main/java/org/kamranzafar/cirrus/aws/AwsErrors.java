@@ -55,6 +55,9 @@ public final class AwsErrors {
             if (status == 429 || (code != null && THROTTLING_CODES.contains(code)) || e.isThrottlingException()) {
                 return Optional.of(new ThrottledException(message, e, provider, code, retryAfter(e)));
             }
+            if ("ConditionalCheckFailedException".equals(code) || "TransactionConflictException".equals(code)) {
+                return Optional.of(new PreconditionFailedException(message, e, provider, code));
+            }
             if (code != null && NOT_FOUND_CODES.contains(code)) {
                 return Optional.of(new NotFoundException(message, e, provider, code));
             }
