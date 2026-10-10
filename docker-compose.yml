@@ -1,0 +1,12 @@
+# Floci cloud emulators for local development (the integration tests start their own containers).
+#   docker compose up -d
+services:
+  floci-aws:
+    image: floci/floci:2.2.0
+    ports: ["4566:4566"]   # S3 and other AWS services
+  floci-azure:
+    image: floci/floci-az:0.14.0
+    ports: ["4577:4577"]   # Blob endpoint: http://localhost:4577/devstoreaccount1
+  floci-gcp:
+    image: floci/floci-gcp:0.10.0
+    ports: ["4588:4588"]   # GCS endpoint: http://localhost:4588, project floci-local
