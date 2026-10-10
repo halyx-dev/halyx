@@ -1,0 +1,386 @@
+package org.kamranzafar.stratum.tck;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInfo;
+import org.kamranzafar.stratum.CloudContext;
+import org.kamranzafar.stratum.cache.Cache;
+import org.kamranzafar.stratum.cache.CacheConfig;
+import org.kamranzafar.stratum.cache.Codec;
+import org.kamranzafar.stratum.error.InvalidArgumentException;
+
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+
+/**
+ * Conformance suite for {@link Cache}. Every provider extends it and supplies a context plus the
+ * endpoint and auth of a running Redis-compatible server. Each test uses a fresh random namespace,
+ * so tests never interfere and the server can be shared.
+ */
+public abstract class CacheConformanceTest {
+
+    private String namespace;
+
+    /** The provider context under test. */
+    protected abstract CloudContext context();
+
+    /** Endpoint, auth and provider properties of the server under test; the TCK sets the namespace. */
+    protected abstract CacheConfig.Builder config();
+
+    /** Test names to skip in this environment, mapped to the reason. */
+    protected Map<String, String> knownEnvironmentGaps() {
+        return Map.of();
+    }
+
+    @BeforeEach
+    void newNamespace(TestInfo test) {
+        test.getTestMethod().map(m -> knownEnvironmentGaps().get(m.getName()))
+                .ifPresent(reason -> assumeTrue(false, "Known environment gap: " + reason));
+        namespace = "tck-" + UUID.randomUUID();
+    }
+
+    protected Cache<String> cache() {
+        return context().cache(config().namespace(namespace).build());
+    }
+
+    private Cache<String> cacheWithDefaultTtl(Duration ttl) {
+        return context().cache(config().namespace(namespace).defaultTtl(ttl).build());
+    }
+
+    private static void awaitAbsent(Cache<?> cache, String key) throws InterruptedException {
+        Instant deadline = Instant.now().plusSeconds(5);
+        while (cache.exists(key)) {
+            assertThat(Instant.now()).as("%s should have expired", key).isBefore(deadline);
+            Thread.sleep(50);
+        }
+    }
+
+    // --- basics --------------------------------------------------------------------------------
+
+    @Test
+    void putThenGet() {
+        cache().put("greeting", "hello");
+
+        assertThat(cache().get("greeting")).hasValue("hello");
+    }
+
+    @Test
+    void missingKeyIsEmpty() {
+        assertThat(cache().get("missing")).isEmpty();
+        assertThat(cache().exists("missing")).isFalse();
+    }
+
+    @Test
+    void putOverwrites() {
+        cache().put("k", "v1");
+        cache().put("k", "v2");
+
+        assertThat(cache().get("k")).hasValue("v2");
+    }
+
+    @Test
+    void deleteReportsWhetherKeyExisted() {
+        cache().put("k", "v");
+
+        assertThat(cache().delete("k")).isTrue();
+        assertThat(cache().delete("k")).isFalse();
+        assertThat(cache().get("k")).isEmpty();
+    }
+
+    @Test
+    void unicodeKeysAndValues() {
+        cache().put("ключ:キー", "värde ✓");
+
+        assertThat(cache().get("ключ:キー")).hasValue("värde ✓");
+    }
+
+    @Test
+    void binaryValuesWithBytesCodec() {
+        byte[] data = new byte[256];
+        for (int i = 0; i < data.length; i++) {
+            data[i] = (byte) i;
+        }
+        Cache<byte[]> bytes = context().cache(config().namespace(namespace).build(), Codec.bytes());
+        bytes.put("binary", data);
+
+        assertThat(bytes.get("binary")).hasValueSatisfying(v -> assertThat(v).isEqualTo(data));
+    }
+
+    @Test
+    void largeValue() {
+        byte[] data = new byte[1024 * 1024];
+        new Random(1).nextBytes(data);
+        Cache<byte[]> bytes = context().cache(config().namespace(namespace).build(), Codec.bytes());
+        bytes.put("large", data);
+
+        assertThat(bytes.get("large")).hasValueSatisfying(v -> assertThat(v).isEqualTo(data));
+    }
+
+    @Test
+    void customCodec() {
+        Codec<Integer> ints = Codec.of(i -> i.toString().getBytes(StandardCharsets.UTF_8),
+                b -> Integer.parseInt(new String(b, StandardCharsets.UTF_8)));
+        Cache<Integer> numbers = context().cache(config().namespace(namespace).build(), ints);
+        numbers.put("answer", 42);
+
+        assertThat(numbers.get("answer")).hasValue(42);
+    }
+
+    @Test
+    void namespacesAreIsolated() {
+        Cache<String> a = context().cache(config().namespace(namespace + "-a").build());
+        Cache<String> b = context().cache(config().namespace(namespace + "-b").build());
+        a.put("shared-key", "from a");
+
+        assertThat(b.get("shared-key")).isEmpty();
+        assertThat(a.get("shared-key")).hasValue("from a");
+    }
+
+    // --- expiry --------------------------------------------------------------------------------
+
+    @Test
+    void entriesExpire() throws Exception {
+        cache().put("short-lived", "v", Duration.ofMillis(300));
+
+        assertThat(cache().exists("short-lived")).isTrue();
+        awaitAbsent(cache(), "short-lived");
+        assertThat(cache().get("short-lived")).isEmpty();
+    }
+
+    @Test
+    void ttlReportsRemainingTime() {
+        cache().put("k", "v", Duration.ofSeconds(60));
+
+        assertThat(cache().ttl("k")).hasValueSatisfying(ttl ->
+                assertThat(ttl).isBetween(Duration.ofSeconds(50), Duration.ofSeconds(60)));
+    }
+
+    @Test
+    void withoutTtlEntriesDoNotExpire() {
+        cache().put("forever", "v");
+
+        assertThat(cache().ttl("forever")).isEmpty();
+        assertThat(cache().exists("forever")).isTrue();
+    }
+
+    @Test
+    void defaultTtlApplies() {
+        Cache<String> withDefault = cacheWithDefaultTtl(Duration.ofSeconds(60));
+        withDefault.put("k", "v");
+
+        assertThat(withDefault.ttl("k")).hasValueSatisfying(ttl -> assertThat(ttl).isPositive());
+    }
+
+    @Test
+    void expireSetsNewTtl() throws Exception {
+        cache().put("k", "v");
+
+        assertThat(cache().expire("k", Duration.ofMillis(300))).isTrue();
+        awaitAbsent(cache(), "k");
+    }
+
+    @Test
+    void expireOnMissingKeyReturnsFalse() {
+        assertThat(cache().expire("missing", Duration.ofSeconds(10))).isFalse();
+    }
+
+    @Test
+    void ttlOfMissingKeyIsEmpty() {
+        assertThat(cache().ttl("missing")).isEmpty();
+    }
+
+    @Test
+    void nonPositiveTtlIsRejected() {
+        assertThatThrownBy(() -> cache().put("k", "v", Duration.ZERO)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> cache().put("k", "v", Duration.ofSeconds(-1))).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    // --- conditional and bulk writes -----------------------------------------------------------
+
+    @Test
+    void putIfAbsentOnlyStoresOnce() {
+        assertThat(cache().putIfAbsent("lock", "owner-1")).isTrue();
+        assertThat(cache().putIfAbsent("lock", "owner-2")).isFalse();
+
+        assertThat(cache().get("lock")).hasValue("owner-1");
+    }
+
+    @Test
+    void putIfAbsentWithTtlExpires() throws Exception {
+        assertThat(cache().putIfAbsent("lease", "a", Duration.ofMillis(300))).isTrue();
+
+        awaitAbsent(cache(), "lease");
+        assertThat(cache().putIfAbsent("lease", "b", Duration.ofSeconds(10))).isTrue();
+    }
+
+    @Test
+    void putAllAndGetAll() {
+        Map<String, String> entries = new LinkedHashMap<>();
+        for (int i = 0; i < 20; i++) {
+            entries.put("k" + i, "v" + i);
+        }
+        cache().putAll(entries);
+
+        List<String> keys = new ArrayList<>(entries.keySet());
+        keys.add("missing");
+        Map<String, String> found = cache().getAll(keys);
+
+        assertThat(found).containsExactlyInAnyOrderEntriesOf(entries);
+    }
+
+    @Test
+    void putAllWithTtl() {
+        cache().putAll(Map.of("a", "1", "b", "2"), Duration.ofSeconds(60));
+
+        assertThat(cache().ttl("a")).isPresent();
+        assertThat(cache().ttl("b")).isPresent();
+    }
+
+    @Test
+    void deleteAllCountsExistingKeys() {
+        cache().putAll(Map.of("a", "1", "b", "2", "c", "3"));
+
+        assertThat(cache().deleteAll(List.of("a", "b", "missing"))).isEqualTo(2);
+        assertThat(cache().getAll(List.of("a", "b", "c"))).containsOnlyKeys("c");
+    }
+
+    @Test
+    void emptyBulkOperations() {
+        assertThat(cache().getAll(List.of())).isEmpty();
+        assertThat(cache().deleteAll(List.of())).isZero();
+        cache().putAll(Map.of());
+    }
+
+    // --- counters ------------------------------------------------------------------------------
+
+    @Test
+    void incrementCreatesAndAdds() {
+        assertThat(cache().increment("hits", 1)).isEqualTo(1);
+        assertThat(cache().increment("hits", 5)).isEqualTo(6);
+        assertThat(cache().increment("hits", -2)).isEqualTo(4);
+        assertThat(cache().increment("hits", 0)).isEqualTo(4);
+    }
+
+    @Test
+    void incrementKeepsTtl() {
+        cache().increment("rate", 1);
+        cache().expire("rate", Duration.ofSeconds(60));
+        cache().increment("rate", 1);
+
+        assertThat(cache().ttl("rate")).isPresent();
+    }
+
+    @Test
+    void incrementOnNonNumberFails() {
+        cache().put("text", "not a number");
+
+        assertThatThrownBy(() -> cache().increment("text", 1)).isInstanceOf(InvalidArgumentException.class);
+    }
+
+    // --- cache-aside ---------------------------------------------------------------------------
+
+    @Test
+    void getOrLoadLoadsOnceThenServesFromCache() {
+        AtomicInteger loads = new AtomicInteger();
+
+        assertThat(cache().getOrLoad("user:1", () -> "alice-" + loads.incrementAndGet())).isEqualTo("alice-1");
+        assertThat(cache().getOrLoad("user:1", () -> "alice-" + loads.incrementAndGet())).isEqualTo("alice-1");
+        assertThat(loads).hasValue(1);
+    }
+
+    @Test
+    void getOrLoadWithTtl() {
+        cache().getOrLoad("k", Duration.ofSeconds(60), () -> "v");
+
+        assertThat(cache().ttl("k")).isPresent();
+    }
+
+    @Test
+    void concurrentGetOrLoadSharesOneLoad() throws Exception {
+        Cache<String> shared = cache();
+        AtomicInteger loads = new AtomicInteger();
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(8);
+        try {
+            List<Future<String>> results = new ArrayList<>();
+            for (int i = 0; i < 8; i++) {
+                results.add(pool.submit(() -> {
+                    start.await();
+                    return shared.getOrLoad("expensive", () -> {
+                        loads.incrementAndGet();
+                        sleep(300);
+                        return "computed";
+                    });
+                }));
+            }
+            start.countDown();
+            for (Future<String> result : results) {
+                assertThat(result.get()).isEqualTo("computed");
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+        assertThat(loads).hasValue(1);
+    }
+
+    @Test
+    void nullLoadResultIsNotCached() {
+        assertThat(cache().getOrLoad("nothing", () -> null)).isNull();
+        assertThat(cache().exists("nothing")).isFalse();
+    }
+
+    @Test
+    void failingLoaderCachesNothing() {
+        assertThatThrownBy(() -> cache().getOrLoad("broken", () -> {
+            throw new IllegalStateException("database down");
+        })).hasMessage("database down");
+
+        assertThat(cache().exists("broken")).isFalse();
+        assertThat(cache().getOrLoad("broken", () -> "recovered")).isEqualTo("recovered");
+    }
+
+    // --- misc ----------------------------------------------------------------------------------
+
+    @Test
+    void invalidKeysAreRejected() {
+        assertThatThrownBy(() -> cache().put("", "v")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> cache().put(null, "v")).isInstanceOf(NullPointerException.class);
+        assertThatThrownBy(() -> cache().put("k", null)).isInstanceOf(NullPointerException.class);
+    }
+
+    @Test
+    void unwrapUnknownTypeThrows() {
+        assertThatThrownBy(() -> cache().unwrap(StringBuilder.class)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void reportsProviderAndNamespace() {
+        assertThat(cache().provider()).isEqualTo(context().providerId());
+        assertThat(cache().namespace()).isEqualTo(namespace);
+    }
+
+    private static void sleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
+    }
+}

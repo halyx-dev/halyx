@@ -1,11 +1,13 @@
 package org.kamranzafar.stratum.spi;
 
+import org.kamranzafar.stratum.cache.CacheConfig;
+import org.kamranzafar.stratum.cache.spi.CacheDriver;
 import org.kamranzafar.stratum.error.UnsupportedFeatureException;
 import org.kamranzafar.stratum.storage.spi.BlobStoreDriver;
 
 /**
  * A live connection to one provider account and region: the Abstract Factory for the family of
- * service drivers (storage now; cache, SQL and search later). It owns the native SDK clients and
+ * service drivers (storage and cache now; SQL and search later). It owns the native SDK clients and
  * releases them on {@link #close()}.
  *
  * <p>Services a provider does not offer keep the default, which throws
@@ -15,6 +17,11 @@ public interface ProviderConnection extends AutoCloseable {
 
     default BlobStoreDriver blobStore(String bucket) {
         throw new UnsupportedFeatureException("Blob storage is not supported by this provider");
+    }
+
+    /** A driver for the cache at {@code config.endpoint()}, shared by caches with the same endpoint and auth. */
+    default CacheDriver cache(CacheConfig config) {
+        throw new UnsupportedFeatureException("Caches are not supported by this provider");
     }
 
     @Override

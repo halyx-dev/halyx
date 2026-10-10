@@ -23,6 +23,11 @@
             <groupId>com.google.cloud</groupId>
             <artifactId>google-cloud-storage</artifactId>
         </dependency>
+        <!-- Caches: shared Redis driver, with IAM access tokens for Memorystore -->
+        <dependency>
+            <groupId>org.kamranzafar</groupId>
+            <artifactId>stratum-redis</artifactId>
+        </dependency>
         <!-- Tests: TCK against the Floci emulator in Docker (run with mvn verify) -->
         <dependency>
             <groupId>org.kamranzafar</groupId>

@@ -44,6 +44,27 @@ class StratumHealthTest {
     }
 
     @Test
+    void cachesHaveIndicatorsToo() {
+        runner.withPropertyValues("stratum.providers.local.type=memory",
+                        "stratum.blob-stores.files.bucket=files",
+                        "stratum.caches.sessions.endpoint=redis://localhost:6379")
+                .run(context -> {
+                    var composite = context.getBean("stratumHealthContributor", CompositeHealthContributor.class);
+                    var sessions = ((HealthIndicator) composite.getContributor("sessions")).health();
+                    assertThat(sessions.getStatus()).isEqualTo(Status.UP);
+                    assertThat(sessions.getDetails()).containsEntry("namespace", "sessions");
+                    assertThat(composite.getContributor("files")).isNotNull();
+                });
+    }
+
+    @Test
+    void cachesAloneEnableHealth() {
+        runner.withPropertyValues("stratum.providers.local.type=memory",
+                        "stratum.caches.sessions.endpoint=redis://localhost:6379")
+                .run(context -> assertThat(context).hasBean("stratumHealthContributor"));
+    }
+
+    @Test
     void canBeDisabled() {
         runner.withPropertyValues("stratum.providers.local.type=memory", "stratum.blob-stores.a.bucket=a",
                         "management.health.stratum.enabled=false")

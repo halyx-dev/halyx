@@ -5,7 +5,12 @@ import com.google.cloud.storage.Storage;
 import com.google.cloud.storage.StorageOptions;
 import org.kamranzafar.stratum.config.Credentials;
 import org.kamranzafar.stratum.config.ProviderConfig;
+import org.kamranzafar.stratum.cache.CacheAuth;
+import org.kamranzafar.stratum.cache.CacheConfig;
+import org.kamranzafar.stratum.cache.spi.CacheDriver;
+import org.kamranzafar.stratum.gcp.memorystore.MemorystoreIamTokens;
 import org.kamranzafar.stratum.gcp.storage.GcsBlobStoreDriver;
+import org.kamranzafar.stratum.redis.RedisCaches;
 import org.kamranzafar.stratum.spi.ProviderConnection;
 import org.kamranzafar.stratum.storage.spi.BlobStoreDriver;
 
@@ -14,6 +19,7 @@ final class GcpConnection implements ProviderConnection {
 
     private final ProviderConfig config;
     private Storage storage;
+    private RedisCaches caches;
 
     GcpConnection(ProviderConfig config) {
         this.config = config;
@@ -38,7 +44,27 @@ final class GcpConnection implements ProviderConnection {
     }
 
     @Override
+    public synchronized CacheDriver cache(CacheConfig cacheConfig) {
+        if (caches == null) {
+            caches = new RedisCaches(GcpProvider.ID);
+        }
+        return caches.driver(cacheConfig, RedisCaches.credentials(cacheConfig.auth(), this::iamTokens));
+    }
+
+    private MemorystoreIamTokens iamTokens(CacheAuth.Iam iam) {
+        if (!(config.credentials() instanceof Credentials.DefaultChain)) {
+            throw new IllegalArgumentException("Memorystore IAM authentication uses Application Default Credentials; "
+                    + "configure the provider with Credentials.defaultChain()");
+        }
+        return MemorystoreIamTokens.applicationDefault(iam.username());
+    }
+
+    @Override
     public synchronized void close() {
+        if (caches != null) {
+            caches.close();
+            caches = null;
+        }
         if (storage != null) {
             try {
                 storage.close();

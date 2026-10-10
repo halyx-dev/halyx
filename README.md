@@ -136,6 +136,43 @@ send exactly that value. Expiry is capped at 7 days, the longest every provider 
 `capabilities().supports(PRESIGNED_URL)` reflects the configured credentials: on GCP it is false for
 user or anonymous credentials, which cannot sign.
 
+## Caches
+
+A portable Redis/Valkey cache on every cloud: ElastiCache, Azure Cache for Redis / Azure Managed
+Redis, and Memorystore. Only authentication differs between clouds.
+
+```java
+Cache<String> sessions = stratum.provider("orders").cache(
+        CacheConfig.builder(URI.create("rediss://master.sessions.abc123.euw2.cache.amazonaws.com:6379"))
+                .namespace("sessions")                      // keys become sessions:<key>
+                .defaultTtl(Duration.ofMinutes(30))
+                .auth(CacheAuth.iam("sessions-app"))        // ElastiCache IAM user id
+                .property(AwsProperties.ELASTICACHE_CACHE_NAME, "sessions")
+                .build());
+
+sessions.put("user-42", json);
+User user = users.getOrLoad("user-42", () -> repository.load(42));   // one load per key at a time
+long hits = sessions.increment("hits", 1);
+```
+
+Operations: `get`/`getAll`, `put` with optional TTL, `putIfAbsent`, `putAll`, `getOrLoad` (cache-aside;
+concurrent misses in one JVM share a single load), `delete`/`deleteAll`, `exists`, `ttl`/`expire` and
+`increment`. Values go through a `Codec<V>`: `Codec.string()`, `Codec.bytes()` or `Codec.of(...)`.
+
+| `CacheAuth` | AWS | Azure | GCP |
+|---|---|---|---|
+| `iam()` | ElastiCache IAM: SigV4-signed `connect` token (15 min); username = ElastiCache user id; needs `aws.elasticache.cache-name` | Entra ID token for `https://redis.azure.com/.default`; username = the token's `oid` | Memorystore IAM: OAuth access token from Application Default Credentials |
+| `password(...)` | AUTH token, or ACL user + password | access key | AUTH string |
+| `none()` | local / unsecured servers | | |
+
+The shared `stratum-redis` module (Lettuce 6.8, which stays on Netty 4.1 like the AWS and Azure SDKs)
+runs standalone or cluster mode (`cluster(true)`, with topology refresh), TLS via `rediss://`, and one
+connection per endpoint and auth. IAM tokens are minted again before they expire, and open
+connections re-authenticate with them, so long-lived connections survive token rotation.
+
+Not included yet: endpoint discovery by cache name (you configure the endpoint URI), and a Spring
+`CacheManager` for `@Cacheable`.
+
 ## Spring Boot
 
 Add the starter plus the provider modules you use:
@@ -164,6 +201,12 @@ stratum:
     invoices:                      # bean name
       bucket: acme-invoices        # defaults to the bean name
       # provider: orders           # optional when only one provider is configured
+  caches:
+    sessions:                      # Cache<String> bean name, also the default key namespace
+      endpoint: rediss://master.sessions.abc123.euw2.cache.amazonaws.com:6379
+      default-ttl: 30m
+      auth: { type: iam, username: sessions-app }      # none | password | iam
+      properties: { aws.elasticache.cache-name: sessions }
   retry:
     enabled: false                 # the SDKs already retry; enable for uniform retries
 ```
@@ -181,10 +224,11 @@ What the starter provides:
 |---|---|
 | `Stratum` bean | Built from `stratum.providers`, closed with the context. Define your own `Stratum` bean to replace it. |
 | `BlobStore` beans | One per `stratum.blob-stores` entry, named after the entry. |
+| `Cache<String>` beans | One per `stratum.caches` entry, named after the entry. |
 | Interceptors | Every `Interceptor` bean is applied in `@Order` order. Order of application, outermost first: observations, your interceptors, retries. |
 | Customisation | `StratumBuilderCustomizer` beans can add plugins or registrations. |
 | Observations | With Micrometer, every operation records a `stratum.operation` observation (timer + span) tagged with `stratum.service`, `stratum.operation`, `stratum.provider` and `error`. Disable with `stratum.observations.enabled=false`. |
-| Health | A `stratum` health contributor with one indicator per blob store, which lists one item from the bucket. Disable with `management.health.stratum.enabled=false`. |
+| Health | A `stratum` health contributor with one indicator per blob store (lists one item) and per cache (runs an authenticated command). Disable with `management.health.stratum.enabled=false`. |
 | Fail fast | Startup fails, naming the property, for an unknown provider type (with the module to add), an unknown or ambiguous `provider` reference, or incomplete static credentials. |
 | IDE support | Configuration metadata is generated, so `stratum.*` keys autocomplete. |
 
@@ -202,9 +246,10 @@ runs on both: `stratum-spring-boot-autoconfigure` tests on 3.5, and the unpublis
 | `stratum-bom` | Import to align Stratum versions |
 | `stratum-core` | Portable API, provider SPI, error model, interceptors, in-memory provider. No cloud SDKs (enforced) |
 | `stratum-tck` | Conformance test kit every provider must pass |
-| `stratum-aws` | AWS SDK v2: S3 |
-| `stratum-azure` | Azure SDK: Blob Storage |
-| `stratum-gcp` | Google Cloud: Cloud Storage |
+| `stratum-redis` | Shared Redis/Valkey cache driver (Lettuce) used by every provider |
+| `stratum-aws` | AWS SDK v2: S3, ElastiCache IAM auth |
+| `stratum-azure` | Azure SDK: Blob Storage, Entra ID cache auth |
+| `stratum-gcp` | Google Cloud: Cloud Storage, Memorystore IAM auth |
 | `stratum-spring-boot-autoconfigure` | Spring Boot auto-configuration, properties, health, observations |
 | `stratum-spring-boot-starter` | The dependency Spring Boot applications add |
 
@@ -286,10 +331,22 @@ reason, so the TCK itself stays strict for runs against real clouds:
 | Floci-az 0.14.0 | no Set Blob Tier, Set Blob Properties or Blob Batch (501); no `x-ms-access-tier` | tier and metadata-update tests (batch delete falls back to single deletes) |
 | Floci-gcp 0.10.0 | metadata PATCH replaces the map and stores `null` instead of removing keys | `updateMetadataReplacesHeadersAndMetadataButNotContent` |
 
+Cache tests:
+
+| Provider | Server | What is verified |
+|---|---|---|
+| shared driver | Valkey container | full cache TCK without auth and with a password; wrong or missing password; token rotation with re-authentication of open connections and fresh tokens on reconnect |
+| AWS | Floci ElastiCache (real Valkey) | full cache TCK with an AUTH token; ElastiCache IAM tokens accepted by Floci's SigV4 token validator, wrong-secret and tampered tokens rejected |
+| Azure | Floci-az Azure Cache for Redis (real Valkey, provisioned over ARM) | full cache TCK with the access key |
+| GCP | Valkey container (Floci has no Memorystore) | full cache TCK with an AUTH string |
+
+Not verified locally: an IAM *login* end to end (the released Floci images cannot attach IAM users to
+a cache yet), Entra ID logins (Floci-az does not emulate them), and cluster mode.
+
 ## Roadmap
 
 1. ~~Core, SPI, storage on AWS/Azure/GCP, TCK, Floci tests~~
-2. Cache: one Redis/Valkey driver plus cloud auth (ElastiCache IAM, Entra ID, Memorystore IAM)
+2. ~~Cache: one Redis/Valkey driver plus cloud auth (ElastiCache IAM, Entra ID, Memorystore IAM)~~ (next: Spring `CacheManager`, endpoint discovery, cluster-mode tests)
 3. SQL: `DataSource` factory with cloud IAM auth and token refresh (RDS IAM, Entra ID, Cloud SQL connector)
 4. Search/index: OpenSearch, Azure AI Search, GCP backend to be decided
 5. ~~Spring Boot starter: `stratum.*` properties, auto-configuration, health and Micrometer~~

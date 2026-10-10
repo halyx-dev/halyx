@@ -14,6 +14,12 @@ public final class AwsProperties {
 
     public static final long DEFAULT_MULTIPART_THRESHOLD = 64L * 1024 * 1024;
 
+    /** Cache property: replication group id or serverless cache name, signed into ElastiCache IAM tokens. */
+    public static final String ELASTICACHE_CACHE_NAME = "aws.elasticache.cache-name";
+
+    /** Cache property: {@code "true"} for ElastiCache Serverless caches. */
+    public static final String ELASTICACHE_SERVERLESS = "aws.elasticache.serverless";
+
     private AwsProperties() {
     }
 }

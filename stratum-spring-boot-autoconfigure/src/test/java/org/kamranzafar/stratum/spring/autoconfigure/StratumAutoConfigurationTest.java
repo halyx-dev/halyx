@@ -4,6 +4,7 @@ import io.micrometer.observation.tck.TestObservationRegistry;
 import io.micrometer.observation.tck.TestObservationRegistryAssert;
 import org.junit.jupiter.api.Test;
 import org.kamranzafar.stratum.Stratum;
+import org.kamranzafar.stratum.cache.Cache;
 import org.kamranzafar.stratum.config.ProviderConfig;
 import org.kamranzafar.stratum.error.ThrottledException;
 import org.kamranzafar.stratum.interceptor.Interceptor;
@@ -61,6 +62,52 @@ class StratumAutoConfigurationTest {
     void bucketDefaultsToBeanNameAndProviderToTheOnlyOne() {
         runner.withPropertyValues("stratum.providers.local.type=memory", "stratum.blob-stores.uploads.bucket=")
                 .run(context -> assertThat(context.getBean("uploads", BlobStore.class).bucket()).isEqualTo("uploads"));
+    }
+
+    @Test
+    void registersNamedCacheBeans() {
+        runner.withPropertyValues("stratum.providers.local.type=memory",
+                "stratum.caches.sessions.endpoint=redis://localhost:6379",
+                "stratum.caches.sessions.default-ttl=30m",
+                "stratum.caches.tokens.endpoint=redis://localhost:6379",
+                "stratum.caches.tokens.namespace=").run(context -> {
+            @SuppressWarnings("unchecked")
+            Cache<String> sessions = context.getBean("sessions", Cache.class);
+            @SuppressWarnings("unchecked")
+            Cache<String> tokens = context.getBean("tokens", Cache.class);
+            sessions.put("user-1", "alice");
+
+            assertThat(sessions.namespace()).isEqualTo("sessions");
+            assertThat(sessions.get("user-1")).hasValue("alice");
+            assertThat(sessions.ttl("user-1")).hasValueSatisfying(ttl -> assertThat(ttl).isPositive());
+            assertThat(tokens.namespace()).isEmpty();
+            assertThat(tokens.get("user-1")).as("different namespace").isEmpty();
+        });
+    }
+
+    @Test
+    void cacheAuthIsMapped() {
+        runner.withPropertyValues("stratum.providers.local.type=memory",
+                "stratum.caches.c.endpoint=redis://localhost:6379",
+                "stratum.caches.c.auth.type=password",
+                "stratum.caches.c.auth.username=app",
+                "stratum.caches.c.auth.password=pw").run(context ->
+                assertThat(context).hasBean("c"));
+    }
+
+    @Test
+    void cacheWithoutEndpointFailsAtStartup() {
+        runner.withPropertyValues("stratum.providers.local.type=memory", "stratum.caches.c.namespace=x")
+                .run(context -> assertThat(context).hasFailed().getFailure()
+                        .hasMessageContaining("stratum.caches.c.endpoint is required"));
+    }
+
+    @Test
+    void passwordAuthWithoutPasswordFailsAtStartup() {
+        runner.withPropertyValues("stratum.providers.local.type=memory",
+                        "stratum.caches.c.endpoint=redis://localhost:6379", "stratum.caches.c.auth.type=password")
+                .run(context -> assertThat(context).hasFailed().getFailure()
+                        .hasMessageContaining("stratum.caches.c.auth.password is required"));
     }
 
     @Test

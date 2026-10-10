@@ -29,6 +29,11 @@
             </dependency>
             <dependency>
                 <groupId>org.kamranzafar</groupId>
+                <artifactId>stratum-redis</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.kamranzafar</groupId>
                 <artifactId>stratum-aws</artifactId>
                 <version>${project.version}</version>
             </dependency>

@@ -1,5 +1,7 @@
 package org.kamranzafar.stratum.memory;
 
+import org.kamranzafar.stratum.cache.CacheConfig;
+import org.kamranzafar.stratum.cache.spi.CacheDriver;
 import org.kamranzafar.stratum.config.ProviderConfig;
 import org.kamranzafar.stratum.spi.CloudProvider;
 import org.kamranzafar.stratum.spi.ProviderConnection;
@@ -12,8 +14,8 @@ import java.util.concurrent.ConcurrentSkipListMap;
 
 /**
  * The {@code "memory"} provider: a Service Stub that keeps everything in the JVM heap. Use it for unit
- * tests and local development, with {@code ProviderConfig.of("memory")}. Buckets are created on first
- * use, and each connection has its own isolated data.
+ * tests and local development, with {@code ProviderConfig.of("memory")}. Buckets and caches are created
+ * on first use (any {@code redis://} endpoint works), and each connection has its own isolated data.
  */
 public final class InMemoryProvider implements CloudProvider {
 
@@ -33,6 +35,8 @@ public final class InMemoryProvider implements CloudProvider {
 
         private final Map<String, ConcurrentNavigableMap<String, InMemoryBlobStoreDriver.Entry>> buckets =
                 new ConcurrentHashMap<>();
+        /** One store per endpoint, shared by every namespace on it, like a Redis server. */
+        private final Map<String, CacheDriver> caches = new ConcurrentHashMap<>();
 
         @Override
         public BlobStoreDriver blobStore(String bucket) {
@@ -40,8 +44,15 @@ public final class InMemoryProvider implements CloudProvider {
         }
 
         @Override
+        public CacheDriver cache(CacheConfig config) {
+            String server = config.endpoint().getHost() + ":" + config.endpoint().getPort();
+            return caches.computeIfAbsent(server, s -> new InMemoryCacheDriver());
+        }
+
+        @Override
         public void close() {
             buckets.clear();
+            caches.clear();
         }
     }
 }

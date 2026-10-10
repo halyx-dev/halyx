@@ -31,6 +31,11 @@
             <groupId>com.azure</groupId>
             <artifactId>azure-identity</artifactId>
         </dependency>
+        <!-- Caches: shared Redis driver, with Entra ID tokens for Azure Cache for Redis / Azure Managed Redis -->
+        <dependency>
+            <groupId>org.kamranzafar</groupId>
+            <artifactId>stratum-redis</artifactId>
+        </dependency>
         <!-- Tests: TCK against the Floci emulator in Docker (run with mvn verify) -->
         <dependency>
             <groupId>org.kamranzafar</groupId>

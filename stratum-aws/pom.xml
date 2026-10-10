@@ -23,6 +23,15 @@
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>s3</artifactId>
         </dependency>
+        <!-- Caches: shared Redis driver plus SigV4 signing for ElastiCache IAM tokens -->
+        <dependency>
+            <groupId>org.kamranzafar</groupId>
+            <artifactId>stratum-redis</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>http-auth-aws</artifactId>
+        </dependency>
         <!-- Tests: TCK against the Floci emulator in Docker (run with mvn verify) -->
         <dependency>
             <groupId>org.kamranzafar</groupId>
@@ -32,6 +41,12 @@
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Provisions ElastiCache users and replication groups in Floci for the cache tests -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>elasticache</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>

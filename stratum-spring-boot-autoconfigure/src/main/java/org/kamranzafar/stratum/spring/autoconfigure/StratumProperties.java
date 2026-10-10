@@ -1,5 +1,7 @@
 package org.kamranzafar.stratum.spring.autoconfigure;
 
+import org.kamranzafar.stratum.cache.CacheAuth;
+import org.kamranzafar.stratum.cache.CacheConfig;
 import org.kamranzafar.stratum.config.Credentials;
 import org.kamranzafar.stratum.config.ProviderConfig;
 import org.kamranzafar.stratum.interceptor.RetryPolicy;
@@ -25,20 +27,29 @@ import java.util.Map;
  *     invoices:            # bean name
  *       provider: orders   # optional when only one provider is configured
  *       bucket: acme-invoices
+ *   caches:
+ *     sessions:            # bean name
+ *       endpoint: rediss://master.sessions.abc123.euw2.cache.amazonaws.com:6379
+ *       default-ttl: 30m
+ *       auth: { type: iam, username: sessions-app }
+ *       properties: { aws.elasticache.cache-name: sessions }
  * }</pre>
  *
  * @param providers   named provider connections
  * @param blobStores  {@code BlobStore} beans to create, keyed by bean name
+ * @param caches      {@code Cache<String>} beans to create, keyed by bean name
  * @param retry       provider-neutral retries on top of the SDKs' own
  * @param observations Micrometer observations of every operation
  */
 @ConfigurationProperties("stratum")
 public record StratumProperties(Map<String, Provider> providers, Map<String, BlobStoreProperties> blobStores,
+                                Map<String, CacheProperties> caches,
                                 @DefaultValue Retry retry, @DefaultValue Observations observations) {
 
     public StratumProperties {
         providers = ordered(providers);
         blobStores = ordered(blobStores);
+        caches = ordered(caches);
     }
 
     private static <V> Map<String, V> ordered(Map<String, V> map) {
@@ -118,6 +129,63 @@ public record StratumProperties(Map<String, Provider> providers, Map<String, Blo
      * @param maxBackoff     cap on the delay between attempts
      * @param multiplier     growth factor of the delay bound per attempt
      */
+    /**
+     * @param provider   the provider name; may be omitted when exactly one provider is configured
+     * @param endpoint   {@code redis://host:port}, or {@code rediss://host:port} for TLS
+     * @param namespace  key prefix ({@code namespace:key}); defaults to the bean name, empty for none
+     * @param defaultTtl expiry for writes that do not give one; none when omitted
+     * @param cluster    whether the server runs in cluster mode
+     * @param auth       how to log in
+     * @param properties provider-specific settings, such as {@code aws.elasticache.cache-name}
+     */
+    public record CacheProperties(String provider, URI endpoint, String namespace, Duration defaultTtl,
+                                  @DefaultValue("false") boolean cluster, @DefaultValue CacheAuthProperties auth,
+                                  Map<String, String> properties) {
+
+        public CacheProperties {
+            properties = ordered(properties);
+        }
+
+        CacheConfig toCacheConfig(String name) {
+            if (endpoint == null) {
+                throw new IllegalStateException("stratum.caches." + name + ".endpoint is required (redis:// or rediss://)");
+            }
+            CacheConfig.Builder config = CacheConfig.builder(endpoint)
+                    .namespace(namespace == null ? name : namespace)
+                    .cluster(cluster)
+                    .auth(auth.toCacheAuth(name));
+            if (defaultTtl != null) {
+                config.defaultTtl(defaultTtl);
+            }
+            properties.forEach(config::property);
+            return config.build();
+        }
+    }
+
+    /**
+     * @param type     {@code none}, {@code password} (AUTH token / access key, optionally with an ACL
+     *                 username) or {@code iam} (cloud identity tokens: ElastiCache IAM, Entra ID, Memorystore IAM)
+     * @param username ACL username; for {@code iam}, the ElastiCache user id or the Entra object id
+     * @param password the password, for {@code password}
+     */
+    public record CacheAuthProperties(@DefaultValue("none") Type type, String username, String password) {
+
+        public enum Type { NONE, PASSWORD, IAM }
+
+        CacheAuth toCacheAuth(String cache) {
+            return switch (type) {
+                case NONE -> CacheAuth.none();
+                case IAM -> username == null ? CacheAuth.iam() : CacheAuth.iam(username);
+                case PASSWORD -> {
+                    if (password == null) {
+                        throw new IllegalStateException("stratum.caches." + cache + ".auth.password is required for password auth");
+                    }
+                    yield username == null ? CacheAuth.password(password) : CacheAuth.password(username, password);
+                }
+            };
+        }
+    }
+
     public record Retry(@DefaultValue("false") boolean enabled, @DefaultValue("3") int maxAttempts,
                         @DefaultValue("100ms") Duration initialBackoff, @DefaultValue("2s") Duration maxBackoff,
                         @DefaultValue("2.0") double multiplier) {

@@ -1,5 +1,9 @@
 package org.kamranzafar.stratum;
 
+import org.kamranzafar.stratum.cache.Cache;
+import org.kamranzafar.stratum.cache.CacheConfig;
+import org.kamranzafar.stratum.cache.Codec;
+import org.kamranzafar.stratum.cache.DefaultCache;
 import org.kamranzafar.stratum.config.ProviderConfig;
 import org.kamranzafar.stratum.interceptor.InterceptorChain;
 import org.kamranzafar.stratum.spi.CloudProvider;
@@ -49,6 +53,19 @@ public final class CloudContext implements AutoCloseable {
     public BlobStore blobStore(String bucket) {
         return blobStores.computeIfAbsent(bucket,
                 b -> new DefaultBlobStore(provider.id(), b, connection().blobStore(b), interceptors));
+    }
+
+    /**
+     * A portable cache over the Redis-compatible server described by {@code config}. Caches on the
+     * same endpoint share one connection.
+     */
+    public <V> Cache<V> cache(CacheConfig config, Codec<V> codec) {
+        return new DefaultCache<>(provider.id(), config, codec, connection().cache(config), interceptors);
+    }
+
+    /** A cache of strings. */
+    public Cache<String> cache(CacheConfig config) {
+        return cache(config, Codec.string());
     }
 
     private ProviderConnection connection() {
