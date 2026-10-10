@@ -712,3 +712,17 @@ property goes to the provider (for example `-Dcirrus.aws.retry-mode=standard`). 
 6. ~~Spring Boot starter: `cirrus.*` properties, auto-configuration, health and Micrometer~~
 7. Blob: archive restore, KMS encryption, versioning, tags, retention
 8. JPMS module descriptors, japicmp API compatibility checks, real-cloud CI profile
+9. Pub/sub messaging: one portable API for topics, subscriptions and queues
+   - Providers: AWS SNS topics with SQS subscriptions (and plain SQS queues); Azure Service Bus topics,
+     subscriptions and queues; GCP Pub/Sub
+   - Publish: payload plus attributes, batching, ordering keys (SQS FIFO message groups, Service Bus
+     sessions, Pub/Sub ordering keys), delayed delivery where supported, and claim-check offload of
+     large payloads to a `BlobStore`
+   - Consume: at-least-once delivery with explicit ack/nack, automatic visibility or lease extension
+     while a handler runs, retry with backoff, dead-letter queues, and bounded concurrency on virtual
+     threads with backpressure
+   - Portable semantics documented where clouds differ: ordering, deduplication (FIFO dedup ids,
+     Service Bus duplicate detection), message size limits and retention
+   - Spring: `Publisher` and listener beans from `cirrus.topics` / `cirrus.subscriptions`, health and
+     Micrometer metrics (lag, in-flight, failures), with trace context carried in message attributes
+   - Tests: a conformance kit run on Floci (SNS, SQS), the Service Bus emulator and the Pub/Sub emulator
