@@ -9,6 +9,7 @@ import org.kamranzafar.cirrus.messaging.ClaimCheck;
 import org.kamranzafar.cirrus.messaging.ConsumerOptions;
 import org.kamranzafar.cirrus.messaging.SubscriptionConfig;
 import org.kamranzafar.cirrus.messaging.TopicConfig;
+import org.kamranzafar.cirrus.nosql.TableConfig;
 import org.kamranzafar.cirrus.parameters.ParameterKind;
 import org.kamranzafar.cirrus.parameters.ParameterStoreConfig;
 import org.kamranzafar.cirrus.sql.PoolSettings;
@@ -54,6 +55,7 @@ import java.util.Map;
  * @param parameterStores {@code ParameterStore} beans to create, keyed by bean name; also the names used by
  *                    {@code spring.config.import=cirrus:<name>}
  * @param databases   pooled {@code DataSource} beans to create, keyed by bean name
+ * @param documentStores {@code DocumentStore} beans to create, keyed by bean name
  * @param topics      {@code Publisher} beans to create, keyed by bean name
  * @param subscriptions {@code Subscription} beans to create, keyed by bean name; also what
  *                    {@code @CirrusListener} refers to
@@ -65,6 +67,7 @@ public record CirrusProperties(Map<String, Provider> providers, Map<String, Blob
                                 Map<String, CacheProperties> caches, @DefaultValue CacheManagerProperties cacheManager,
                                 Map<String, ParameterStoreProperties> parameterStores,
                                 Map<String, DatabaseProperties> databases,
+                                Map<String, DocumentStoreProperties> documentStores,
                                 Map<String, TopicProperties> topics, Map<String, SubscriptionProperties> subscriptions,
                                 @DefaultValue Retry retry, @DefaultValue Observations observations) {
 
@@ -74,6 +77,7 @@ public record CirrusProperties(Map<String, Provider> providers, Map<String, Blob
         caches = ordered(caches);
         parameterStores = ordered(parameterStores);
         databases = ordered(databases);
+        documentStores = ordered(documentStores);
         topics = ordered(topics);
         subscriptions = ordered(subscriptions);
     }
@@ -211,6 +215,33 @@ public record CirrusProperties(Map<String, Provider> providers, Map<String, Blob
                     yield username == null ? CacheAuth.password(password) : CacheAuth.password(username, password);
                 }
             };
+        }
+    }
+
+    /**
+     * A document table, registered as a {@code DocumentStore} bean named after its key.
+     *
+     * @param provider     the provider name; may be omitted when exactly one provider is configured
+     * @param table        the DynamoDB table, Cosmos DB container or Firestore collection; defaults to the key
+     * @param partitionKey partition key attribute (default {@code pk})
+     * @param sortKey      sort key attribute, for tables that have one
+     * @param properties   provider-specific settings, such as {@code aws.dynamodb.ttl-attribute}
+     */
+    public record DocumentStoreProperties(String provider, String table, @DefaultValue("pk") String partitionKey,
+                                          String sortKey, Map<String, String> properties) {
+
+        public DocumentStoreProperties {
+            properties = ordered(properties);
+        }
+
+        TableConfig toTableConfig(String key) {
+            TableConfig.Builder config = TableConfig.builder(table == null || table.isBlank() ? key : table)
+                    .partitionKey(partitionKey);
+            if (sortKey != null && !sortKey.isBlank()) {
+                config.sortKey(sortKey);
+            }
+            properties.forEach(config::property);
+            return config.build();
         }
     }
 

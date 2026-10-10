@@ -4,6 +4,7 @@ import org.kamranzafar.cirrus.Cirrus;
 import org.kamranzafar.cirrus.cache.Cache;
 import org.kamranzafar.cirrus.cache.CacheConfig;
 import org.kamranzafar.cirrus.messaging.Publisher;
+import org.kamranzafar.cirrus.nosql.DocumentStore;
 import org.kamranzafar.cirrus.messaging.Subscription;
 import org.kamranzafar.cirrus.parameters.ParameterStore;
 import org.kamranzafar.cirrus.parameters.ParameterStoreConfig;
@@ -35,6 +36,10 @@ public final class CirrusBlobStores {
 
     public ParameterStore parameterStore(String provider, ParameterStoreConfig config) {
         return cirrus.provider(provider).parameterStore(config);
+    }
+
+    public DocumentStore documentStore(String provider, String name, CirrusProperties.DocumentStoreProperties store) {
+        return cirrus.provider(provider).documentStore(store.toTableConfig(name));
     }
 
     public Publisher publisher(String provider, String name, CirrusProperties.TopicProperties topic) {

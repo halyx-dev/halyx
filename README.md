@@ -1,6 +1,6 @@
 # Cirrus
 
-A cloud-agnostic Java 21 API that gives microservices one consistent way to use storage, SQL,
+A cloud-agnostic Java 21 API that gives microservices one consistent way to use storage, SQL, NoSQL,
 caches, messaging, and parameters and secrets across **AWS**, **Azure** and **GCP**.
 
 ```java
@@ -374,6 +374,48 @@ early). It uses the JDK HTTP client and a built-in JSON codec, so it adds no dep
 could clash with the cloud SDKs. Secrets written by other tools without a `value` field are read as
 their JSON data.
 
+## NoSQL document stores
+
+Items keyed by a partition key and an optional sort key, holding a portable `Document`:
+
+```java
+DocumentStore orders = cirrus.provider("aws").documentStore(TableConfig.builder("orders").sortKey("sk").build());
+RecordMapper<Order> mapper = RecordMapper.of(Order.class);
+
+Item item = orders.put(Key.of("acme", "2026-10-11#1"), mapper.toDocument(order));
+orders.update(item.key(), DocumentUpdate.builder().increment("total", 5).set("status", "PAID").build(),
+        WriteOptions.ifVersion(item.version()));                     // fails if someone else wrote first
+orders.queryAll(Query.builder("acme").where(SortCondition.beginsWith("2026-10")).descending().build())
+        .map(i -> mapper.fromDocument(i.document()))
+        .forEach(this::show);
+```
+
+- **Operations:** get, put (create or replace), atomic partial `update` (set, remove, increment), delete,
+  `getAll` and `putAll` in batches, and queries within one partition by sort-key range, both directions,
+  with page tokens.
+- **Optimistic concurrency:** every item has a `Version`. `WriteOptions.ifVersion` and `ifNotExists` turn
+  lost updates into `PreconditionFailedException`.
+- **Expiry:** `WriteOptions.ttl(...)` items are never returned once expired, even before the store deletes
+  them, and they don't block `ifNotExists`.
+- **Values:** strings, whole numbers, doubles, decimals, booleans, binary, null, lists and nested documents.
+  `RecordMapper` maps records (with enums, `Instant`, `LocalDate`, `UUID`, `Optional`, lists and maps) to
+  documents and back.
+
+| | DynamoDB | Cosmos DB (NoSQL API) | Firestore (native mode) |
+|---|---|---|---|
+| Table | table with string `pk` (and `sk`) keys | container partitioned on `/pk` | collection; sorted items in `<pk>/items/<sk>` |
+| Version | `cirrus_version` attribute | ETag | update time |
+| Expiry | `cirrus_expires` (epoch seconds): enable TTL on it | `ttl` (container default TTL must be on, e.g. -1) | `cirrus_expires` Timestamp: add a TTL policy |
+| Query | key condition on `sk` | SQL within the partition, `ORDER BY sk` | ordered on the `cirrus_sort` field (automatic single-field index) |
+| Decimals | exact | exact (stored as a string wrapper) | stored as doubles |
+| Item size | 400 KB | 2 MB | about 1 MiB |
+| Reads | strongly consistent | the account's consistency level | strongly consistent |
+
+Tables, containers and collections are infrastructure: create them with your usual tooling, with key
+attributes named as in the `TableConfig` (`pk` and `sk` by default). `unwrap(DynamoDbClient.class)`,
+`unwrap(CosmosContainer.class)` and `unwrap(Firestore.class)` give the native client for anything the
+portable API doesn't cover, such as secondary indexes and transactions.
+
 ## Messaging
 
 Publish to topics and consume subscriptions with one API. Delivery is **at least once** on every provider,
@@ -521,6 +563,10 @@ cirrus:
       # native-names: true         # use existing backend names as they are
       # expand-json: true          # (default) JSON values also become db.creds.password etc.
       # startup-attempts: 3        # (default) retries when the backend is briefly unavailable
+  document-stores:
+    orders:                        # DocumentStore bean name
+      table: orders-v2             # DynamoDB table / Cosmos container / Firestore collection; defaults to the key
+      sort-key: sk                 # omit for tables keyed by partition key only
   topics:
     order-events:                  # Publisher bean name
       name: orders                 # SNS topic / Service Bus topic / Pub/Sub topic; defaults to the key
@@ -553,6 +599,8 @@ class Billing {
     void onOrder(String json) { ... }   // return = ack, throw = retry with backoff
 }
 ```
+
+`cirrus.document-stores.<name>` entries become `DocumentStore` beans with a health entry each.
 
 Listeners start once the application is ready and stop first on shutdown, letting running handlers finish.
 Each consumer reports `cirrus.messaging.messages{subscription, listener, result}`,
@@ -597,9 +645,9 @@ runs on both: `cirrus-spring-boot-autoconfigure` tests on 3.5, and the unpublish
 | `cirrus-tck` | Conformance test kit every provider must pass |
 | `cirrus-redis` | Shared Redis/Valkey cache driver (Lettuce) used by every provider |
 | `cirrus-sql` | Shared HikariCP pool with per-connection credentials (passwords, cloud IAM tokens) |
-| `cirrus-aws` | AWS SDK v2: S3, SNS, SQS, SSM Parameter Store, Secrets Manager, ElastiCache and RDS IAM auth |
-| `cirrus-azure` | Azure SDK: Blob Storage, Service Bus, Key Vault, App Configuration, Entra ID cache and database auth |
-| `cirrus-gcp` | Google Cloud: Cloud Storage, Pub/Sub, Secret Manager, Memorystore and Cloud SQL IAM auth |
+| `cirrus-aws` | AWS SDK v2: S3, DynamoDB, SNS, SQS, SSM Parameter Store, Secrets Manager, ElastiCache and RDS IAM auth |
+| `cirrus-azure` | Azure SDK: Blob Storage, Cosmos DB, Service Bus, Key Vault, App Configuration, Entra ID cache and database auth |
+| `cirrus-gcp` | Google Cloud: Cloud Storage, Firestore, Pub/Sub, Secret Manager, Memorystore and Cloud SQL IAM auth |
 | `cirrus-vault` | HashiCorp Vault (KV v2): parameters and secrets |
 | `cirrus-spring-boot-autoconfigure` | Spring Boot auto-configuration, properties, health, observations |
 | `cirrus-spring-boot-starter` | The dependency Spring Boot applications add |
@@ -708,6 +756,18 @@ fields, native names, watching):
 | HashiCorp Vault | Vault dev server (plain and TLS with a private CA) | plus AppRole with token renewal, token-file rotation, wrong tokens, multi-field secrets, CA trust; GCP and Azure login requests against a fake metadata service |
 | Spring `spring.config.import` | Vault dev server | on Boot 3.5 and 4.1: JSON expansion, native names, live reload with change events, prefixes, optional imports |
 
+Document store tests (the same 16-test TCK: every value type, versions and conditions, partial updates
+with concurrent increments, batches beyond provider limits, sort-key queries in both directions with
+paging, keys with `/ ? # % \`, expiry):
+
+| Backend | Server | Notes |
+|---|---|---|
+| in-memory store | none | the full TCK |
+| DynamoDB | Floci | the full TCK |
+| Firestore | Google's Firestore emulator, and Floci-gcp | the full TCK on Google's emulator; Floci skips concurrent increments, which it doesn't apply atomically |
+| Cosmos DB | Floci-az, over TLS with a throwaway certificate (the SDK requires HTTPS) | the full TCK |
+| Spring | in-memory store | on Boot 3.5 and 4.1: `DocumentStore` beans and health |
+
 Messaging tests (the same 15-test TCK: round trips, binary bodies, ack, nack, lease expiry and
 extension, batches, listener retries and concurrency, claim checks, ordering, deduplication, delays):
 
@@ -789,7 +849,8 @@ property goes to the provider (for example `-Dcirrus.aws.retry-mode=standard`). 
      and use secrets for cache and SQL credentials
    - Tests: Floci for AWS (SSM, Secrets Manager), Azure (App Configuration, Key Vault) and GCP
      (Secret Manager); a Vault dev-server container
-5. NoSQL: one portable API for document and key-value stores
+5. ~~NoSQL: one portable API for document and key-value stores~~ (next: transactions within a partition,
+   secondary-index queries, nested field paths in updates)
    - Providers: Amazon DynamoDB, Azure Cosmos DB (NoSQL API), Google Cloud Firestore (native mode)
    - Model: items in a table, container or collection, addressed by a partition key and an optional sort
      key, held as a portable document (nested maps, lists, strings, numbers, booleans, binary) and mapped

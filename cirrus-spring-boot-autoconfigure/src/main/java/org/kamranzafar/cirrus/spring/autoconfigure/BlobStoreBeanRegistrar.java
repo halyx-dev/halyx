@@ -2,6 +2,7 @@ package org.kamranzafar.cirrus.spring.autoconfigure;
 
 import org.kamranzafar.cirrus.cache.Cache;
 import org.kamranzafar.cirrus.messaging.Publisher;
+import org.kamranzafar.cirrus.nosql.DocumentStore;
 import org.kamranzafar.cirrus.messaging.Subscription;
 import org.kamranzafar.cirrus.parameters.ParameterStore;
 import org.kamranzafar.cirrus.storage.BlobStore;
@@ -105,6 +106,20 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
             definition.setDescription("Cirrus " + database.engine() + " database " + provider + "/" + database.database());
             registry.registerBeanDefinition(name, definition);
         });
+        binder.bind("cirrus.document-stores", Bindable.mapOf(String.class, CirrusProperties.DocumentStoreProperties.class))
+                .orElse(Map.of())
+                .forEach((name, store) -> {
+                    String provider = resolveProvider("cirrus.document-stores." + name, store.provider(), providers);
+                    RootBeanDefinition definition = new RootBeanDefinition(DocumentStore.class);
+                    definition.setFactoryBeanName(FACTORY_BEAN);
+                    definition.setFactoryMethodName("documentStore");
+                    definition.getConstructorArgumentValues().addIndexedArgumentValue(0, provider);
+                    definition.getConstructorArgumentValues().addIndexedArgumentValue(1, name);
+                    definition.getConstructorArgumentValues().addIndexedArgumentValue(2, store);
+                    definition.setTargetType(DocumentStore.class);
+                    definition.setDescription("Cirrus document store " + provider + "/" + store.toTableConfig(name).name());
+                    registry.registerBeanDefinition(name, definition);
+                });
         binder.bind("cirrus.topics", Bindable.mapOf(String.class, CirrusProperties.TopicProperties.class))
                 .orElse(Map.of())
                 .forEach((name, topic) -> registry.registerBeanDefinition(name, messagingBean(Publisher.class,

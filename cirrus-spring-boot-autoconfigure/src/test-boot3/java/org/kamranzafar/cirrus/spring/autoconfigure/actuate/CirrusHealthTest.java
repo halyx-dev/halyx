@@ -62,6 +62,17 @@ class CirrusHealthTest {
     }
 
     @Test
+    void documentStoresHaveIndicators() {
+        runner.withPropertyValues("cirrus.providers.local.type=memory", "cirrus.document-stores.orders.sort-key=sk")
+                .run(context -> {
+                    var composite = context.getBean("cirrusHealthContributor", CompositeHealthContributor.class);
+                    var orders = ((HealthIndicator) composite.getContributor("orders")).health();
+                    assertThat(orders.getStatus()).isEqualTo(Status.UP);
+                    assertThat(orders.getDetails()).containsEntry("table", "orders");
+                });
+    }
+
+    @Test
     void cachesHaveIndicatorsToo() {
         runner.withPropertyValues("cirrus.providers.local.type=memory",
                         "cirrus.blob-stores.files.bucket=files",

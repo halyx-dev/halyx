@@ -2,6 +2,7 @@ package org.kamranzafar.cirrus.spring.autoconfigure.actuate;
 
 import org.kamranzafar.cirrus.cache.Cache;
 import org.kamranzafar.cirrus.messaging.Subscription;
+import org.kamranzafar.cirrus.nosql.DocumentStore;
 import org.kamranzafar.cirrus.parameters.ParameterStore;
 import org.kamranzafar.cirrus.spring.messaging.CirrusListenerRegistrar;
 import org.kamranzafar.cirrus.spring.autoconfigure.CirrusAutoConfiguration;
@@ -38,11 +39,13 @@ public class CirrusActuatorHealthContributorAutoConfiguration {
     public HealthContributor cirrusHealthContributor(Map<String, BlobStore> blobStores, Map<String, Cache<?>> caches,
                                                       Map<String, ParameterStore> parameterStores,
                                                       Map<String, Subscription> subscriptions,
+                                                      Map<String, DocumentStore> documentStores,
                                                       ObjectProvider<CirrusListenerRegistrar> listeners) {
         Map<String, HealthContributor> contributors = new TreeMap<>();
         blobStores.forEach((name, store) -> contributors.put(name, new ActuatorBlobStoreHealthIndicator(store)));
         caches.forEach((name, cache) -> contributors.put(name, new ActuatorCacheHealthIndicator(cache)));
         parameterStores.forEach((name, store) -> contributors.put(name, new ActuatorParameterStoreHealthIndicator(store)));
+        documentStores.forEach((name, store) -> contributors.put(name, new ActuatorDocumentStoreHealthIndicator(store)));
         if (!subscriptions.isEmpty()) {
             listeners.ifAvailable(registrar -> contributors.put("messaging", new ActuatorMessageConsumersHealthIndicator(registrar)));
         }
