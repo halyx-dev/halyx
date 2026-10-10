@@ -5,6 +5,10 @@ import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -16,8 +20,10 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * Pulls on one virtual thread and handles each message on its own virtual thread, at most
  * {@code concurrency} at once: the poller only asks for as many messages as there are free slots, so a
- * slow handler slows pulling instead of piling up leased messages. While a handler runs, its lease is
- * extended every half lease. Success acks; an exception nacks with exponential backoff.
+ * slow handler slows pulling instead of piling up leased messages. From receipt until it is settled, a
+ * message's lease is extended every half lease. Messages with the same ordering key are handled one after
+ * another in delivery order, also across receive batches. Success acks; an exception nacks with
+ * exponential backoff.
  */
 final class PollingConsumer implements MessageConsumer {
 
@@ -30,6 +36,10 @@ final class PollingConsumer implements MessageConsumer {
     private final Semaphore slots;
     private final ScheduledExecutorService leases;
     private final Thread poller;
+    private final ExecutorService handlers = Executors.newThreadPerTaskExecutor(
+            Thread.ofVirtual().name("cirrus-handle-", 0).factory());
+    /** The last scheduled handler per ordering key; the next message of that key runs after it. */
+    private final Map<String, CompletableFuture<Void>> keyTails = new ConcurrentHashMap<>();
     private volatile boolean running = true;
 
     private final AtomicLong received = new AtomicLong();
@@ -84,13 +94,28 @@ final class PollingConsumer implements MessageConsumer {
                     slots.release();
                     continue;
                 }
-                Thread.ofVirtual().name("cirrus-handle-" + subscription.name()).start(() -> handle(message));
+                dispatch(message);
             }
         }
     }
 
-    private void handle(ReceivedMessage message) {
+    private void dispatch(ReceivedMessage message) {
         ScheduledFuture<?> extender = startLeaseExtension(message);
+        String key = message.orderingKey().orElse(null);
+        if (key == null) {
+            handlers.execute(() -> handle(message, extender));
+            return;
+        }
+        keyTails.compute(key, (k, tail) -> {
+            CompletableFuture<Void> previous = tail == null ? CompletableFuture.completedFuture(null) : tail;
+            CompletableFuture<Void> next = previous.handle((v, e) -> null)
+                    .thenRunAsync(() -> handle(message, extender), handlers);
+            next.whenComplete((v, e) -> keyTails.remove(k, next));
+            return next;
+        });
+    }
+
+    private void handle(ReceivedMessage message, ScheduledFuture<?> extender) {
         try {
             listener.onMessage(message);
             if (!message.isSettled()) {
@@ -176,6 +201,7 @@ final class PollingConsumer implements MessageConsumer {
             Thread.currentThread().interrupt();
         } finally {
             leases.shutdownNow();
+            handlers.shutdown();
         }
     }
 

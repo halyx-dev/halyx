@@ -1,6 +1,9 @@
 package org.kamranzafar.cirrus.aws;
 
 import org.kamranzafar.cirrus.aws.elasticache.ElastiCacheIamTokens;
+import org.kamranzafar.cirrus.aws.messaging.SnsPublisherDriver;
+import org.kamranzafar.cirrus.aws.messaging.SqsPublisherDriver;
+import org.kamranzafar.cirrus.aws.messaging.SqsSubscriptionDriver;
 import org.kamranzafar.cirrus.aws.parameters.SecretsManagerDriver;
 import org.kamranzafar.cirrus.aws.parameters.SsmParameterDriver;
 import org.kamranzafar.cirrus.aws.rds.RdsIamTokens;
@@ -15,6 +18,10 @@ import org.kamranzafar.cirrus.config.HttpSettings;
 import org.kamranzafar.cirrus.config.ProviderConfig;
 import org.kamranzafar.cirrus.error.UnsupportedFeatureException;
 import org.kamranzafar.cirrus.jdbc.JdbcDatabases;
+import org.kamranzafar.cirrus.messaging.SubscriptionConfig;
+import org.kamranzafar.cirrus.messaging.TopicConfig;
+import org.kamranzafar.cirrus.messaging.spi.PublisherDriver;
+import org.kamranzafar.cirrus.messaging.spi.SubscriptionDriver;
 import org.kamranzafar.cirrus.redis.RedisCaches;
 import org.kamranzafar.cirrus.spi.ProviderConnection;
 import org.kamranzafar.cirrus.sql.Database;
@@ -35,6 +42,8 @@ import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.regions.providers.DefaultAwsRegionProviderChain;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
+import software.amazon.awssdk.services.sns.SnsClient;
+import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.ssm.SsmClient;
 import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
@@ -50,6 +59,8 @@ final class AwsConnection implements ProviderConnection {
     private final ProviderConfig config;
     private SdkHttpClient http;
     private JdbcDatabases databases;
+    private SnsClient sns;
+    private SqsClient sqs;
     private S3Client s3;
     private S3Presigner presigner;
     private RedisCaches caches;
@@ -139,6 +150,43 @@ final class AwsConnection implements ProviderConnection {
         };
     }
 
+    /** An SNS topic, or with {@code aws.target=sqs} an SQS queue. */
+    @Override
+    public synchronized PublisherDriver publisher(TopicConfig topic) {
+        String target = topic.property(AwsProperties.MESSAGING_TARGET).orElse("sns");
+        return switch (target) {
+            case "sns" -> new SnsPublisherDriver(sns(), topic.name());
+            case "sqs" -> new SqsPublisherDriver(sqs(), topic.name());
+            default -> throw new IllegalArgumentException(AwsProperties.MESSAGING_TARGET + " must be sns or sqs, not " + target);
+        };
+    }
+
+    /** An SQS queue, on its own or subscribed to an SNS topic. */
+    @Override
+    public synchronized SubscriptionDriver subscription(SubscriptionConfig subscription) {
+        return new SqsSubscriptionDriver(sqs(), subscription.name());
+    }
+
+    private SnsClient sns() {
+        if (sns == null) {
+            var builder = SnsClient.builder().region(region()).credentialsProvider(credentials())
+                    .httpClient(http()).overrideConfiguration(overrides());
+            config.endpoint().ifPresent(builder::endpointOverride);
+            sns = builder.build();
+        }
+        return sns;
+    }
+
+    private SqsClient sqs() {
+        if (sqs == null) {
+            var builder = SqsClient.builder().region(region()).credentialsProvider(credentials())
+                    .httpClient(http()).overrideConfiguration(overrides());
+            config.endpoint().ifPresent(builder::endpointOverride);
+            sqs = builder.build();
+        }
+        return sqs;
+    }
+
     /** Password auth, or RDS IAM tokens for PostgreSQL and MySQL (RDS for SQL Server has no IAM login). */
     @Override
     public synchronized Database database(SqlConfig sql) {
@@ -195,6 +243,14 @@ final class AwsConnection implements ProviderConnection {
         if (databases != null) {
             databases.close();
             databases = null;
+        }
+        if (sns != null) {
+            sns.close();
+            sns = null;
+        }
+        if (sqs != null) {
+            sqs.close();
+            sqs = null;
         }
         if (caches != null) {
             caches.close();

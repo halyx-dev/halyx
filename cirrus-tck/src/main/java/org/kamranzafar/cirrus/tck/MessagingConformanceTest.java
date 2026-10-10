@@ -41,7 +41,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 public abstract class MessagingConformanceTest {
 
     /** A topic and a subscription that receives everything published to it. */
-    protected record Channel(Publisher publisher, Subscription subscription) {
+    public record Channel(Publisher publisher, Subscription subscription) {
     }
 
     private String name;
@@ -204,6 +204,11 @@ public abstract class MessagingConformanceTest {
             }
         }, quickOptions(4))) {
             assertThat(all.await(90, TimeUnit.SECONDS)).as("all messages handled").isTrue();
+            // The ack follows the handler's return; give the last one a moment.
+            long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+            while (consumer.statistics().acked() < 5 && System.nanoTime() < deadline) {
+                Thread.sleep(50);
+            }
             assertThat(consumer.statistics().failed()).isGreaterThanOrEqualTo(1);
             assertThat(consumer.statistics().acked()).isGreaterThanOrEqualTo(5);
         }

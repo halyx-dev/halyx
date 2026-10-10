@@ -25,7 +25,8 @@ public final class AwsErrors {
 
     /** Services that report a missing resource with 400 and a specific code. */
     private static final Set<String> NOT_FOUND_CODES =
-            Set.of("ParameterNotFound", "ParameterVersionNotFound", "ResourceNotFoundException");
+            Set.of("ParameterNotFound", "ParameterVersionNotFound", "ResourceNotFoundException",
+                    "AWS.SimpleQueueService.NonExistentQueue", "QueueDoesNotExist", "NotFound");
 
     private AwsErrors() {
     }

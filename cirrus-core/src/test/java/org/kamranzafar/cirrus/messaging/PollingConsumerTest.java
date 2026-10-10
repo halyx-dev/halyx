@@ -1,0 +1,136 @@
+package org.kamranzafar.cirrus.messaging;
+
+import org.junit.jupiter.api.Test;
+import org.kamranzafar.cirrus.capability.Capabilities;
+import org.kamranzafar.cirrus.error.CloudException;
+import org.kamranzafar.cirrus.error.UnknownCloudException;
+import org.kamranzafar.cirrus.interceptor.InterceptorChain;
+import org.kamranzafar.cirrus.messaging.spi.DriverMessage;
+import org.kamranzafar.cirrus.messaging.spi.SubscriptionDriver;
+
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+class PollingConsumerTest {
+
+    /** Hands out everything at once, the way an SQS FIFO receive returns a whole message group. */
+    private static final class BatchDriver implements SubscriptionDriver {
+        final ConcurrentLinkedQueue<DriverMessage> pending = new ConcurrentLinkedQueue<>();
+        final List<String> acked = Collections.synchronizedList(new ArrayList<>());
+        final AtomicInteger extensions = new AtomicInteger();
+        final Duration lease;
+
+        BatchDriver(Duration lease) {
+            this.lease = lease;
+        }
+
+        void add(String body, String key) {
+            pending.add(new DriverMessage(body, body, body.getBytes(StandardCharsets.UTF_8), Map.of(), key, null, 1));
+        }
+
+        @Override public String provider() { return "test"; }
+        @Override public String name() { return "batch"; }
+        @Override public Capabilities capabilities() { return Capabilities.none(); }
+
+        @Override
+        public List<DriverMessage> receive(int max, Duration wait) {
+            List<DriverMessage> out = new ArrayList<>();
+            DriverMessage m;
+            while (out.size() < max && (m = pending.poll()) != null) {
+                out.add(m);
+            }
+            if (out.isEmpty()) {
+                try {
+                    Thread.sleep(20);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            return out;
+        }
+
+        @Override public int maxReceiveBatch() { return 100; }
+        @Override public void ack(DriverMessage message) { acked.add(message.id()); }
+        @Override public void nack(DriverMessage message, Duration delay) { pending.add(message); }
+        @Override public void extendLease(DriverMessage message, Duration lease) { extensions.incrementAndGet(); }
+        @Override public Duration defaultLease() { return lease; }
+        @Override public CloudException translate(Throwable error) { return new UnknownCloudException(error.getMessage()); }
+        @Override public <T> T unwrap(Class<T> nativeType) { throw new IllegalArgumentException(); }
+    }
+
+    private static Subscription subscription(BatchDriver driver) {
+        return new DefaultSubscription(driver, SubscriptionConfig.of("batch"), InterceptorChain.empty());
+    }
+
+    @Test
+    void messagesWithTheSameKeyRunOneAtATimeInOrderEvenWithinABatch() throws InterruptedException {
+        var driver = new BatchDriver(Duration.ofMinutes(1));
+        for (int i = 0; i < 10; i++) {
+            driver.add("a" + i, "a");
+            driver.add("b" + i, "b");
+            driver.add("free" + i, null);
+        }
+        List<String> order = Collections.synchronizedList(new ArrayList<>());
+        AtomicInteger runningA = new AtomicInteger();
+        AtomicInteger peakA = new AtomicInteger();
+        CountDownLatch all = new CountDownLatch(30);
+
+        try (MessageConsumer ignored = subscription(driver).listen(message -> {
+            boolean a = message.orderingKey().filter("a"::equals).isPresent();
+            if (a) {
+                peakA.accumulateAndGet(runningA.incrementAndGet(), Math::max);
+            }
+            Thread.sleep(5);
+            order.add(message.bodyAsString());
+            if (a) {
+                runningA.decrementAndGet();
+            }
+            all.countDown();
+        }, ConsumerOptions.DEFAULTS.withConcurrency(30).withPollWait(Duration.ofMillis(50)))) {
+            assertThat(all.await(10, TimeUnit.SECONDS)).isTrue();
+        }
+
+        assertThat(peakA.get()).isEqualTo(1);
+        assertThat(order.stream().filter(s -> s.startsWith("a")).toList())
+                .containsExactly("a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8", "a9");
+        assertThat(order.stream().filter(s -> s.startsWith("b")).toList())
+                .containsExactly("b0", "b1", "b2", "b3", "b4", "b5", "b6", "b7", "b8", "b9");
+    }
+
+    @Test
+    void leasesAreExtendedWhileAHandlerRuns() throws InterruptedException {
+        var driver = new BatchDriver(Duration.ofMillis(200));
+        driver.add("slow", null);
+        CountDownLatch done = new CountDownLatch(1);
+
+        try (MessageConsumer consumer = subscription(driver).listen(message -> {
+            Thread.sleep(700);
+            done.countDown();
+        }, ConsumerOptions.DEFAULTS.withPollWait(Duration.ofMillis(50)))) {
+            assertThat(done.await(5, TimeUnit.SECONDS)).isTrue();
+            Thread.sleep(100);
+            assertThat(consumer.statistics().acked()).isEqualTo(1);
+        }
+        assertThat(driver.extensions.get()).isGreaterThanOrEqualTo(3);
+        assertThat(driver.acked).containsExactly("slow");
+    }
+
+    @Test
+    void backoffDoublesUpToTheMaximum() {
+        var options = ConsumerOptions.DEFAULTS.withBackoff(Duration.ofSeconds(1), Duration.ofSeconds(10));
+        assertThat(options.backoff(1)).isEqualTo(Duration.ofSeconds(1));
+        assertThat(options.backoff(3)).isEqualTo(Duration.ofSeconds(4));
+        assertThat(options.backoff(10)).isEqualTo(Duration.ofSeconds(10));
+        assertThat(options.backoff(0)).isEqualTo(Duration.ofSeconds(1));
+    }
+}

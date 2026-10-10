@@ -23,6 +23,9 @@ public final class AwsProperties {
      */
     public static final String RETRY_MODE = "aws.retry-mode";
 
+    /** Topic property: {@code sqs} to send straight to an SQS queue instead of an SNS topic ({@code sns}, the default). */
+    public static final String MESSAGING_TARGET = "aws.target";
+
     /** SQL property: the region RDS IAM tokens are signed for, when it differs from the connection's region. */
     public static final String RDS_REGION = "aws.rds.region";
 
