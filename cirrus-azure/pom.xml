@@ -23,6 +23,11 @@
             <groupId>com.azure</groupId>
             <artifactId>azure-storage-blob</artifactId>
         </dependency>
+        <!-- NoSQL: Cosmos DB for NoSQL -->
+        <dependency>
+            <groupId>com.azure</groupId>
+            <artifactId>azure-cosmos</artifactId>
+        </dependency>
         <!-- Messaging: Service Bus queues and topics -->
         <dependency>
             <groupId>com.azure</groupId>

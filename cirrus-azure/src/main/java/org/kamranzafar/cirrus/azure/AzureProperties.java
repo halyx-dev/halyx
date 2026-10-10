@@ -9,6 +9,15 @@ public final class AzureProperties {
      */
     public static final String STORAGE_ACCOUNT = "azure.storage.account";
 
+    /** Cosmos DB account endpoint, {@code https://<account>.documents.azure.com:443/}. */
+    public static final String COSMOS_ENDPOINT = "azure.cosmos.endpoint";
+
+    /** Cosmos DB account key; without it, Entra ID with the default credential chain. */
+    public static final String COSMOS_KEY = "azure.cosmos.key";
+
+    /** Cosmos DB database holding the containers (required for document stores). */
+    public static final String COSMOS_DATABASE = "azure.cosmos.database";
+
     /** Service Bus connection string (shared access key, or the local emulator's). */
     public static final String SERVICE_BUS_CONNECTION_STRING = "azure.servicebus.connection-string";
 

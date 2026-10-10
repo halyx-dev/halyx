@@ -1,5 +1,7 @@
 package org.kamranzafar.cirrus.azure;
 
+import com.azure.cosmos.CosmosClient;
+import com.azure.cosmos.CosmosClientBuilder;
 import com.azure.identity.DefaultAzureCredentialBuilder;
 import com.azure.messaging.servicebus.ServiceBusClientBuilder;
 import com.azure.messaging.servicebus.models.ServiceBusReceiveMode;
@@ -14,6 +16,7 @@ import com.azure.core.util.HttpClientOptions;
 import com.azure.data.appconfiguration.ConfigurationClientBuilder;
 import com.azure.security.keyvault.secrets.SecretClientBuilder;
 import org.kamranzafar.cirrus.azure.blob.AzureBlobStoreDriver;
+import org.kamranzafar.cirrus.azure.cosmos.CosmosDocumentStoreDriver;
 import org.kamranzafar.cirrus.azure.parameters.AppConfigurationDriver;
 import org.kamranzafar.cirrus.azure.parameters.AzureParameterProperties;
 import org.kamranzafar.cirrus.azure.parameters.ForceHttpPolicy;
@@ -33,6 +36,8 @@ import org.kamranzafar.cirrus.config.HttpSettings;
 import org.kamranzafar.cirrus.config.ProviderConfig;
 import org.kamranzafar.cirrus.jdbc.JdbcDatabases;
 import org.kamranzafar.cirrus.messaging.SubscriptionConfig;
+import org.kamranzafar.cirrus.nosql.TableConfig;
+import org.kamranzafar.cirrus.nosql.spi.DocumentStoreDriver;
 import org.kamranzafar.cirrus.messaging.TopicConfig;
 import org.kamranzafar.cirrus.messaging.spi.PublisherDriver;
 import org.kamranzafar.cirrus.messaging.spi.SubscriptionDriver;
@@ -59,6 +64,7 @@ final class AzureConnection implements ProviderConnection {
     private HttpClient http;
     private JdbcDatabases databases;
     private ServiceBusClientBuilder serviceBus;
+    private CosmosClient cosmos;
     /** Senders and receivers own AMQP links, closed with the connection. */
     private final List<AutoCloseable> serviceBusClients = new ArrayList<>();
     private BlobServiceClient blobService;
@@ -172,6 +178,26 @@ final class AzureConnection implements ProviderConnection {
         });
     }
 
+    /** A Cosmos DB container in {@code azure.cosmos.database}. */
+    @Override
+    public synchronized DocumentStoreDriver documentStore(TableConfig table) {
+        if (cosmos == null) {
+            String endpoint = config.property(AzureProperties.COSMOS_ENDPOINT)
+                    .orElseThrow(() -> new IllegalArgumentException("Cosmos DB needs '" + AzureProperties.COSMOS_ENDPOINT + "'"));
+            var builder = new CosmosClientBuilder().endpoint(endpoint).gatewayMode().endpointDiscoveryEnabled(false);
+            var key = config.property(AzureProperties.COSMOS_KEY);
+            if (key.isPresent()) {
+                builder.key(key.get());
+            } else {
+                builder.credential(new DefaultAzureCredentialBuilder().build());
+            }
+            cosmos = builder.buildClient();
+        }
+        String database = config.property(AzureProperties.COSMOS_DATABASE)
+                .orElseThrow(() -> new IllegalArgumentException("Cosmos DB needs '" + AzureProperties.COSMOS_DATABASE + "'"));
+        return new CosmosDocumentStoreDriver(cosmos.getDatabase(database).getContainer(table.name()), table);
+    }
+
     /** A Service Bus topic, or with {@code azure.servicebus.entity=queue} a queue. */
     @Override
     public synchronized PublisherDriver publisher(TopicConfig topic) {
@@ -247,6 +273,10 @@ final class AzureConnection implements ProviderConnection {
         if (databases != null) {
             databases.close();
             databases = null;
+        }
+        if (cosmos != null) {
+            cosmos.close();
+            cosmos = null;
         }
         for (AutoCloseable client : serviceBusClients) {
             try {
