@@ -2,6 +2,7 @@ package org.kamranzafar.cirrus.gcp;
 
 import com.google.api.gax.core.NoCredentialsProvider;
 import com.google.api.gax.grpc.GrpcTransportChannel;
+import com.google.api.gax.rpc.ClientSettings;
 import com.google.api.gax.rpc.FixedTransportChannelProvider;
 import com.google.cloud.NoCredentials;
 import com.google.cloud.ServiceOptions;
@@ -10,6 +11,10 @@ import com.google.cloud.parametermanager.v1.ParameterManagerSettings;
 import com.google.cloud.secretmanager.v1.SecretManagerServiceClient;
 import com.google.cloud.secretmanager.v1.SecretManagerServiceSettings;
 import io.grpc.ManagedChannelBuilder;
+import com.google.cloud.pubsub.v1.SubscriptionAdminClient;
+import com.google.cloud.pubsub.v1.SubscriptionAdminSettings;
+import com.google.cloud.pubsub.v1.TopicAdminClient;
+import com.google.cloud.pubsub.v1.TopicAdminSettings;
 import com.google.cloud.storage.Storage;
 import com.google.cloud.storage.StorageOptions;
 import com.google.cloud.http.HttpTransportOptions;
@@ -19,11 +24,17 @@ import org.kamranzafar.cirrus.config.HttpSettings;
 import org.kamranzafar.cirrus.config.ProviderConfig;
 import org.kamranzafar.cirrus.error.UnsupportedFeatureException;
 import org.kamranzafar.cirrus.jdbc.JdbcDatabases;
+import org.kamranzafar.cirrus.messaging.SubscriptionConfig;
+import org.kamranzafar.cirrus.messaging.TopicConfig;
+import org.kamranzafar.cirrus.messaging.spi.PublisherDriver;
+import org.kamranzafar.cirrus.messaging.spi.SubscriptionDriver;
 import org.kamranzafar.cirrus.cache.CacheAuth;
 import org.kamranzafar.cirrus.cache.CacheConfig;
 import org.kamranzafar.cirrus.cache.spi.CacheDriver;
 import org.kamranzafar.cirrus.gcp.memorystore.MemorystoreIamTokens;
 import org.kamranzafar.cirrus.gcp.parameters.ParameterManagerDriver;
+import org.kamranzafar.cirrus.gcp.pubsub.PubSubPublisherDriver;
+import org.kamranzafar.cirrus.gcp.pubsub.PubSubSubscriptionDriver;
 import org.kamranzafar.cirrus.gcp.parameters.SecretManagerDriver;
 import org.kamranzafar.cirrus.gcp.sql.CloudSqlConnector;
 import org.kamranzafar.cirrus.gcp.sql.CloudSqlIamTokens;
@@ -55,6 +66,8 @@ final class GcpConnection implements ProviderConnection {
     private ApacheHttpTransport httpTransport;
     private Storage storage;
     private JdbcDatabases databases;
+    private TopicAdminClient topicAdmin;
+    private SubscriptionAdminClient subscriptionAdmin;
     private RedisCaches caches;
     private SecretManagerServiceClient secretManager;
     private final Map<String, ParameterManagerClient> parameterManagers = new HashMap<>();
@@ -145,6 +158,57 @@ final class GcpConnection implements ProviderConnection {
     }
 
     /** With an endpoint override (an emulator), Secret Manager is reached over plaintext gRPC on the same host and port. */
+    /** A Pub/Sub topic: a topic id in the configured project, or {@code projects/<p>/topics/<id>}. */
+    @Override
+    public synchronized PublisherDriver publisher(TopicConfig topic) {
+        if (topicAdmin == null) {
+            topicAdmin = pubSubClient(TopicAdminSettings.newBuilder(), TopicAdminClient::create);
+        }
+        return new PubSubPublisherDriver(topicAdmin, qualified(topic.name(), "topics"));
+    }
+
+    /** A Pub/Sub pull subscription: an id in the configured project, or {@code projects/<p>/subscriptions/<id>}. */
+    @Override
+    public synchronized SubscriptionDriver subscription(SubscriptionConfig subscription) {
+        if (subscriptionAdmin == null) {
+            subscriptionAdmin = pubSubClient(SubscriptionAdminSettings.newBuilder(), SubscriptionAdminClient::create);
+        }
+        return new PubSubSubscriptionDriver(subscriptionAdmin, qualified(subscription.name(), "subscriptions"));
+    }
+
+    private String qualified(String name, String collection) {
+        if (name.startsWith("projects/")) {
+            return name;
+        }
+        String project = config.property(GcpProperties.PROJECT_ID).orElseGet(ServiceOptions::getDefaultProjectId);
+        if (project == null) {
+            throw new IllegalArgumentException("Pub/Sub needs a project: set the '" + GcpProperties.PROJECT_ID
+                    + "' property or use projects/<project>/" + collection + "/<id>");
+        }
+        return "projects/" + project + "/" + collection + "/" + name;
+    }
+
+    @FunctionalInterface
+    private interface ClientFactory<S, C> {
+        C create(S settings) throws IOException;
+    }
+
+    private <B extends ClientSettings.Builder<S, B>, S extends ClientSettings<S>, C> C pubSubClient(B settings, ClientFactory<S, C> factory) {
+        try {
+            if (config.endpoint().isPresent()) {
+                var endpoint = config.endpoint().get();
+                var channel = ManagedChannelBuilder.forAddress(endpoint.getHost(), endpoint.getPort()).usePlaintext().build();
+                settings.setTransportChannelProvider(FixedTransportChannelProvider.create(GrpcTransportChannel.create(channel)))
+                        .setCredentialsProvider(NoCredentialsProvider.create());
+            } else if (config.credentials() instanceof Credentials.Anonymous) {
+                settings.setCredentialsProvider(NoCredentialsProvider.create());
+            }
+            return factory.create(settings.build());
+        } catch (IOException e) {
+            throw new UncheckedIOException("Could not create the Pub/Sub client", e);
+        }
+    }
+
     private SecretManagerServiceClient secretManagerClient() {
         try {
             var settings = SecretManagerServiceSettings.newBuilder();
@@ -211,6 +275,14 @@ final class GcpConnection implements ProviderConnection {
         if (databases != null) {
             databases.close();
             databases = null;
+        }
+        if (topicAdmin != null) {
+            topicAdmin.close();
+            topicAdmin = null;
+        }
+        if (subscriptionAdmin != null) {
+            subscriptionAdmin.close();
+            subscriptionAdmin = null;
         }
         if (caches != null) {
             caches.close();

@@ -269,11 +269,16 @@ public abstract class MessagingConformanceTest {
     @Test
     void orderingKeyDeliversEachKeyInOrder() throws InterruptedException {
         Channel c = channelWith(MessagingCapability.ORDERING);
+        // FIFO topics without content-based deduplication need an id on every message.
+        boolean dedup = c.publisher().capabilities().supports(MessagingCapability.DEDUPLICATION);
         List<OutgoingMessage> batch = new ArrayList<>();
         for (int i = 0; i < 8; i++) {
             for (String key : List.of("a", "b")) {
-                batch.add(OutgoingMessage.builder(key + ":" + i).orderingKey(key)
-                        .deduplicationId(name + key + i).build());
+                var message = OutgoingMessage.builder(key + ":" + i).orderingKey(key);
+                if (dedup) {
+                    message.deduplicationId(name + key + i);
+                }
+                batch.add(message.build());
             }
         }
         c.publisher().publishAll(batch);
