@@ -5,12 +5,17 @@ import org.kamranzafar.cirrus.cache.CacheConfig;
 import org.kamranzafar.cirrus.config.Credentials;
 import org.kamranzafar.cirrus.config.ProviderConfig;
 import org.kamranzafar.cirrus.interceptor.RetryPolicy;
+import org.kamranzafar.cirrus.messaging.ClaimCheck;
+import org.kamranzafar.cirrus.messaging.ConsumerOptions;
+import org.kamranzafar.cirrus.messaging.SubscriptionConfig;
+import org.kamranzafar.cirrus.messaging.TopicConfig;
 import org.kamranzafar.cirrus.parameters.ParameterKind;
 import org.kamranzafar.cirrus.parameters.ParameterStoreConfig;
 import org.kamranzafar.cirrus.sql.PoolSettings;
 import org.kamranzafar.cirrus.sql.SqlAuth;
 import org.kamranzafar.cirrus.sql.SqlConfig;
 import org.kamranzafar.cirrus.sql.SqlEngine;
+import org.kamranzafar.cirrus.storage.BlobStore;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
@@ -49,6 +54,9 @@ import java.util.Map;
  * @param parameterStores {@code ParameterStore} beans to create, keyed by bean name; also the names used by
  *                    {@code spring.config.import=cirrus:<name>}
  * @param databases   pooled {@code DataSource} beans to create, keyed by bean name
+ * @param topics      {@code Publisher} beans to create, keyed by bean name
+ * @param subscriptions {@code Subscription} beans to create, keyed by bean name; also what
+ *                    {@code @CirrusListener} refers to
  * @param retry       provider-neutral retries on top of the SDKs' own
  * @param observations Micrometer observations of every operation
  */
@@ -57,6 +65,7 @@ public record CirrusProperties(Map<String, Provider> providers, Map<String, Blob
                                 Map<String, CacheProperties> caches, @DefaultValue CacheManagerProperties cacheManager,
                                 Map<String, ParameterStoreProperties> parameterStores,
                                 Map<String, DatabaseProperties> databases,
+                                Map<String, TopicProperties> topics, Map<String, SubscriptionProperties> subscriptions,
                                 @DefaultValue Retry retry, @DefaultValue Observations observations) {
 
     public CirrusProperties {
@@ -65,6 +74,8 @@ public record CirrusProperties(Map<String, Provider> providers, Map<String, Blob
         caches = ordered(caches);
         parameterStores = ordered(parameterStores);
         databases = ordered(databases);
+        topics = ordered(topics);
+        subscriptions = ordered(subscriptions);
     }
 
     private static <V> Map<String, V> ordered(Map<String, V> map) {
@@ -200,6 +211,93 @@ public record CirrusProperties(Map<String, Provider> providers, Map<String, Blob
                     yield username == null ? CacheAuth.password(password) : CacheAuth.password(username, password);
                 }
             };
+        }
+    }
+
+    /**
+     * A topic or queue to publish to, registered as a {@code Publisher} bean named after its key.
+     *
+     * @param provider   the provider name; may be omitted when exactly one provider is configured
+     * @param name       the provider's topic name (SNS topic name or ARN, Service Bus topic, Pub/Sub topic id);
+     *                   defaults to the key
+     * @param claimCheck send large bodies through a blob store
+     * @param properties provider-specific settings, such as {@code aws.target=sqs}
+     */
+    public record TopicProperties(String provider, String name, ClaimCheckProperties claimCheck,
+                                  Map<String, String> properties) {
+
+        public TopicProperties {
+            properties = ordered(properties);
+        }
+
+        TopicConfig toTopicConfig(String key, ClaimCheck resolvedClaimCheck) {
+            TopicConfig.Builder config = TopicConfig.builder(name == null || name.isBlank() ? key : name);
+            if (resolvedClaimCheck != null) {
+                config.claimCheck(resolvedClaimCheck);
+            }
+            properties.forEach(config::property);
+            return config.build();
+        }
+    }
+
+    /**
+     * A subscription or queue to consume from, registered as a {@code Subscription} bean named after its key.
+     *
+     * @param provider   the provider name; may be omitted when exactly one provider is configured
+     * @param name       the provider's subscription name (SQS queue, {@code <topic>/subscriptions/<name>} on
+     *                   Service Bus, Pub/Sub subscription id); defaults to the key
+     * @param topic      the topic, for providers that bind subscriptions themselves (memory)
+     * @param claimCheck resolve bodies sent through a blob store; must match the publisher's
+     * @param listener   how {@code @CirrusListener} methods on this subscription are run
+     * @param properties provider-specific settings
+     */
+    public record SubscriptionProperties(String provider, String name, String topic, ClaimCheckProperties claimCheck,
+                                         @DefaultValue ListenerProperties listener, Map<String, String> properties) {
+
+        public SubscriptionProperties {
+            properties = ordered(properties);
+        }
+
+        SubscriptionConfig toSubscriptionConfig(String key, ClaimCheck resolvedClaimCheck) {
+            SubscriptionConfig.Builder config = SubscriptionConfig.builder(name == null || name.isBlank() ? key : name);
+            if (topic != null) {
+                config.topic(topic);
+            }
+            if (resolvedClaimCheck != null) {
+                config.claimCheck(resolvedClaimCheck);
+            }
+            properties.forEach(config::property);
+            return config.build();
+        }
+    }
+
+    /**
+     * @param blobStore bean name of one of the {@code cirrus.blob-stores}
+     * @param threshold bodies larger than this many bytes go through the store (default 204800)
+     * @param prefix    key prefix of stored bodies (default {@code claim-check/})
+     */
+    public record ClaimCheckProperties(String blobStore, Integer threshold, String prefix) {
+
+        ClaimCheck toClaimCheck(BlobStore store) {
+            ClaimCheck defaults = ClaimCheck.of(store);
+            return new ClaimCheck(store, threshold == null ? defaults.thresholdBytes() : threshold,
+                    prefix == null ? defaults.prefix() : prefix);
+        }
+    }
+
+    /** See {@code ConsumerOptions}; unset values keep its defaults. */
+    public record ListenerProperties(Integer concurrency, Integer batchSize, Duration pollWait, Duration initialBackoff,
+                                     Duration maxBackoff, Boolean extendLease, Duration shutdownTimeout) {
+
+        public ConsumerOptions toConsumerOptions(int concurrencyOverride) {
+            ConsumerOptions d = ConsumerOptions.DEFAULTS;
+            int threads = concurrencyOverride > 0 ? concurrencyOverride : concurrency == null ? d.concurrency() : concurrency;
+            return new ConsumerOptions(threads, batchSize == null ? d.batchSize() : batchSize,
+                    pollWait == null ? d.pollWait() : pollWait,
+                    initialBackoff == null ? d.initialBackoff() : initialBackoff,
+                    maxBackoff == null ? d.maxBackoff() : maxBackoff,
+                    extendLease == null ? d.extendLease() : extendLease,
+                    shutdownTimeout == null ? d.shutdownTimeout() : shutdownTimeout);
         }
     }
 

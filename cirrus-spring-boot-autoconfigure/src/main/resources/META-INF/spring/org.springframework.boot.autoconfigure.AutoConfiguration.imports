@@ -4,3 +4,4 @@ org.kamranzafar.cirrus.spring.autoconfigure.actuate.CirrusActuatorHealthContribu
 org.kamranzafar.cirrus.spring.autoconfigure.health.CirrusHealthContributorAutoConfiguration
 org.kamranzafar.cirrus.spring.autoconfigure.cache.CirrusCacheManagerAutoConfiguration
 org.kamranzafar.cirrus.spring.autoconfigure.metrics.CirrusCacheMetricsAutoConfiguration
+org.kamranzafar.cirrus.spring.autoconfigure.observation.CirrusMessagingTracingAutoConfiguration

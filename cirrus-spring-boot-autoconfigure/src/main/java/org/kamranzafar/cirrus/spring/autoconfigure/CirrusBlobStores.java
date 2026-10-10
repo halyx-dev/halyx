@@ -3,6 +3,8 @@ package org.kamranzafar.cirrus.spring.autoconfigure;
 import org.kamranzafar.cirrus.Cirrus;
 import org.kamranzafar.cirrus.cache.Cache;
 import org.kamranzafar.cirrus.cache.CacheConfig;
+import org.kamranzafar.cirrus.messaging.Publisher;
+import org.kamranzafar.cirrus.messaging.Subscription;
 import org.kamranzafar.cirrus.parameters.ParameterStore;
 import org.kamranzafar.cirrus.parameters.ParameterStoreConfig;
 import org.kamranzafar.cirrus.sql.Database;
@@ -33,6 +35,25 @@ public final class CirrusBlobStores {
 
     public ParameterStore parameterStore(String provider, ParameterStoreConfig config) {
         return cirrus.provider(provider).parameterStore(config);
+    }
+
+    public Publisher publisher(String provider, String name, CirrusProperties.TopicProperties topic) {
+        return cirrus.provider(provider).publisher(topic.toTopicConfig(name, null));
+    }
+
+    public Publisher publisherWithClaimCheck(String provider, String name, CirrusProperties.TopicProperties topic,
+                                             BlobStore claims) {
+        return cirrus.provider(provider).publisher(topic.toTopicConfig(name, topic.claimCheck().toClaimCheck(claims)));
+    }
+
+    public Subscription subscription(String provider, String name, CirrusProperties.SubscriptionProperties subscription) {
+        return cirrus.provider(provider).subscription(subscription.toSubscriptionConfig(name, null));
+    }
+
+    public Subscription subscriptionWithClaimCheck(String provider, String name,
+                                                   CirrusProperties.SubscriptionProperties subscription, BlobStore claims) {
+        return cirrus.provider(provider).subscription(
+                subscription.toSubscriptionConfig(name, subscription.claimCheck().toClaimCheck(claims)));
     }
 
     /** A pooled database with a fixed password or cloud IAM login. The pool closes with Cirrus. */

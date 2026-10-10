@@ -1,6 +1,8 @@
 package org.kamranzafar.cirrus.spring.autoconfigure;
 
 import org.kamranzafar.cirrus.cache.Cache;
+import org.kamranzafar.cirrus.messaging.Publisher;
+import org.kamranzafar.cirrus.messaging.Subscription;
 import org.kamranzafar.cirrus.parameters.ParameterStore;
 import org.kamranzafar.cirrus.storage.BlobStore;
 import org.springframework.beans.factory.config.RuntimeBeanReference;
@@ -103,6 +105,16 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
             definition.setDescription("Cirrus " + database.engine() + " database " + provider + "/" + database.database());
             registry.registerBeanDefinition(name, definition);
         });
+        binder.bind("cirrus.topics", Bindable.mapOf(String.class, CirrusProperties.TopicProperties.class))
+                .orElse(Map.of())
+                .forEach((name, topic) -> registry.registerBeanDefinition(name, messagingBean(Publisher.class,
+                        "cirrus.topics." + name, name, topic.provider(), topic, topic.claimCheck(), "publisher",
+                        providers, stores.keySet())));
+        binder.bind("cirrus.subscriptions", Bindable.mapOf(String.class, CirrusProperties.SubscriptionProperties.class))
+                .orElse(Map.of())
+                .forEach((name, subscription) -> registry.registerBeanDefinition(name, messagingBean(Subscription.class,
+                        "cirrus.subscriptions." + name, name, subscription.provider(), subscription,
+                        subscription.claimCheck(), "subscription", providers, stores.keySet())));
         stores.forEach((name, store) -> {
             String provider = resolveProvider("cirrus.blob-stores." + name, store.provider(), providers);
             String bucket = store.bucket() == null || store.bucket().isBlank() ? name : store.bucket();
@@ -115,6 +127,33 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
             definition.setDescription("Cirrus blob store " + provider + "/" + bucket);
             registry.registerBeanDefinition(name, definition);
         });
+    }
+
+    /** A Publisher or Subscription bean; with a claim check, its blob store bean is injected too. */
+    private static RootBeanDefinition messagingBean(Class<?> type, String property, String name, String provider,
+                                                    Object properties, CirrusProperties.ClaimCheckProperties claimCheck,
+                                                    String factoryMethod, Map<String, CirrusProperties.Provider> providers,
+                                                    Set<String> blobStores) {
+        String resolved = resolveProvider(property, provider, providers);
+        RootBeanDefinition definition = new RootBeanDefinition(type);
+        definition.setFactoryBeanName(FACTORY_BEAN);
+        var args = definition.getConstructorArgumentValues();
+        args.addIndexedArgumentValue(0, resolved);
+        args.addIndexedArgumentValue(1, name);
+        args.addIndexedArgumentValue(2, properties);
+        if (claimCheck != null) {
+            if (claimCheck.blobStore() == null || !blobStores.contains(claimCheck.blobStore())) {
+                throw new IllegalStateException(property + ".claim-check.blob-store must name one of cirrus.blob-stores "
+                        + blobStores);
+            }
+            definition.setFactoryMethodName(factoryMethod + "WithClaimCheck");
+            args.addIndexedArgumentValue(3, new RuntimeBeanReference(claimCheck.blobStore()));
+        } else {
+            definition.setFactoryMethodName(factoryMethod);
+        }
+        definition.setTargetType(type);
+        definition.setDescription("Cirrus " + factoryMethod + " " + resolved + "/" + name);
+        return definition;
     }
 
     static String resolveProvider(String property, String provider,

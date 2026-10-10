@@ -1,6 +1,7 @@
 package org.kamranzafar.cirrus.spring.autoconfigure;
 
 import org.kamranzafar.cirrus.cache.Cache;
+import org.kamranzafar.cirrus.messaging.Subscription;
 import org.kamranzafar.cirrus.parameters.ParameterStore;
 import org.kamranzafar.cirrus.storage.BlobStore;
 import org.springframework.boot.autoconfigure.condition.AnyNestedCondition;
@@ -23,5 +24,9 @@ public class CirrusResourcesCondition extends AnyNestedCondition {
 
     @ConditionalOnBean(ParameterStore.class)
     static class HasParameterStore {
+    }
+
+    @ConditionalOnBean(Subscription.class)
+    static class HasSubscription {
     }
 }

@@ -374,6 +374,55 @@ early). It uses the JDK HTTP client and a built-in JSON codec, so it adds no dep
 could clash with the cloud SDKs. Secrets written by other tools without a `value` field are read as
 their JSON data.
 
+## Messaging
+
+Publish to topics and consume subscriptions with one API. Delivery is **at least once** on every provider,
+so make handlers idempotent.
+
+```java
+Publisher orders = cirrus.provider("aws").publisher("orders");            // SNS topic (name or ARN)
+orders.publish(OutgoingMessage.builder(json).attribute("type", "created").build());
+
+Subscription queue = cirrus.provider("aws").subscription("orders-billing"); // the SQS queue it feeds
+MessageConsumer consumer = queue.listen(message -> bill(message.bodyAsString()),
+        ConsumerOptions.DEFAULTS.withConcurrency(32));
+```
+
+`listen` pulls on a virtual thread and handles each message on its own virtual thread, at most `concurrency`
+at once. It only asks for as many messages as it has free slots, so slow handlers slow the pulling instead of
+piling up leased messages. While a handler runs, its lease is extended. Returning acks the message; throwing
+nacks it for redelivery with exponential backoff (1s doubling up to 5 minutes by default). Messages with the
+same ordering key are handled one at a time, in order. `close()` stops pulling and lets running handlers
+finish. Use `receive(max, wait)` with `ack()`, `nack(delay)` and `extendLease(d)` to pull by hand.
+
+| | AWS | Azure | GCP |
+|---|---|---|---|
+| Topic | SNS topic, or an SQS queue with `aws.target=sqs` | Service Bus topic, or a queue with `azure.servicebus.entity=queue` | Pub/Sub topic |
+| Subscription | SQS queue (raw delivery or SNS envelope, both handled) | queue, or `<topic>/subscriptions/<name>` | pull subscription |
+| Lease | queue visibility timeout | lock duration (renewed repeatedly to extend further) | ack deadline |
+| Ordering keys | FIFO topics and queues (message groups) | not yet (sessions) | with message ordering enabled on the subscription |
+| Deduplication ids | FIFO topics and queues | entities with duplicate detection | no |
+| Delayed delivery | SQS queues, up to 15 minutes | yes (scheduled enqueue) | no |
+| `nack(delay)` | honoured | redelivers at once | honoured |
+| Max body | 256 KiB | 256 KiB standard, up to 100 MB premium (`azure.servicebus.max-message-bytes`) | 10 MB |
+| Dead letters | queue redrive policy | max delivery count | dead-letter policy |
+
+Capabilities are declared (`MessagingCapability.ORDERING`, `DEDUPLICATION`, `DELAYED_DELIVERY`, `NACK_DELAY`).
+Asking for one that isn't there fails rather than being ignored. Topics, subscriptions and dead-letter
+settings are infrastructure: create them with your usual tooling. Cirrus never creates them.
+
+**Claim checks.** Bodies over a threshold go through a `BlobStore`, and the message carries only the key:
+
+```java
+var claims = new ClaimCheck(cirrus.provider("aws").blobStore("message-bodies"), 200 * 1024, "orders/");
+Publisher orders = aws.publisher(TopicConfig.builder("orders").claimCheck(claims).build());
+Subscription billing = aws.subscription(SubscriptionConfig.builder("orders-billing").claimCheck(claims).build());
+```
+
+Stored bodies aren't deleted on ack, since other subscriptions may still need them. Expire them with a
+bucket lifecycle rule. On SNS and SQS, binary bodies travel base64-encoded, and messages carry at most 10
+attributes. Cirrus' own (`cirrus-encoding`, `cirrus-claim-check`, trace headers) count towards that limit.
+
 ## SQL databases
 
 A pooled `DataSource` (HikariCP) whose connections log in with the cloud's identity instead of a stored
@@ -472,6 +521,14 @@ cirrus:
       # native-names: true         # use existing backend names as they are
       # expand-json: true          # (default) JSON values also become db.creds.password etc.
       # startup-attempts: 3        # (default) retries when the backend is briefly unavailable
+  topics:
+    order-events:                  # Publisher bean name
+      name: orders                 # SNS topic / Service Bus topic / Pub/Sub topic; defaults to the key
+      claim-check: { blob-store: invoices, threshold: 204800 }
+  subscriptions:
+    billing:                       # Subscription bean name, used by @CirrusListener("billing")
+      name: orders-billing         # SQS queue / <topic>/subscriptions/<name> / Pub/Sub subscription
+      listener: { concurrency: 32, max-backoff: 2m }
   databases:
     orders:                        # DataSource bean name; a single database is the primary DataSource
       engine: postgresql           # postgresql | mysql | sqlserver
@@ -489,7 +546,20 @@ cirrus:
 class InvoiceService {
     InvoiceService(@Qualifier("invoices") BlobStore invoices) { ... }
 }
+
+@Component
+class Billing {
+    @CirrusListener("billing")          // or (ReceivedMessage message), or (byte[] body)
+    void onOrder(String json) { ... }   // return = ack, throw = retry with backoff
+}
 ```
+
+Listeners start once the application is ready and stop first on shutdown, letting running handlers finish.
+Each consumer reports `cirrus.messaging.messages{subscription, listener, result}`,
+`cirrus.messaging.in.flight` and `cirrus.messaging.receive.errors`, and appears under the `messaging` health
+entry. With Micrometer Tracing, publishers add the current trace context to message attributes, and each
+listener invocation runs in a consumer span that continues the trace. Bean names are shared across
+`blob-stores`, `caches`, `topics`, `subscriptions` and your own beans, so keep them distinct.
 
 What the starter provides:
 
@@ -527,9 +597,9 @@ runs on both: `cirrus-spring-boot-autoconfigure` tests on 3.5, and the unpublish
 | `cirrus-tck` | Conformance test kit every provider must pass |
 | `cirrus-redis` | Shared Redis/Valkey cache driver (Lettuce) used by every provider |
 | `cirrus-sql` | Shared HikariCP pool with per-connection credentials (passwords, cloud IAM tokens) |
-| `cirrus-aws` | AWS SDK v2: S3, SSM Parameter Store, Secrets Manager, ElastiCache and RDS IAM auth |
-| `cirrus-azure` | Azure SDK: Blob Storage, Key Vault, App Configuration, Entra ID cache and database auth |
-| `cirrus-gcp` | Google Cloud: Cloud Storage, Secret Manager, Memorystore and Cloud SQL IAM auth |
+| `cirrus-aws` | AWS SDK v2: S3, SNS, SQS, SSM Parameter Store, Secrets Manager, ElastiCache and RDS IAM auth |
+| `cirrus-azure` | Azure SDK: Blob Storage, Service Bus, Key Vault, App Configuration, Entra ID cache and database auth |
+| `cirrus-gcp` | Google Cloud: Cloud Storage, Pub/Sub, Secret Manager, Memorystore and Cloud SQL IAM auth |
 | `cirrus-vault` | HashiCorp Vault (KV v2): parameters and secrets |
 | `cirrus-spring-boot-autoconfigure` | Spring Boot auto-configuration, properties, health, observations |
 | `cirrus-spring-boot-starter` | The dependency Spring Boot applications add |
@@ -638,6 +708,17 @@ fields, native names, watching):
 | HashiCorp Vault | Vault dev server (plain and TLS with a private CA) | plus AppRole with token renewal, token-file rotation, wrong tokens, multi-field secrets, CA trust; GCP and Azure login requests against a fake metadata service |
 | Spring `spring.config.import` | Vault dev server | on Boot 3.5 and 4.1: JSON expansion, native names, live reload with change events, prefixes, optional imports |
 
+Messaging tests (the same 15-test TCK: round trips, binary bodies, ack, nack, lease expiry and
+extension, batches, listener retries and concurrency, claim checks, ordering, deduplication, delays):
+
+| Backend | Server | Notes |
+|---|---|---|
+| in-memory broker | none | the full TCK, which also checks the TCK itself |
+| AWS SNS → SQS, plain SQS | Floci | standard and FIFO topics and queues; SNS envelope unwrapping and base64 bodies without raw delivery; SNS skips delays |
+| GCP Pub/Sub | Google's Pub/Sub emulator, and Floci-gcp | everything but deduplication and delays (not in Pub/Sub). Floci never redelivers, so its run skips the three redelivery tests, which the Google emulator covers |
+| Azure Service Bus | Microsoft's Service Bus emulator with SQL Edge | topics with subscriptions, a queue, duplicate detection, scheduled delivery, lock renewal past the lock duration; ordering skipped (sessions not yet supported) |
+| Spring | in-memory broker | on Boot 3.5 and 4.1: beans from properties, `@CirrusListener` with retries, claim checks, metrics, health, trace propagation |
+
 **On real GCP:** `GcpParameterStoreIT` runs the same TCK against Secret Manager and Parameter
 Manager in a real project, using Application Default Credentials. It is skipped unless the variables
 are set:
@@ -725,7 +806,8 @@ property goes to the provider (for example `-Dcirrus.aws.retry-mode=standard`). 
 6. ~~Spring Boot starter: `cirrus.*` properties, auto-configuration, health and Micrometer~~
 7. Blob: archive restore, KMS encryption, versioning, tags, retention
 8. JPMS module descriptors, japicmp API compatibility checks, real-cloud CI profile
-9. Pub/sub messaging: one portable API for topics, subscriptions and queues
+9. ~~Pub/sub messaging: one portable API for topics, subscriptions and queues~~ (next: Service Bus sessions
+   for ordering on Azure, ack batching, EventBridge and Event Grid)
    - Providers: AWS SNS topics with SQS subscriptions (and plain SQS queues); Azure Service Bus topics,
      subscriptions and queues; GCP Pub/Sub
    - Publish: payload plus attributes, batching, ordering keys (SQS FIFO message groups, Service Bus

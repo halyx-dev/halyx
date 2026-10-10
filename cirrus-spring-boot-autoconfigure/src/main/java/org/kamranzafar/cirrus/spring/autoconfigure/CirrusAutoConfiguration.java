@@ -9,6 +9,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.kamranzafar.cirrus.spring.autoconfigure.config.CirrusConfigReloader;
+import org.kamranzafar.cirrus.spring.messaging.CirrusListenerRegistrar;
+import org.kamranzafar.cirrus.spring.messaging.MessageListenerDecorator;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.env.ConfigurableEnvironment;
@@ -51,6 +53,14 @@ public class CirrusAutoConfiguration {
     public CirrusConfigReloader cirrusConfigReloader(ConfigurableEnvironment environment, Cirrus cirrus,
                                                        ApplicationContext context) {
         return new CirrusConfigReloader(environment, cirrus, context);
+    }
+
+    /** Runs {@code @CirrusListener} methods; static, as a post-processor must be. */
+    @Bean
+    @ConditionalOnMissingBean
+    public static CirrusListenerRegistrar cirrusListenerRegistrar(ObjectProvider<CirrusProperties> properties,
+                                                                  ObjectProvider<MessageListenerDecorator> decorators) {
+        return new CirrusListenerRegistrar(properties, decorators);
     }
 
     @Bean(BlobStoreBeanRegistrar.FACTORY_BEAN)

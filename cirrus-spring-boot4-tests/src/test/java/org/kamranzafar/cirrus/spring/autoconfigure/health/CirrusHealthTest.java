@@ -43,6 +43,24 @@ class CirrusHealthTest {
                 });
     }
 
+    static class Listener {
+        @org.kamranzafar.cirrus.spring.messaging.CirrusListener("events")
+        void on(String body) {
+        }
+    }
+
+    @Test
+    void messageConsumersReportTheirState() {
+        runner.withPropertyValues("cirrus.providers.local.type=memory", "cirrus.subscriptions.events.topic=events")
+                .withBean(Listener.class, Listener::new)
+                .run(context -> {
+                    var composite = context.getBean("cirrusHealthContributor", CompositeHealthContributor.class);
+                    var messaging = ((HealthIndicator) composite.getContributor("messaging")).health();
+                    assertThat(messaging.getStatus()).isEqualTo(Status.UP);
+                    assertThat(messaging.getDetails().keySet()).singleElement().asString().startsWith("events#");
+                });
+    }
+
     @Test
     void cachesHaveIndicatorsToo() {
         runner.withPropertyValues("cirrus.providers.local.type=memory",

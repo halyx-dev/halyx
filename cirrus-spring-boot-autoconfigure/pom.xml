@@ -59,6 +59,12 @@
             <artifactId>micrometer-observation</artifactId>
             <optional>true</optional>
         </dependency>
+        <!-- Trace context in message attributes -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-tracing</artifactId>
+            <optional>true</optional>
+        </dependency>
         <!-- Cache metrics -->
         <dependency>
             <groupId>io.micrometer</groupId>
@@ -152,6 +158,11 @@
         <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-tracing-test</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
