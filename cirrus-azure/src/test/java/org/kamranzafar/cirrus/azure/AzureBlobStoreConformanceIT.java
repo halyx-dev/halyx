@@ -63,6 +63,7 @@ class AzureBlobStoreConformanceIT extends BlobStoreConformanceTest {
                 "writeInPartsWithIfNotExistsRejectsExistingBlob",
                 "Floci-az 0.14.0 ignores If-None-Match on Put Block List (returns 201; Azure returns 409)",
                 "setTierChangesTierButNotContent", "Floci-az 0.14.0 does not implement Set Blob Tier (501)",
+                "setTierToCurrentTierIsANoOp", "Floci-az 0.14.0 does not implement Set Blob Tier (501)",
                 "defaultTierIsHot", noTier,
                 "putWithTierStoresTier", noTier,
                 "updateMetadataReplacesHeadersAndMetadataButNotContent", noSetProperties,

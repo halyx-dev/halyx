@@ -59,6 +59,8 @@ final class GcpConnection implements ProviderConnection {
                     .setMaxConnTotal(settings.maxConnections())
                     .setMaxConnPerRoute(settings.maxConnections())
                     .evictIdleConnections(settings.idleTimeout().toMillis(), TimeUnit.MILLISECONDS)
+                    // Return bytes exactly as stored: never inflate gzip-encoded objects in the client.
+                    .disableContentCompression()
                     .build());
             var builder = StorageOptions.http().setTransportOptions(HttpTransportOptions.newBuilder()
                     .setHttpTransportFactory(() -> httpTransport)

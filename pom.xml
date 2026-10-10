@@ -36,6 +36,8 @@
         <gcp-libraries-bom.version>26.90.0</gcp-libraries-bom.version>
         <!-- Not in libraries-bom yet; 0.43.0 is from the same google-cloud-java release (1.93.0) -->
         <gcp-parametermanager.version>0.43.0</gcp-parametermanager.version>
+        <!-- Needed by the Apache HTTP transport, which Google's BOM ships without it; same as Spring 7 -->
+        <commons-logging.version>1.3.6</commons-logging.version>
 
         <!--
           Spring Boot, imported only by the Spring modules so it never changes SDK dependency versions.
@@ -105,6 +107,11 @@
                 <groupId>com.google.api.grpc</groupId>
                 <artifactId>grpc-google-cloud-parametermanager-v1</artifactId>
                 <version>${gcp-parametermanager.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>commons-logging</groupId>
+                <artifactId>commons-logging</artifactId>
+                <version>${commons-logging.version}</version>
             </dependency>
             <dependency>
                 <groupId>io.lettuce</groupId>

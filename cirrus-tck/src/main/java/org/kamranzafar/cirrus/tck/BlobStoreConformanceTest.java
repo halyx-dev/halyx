@@ -755,6 +755,21 @@ public abstract class BlobStoreConformanceTest {
     }
 
     @Test
+    void setTierToCurrentTierIsANoOp() {
+        assumeCapability(StorageCapability.STORAGE_TIERS);
+        BlobKey key = key("same-tier.txt");
+        blobStore().put(key, BlobContent.ofString("content"), PutOptions.builder().tier(StorageTier.COOL).build());
+
+        blobStore().setTier(key, StorageTier.COOL);
+        blobStore().setTier(key, StorageTier.COOL);
+
+        assertThat(blobStore().head(key).orElseThrow().tier()).hasValue(StorageTier.COOL);
+        assertThat(readText(key)).isEqualTo("content");
+        assertThatThrownBy(() -> blobStore().setTier(key("missing-tier.txt"), StorageTier.COOL))
+                .isInstanceOf(NotFoundException.class);
+    }
+
+    @Test
     void setTierChangesTierButNotContent() {
         assumeCapability(StorageCapability.STORAGE_TIERS);
         BlobKey key = key("retier.txt");
