@@ -3,12 +3,14 @@ package org.kamranzafar.stratum.storage;
 import org.kamranzafar.stratum.error.CloudException;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * Outcome of a batch delete. Keys that did not exist count as deleted, as with a single delete.
+ * Outcome of a batch delete. Keys that did not exist count as deleted, as with a single delete. Both
+ * collections keep the order of the requested keys.
  *
  * @param deleted keys that are now absent
  * @param failed  keys that could not be deleted, with the reason
@@ -17,7 +19,7 @@ public record BatchDeleteResult(List<BlobKey> deleted, Map<BlobKey, CloudExcepti
 
     public BatchDeleteResult {
         deleted = List.copyOf(deleted);
-        failed = Map.copyOf(failed);
+        failed = Collections.unmodifiableMap(new LinkedHashMap<>(failed));
     }
 
     public boolean isComplete() {

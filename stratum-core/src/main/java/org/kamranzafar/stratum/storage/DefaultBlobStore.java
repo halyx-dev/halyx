@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Supplier;
 
 /**
@@ -212,9 +213,10 @@ public final class DefaultBlobStore implements BlobStore {
                 // sub-request as not implemented: delete those keys individually instead.
                 if (!result.failed().isEmpty()
                         && result.failed().values().stream().allMatch(UnsupportedFeatureException.class::isInstance)) {
+                    Set<BlobKey> unsupported = result.failed().keySet();
                     result = BatchDeleteResult.merge(List.of(
                             new BatchDeleteResult(result.deleted(), Map.of()),
-                            deleteOneByOne(List.copyOf(result.failed().keySet()))));
+                            deleteOneByOne(batch.stream().filter(unsupported::contains).toList())));
                 }
                 results.add(result);
             } catch (UnsupportedFeatureException e) {
