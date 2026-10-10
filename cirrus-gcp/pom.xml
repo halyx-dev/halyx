@@ -47,6 +47,10 @@
             <groupId>org.kamranzafar</groupId>
             <artifactId>cirrus-redis</artifactId>
         </dependency>
+        <dependency>
+            <groupId>org.kamranzafar</groupId>
+            <artifactId>cirrus-sql</artifactId>
+        </dependency>
         <!-- Tests: TCK against the Floci emulator in Docker (run with mvn verify) -->
         <dependency>
             <groupId>org.kamranzafar</groupId>

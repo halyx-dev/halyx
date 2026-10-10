@@ -21,7 +21,11 @@ import org.springframework.context.annotation.Import;
  * <p>Interceptors are applied in this order, outermost first: observations, then {@link Interceptor}
  * beans by {@code @Order}, then retries (so each retry attempt is not observed separately).
  */
-@AutoConfiguration
+// Before Boot's DataSource auto-configuration (Boot 3 and Boot 4 packages), which backs off when the
+// cirrus.databases DataSource beans exist; JPA, Spring Data, JdbcTemplate and Flyway then use ours.
+@AutoConfiguration(beforeName = {
+        "org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration",
+        "org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration"})
 @ConditionalOnClass(Cirrus.class)
 @EnableConfigurationProperties(CirrusProperties.class)
 @Import(BlobStoreBeanRegistrar.class)

@@ -374,6 +374,52 @@ early). It uses the JDK HTTP client and a built-in JSON codec, so it adds no dep
 could clash with the cloud SDKs. Secrets written by other tools without a `value` field are read as
 their JSON data.
 
+## SQL databases
+
+A pooled `DataSource` (HikariCP) whose connections log in with the cloud's identity instead of a stored
+password. Tokens are fetched when a new physical connection opens, and cached until shortly before
+they expire. Established connections stay logged in, so token lifetimes never interrupt queries.
+
+```java
+Database orders = cirrus.provider("aws").database(SqlConfig.builder(SqlEngine.POSTGRESQL)
+        .host("orders.cluster-abc.eu-west-1.rds.amazonaws.com")
+        .database("orders")
+        .auth(SqlAuth.iam("orders_app"))
+        .pool(new PoolSettings(20, 20, Duration.ofSeconds(30), Duration.ofMinutes(10), Duration.ofMinutes(30)))
+        .build());
+DataSource dataSource = orders.dataSource();   // to JDBC, JPA, jOOQ, Flyway
+```
+
+| Provider | `SqlAuth.iam(...)` | Engines | The username is |
+|---|---|---|---|
+| AWS | RDS IAM token (SigV4, signed locally, 15 min) | PostgreSQL, MySQL | the database user granted `rds_iam` |
+| Azure | Entra ID access token | PostgreSQL, MySQL, Azure SQL | the identity's database role; not used for Azure SQL (`accessToken` property) |
+| GCP | OAuth token, `sqlservice.login` scope | PostgreSQL, MySQL | derived from the service account if omitted (`app@project.iam` / `app`) |
+
+IAM logins turn on TLS (`sslmode=require`, `sslMode=REQUIRED` or `encrypt=true`); override it with
+`jdbcProperty(...)`, for example to `verify-full` with the cloud's CA bundle. On GCP, set
+`property("gcp.sql.instance", "project:region:instance")` to go through the Cloud SQL Java connector
+instead of a host. The connector handles TLS and IAM itself and needs no authorized networks. Add
+`com.google.cloud.sql:postgres-socket-factory` or `mysql-socket-factory-connector-j-8` to use it.
+
+Passwords work on every provider. `SqlAuth.password(user, supplier)` asks the supplier for every new
+connection, so a rotated secret takes effect as connections are replaced (`maxLifetime`, 30 minutes by
+default) without a restart:
+
+```java
+SqlAuth.password("app", () -> secrets.require("orders/db", "password"))   // a cached ParameterStore
+```
+
+The JDBC driver is your dependency (`org.postgresql:postgresql`, `com.mysql:mysql-connector-j` or
+`com.microsoft.sqlserver:mssql-jdbc`). The pool starts on first use, so the application can start
+while the database is unreachable. The pool closes with the Cirrus context. In Spring, every
+`cirrus.databases.<name>` entry becomes a `DataSource` bean, covered by Spring Boot's JDBC health check
+and Hikari metrics. Cirrus configures itself before Boot's `DataSourceAutoConfiguration`, which then
+backs off. Spring Data JPA and JDBC repositories, `JdbcTemplate`, Flyway and Liquibase all use the
+primary Cirrus `DataSource` unchanged. With several databases, wire the extra `EntityManagerFactory`
+yourself, as in plain Spring Boot. Pool settings live under `cirrus.databases.<name>.pool`, not
+`spring.datasource.*`. Reactive repositories (R2DBC) aren't covered yet.
+
 ## Spring Boot
 
 Add the starter plus the provider modules you use:
@@ -426,6 +472,14 @@ cirrus:
       # native-names: true         # use existing backend names as they are
       # expand-json: true          # (default) JSON values also become db.creds.password etc.
       # startup-attempts: 3        # (default) retries when the backend is briefly unavailable
+  databases:
+    orders:                        # DataSource bean name; a single database is the primary DataSource
+      engine: postgresql           # postgresql | mysql | sqlserver
+      host: orders.cluster-abc.eu-west-1.rds.amazonaws.com
+      database: orders
+      auth: { type: iam, username: orders_app }    # RDS IAM / Entra ID / Cloud SQL IAM tokens
+      # auth: { type: password, username: app, secret: { store: app-secrets, name: orders/db, field: password } }
+      pool: { max-size: 20 }
   retry:
     enabled: false                 # the SDKs already retry; enable for uniform retries
 ```
@@ -472,9 +526,10 @@ runs on both: `cirrus-spring-boot-autoconfigure` tests on 3.5, and the unpublish
 | `cirrus-core` | Portable API, provider SPI, error model, interceptors, in-memory provider. No cloud SDKs (enforced) |
 | `cirrus-tck` | Conformance test kit every provider must pass |
 | `cirrus-redis` | Shared Redis/Valkey cache driver (Lettuce) used by every provider |
-| `cirrus-aws` | AWS SDK v2: S3, SSM Parameter Store, Secrets Manager, ElastiCache IAM auth |
-| `cirrus-azure` | Azure SDK: Blob Storage, Key Vault, App Configuration, Entra ID cache auth |
-| `cirrus-gcp` | Google Cloud: Cloud Storage, Secret Manager, Memorystore IAM auth |
+| `cirrus-sql` | Shared HikariCP pool with per-connection credentials (passwords, cloud IAM tokens) |
+| `cirrus-aws` | AWS SDK v2: S3, SSM Parameter Store, Secrets Manager, ElastiCache and RDS IAM auth |
+| `cirrus-azure` | Azure SDK: Blob Storage, Key Vault, App Configuration, Entra ID cache and database auth |
+| `cirrus-gcp` | Google Cloud: Cloud Storage, Secret Manager, Memorystore and Cloud SQL IAM auth |
 | `cirrus-vault` | HashiCorp Vault (KV v2): parameters and secrets |
 | `cirrus-spring-boot-autoconfigure` | Spring Boot auto-configuration, properties, health, observations |
 | `cirrus-spring-boot-starter` | The dependency Spring Boot applications add |
@@ -640,7 +695,8 @@ property goes to the provider (for example `-Dcirrus.aws.retry-mode=standard`). 
 
 1. ~~Core, SPI, storage on AWS/Azure/GCP, TCK, Floci tests~~
 2. ~~Cache: one Redis/Valkey driver plus cloud auth (ElastiCache IAM, Entra ID, Memorystore IAM)~~ (next: endpoint discovery, cross-instance stampede protection)
-3. SQL: `DataSource` factory with cloud IAM auth and token refresh (RDS IAM, Entra ID, Cloud SQL connector)
+3. ~~SQL: `DataSource` factory with cloud IAM auth and token refresh (RDS IAM, Entra ID, Cloud SQL connector)~~
+   (next: RDS Proxy and Aurora failover-aware URLs, R2DBC)
 4. ~~Parameters and secrets: one portable API for configuration values and secrets~~ (next: change
    notifications, labels on SSM and Secret Manager)
    - Providers: AWS SSM Parameter Store and Secrets Manager; Azure App Configuration and Key Vault;

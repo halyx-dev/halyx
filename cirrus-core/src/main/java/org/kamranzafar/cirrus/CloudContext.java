@@ -11,6 +11,8 @@ import org.kamranzafar.cirrus.parameters.ParameterStoreConfig;
 import org.kamranzafar.cirrus.interceptor.InterceptorChain;
 import org.kamranzafar.cirrus.spi.CloudProvider;
 import org.kamranzafar.cirrus.spi.ProviderConnection;
+import org.kamranzafar.cirrus.sql.Database;
+import org.kamranzafar.cirrus.sql.SqlConfig;
 import org.kamranzafar.cirrus.storage.BlobStore;
 import org.kamranzafar.cirrus.storage.DefaultBlobStore;
 
@@ -74,6 +76,14 @@ public final class CloudContext implements AutoCloseable {
     /** A portable parameter or secret store. */
     public ParameterStore parameterStore(ParameterStoreConfig config) {
         return new DefaultParameterStore(provider.id(), config, connection().parameterStore(config), interceptors);
+    }
+
+    /**
+     * A pooled database. Each call creates a new pool, so create it once (per database) and share it;
+     * it closes with this context.
+     */
+    public Database database(SqlConfig config) {
+        return connection().database(config);
     }
 
     private ProviderConnection connection() {

@@ -7,6 +7,10 @@ import org.kamranzafar.cirrus.config.ProviderConfig;
 import org.kamranzafar.cirrus.interceptor.RetryPolicy;
 import org.kamranzafar.cirrus.parameters.ParameterKind;
 import org.kamranzafar.cirrus.parameters.ParameterStoreConfig;
+import org.kamranzafar.cirrus.sql.PoolSettings;
+import org.kamranzafar.cirrus.sql.SqlAuth;
+import org.kamranzafar.cirrus.sql.SqlConfig;
+import org.kamranzafar.cirrus.sql.SqlEngine;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
@@ -44,6 +48,7 @@ import java.util.Map;
  * @param cacheManager a Spring {@code CacheManager} for {@code @Cacheable}, enabled by setting its endpoint
  * @param parameterStores {@code ParameterStore} beans to create, keyed by bean name; also the names used by
  *                    {@code spring.config.import=cirrus:<name>}
+ * @param databases   pooled {@code DataSource} beans to create, keyed by bean name
  * @param retry       provider-neutral retries on top of the SDKs' own
  * @param observations Micrometer observations of every operation
  */
@@ -51,6 +56,7 @@ import java.util.Map;
 public record CirrusProperties(Map<String, Provider> providers, Map<String, BlobStoreProperties> blobStores,
                                 Map<String, CacheProperties> caches, @DefaultValue CacheManagerProperties cacheManager,
                                 Map<String, ParameterStoreProperties> parameterStores,
+                                Map<String, DatabaseProperties> databases,
                                 @DefaultValue Retry retry, @DefaultValue Observations observations) {
 
     public CirrusProperties {
@@ -58,6 +64,7 @@ public record CirrusProperties(Map<String, Provider> providers, Map<String, Blob
         blobStores = ordered(blobStores);
         caches = ordered(caches);
         parameterStores = ordered(parameterStores);
+        databases = ordered(databases);
     }
 
     private static <V> Map<String, V> ordered(Map<String, V> map) {
@@ -193,6 +200,95 @@ public record CirrusProperties(Map<String, Provider> providers, Map<String, Blob
                     yield username == null ? CacheAuth.password(password) : CacheAuth.password(username, password);
                 }
             };
+        }
+    }
+
+    /**
+     * A pooled database, registered as a {@code DataSource} bean named after its key. A single database is
+     * the primary {@code DataSource}, so JPA, JDBC templates and Flyway use it; with several, mark one
+     * {@code primary}. Spring Boot's JDBC health check and Hikari metrics cover these beans.
+     *
+     * @param provider       the provider name; may be omitted when exactly one provider is configured
+     * @param engine         {@code postgresql}, {@code mysql} or {@code sqlserver}
+     * @param host           database host (omit with {@code gcp.sql.instance})
+     * @param port           port; the engine's default when omitted
+     * @param database       database name
+     * @param auth           how connections log in
+     * @param primary        make this the primary {@code DataSource} when several are configured
+     * @param pool           pool sizing and timeouts
+     * @param jdbcProperties JDBC driver properties, overriding Cirrus' defaults (such as the TLS mode)
+     * @param properties     provider-specific settings, such as {@code gcp.sql.instance} or {@code aws.rds.region}
+     */
+    public record DatabaseProperties(String provider, SqlEngine engine, String host, Integer port, String database,
+                                     @DefaultValue DatabaseAuthProperties auth, @DefaultValue("false") boolean primary,
+                                     @DefaultValue PoolProperties pool, Map<String, String> jdbcProperties,
+                                     Map<String, String> properties) {
+
+        public DatabaseProperties {
+            jdbcProperties = ordered(jdbcProperties);
+            properties = ordered(properties);
+        }
+
+        /** The config with the auth resolved by the caller (a secret-backed password needs its store bean). */
+        SqlConfig toSqlConfig(String name, SqlAuth resolvedAuth) {
+            String prefix = "cirrus.databases." + name;
+            if (engine == null) {
+                throw new IllegalStateException(prefix + ".engine is required (postgresql, mysql or sqlserver)");
+            }
+            if (database == null) {
+                throw new IllegalStateException(prefix + ".database is required");
+            }
+            if (host == null && !properties.containsKey("gcp.sql.instance")) {
+                throw new IllegalStateException(prefix + ".host is required");
+            }
+            SqlConfig.Builder config = SqlConfig.builder(engine).name(name).database(database).auth(resolvedAuth)
+                    .pool(pool.toPoolSettings());
+            if (host != null) {
+                config.host(host);
+            }
+            if (port != null) {
+                config.port(port);
+            }
+            jdbcProperties.forEach(config::jdbcProperty);
+            properties.forEach(config::property);
+            return config.build();
+        }
+    }
+
+    /**
+     * @param type     {@code password} or {@code iam} (RDS IAM, Entra ID, Cloud SQL IAM tokens)
+     * @param username database user; for {@code iam}, the role mapped to the identity (derived on GCP if omitted)
+     * @param password the password, for {@code password} without a {@code secret}
+     * @param secret   read the password from a Cirrus parameter store for every new connection, so a rotated
+     *                 secret takes effect without a restart
+     */
+    public record DatabaseAuthProperties(@DefaultValue("password") Type type, String username, String password,
+                                         SecretReference secret) {
+
+        public enum Type { PASSWORD, IAM }
+    }
+
+    /**
+     * A secret in one of the {@code cirrus.parameter-stores}.
+     *
+     * @param store bean name of the parameter store
+     * @param name  the secret's name
+     * @param field the JSON field holding the password, for JSON secrets such as RDS-managed ones
+     */
+    public record SecretReference(String store, String name, String field) {
+    }
+
+    /** See {@code PoolSettings}; unset values keep its defaults. */
+    public record PoolProperties(Integer maxSize, Integer minIdle, Duration connectionTimeout, Duration idleTimeout,
+                                 Duration maxLifetime) {
+
+        PoolSettings toPoolSettings() {
+            PoolSettings d = PoolSettings.DEFAULTS;
+            int max = maxSize == null ? d.maxSize() : maxSize;
+            return new PoolSettings(max, minIdle == null ? max : minIdle,
+                    connectionTimeout == null ? d.connectionTimeout() : connectionTimeout,
+                    idleTimeout == null ? d.idleTimeout() : idleTimeout,
+                    maxLifetime == null ? d.maxLifetime() : maxLifetime);
         }
     }
 

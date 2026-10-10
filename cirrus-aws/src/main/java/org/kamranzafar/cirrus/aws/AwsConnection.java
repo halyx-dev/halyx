@@ -3,6 +3,7 @@ package org.kamranzafar.cirrus.aws;
 import org.kamranzafar.cirrus.aws.elasticache.ElastiCacheIamTokens;
 import org.kamranzafar.cirrus.aws.parameters.SecretsManagerDriver;
 import org.kamranzafar.cirrus.aws.parameters.SsmParameterDriver;
+import org.kamranzafar.cirrus.aws.rds.RdsIamTokens;
 import org.kamranzafar.cirrus.aws.s3.S3BlobStoreDriver;
 import org.kamranzafar.cirrus.parameters.ParameterStoreConfig;
 import org.kamranzafar.cirrus.parameters.spi.ParameterDriver;
@@ -12,8 +13,14 @@ import org.kamranzafar.cirrus.cache.spi.CacheDriver;
 import org.kamranzafar.cirrus.config.Credentials;
 import org.kamranzafar.cirrus.config.HttpSettings;
 import org.kamranzafar.cirrus.config.ProviderConfig;
+import org.kamranzafar.cirrus.error.UnsupportedFeatureException;
+import org.kamranzafar.cirrus.jdbc.JdbcDatabases;
 import org.kamranzafar.cirrus.redis.RedisCaches;
 import org.kamranzafar.cirrus.spi.ProviderConnection;
+import org.kamranzafar.cirrus.sql.Database;
+import org.kamranzafar.cirrus.sql.SqlAuth;
+import org.kamranzafar.cirrus.sql.SqlConfig;
+import org.kamranzafar.cirrus.sql.SqlEngine;
 import org.kamranzafar.cirrus.storage.spi.BlobStoreDriver;
 import software.amazon.awssdk.auth.credentials.AnonymousCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
@@ -42,6 +49,7 @@ final class AwsConnection implements ProviderConnection {
 
     private final ProviderConfig config;
     private SdkHttpClient http;
+    private JdbcDatabases databases;
     private S3Client s3;
     private S3Presigner presigner;
     private RedisCaches caches;
@@ -131,6 +139,30 @@ final class AwsConnection implements ProviderConnection {
         };
     }
 
+    /** Password auth, or RDS IAM tokens for PostgreSQL and MySQL (RDS for SQL Server has no IAM login). */
+    @Override
+    public synchronized Database database(SqlConfig sql) {
+        if (databases == null) {
+            databases = new JdbcDatabases();
+        }
+        return switch (sql.auth()) {
+            case SqlAuth.Password ignored -> databases.createWithPassword(sql);
+            case SqlAuth.Iam iam -> {
+                if (sql.engine() == SqlEngine.SQLSERVER) {
+                    throw new UnsupportedFeatureException("RDS IAM authentication supports PostgreSQL and MySQL, "
+                            + "not SQL Server; use password auth", null, AwsProvider.ID, null);
+                }
+                String username = iam.username().orElseThrow(() -> new IllegalArgumentException(
+                        "RDS IAM authentication needs the database user: SqlAuth.iam(\"<user>\")"));
+                String host = sql.host().orElseThrow(() -> new IllegalArgumentException("RDS needs a host"));
+                String region = sql.property(AwsProperties.RDS_REGION).orElseGet(() -> region().id());
+                yield databases.create(sql, sql.jdbcUrl(),
+                        new RdsIamTokens(host, sql.port(), username, region, credentials()),
+                        JdbcDatabases.requireTls(sql.engine()));
+            }
+        };
+    }
+
     private ClientOverrideConfiguration overrides() {
         String mode = config.property(AwsProperties.RETRY_MODE).orElse("adaptive").trim().toLowerCase(Locale.ROOT);
         RetryMode retryMode = switch (mode) {
@@ -160,6 +192,10 @@ final class AwsConnection implements ProviderConnection {
 
     @Override
     public synchronized void close() {
+        if (databases != null) {
+            databases.close();
+            databases = null;
+        }
         if (caches != null) {
             caches.close();
             caches = null;

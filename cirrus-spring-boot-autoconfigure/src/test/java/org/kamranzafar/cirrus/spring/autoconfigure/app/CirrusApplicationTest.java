@@ -24,7 +24,9 @@ class CirrusApplicationTest {
                         "cirrus.providers.local.type=memory",
                         "cirrus.blob-stores.invoices.bucket=acme-invoices",
                         "cirrus.blob-stores.avatars.bucket=acme-avatars",
-                        "cirrus.caches.sessions.endpoint=redis://localhost:6379")
+                        "cirrus.caches.sessions.endpoint=redis://localhost:6379",
+                        // JDBC is on the test classpath for the database tests; this app has no database.
+                        "spring.autoconfigure.exclude=" + dataSourceAutoConfiguration())
                 .run()) {
             InvoiceService service = context.getBean(InvoiceService.class);
 
@@ -48,6 +50,16 @@ class CirrusApplicationTest {
         InvoiceService(@Qualifier("invoices") BlobStore invoices, Cache<String> sessions) {
             this.invoices = invoices;
             this.sessions = sessions;
+        }
+    }
+
+    private static String dataSourceAutoConfiguration() {
+        String boot3 = "org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration";
+        try {
+            Class.forName(boot3);
+            return boot3;
+        } catch (ClassNotFoundException e) {
+            return "org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration";
         }
     }
 }

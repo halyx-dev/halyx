@@ -6,6 +6,12 @@ public final class GcpProperties {
     /** Google Cloud project id. Defaults to the project of the Application Default Credentials. */
     public static final String PROJECT_ID = "gcp.project-id";
 
+    /**
+     * SQL property: connect through the Cloud SQL Java connector to this instance
+     * ({@code project:region:instance}) instead of to a host. The connector must be on the classpath.
+     */
+    public static final String SQL_INSTANCE = "gcp.sql.instance";
+
     private GcpProperties() {
     }
 }

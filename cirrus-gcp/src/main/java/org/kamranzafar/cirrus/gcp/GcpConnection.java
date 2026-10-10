@@ -17,23 +17,34 @@ import com.google.api.client.http.apache.v2.ApacheHttpTransport;
 import org.kamranzafar.cirrus.config.Credentials;
 import org.kamranzafar.cirrus.config.HttpSettings;
 import org.kamranzafar.cirrus.config.ProviderConfig;
+import org.kamranzafar.cirrus.error.UnsupportedFeatureException;
+import org.kamranzafar.cirrus.jdbc.JdbcDatabases;
 import org.kamranzafar.cirrus.cache.CacheAuth;
 import org.kamranzafar.cirrus.cache.CacheConfig;
 import org.kamranzafar.cirrus.cache.spi.CacheDriver;
 import org.kamranzafar.cirrus.gcp.memorystore.MemorystoreIamTokens;
 import org.kamranzafar.cirrus.gcp.parameters.ParameterManagerDriver;
 import org.kamranzafar.cirrus.gcp.parameters.SecretManagerDriver;
+import org.kamranzafar.cirrus.gcp.sql.CloudSqlConnector;
+import org.kamranzafar.cirrus.gcp.sql.CloudSqlIamTokens;
 import org.kamranzafar.cirrus.gcp.storage.GcsBlobStoreDriver;
 import org.kamranzafar.cirrus.parameters.ParameterKind;
 import org.kamranzafar.cirrus.parameters.ParameterStoreConfig;
 import org.kamranzafar.cirrus.parameters.spi.ParameterDriver;
 import org.kamranzafar.cirrus.redis.RedisCaches;
 import org.kamranzafar.cirrus.spi.ProviderConnection;
+import org.kamranzafar.cirrus.sql.Database;
+import org.kamranzafar.cirrus.sql.SqlAuth;
+import org.kamranzafar.cirrus.sql.SqlConfig;
+import org.kamranzafar.cirrus.sql.SqlEngine;
+import org.kamranzafar.cirrus.sql.spi.SqlCredentialsSource;
+import org.kamranzafar.cirrus.sql.spi.SqlLogin;
 import org.kamranzafar.cirrus.storage.spi.BlobStoreDriver;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.HashMap;
+import java.util.Optional;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -43,6 +54,7 @@ final class GcpConnection implements ProviderConnection {
     private final ProviderConfig config;
     private ApacheHttpTransport httpTransport;
     private Storage storage;
+    private JdbcDatabases databases;
     private RedisCaches caches;
     private SecretManagerServiceClient secretManager;
     private final Map<String, ParameterManagerClient> parameterManagers = new HashMap<>();
@@ -150,6 +162,42 @@ final class GcpConnection implements ProviderConnection {
         }
     }
 
+    /**
+     * Password auth or Cloud SQL IAM, over a direct TLS connection to the host, or through the Cloud SQL
+     * connector when {@code gcp.sql.instance} is set.
+     */
+    @Override
+    public synchronized Database database(SqlConfig sql) {
+        if (databases == null) {
+            databases = new JdbcDatabases();
+        }
+        Optional<String> instance = sql.property(GcpProperties.SQL_INSTANCE);
+        boolean iam = sql.auth() instanceof SqlAuth.Iam;
+        if (iam && sql.engine() == SqlEngine.SQLSERVER) {
+            throw new UnsupportedFeatureException("Cloud SQL IAM authentication supports PostgreSQL and MySQL, "
+                    + "not SQL Server; use password auth", null, GcpProvider.ID, null);
+        }
+        if (iam && !(config.credentials() instanceof Credentials.DefaultChain)) {
+            throw new IllegalArgumentException("Cloud SQL IAM authentication uses Application Default Credentials; "
+                    + "configure the provider with Credentials.defaultChain()");
+        }
+        String url = instance.map(i -> CloudSqlConnector.jdbcUrl(sql.engine(), sql.database())).orElseGet(sql::jdbcUrl);
+        SqlCredentialsSource credentials = switch (sql.auth()) {
+            case SqlAuth.Password password -> JdbcDatabases.passwordSource(password);
+            case SqlAuth.Iam i when instance.isPresent() -> {
+                // The connector fetches and sends the token; the driver only needs the user.
+                CloudSqlIamTokens tokens = CloudSqlIamTokens.applicationDefault(sql.engine(), i.username());
+                String user = tokens.username();
+                yield () -> SqlLogin.password(user, null);
+            }
+            case SqlAuth.Iam i -> CloudSqlIamTokens.applicationDefault(sql.engine(), i.username());
+        };
+        Map<String, String> defaults = instance
+                .map(i -> CloudSqlConnector.properties(sql.engine(), i, iam))
+                .orElseGet(() -> iam ? JdbcDatabases.requireTls(sql.engine()) : Map.of());
+        return databases.create(sql, url, credentials, defaults);
+    }
+
     private MemorystoreIamTokens iamTokens(CacheAuth.Iam iam) {
         if (!(config.credentials() instanceof Credentials.DefaultChain)) {
             throw new IllegalArgumentException("Memorystore IAM authentication uses Application Default Credentials; "
@@ -160,6 +208,10 @@ final class GcpConnection implements ProviderConnection {
 
     @Override
     public synchronized void close() {
+        if (databases != null) {
+            databases.close();
+            databases = null;
+        }
         if (caches != null) {
             caches.close();
             caches = null;

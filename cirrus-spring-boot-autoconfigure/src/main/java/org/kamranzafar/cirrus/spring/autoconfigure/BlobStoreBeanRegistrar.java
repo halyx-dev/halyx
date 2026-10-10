@@ -3,6 +3,7 @@ package org.kamranzafar.cirrus.spring.autoconfigure;
 import org.kamranzafar.cirrus.cache.Cache;
 import org.kamranzafar.cirrus.parameters.ParameterStore;
 import org.kamranzafar.cirrus.storage.BlobStore;
+import org.springframework.beans.factory.config.RuntimeBeanReference;
 import org.springframework.beans.factory.support.BeanDefinitionRegistry;
 import org.springframework.beans.factory.support.RootBeanDefinition;
 import org.springframework.boot.context.properties.bind.Bindable;
@@ -13,11 +14,14 @@ import org.springframework.core.ResolvableType;
 import org.springframework.core.env.Environment;
 import org.springframework.core.type.AnnotationMetadata;
 
+import javax.sql.DataSource;
 import java.util.Map;
+import java.util.Set;
 
 /**
- * Registers one {@link BlobStore} bean per {@code cirrus.blob-stores.<name>} entry and one
- * {@code Cache<String>} bean per {@code cirrus.caches.<name>} entry, each named {@code <name>}, so
+ * Registers one {@link BlobStore} bean per {@code cirrus.blob-stores.<name>} entry, one
+ * {@code Cache<String>} bean per {@code cirrus.caches.<name>} entry and one {@code DataSource} bean per
+ * {@code cirrus.databases.<name>} entry, each named {@code <name>}, so
  * they can be injected by type or with {@code @Qualifier("<name>")}. Configuration mistakes fail at
  * startup with the offending property named.
  */
@@ -68,6 +72,37 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
                     definition.setDescription("Cirrus " + store.kind().name().toLowerCase() + " store " + provider);
                     registry.registerBeanDefinition(name, definition);
                 });
+        Map<String, CirrusProperties.DatabaseProperties> databases = binder
+                .bind("cirrus.databases", Bindable.mapOf(String.class, CirrusProperties.DatabaseProperties.class))
+                .orElse(Map.of());
+        Set<String> parameterStores = binder
+                .bind("cirrus.parameter-stores", Bindable.mapOf(String.class, CirrusProperties.ParameterStoreProperties.class))
+                .orElse(Map.of()).keySet();
+        databases.forEach((name, database) -> {
+            String property = "cirrus.databases." + name;
+            String provider = resolveProvider(property, database.provider(), providers);
+            RootBeanDefinition definition = new RootBeanDefinition(DataSource.class);
+            definition.setFactoryBeanName(FACTORY_BEAN);
+            var args = definition.getConstructorArgumentValues();
+            args.addIndexedArgumentValue(0, provider);
+            args.addIndexedArgumentValue(1, name);
+            args.addIndexedArgumentValue(2, database);
+            var secret = database.auth().secret();
+            if (secret != null) {
+                if (secret.store() == null || !parameterStores.contains(secret.store())) {
+                    throw new IllegalStateException(property + ".auth.secret.store must name one of cirrus.parameter-stores "
+                            + parameterStores);
+                }
+                definition.setFactoryMethodName("dataSourceWithSecret");
+                args.addIndexedArgumentValue(3, new RuntimeBeanReference(secret.store()));
+            } else {
+                definition.setFactoryMethodName("dataSource");
+            }
+            definition.setTargetType(DataSource.class);
+            definition.setPrimary(databases.size() == 1 || database.primary());
+            definition.setDescription("Cirrus " + database.engine() + " database " + provider + "/" + database.database());
+            registry.registerBeanDefinition(name, definition);
+        });
         stores.forEach((name, store) -> {
             String provider = resolveProvider("cirrus.blob-stores." + name, store.provider(), providers);
             String bucket = store.bucket() == null || store.bucket().isBlank() ? name : store.bucket();

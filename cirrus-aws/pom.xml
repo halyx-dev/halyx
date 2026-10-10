@@ -37,6 +37,11 @@
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>http-auth-aws</artifactId>
         </dependency>
+        <!-- SQL: the shared pool; RDS IAM tokens are signed with http-auth-aws -->
+        <dependency>
+            <groupId>org.kamranzafar</groupId>
+            <artifactId>cirrus-sql</artifactId>
+        </dependency>
         <!-- Parameters and secrets -->
         <dependency>
             <groupId>software.amazon.awssdk</groupId>

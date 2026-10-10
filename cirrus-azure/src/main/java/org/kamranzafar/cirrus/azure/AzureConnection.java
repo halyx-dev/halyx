@@ -20,14 +20,19 @@ import org.kamranzafar.cirrus.parameters.ParameterStoreConfig;
 import org.kamranzafar.cirrus.parameters.spi.ParameterDriver;
 import reactor.core.publisher.Mono;
 import org.kamranzafar.cirrus.azure.redis.EntraIdRedisTokens;
+import org.kamranzafar.cirrus.azure.sql.EntraIdSqlTokens;
 import org.kamranzafar.cirrus.cache.CacheAuth;
 import org.kamranzafar.cirrus.cache.CacheConfig;
 import org.kamranzafar.cirrus.cache.spi.CacheDriver;
 import org.kamranzafar.cirrus.config.Credentials;
 import org.kamranzafar.cirrus.config.HttpSettings;
 import org.kamranzafar.cirrus.config.ProviderConfig;
+import org.kamranzafar.cirrus.jdbc.JdbcDatabases;
 import org.kamranzafar.cirrus.redis.RedisCaches;
 import org.kamranzafar.cirrus.spi.ProviderConnection;
+import org.kamranzafar.cirrus.sql.Database;
+import org.kamranzafar.cirrus.sql.SqlAuth;
+import org.kamranzafar.cirrus.sql.SqlConfig;
 import org.kamranzafar.cirrus.storage.spi.BlobStoreDriver;
 
 import java.time.OffsetDateTime;
@@ -41,6 +46,7 @@ final class AzureConnection implements ProviderConnection {
 
     private final ProviderConfig config;
     private HttpClient http;
+    private JdbcDatabases databases;
     private BlobServiceClient blobService;
     private BlobServiceAsyncClient blobAsyncService;
     private RedisCaches caches;
@@ -152,8 +158,32 @@ final class AzureConnection implements ProviderConnection {
         });
     }
 
+    /** Password auth, or Entra ID tokens (Azure Database for PostgreSQL and MySQL, Azure SQL). */
+    @Override
+    public synchronized Database database(SqlConfig sql) {
+        if (databases == null) {
+            databases = new JdbcDatabases();
+        }
+        return switch (sql.auth()) {
+            case SqlAuth.Password ignored -> databases.createWithPassword(sql);
+            case SqlAuth.Iam iam -> {
+                if (config.credentials() instanceof Credentials.Static) {
+                    throw new IllegalArgumentException("Entra ID database login needs an identity "
+                            + "(Credentials.defaultChain()), not a storage shared key");
+                }
+                var tokens = new EntraIdSqlTokens(new DefaultAzureCredentialBuilder().build(), sql.engine(),
+                        iam.username().orElse(null));
+                yield databases.create(sql, sql.jdbcUrl(), tokens, JdbcDatabases.requireTls(sql.engine()));
+            }
+        };
+    }
+
     @Override
     public synchronized void close() {
+        if (databases != null) {
+            databases.close();
+            databases = null;
+        }
         // The sync Azure clients hold no resources that need explicit release.
         blobService = null;
         if (caches != null) {

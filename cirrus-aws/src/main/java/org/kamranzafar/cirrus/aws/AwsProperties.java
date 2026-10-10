@@ -23,6 +23,9 @@ public final class AwsProperties {
      */
     public static final String RETRY_MODE = "aws.retry-mode";
 
+    /** SQL property: the region RDS IAM tokens are signed for, when it differs from the connection's region. */
+    public static final String RDS_REGION = "aws.rds.region";
+
     /** Cache property: replication group id or serverless cache name, signed into ElastiCache IAM tokens. */
     public static final String ELASTICACHE_CACHE_NAME = "aws.elasticache.cache-name";
 

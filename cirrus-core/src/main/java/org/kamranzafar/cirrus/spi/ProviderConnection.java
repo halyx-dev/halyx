@@ -5,6 +5,8 @@ import org.kamranzafar.cirrus.cache.spi.CacheDriver;
 import org.kamranzafar.cirrus.error.UnsupportedFeatureException;
 import org.kamranzafar.cirrus.parameters.ParameterStoreConfig;
 import org.kamranzafar.cirrus.parameters.spi.ParameterDriver;
+import org.kamranzafar.cirrus.sql.Database;
+import org.kamranzafar.cirrus.sql.SqlConfig;
 import org.kamranzafar.cirrus.storage.spi.BlobStoreDriver;
 
 /**
@@ -29,6 +31,14 @@ public interface ProviderConnection extends AutoCloseable {
     /** A driver for the parameter or secret store described by {@code config}. */
     default ParameterDriver parameterStore(ParameterStoreConfig config) {
         throw new UnsupportedFeatureException("Parameter stores are not supported by this provider");
+    }
+
+    /**
+     * A pooled database. The connection closes it on {@link #close()}; with IAM auth the provider supplies
+     * the cloud tokens.
+     */
+    default Database database(SqlConfig config) {
+        throw new UnsupportedFeatureException("SQL databases are not supported by this provider");
     }
 
     @Override
