@@ -10,7 +10,6 @@ import org.kamranzafar.stratum.CloudContext;
 import org.kamranzafar.stratum.Stratum;
 import org.kamranzafar.stratum.config.Credentials;
 import org.kamranzafar.stratum.config.ProviderConfig;
-import org.kamranzafar.stratum.error.UnsupportedFeatureException;
 import org.kamranzafar.stratum.parameters.ParameterStore;
 import org.kamranzafar.stratum.parameters.ParameterStoreConfig;
 import org.kamranzafar.stratum.tck.ParameterStoreConformanceTest;
@@ -23,7 +22,6 @@ import org.testcontainers.utility.DockerImageName;
 import java.net.URI;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** The parameter store TCK on Secret Manager emulated by Floci-gcp (gRPC). */
 @Testcontainers(disabledWithoutDocker = true)
@@ -76,11 +74,5 @@ class SecretManagerConformanceIT {
         assertThat(client.accessSecretVersion(SecretVersionName.of("floci-local", "orders__db__password", "latest"))
                 .getPayload().getData().toStringUtf8()).isEqualTo("pw");
         store.delete("orders/db/password");
-    }
-
-    @Test
-    void parameterManagerIsNotSupportedYet() {
-        assertThatThrownBy(() -> stratum.provider("gcp").parameterStore(ParameterStoreConfig.parameters().build()))
-                .isInstanceOf(UnsupportedFeatureException.class);
     }
 }

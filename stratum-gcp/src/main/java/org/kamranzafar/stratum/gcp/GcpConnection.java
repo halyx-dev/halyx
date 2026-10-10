@@ -5,6 +5,8 @@ import com.google.api.gax.grpc.GrpcTransportChannel;
 import com.google.api.gax.rpc.FixedTransportChannelProvider;
 import com.google.cloud.NoCredentials;
 import com.google.cloud.ServiceOptions;
+import com.google.cloud.parametermanager.v1.ParameterManagerClient;
+import com.google.cloud.parametermanager.v1.ParameterManagerSettings;
 import com.google.cloud.secretmanager.v1.SecretManagerServiceClient;
 import com.google.cloud.secretmanager.v1.SecretManagerServiceSettings;
 import io.grpc.ManagedChannelBuilder;
@@ -16,7 +18,7 @@ import org.kamranzafar.stratum.cache.CacheAuth;
 import org.kamranzafar.stratum.cache.CacheConfig;
 import org.kamranzafar.stratum.cache.spi.CacheDriver;
 import org.kamranzafar.stratum.gcp.memorystore.MemorystoreIamTokens;
-import org.kamranzafar.stratum.error.UnsupportedFeatureException;
+import org.kamranzafar.stratum.gcp.parameters.ParameterManagerDriver;
 import org.kamranzafar.stratum.gcp.parameters.SecretManagerDriver;
 import org.kamranzafar.stratum.gcp.storage.GcsBlobStoreDriver;
 import org.kamranzafar.stratum.parameters.ParameterKind;
@@ -28,6 +30,8 @@ import org.kamranzafar.stratum.storage.spi.BlobStoreDriver;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.HashMap;
+import java.util.Map;
 
 /** Owns the Google Cloud clients for one configuration. Clients are created lazily and shared by all buckets. */
 final class GcpConnection implements ProviderConnection {
@@ -36,6 +40,7 @@ final class GcpConnection implements ProviderConnection {
     private Storage storage;
     private RedisCaches caches;
     private SecretManagerServiceClient secretManager;
+    private final Map<String, ParameterManagerClient> parameterManagers = new HashMap<>();
 
     GcpConnection(ProviderConfig config) {
         this.config = config;
@@ -69,18 +74,44 @@ final class GcpConnection implements ProviderConnection {
 
     @Override
     public synchronized ParameterDriver parameterStore(ParameterStoreConfig storeConfig) {
+        String project = config.property(GcpProperties.PROJECT_ID).orElseGet(ServiceOptions::getDefaultProjectId);
+        if (project == null) {
+            throw new IllegalArgumentException("Parameter stores need a project: set the '" + GcpProperties.PROJECT_ID + "' property");
+        }
         if (storeConfig.kind() == ParameterKind.PARAMETERS) {
-            throw new UnsupportedFeatureException("GCP Parameter Manager is not supported yet; use Secret Manager "
-                    + "(ParameterStoreConfig.secrets())", null, GcpProvider.ID, null);
+            // The store location is the Parameter Manager location: "global" or a region such as "europe-west2".
+            String location = storeConfig.location().orElse("global");
+            ParameterManagerClient client = parameterManagers.computeIfAbsent(location, this::parameterManagerClient);
+            return new ParameterManagerDriver(client, project, location,
+                    Boolean.parseBoolean(storeConfig.property(ParameterManagerDriver.RENDER).orElse("false")));
         }
         if (secretManager == null) {
             secretManager = secretManagerClient();
         }
-        String project = config.property(GcpProperties.PROJECT_ID).orElseGet(ServiceOptions::getDefaultProjectId);
-        if (project == null) {
-            throw new IllegalArgumentException("Secret Manager needs a project: set the '" + GcpProperties.PROJECT_ID + "' property");
-        }
         return new SecretManagerDriver(secretManager, project);
+    }
+
+    /** Regional locations are served by regional endpoints; an endpoint override (emulator or fake) wins. */
+    private ParameterManagerClient parameterManagerClient(String location) {
+        try {
+            var settings = ParameterManagerSettings.newBuilder();
+            if (config.endpoint().isPresent()) {
+                var endpoint = config.endpoint().get();
+                var channel = ManagedChannelBuilder.forAddress(endpoint.getHost(), endpoint.getPort()).usePlaintext().build();
+                settings.setTransportChannelProvider(FixedTransportChannelProvider.create(GrpcTransportChannel.create(channel)))
+                        .setCredentialsProvider(NoCredentialsProvider.create());
+            } else {
+                if (!"global".equals(location)) {
+                    settings.setEndpoint("parametermanager." + location + ".rep.googleapis.com:443");
+                }
+                if (config.credentials() instanceof Credentials.Anonymous) {
+                    settings.setCredentialsProvider(NoCredentialsProvider.create());
+                }
+            }
+            return ParameterManagerClient.create(settings.build());
+        } catch (IOException e) {
+            throw new UncheckedIOException("Could not create the Parameter Manager client", e);
+        }
     }
 
     /** With an endpoint override (an emulator), Secret Manager is reached over plaintext gRPC on the same host and port. */
@@ -119,6 +150,8 @@ final class GcpConnection implements ProviderConnection {
             secretManager.close();
             secretManager = null;
         }
+        parameterManagers.values().forEach(ParameterManagerClient::close);
+        parameterManagers.clear();
         if (storage != null) {
             try {
                 storage.close();

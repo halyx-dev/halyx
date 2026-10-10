@@ -28,6 +28,10 @@
             <groupId>com.google.cloud</groupId>
             <artifactId>google-cloud-secretmanager</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.google.cloud</groupId>
+            <artifactId>google-cloud-parametermanager</artifactId>
+        </dependency>
         <!-- Caches: shared Redis driver, with IAM access tokens for Memorystore -->
         <dependency>
             <groupId>org.kamranzafar</groupId>
@@ -42,6 +46,12 @@
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Fake Parameter Manager gRPC server for tests (there is no emulator) -->
+        <dependency>
+            <groupId>com.google.api.grpc</groupId>
+            <artifactId>grpc-google-cloud-parametermanager-v1</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>

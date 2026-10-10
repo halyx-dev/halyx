@@ -213,7 +213,7 @@ Optional<Integer> pool = config.get("db/pool/size", Integer::valueOf);
 
 | `ParameterKind` | AWS | Azure | GCP | Vault |
 |---|---|---|---|---|
-| `PARAMETERS` | SSM Parameter Store (`SecureString` with `aws.ssm.secure=true`) | App Configuration (optional label; no reads by version) | Parameter Manager: **not supported yet** | KV v2 |
+| `PARAMETERS` | SSM Parameter Store (`SecureString` with `aws.ssm.secure=true`) | App Configuration (optional label; no reads by version) | Parameter Manager (location `global` or a region; `gcp.parametermanager.render=true` resolves Secret Manager references) | KV v2 |
 | `SECRETS` | Secrets Manager | Key Vault (location = vault URL) | Secret Manager | KV v2 |
 
 Names are portable: segments of letters, digits and single dashes separated by `/`
@@ -222,6 +222,11 @@ Key Vault `--`, Secret Manager `__`, and Vault, App Configuration and Secrets Ma
 it is. `getAll` returns everything at or below a prefix, and never matches partial segments (`db`
 does not match `dbx/...`). Reads can be cached per store (`cacheTtl`; `refresh()` clears the cache).
 Earlier versions are readable where the backend keeps them (`get(name, version)`).
+
+Parameter Manager has no "latest" alias and the caller names each version. Stratum writes versions
+with ids that sort by creation time, and reads take the newest enabled version by creation time,
+which is also correct for versions written by other tools. A read lists versions and then fetches
+one, so give Parameter Manager stores a `cacheTtl`. Deletes remove all versions, then the parameter.
 
 Deletes are idempotent. On Secrets Manager they skip the recovery window. On Key Vault they are soft
 deletes; writing a soft-deleted name recovers it first, so names can be reused without the purge
@@ -430,10 +435,19 @@ Parameter store tests (the same 16-test TCK everywhere):
 | AWS SSM Parameter Store, Secrets Manager | Floci | plus `SecureString` writes |
 | Azure Key Vault, App Configuration | Floci-az | plus Key Vault name encoding and App Configuration labels; App Configuration skips the versions test |
 | GCP Secret Manager | Floci-gcp (gRPC) | plus name encoding |
+| GCP Parameter Manager | an in-process fake gRPC server (no emulator exists) | global and regional; latest-version selection with foreign version ids, rendering, name encoding. This checks the driver's use of the real client, not GCP's exact behaviour |
 | HashiCorp Vault | Vault dev server | plus AppRole login with token renewal, wrong tokens, multi-field secrets |
 | Spring `spring.config.import` | Vault dev server | on Boot 3.5 and 4.1 |
 
-Not verified locally: GCP Parameter Manager (no emulator, so not implemented yet), Vault Kubernetes
+**On real GCP:** `GcpParameterStoreIT` runs the same TCK against Secret Manager and Parameter
+Manager in a real project, using Application Default Credentials. It is skipped unless the variables
+are set:
+
+```bash
+STRATUM_GCP_PROJECT=my-project STRATUM_GCP_LOCATION=global mvn verify -pl stratum-gcp -Dit.test=GcpParameterStoreIT
+```
+
+Not verified locally: GCP Parameter Manager against real GCP (see above), Vault Kubernetes
 login, Entra ID logins to Key Vault and App Configuration (the emulator accepts any token), and an IAM *login* end to end (the released Floci images cannot attach IAM users to
 a cache yet), Entra ID logins (Floci-az does not emulate them), and failover of a managed cluster.
 
@@ -442,8 +456,8 @@ a cache yet), Entra ID logins (Floci-az does not emulate them), and failover of 
 1. ~~Core, SPI, storage on AWS/Azure/GCP, TCK, Floci tests~~
 2. ~~Cache: one Redis/Valkey driver plus cloud auth (ElastiCache IAM, Entra ID, Memorystore IAM)~~ (next: endpoint discovery, cross-instance stampede protection)
 3. SQL: `DataSource` factory with cloud IAM auth and token refresh (RDS IAM, Entra ID, Cloud SQL connector)
-4. ~~Parameters and secrets: one portable API for configuration values and secrets~~ (next: GCP
-   Parameter Manager, change notifications, labels on SSM and Secret Manager)
+4. ~~Parameters and secrets: one portable API for configuration values and secrets~~ (next: change
+   notifications, labels on SSM and Secret Manager)
    - Providers: AWS SSM Parameter Store and Secrets Manager; Azure App Configuration and Key Vault;
      GCP Parameter Manager and Secret Manager; HashiCorp Vault (KV v2), in a separate
      `stratum-vault` module because it is not tied to a cloud

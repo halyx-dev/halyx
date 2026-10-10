@@ -34,6 +34,8 @@
         <aws-sdk.version>2.55.14</aws-sdk.version>
         <azure-sdk-bom.version>1.3.8</azure-sdk-bom.version>
         <gcp-libraries-bom.version>26.90.0</gcp-libraries-bom.version>
+        <!-- Not in libraries-bom yet; 0.43.0 is from the same google-cloud-java release (1.93.0) -->
+        <gcp-parametermanager.version>0.43.0</gcp-parametermanager.version>
 
         <!--
           Spring Boot, imported only by the Spring modules so it never changes SDK dependency versions.
@@ -93,6 +95,16 @@
                 <groupId>org.kamranzafar</groupId>
                 <artifactId>stratum-aws</artifactId>
                 <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.google.cloud</groupId>
+                <artifactId>google-cloud-parametermanager</artifactId>
+                <version>${gcp-parametermanager.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.google.api.grpc</groupId>
+                <artifactId>grpc-google-cloud-parametermanager-v1</artifactId>
+                <version>${gcp-parametermanager.version}</version>
             </dependency>
             <dependency>
                 <groupId>io.lettuce</groupId>
