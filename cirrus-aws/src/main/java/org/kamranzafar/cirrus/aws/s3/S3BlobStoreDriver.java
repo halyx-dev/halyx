@@ -1,0 +1,344 @@
+package org.kamranzafar.cirrus.aws.s3;
+
+import org.kamranzafar.cirrus.aws.AwsErrors;
+import org.kamranzafar.cirrus.aws.AwsProvider;
+import org.kamranzafar.cirrus.capability.Capabilities;
+import org.kamranzafar.cirrus.error.CloudException;
+import org.kamranzafar.cirrus.error.NotFoundException;
+import org.kamranzafar.cirrus.error.PreconditionFailedException;
+import org.kamranzafar.cirrus.storage.BatchDeleteResult;
+import org.kamranzafar.cirrus.storage.Blob;
+import org.kamranzafar.cirrus.storage.BlobContent;
+import org.kamranzafar.cirrus.storage.BlobHeaders;
+import org.kamranzafar.cirrus.storage.BlobKey;
+import org.kamranzafar.cirrus.storage.BlobMetadata;
+import org.kamranzafar.cirrus.storage.BlobPage;
+import org.kamranzafar.cirrus.storage.BlobSummary;
+import org.kamranzafar.cirrus.storage.Checksums;
+import org.kamranzafar.cirrus.storage.DeleteOptions;
+import org.kamranzafar.cirrus.storage.ETag;
+import org.kamranzafar.cirrus.storage.GetOptions;
+import org.kamranzafar.cirrus.storage.ListOptions;
+import org.kamranzafar.cirrus.storage.MetadataUpdate;
+import org.kamranzafar.cirrus.storage.PresignRequest;
+import org.kamranzafar.cirrus.storage.PresignedUrl;
+import org.kamranzafar.cirrus.storage.PutOptions;
+import org.kamranzafar.cirrus.storage.PutResult;
+import org.kamranzafar.cirrus.storage.StorageCapability;
+import org.kamranzafar.cirrus.storage.StorageTier;
+import org.kamranzafar.cirrus.storage.spi.AbstractBlobStoreDriver;
+import org.kamranzafar.cirrus.storage.spi.MultipartUploadSession;
+import software.amazon.awssdk.awscore.presigner.PresignedRequest;
+import software.amazon.awssdk.core.ResponseInputStream;
+import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.ChecksumMode;
+import software.amazon.awssdk.services.s3.model.CommonPrefix;
+import software.amazon.awssdk.services.s3.model.CopyObjectRequest;
+import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectResponse;
+import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
+import software.amazon.awssdk.services.s3.model.MetadataDirective;
+import software.amazon.awssdk.services.s3.model.ObjectIdentifier;
+import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.S3Error;
+import software.amazon.awssdk.services.s3.model.S3Exception;
+import software.amazon.awssdk.services.s3.presigner.S3Presigner;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
+import java.net.URISyntaxException;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
+/** Blob storage on Amazon S3. */
+public final class S3BlobStoreDriver extends AbstractBlobStoreDriver {
+
+    /** DeleteObjects accepts up to 1,000 keys per request. */
+    private static final int MAX_BATCH = 1000;
+
+    private final S3Client s3;
+    private final S3Presigner presigner;
+    private final long multipartThreshold;
+
+    /**
+     * @param multipartThreshold content longer than this is uploaded with a multipart upload (a single
+     *                           S3 PUT is limited to 5 GiB)
+     */
+    public S3BlobStoreDriver(String bucket, S3Client s3, S3Presigner presigner, long multipartThreshold) {
+        super(AwsProvider.ID, bucket, Capabilities.of(StorageCapability.values()));
+        this.s3 = s3;
+        this.presigner = presigner;
+        this.multipartThreshold = multipartThreshold;
+    }
+
+    @Override
+    public PutResult put(BlobKey key, BlobContent.Sized content, PutOptions options, Checksums expected) {
+        if (content.length() > multipartThreshold) {
+            return putInParts(key, content, options, expected);
+        }
+        var request = PutObjectRequest.builder().bucket(bucket).key(key.value()).contentLength(content.length());
+        var headers = options.headers();
+        headers.contentType().ifPresent(request::contentType);
+        headers.contentEncoding().ifPresent(request::contentEncoding);
+        headers.contentDisposition().ifPresent(request::contentDisposition);
+        headers.contentLanguage().ifPresent(request::contentLanguage);
+        headers.cacheControl().ifPresent(request::cacheControl);
+        if (!options.metadata().isEmpty()) {
+            request.metadata(options.metadata());
+        }
+        options.tier().ifPresent(tier -> request.storageClass(S3Tiers.toNative(tier)));
+        options.ifMatch().ifPresent(etag -> request.ifMatch(etag.value()));
+        if (options.ifNotExists()) {
+            request.ifNoneMatch("*");
+        }
+        // S3 rejects the upload if the content does not match, and stores the checksum.
+        expected.crc32c().ifPresent(request::checksumCRC32C);
+        RequestBody body = switch (content) {
+            case BlobContent.OfBytes bytes -> RequestBody.fromBytes(bytes.bytes());
+            case BlobContent.OfFile file -> RequestBody.fromFile(file.path());
+            case BlobContent.OfStream stream -> RequestBody.fromInputStream(stream.stream(), stream.length());
+        };
+        var response = s3.putObject(request.build(), body);
+        return new PutResult(key, new ETag(response.eTag()),
+                checksums(response.checksumCRC32C(), response.checksumCRC32()));
+    }
+
+    @Override
+    public MultipartUploadSession startMultipartUpload(BlobKey key, PutOptions options) {
+        return new S3MultipartUpload(s3, bucket, key, options);
+    }
+
+    private PutResult putInParts(BlobKey key, BlobContent.Sized content, PutOptions options, Checksums expected) {
+        S3MultipartUpload upload = new S3MultipartUpload(s3, bucket, key, options);
+        byte[] buffer = new byte[options.partSize()];
+        try (InputStream in = content.openStream()) {
+            int part = 0;
+            int read;
+            while ((read = in.readNBytes(buffer, 0, buffer.length)) > 0) {
+                upload.uploadPart(++part, buffer, read);
+            }
+            return upload.complete(expected);
+        } catch (IOException e) {
+            upload.abort();
+            throw new UncheckedIOException(e);
+        } catch (RuntimeException e) {
+            upload.abort();
+            throw e;
+        }
+    }
+
+    @Override
+    public Blob get(BlobKey key, GetOptions options) {
+        var request = GetObjectRequest.builder().bucket(bucket).key(key.value());
+        options.range().ifPresent(range -> request.range(range.toHttpHeader()));
+        options.ifMatch().ifPresent(etag -> request.ifMatch(etag.value()));
+        if (options.range().isEmpty()) {
+            request.checksumMode(ChecksumMode.ENABLED);
+        }
+        ResponseInputStream<GetObjectResponse> in = s3.getObject(request.build());
+        GetObjectResponse r = in.response();
+        BlobMetadata metadata = new BlobMetadata(key, totalSize(r), new ETag(r.eTag()), r.lastModified(),
+                BlobHeaders.of(r.contentType(), r.contentEncoding(), r.contentDisposition(), r.contentLanguage(),
+                        r.cacheControl()),
+                r.metadata(), S3Tiers.fromNative(r.storageClassAsString()),
+                checksums(r.checksumCRC32C(), r.checksumCRC32()));
+        return new Blob(metadata, in);
+    }
+
+    @Override
+    public Optional<BlobMetadata> head(BlobKey key) {
+        try {
+            HeadObjectResponse r = s3.headObject(b -> b.bucket(bucket).key(key.value()).checksumMode(ChecksumMode.ENABLED));
+            return Optional.of(toMetadata(key, r));
+        } catch (S3Exception e) {
+            if (e.statusCode() == 404) {
+                return Optional.empty();
+            }
+            throw e;
+        }
+    }
+
+    @Override
+    public void delete(BlobKey key, DeleteOptions options) {
+        var request = DeleteObjectRequest.builder().bucket(bucket).key(key.value());
+        options.ifMatchETag().ifPresent(etag -> request.ifMatch(etag.value()));
+        try {
+            s3.deleteObject(request.build());
+        } catch (S3Exception e) {
+            if (options.isConditional() && e.statusCode() == 404) {
+                throw new PreconditionFailedException("No blob " + bucket + "/" + key + " to delete conditionally",
+                        e, provider, "NoSuchKey");
+            }
+            throw e;
+        }
+    }
+
+    @Override
+    public int maxBatchSize() {
+        return MAX_BATCH;
+    }
+
+    @Override
+    public BatchDeleteResult deleteBatch(List<BlobKey> keys) {
+        List<ObjectIdentifier> objects = keys.stream().map(k -> ObjectIdentifier.builder().key(k.value()).build()).toList();
+        var response = s3.deleteObjects(b -> b.bucket(bucket).delete(d -> d.objects(objects).quiet(true)));
+        Map<BlobKey, CloudException> failed = new LinkedHashMap<>();
+        for (S3Error error : response.errors()) {
+            if (!"NoSuchKey".equals(error.code())) {
+                failed.put(BlobKey.of(error.key()), AwsErrors.fromCode(error.code(), error.message()));
+            }
+        }
+        List<BlobKey> deleted = new ArrayList<>(keys);
+        deleted.removeAll(failed.keySet());
+        return new BatchDeleteResult(deleted, failed);
+    }
+
+    @Override
+    public BlobMetadata updateMetadata(BlobKey key, MetadataUpdate update) {
+        // S3 cannot edit metadata in place: copy the object onto itself, replacing its metadata and
+        // keeping its storage class (which a copy would otherwise reset to STANDARD).
+        HeadObjectResponse current = currentOrThrow(key, update.ifMatch().isPresent());
+        var request = CopyObjectRequest.builder()
+                .sourceBucket(bucket).sourceKey(key.value())
+                .destinationBucket(bucket).destinationKey(key.value())
+                .metadataDirective(MetadataDirective.REPLACE)
+                .metadata(update.metadata());
+        if (current.storageClassAsString() != null) {
+            request.storageClass(current.storageClassAsString());
+        }
+        var headers = update.headers();
+        headers.contentType().ifPresent(request::contentType);
+        headers.contentEncoding().ifPresent(request::contentEncoding);
+        headers.contentDisposition().ifPresent(request::contentDisposition);
+        headers.contentLanguage().ifPresent(request::contentLanguage);
+        headers.cacheControl().ifPresent(request::cacheControl);
+        update.ifMatch().ifPresent(etag -> request.copySourceIfMatch(etag.value()));
+        s3.copyObject(request.build());
+        return head(key).orElseThrow(() -> new NotFoundException("Blob vanished during update: " + key, null, provider, null));
+    }
+
+    @Override
+    public void setTier(BlobKey key, StorageTier tier) {
+        HeadObjectResponse current = currentOrThrow(key, false);
+        String target = S3Tiers.toNative(tier);
+        if (S3Tiers.fromNative(current.storageClassAsString()).equals(Optional.of(tier))) {
+            return; // S3 rejects a copy onto itself that changes nothing
+        }
+        s3.copyObject(b -> b.sourceBucket(bucket).sourceKey(key.value())
+                .destinationBucket(bucket).destinationKey(key.value())
+                .metadataDirective(MetadataDirective.COPY)
+                .storageClass(target));
+    }
+
+    private HeadObjectResponse currentOrThrow(BlobKey key, boolean conditional) {
+        try {
+            return s3.headObject(b -> b.bucket(bucket).key(key.value()));
+        } catch (S3Exception e) {
+            if (e.statusCode() == 404) {
+                throw conditional
+                        ? new PreconditionFailedException("No blob " + bucket + "/" + key, e, provider, "NoSuchKey")
+                        : new NotFoundException("No blob " + bucket + "/" + key, e, provider, "NoSuchKey");
+            }
+            throw e;
+        }
+    }
+
+    @Override
+    public BlobPage list(ListOptions options) {
+        var request = ListObjectsV2Request.builder().bucket(bucket).maxKeys(options.pageSize());
+        options.prefix().ifPresent(request::prefix);
+        options.delimiter().ifPresent(request::delimiter);
+        options.pageToken().ifPresent(request::continuationToken);
+        ListObjectsV2Response r = s3.listObjectsV2(request.build());
+        List<BlobSummary> items = r.contents().stream()
+                .map(o -> new BlobSummary(BlobKey.of(o.key()), o.size(), new ETag(o.eTag()), o.lastModified(),
+                        S3Tiers.fromNative(o.storageClassAsString())))
+                .toList();
+        boolean truncated = Boolean.TRUE.equals(r.isTruncated());
+        List<String> prefixes = r.commonPrefixes().stream().map(CommonPrefix::prefix).toList();
+        return new BlobPage(items, prefixes, truncated ? Optional.ofNullable(r.nextContinuationToken()) : Optional.empty());
+    }
+
+    @Override
+    public PutResult copy(BlobKey source, BlobKey target) {
+        var r = s3.copyObject(b -> b.sourceBucket(bucket).sourceKey(source.value())
+                .destinationBucket(bucket).destinationKey(target.value()));
+        return new PutResult(target, new ETag(r.copyObjectResult().eTag()));
+    }
+
+    @Override
+    public PresignedUrl presign(BlobKey key, PresignRequest request) {
+        PresignedRequest presigned = switch (request.method()) {
+            case GET -> presigner.presignGetObject(p -> p.signatureDuration(request.expiry())
+                    .getObjectRequest(g -> g.bucket(bucket).key(key.value())));
+            case PUT -> presigner.presignPutObject(p -> p.signatureDuration(request.expiry())
+                    .putObjectRequest(put -> {
+                        put.bucket(bucket).key(key.value());
+                        request.contentType().ifPresent(put::contentType);
+                    }));
+        };
+        // Signed headers other than Host (which HTTP clients set themselves) must be sent verbatim,
+        // for example the Content-Type of an upload.
+        Map<String, String> headers = new LinkedHashMap<>();
+        presigned.signedHeaders().forEach((name, values) -> {
+            if (!name.equalsIgnoreCase("host")) {
+                headers.put(name, String.join(",", values));
+            }
+        });
+        try {
+            return new PresignedUrl(request.method(), presigned.url().toURI(), presigned.expiration(), headers);
+        } catch (URISyntaxException e) {
+            throw new IllegalStateException("S3 presigner returned an invalid URL: " + presigned.url(), e);
+        }
+    }
+
+    @Override
+    protected Optional<CloudException> translateNative(Throwable error) {
+        return AwsErrors.translate(error);
+    }
+
+    @Override
+    protected List<Object> nativeClients() {
+        return List.of(s3, presigner);
+    }
+
+    private BlobMetadata toMetadata(BlobKey key, HeadObjectResponse r) {
+        return new BlobMetadata(key, r.contentLength(), new ETag(r.eTag()), r.lastModified(),
+                BlobHeaders.of(r.contentType(), r.contentEncoding(), r.contentDisposition(), r.contentLanguage(),
+                        r.cacheControl()),
+                r.metadata(), S3Tiers.fromNative(r.storageClassAsString()),
+                checksums(r.checksumCRC32C(), r.checksumCRC32()));
+    }
+
+    /**
+     * Full-object checksums only. Composite multipart checksums ("checksum-of-checksums", suffixed
+     * "-N") do not describe the content as a whole and are dropped.
+     */
+    static Checksums checksums(String crc32c, String crc32) {
+        return Checksums.of(fullObject(crc32c), null, fullObject(crc32));
+    }
+
+    private static String fullObject(String value) {
+        return value == null || value.contains("-") ? null : value;
+    }
+
+    /** Full object size; for range reads S3 reports it after the slash in {@code Content-Range}. */
+    private static long totalSize(GetObjectResponse r) {
+        String contentRange = r.contentRange();
+        if (contentRange != null) {
+            int slash = contentRange.lastIndexOf('/');
+            if (slash >= 0 && !contentRange.endsWith("*")) {
+                return Long.parseLong(contentRange.substring(slash + 1).trim());
+            }
+        }
+        return r.contentLength();
+    }
+}

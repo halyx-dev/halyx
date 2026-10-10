@@ -5,25 +5,25 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>org.kamranzafar</groupId>
-    <artifactId>stratum-parent</artifactId>
+    <artifactId>cirrus-parent</artifactId>
     <version>0.1.0-SNAPSHOT</version>
     <packaging>pom</packaging>
 
-    <name>Stratum :: Parent</name>
+    <name>Cirrus :: Parent</name>
     <description>Cloud-agnostic Java API for storage, SQL, search and cache across AWS, Azure and GCP.</description>
 
     <modules>
-        <module>stratum-bom</module>
-        <module>stratum-core</module>
-        <module>stratum-tck</module>
-        <module>stratum-redis</module>
-        <module>stratum-aws</module>
-        <module>stratum-azure</module>
-        <module>stratum-gcp</module>
-        <module>stratum-vault</module>
-        <module>stratum-spring-boot-autoconfigure</module>
-        <module>stratum-spring-boot-starter</module>
-        <module>stratum-spring-boot4-tests</module>
+        <module>cirrus-bom</module>
+        <module>cirrus-core</module>
+        <module>cirrus-tck</module>
+        <module>cirrus-redis</module>
+        <module>cirrus-aws</module>
+        <module>cirrus-azure</module>
+        <module>cirrus-gcp</module>
+        <module>cirrus-vault</module>
+        <module>cirrus-spring-boot-autoconfigure</module>
+        <module>cirrus-spring-boot-starter</module>
+        <module>cirrus-spring-boot4-tests</module>
     </modules>
 
     <properties>
@@ -75,25 +75,25 @@
 
     <dependencyManagement>
         <dependencies>
-            <!-- Stratum modules -->
+            <!-- Cirrus modules -->
             <dependency>
                 <groupId>org.kamranzafar</groupId>
-                <artifactId>stratum-core</artifactId>
+                <artifactId>cirrus-core</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.kamranzafar</groupId>
-                <artifactId>stratum-tck</artifactId>
+                <artifactId>cirrus-tck</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.kamranzafar</groupId>
-                <artifactId>stratum-redis</artifactId>
+                <artifactId>cirrus-redis</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.kamranzafar</groupId>
-                <artifactId>stratum-aws</artifactId>
+                <artifactId>cirrus-aws</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
@@ -113,12 +113,12 @@
             </dependency>
             <dependency>
                 <groupId>org.kamranzafar</groupId>
-                <artifactId>stratum-spring-boot-autoconfigure</artifactId>
+                <artifactId>cirrus-spring-boot-autoconfigure</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.kamranzafar</groupId>
-                <artifactId>stratum-vault</artifactId>
+                <artifactId>cirrus-vault</artifactId>
                 <version>${project.version}</version>
             </dependency>
 

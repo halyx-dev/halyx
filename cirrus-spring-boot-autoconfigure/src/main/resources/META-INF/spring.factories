@@ -1,0 +1,4 @@
+org.springframework.boot.context.config.ConfigDataLocationResolver=\
+org.kamranzafar.cirrus.spring.autoconfigure.config.CirrusConfigDataLocationResolver
+org.springframework.boot.context.config.ConfigDataLoader=\
+org.kamranzafar.cirrus.spring.autoconfigure.config.CirrusConfigDataLoader

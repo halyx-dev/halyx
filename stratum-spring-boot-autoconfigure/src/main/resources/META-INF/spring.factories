@@ -1,4 +1,0 @@
-org.springframework.boot.context.config.ConfigDataLocationResolver=\
-org.kamranzafar.stratum.spring.autoconfigure.config.StratumConfigDataLocationResolver
-org.springframework.boot.context.config.ConfigDataLoader=\
-org.kamranzafar.stratum.spring.autoconfigure.config.StratumConfigDataLoader

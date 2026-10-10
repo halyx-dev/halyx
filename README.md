@@ -1,15 +1,15 @@
-# Stratum
+# Cirrus
 
 A cloud-agnostic Java 21 API that gives microservices one consistent way to use storage, SQL,
 search and cache across **AWS**, **Azure** and **GCP**.
 
 ```java
-try (Stratum stratum = Stratum.builder()
+try (Cirrus cirrus = Cirrus.builder()
         .register("orders", ProviderConfig.of("aws").region("eu-west-2"))
         .register("archive", ProviderConfig.of("gcp").property(GcpProperties.PROJECT_ID, "acme-prod"))
         .build()) {
 
-    BlobStore orders = stratum.provider("orders").blobStore("orders-bucket");
+    BlobStore orders = cirrus.provider("orders").blobStore("orders-bucket");
     orders.put(BlobKey.of("invoices/42.pdf"), BlobContent.ofFile(path),
             PutOptions.builder().contentType("application/pdf").ifNotExists().build());
 
@@ -67,10 +67,10 @@ store.put(key, BlobContent.ofFile(path), PutOptions.builder().validateChecksum()
 try (Blob blob = store.get(key, GetOptions.builder().validateChecksum().build())) { ... }
 ```
 
-No algorithm is stored by all three clouds, so Stratum computes **CRC32C and MD5** itself. Each
+No algorithm is stored by all three clouds, so Cirrus computes **CRC32C and MD5** itself. Each
 provider checks what it supports before committing (S3: CRC32C, including full-object CRC32C for
 multipart uploads; Azure: MD5 per request and per block; GCS: CRC32C and MD5 match conditions).
-Stratum then compares the checksums the provider reports for the stored blob. A mismatch throws
+Cirrus then compares the checksums the provider reports for the stored blob. A mismatch throws
 `DataIntegrityException`, and the corrupt blob is deleted if it is still the version just written.
 Downloads are verified at end of stream against the strongest stored checksum (`BlobMetadata.checksums()`).
 
@@ -83,7 +83,7 @@ BatchDeleteResult result = store.deleteAll(keys);           // per-key failures,
 
 `deleteAll` splits keys into each provider's batch limit: S3 `DeleteObjects` (1,000), Azure Blob Batch
 (256), GCS JSON batch (100). Missing keys count as deleted. If an endpoint doesn't implement the batch
-API, Stratum falls back to deleting keys one at a time.
+API, Cirrus falls back to deleting keys one at a time.
 
 ### Metadata updates
 
@@ -142,7 +142,7 @@ A portable Redis/Valkey cache on every cloud: ElastiCache, Azure Cache for Redis
 Redis, and Memorystore. Only authentication differs between clouds.
 
 ```java
-Cache<String> sessions = stratum.provider("orders").cache(
+Cache<String> sessions = cirrus.provider("orders").cache(
         CacheConfig.builder(URI.create("rediss://master.sessions.abc123.euw2.cache.amazonaws.com:6379"))
                 .namespace("sessions")                      // keys become sessions:<key>
                 .defaultTtl(Duration.ofMinutes(30))
@@ -188,7 +188,7 @@ miss under fail-open).
 | `password(...)` | AUTH token, or ACL user + password | access key | AUTH string |
 | `none()` | local / unsecured servers | | |
 
-The shared `stratum-redis` module (Lettuce 6.8, which stays on Netty 4.1 like the AWS and Azure SDKs)
+The shared `cirrus-redis` module (Lettuce 6.8, which stays on Netty 4.1 like the AWS and Azure SDKs)
 runs standalone or cluster mode (`cluster(true)`, with topology refresh), TLS via `rediss://`, and one
 connection per endpoint and auth. IAM tokens are minted again before they expire, and open
 connections re-authenticate with them, so long-lived connections survive token rotation.
@@ -202,7 +202,7 @@ read-from-replica, near caching, and data structures beyond strings (use `unwrap
 One API for configuration values and secrets on every cloud and on HashiCorp Vault:
 
 ```java
-ParameterStore secrets = stratum.provider("aws").parameterStore(
+ParameterStore secrets = cirrus.provider("aws").parameterStore(
         ParameterStoreConfig.secrets().prefix("orders-svc").cacheTtl(Duration.ofMinutes(5)).build());
 
 String password = secrets.require("db/password");          // Secrets Manager secret "orders-svc/db/password"
@@ -227,7 +227,7 @@ it is. `getAll` returns everything at or below a prefix, and never matches parti
 does not match `dbx/...`). Reads can be cached per store (`cacheTtl`; `refresh()` clears the cache).
 Earlier versions are readable where the backend keeps them (`get(name, version)`).
 
-Parameter Manager has no "latest" alias and the caller names each version. Stratum writes versions
+Parameter Manager has no "latest" alias and the caller names each version. Cirrus writes versions
 with ids that sort by creation time, and reads take the newest enabled version by creation time,
 which is also correct for versions written by other tools. A read lists versions and then fetches
 one, so give Parameter Manager stores a `cacheTtl`. Deletes remove all versions, then the parameter.
@@ -249,7 +249,7 @@ Deletes are idempotent. On Secrets Manager they skip the recovery window. On Key
 deletes; writing a soft-deleted name recovers it first, so names can be reused without the purge
 permission. On Vault they remove all versions.
 
-**`stratum-vault`** supports token auth (or `VAULT_TOKEN`), a token file (Vault Agent sink; read
+**`cirrus-vault`** supports token auth (or `VAULT_TOKEN`), a token file (Vault Agent sink; read
 again when the token is rejected), AppRole, Kubernetes, GCP (metadata-server identity token) and Azure
 (managed identity) login, Vault namespaces, a private CA (`vault.ca-certificate`; untrusted
 certificates are a non-retryable `AccessDeniedException`), and renews tokens before they expire (in the last fifth of their life, at most 30 s
@@ -264,16 +264,16 @@ Add the starter plus the provider modules you use:
 ```xml
 <dependency>
   <groupId>org.kamranzafar</groupId>
-  <artifactId>stratum-spring-boot-starter</artifactId>
+  <artifactId>cirrus-spring-boot-starter</artifactId>
 </dependency>
 <dependency>
   <groupId>org.kamranzafar</groupId>
-  <artifactId>stratum-aws</artifactId>
+  <artifactId>cirrus-aws</artifactId>
 </dependency>
 ```
 
 ```yaml
-stratum:
+cirrus:
   providers:
     orders:
       type: aws                    # aws | azure | gcp | memory
@@ -301,11 +301,11 @@ stratum:
     codec: json                    # jdk (default) | json (Jackson 3 on Boot 4, Jackson 2 on Boot 3)
     trusted-packages: com.example.orders
   parameter-stores:
-    app-secrets:                   # ParameterStore bean name, and the name used by stratum: imports
+    app-secrets:                   # ParameterStore bean name, and the name used by cirrus: imports
       kind: secrets                # secrets | parameters
       prefix: orders-svc
       cache-ttl: 5m
-      reload-interval: 1m          # for stratum: imports; omit for read-once at startup
+      reload-interval: 1m          # for cirrus: imports; omit for read-once at startup
       # native-names: true         # use existing backend names as they are
       # expand-json: true          # (default) JSON values also become db.creds.password etc.
       # startup-attempts: 3        # (default) retries when the backend is briefly unavailable
@@ -324,52 +324,52 @@ What the starter provides:
 
 | Feature | Details |
 |---|---|
-| `Stratum` bean | Built from `stratum.providers`, closed with the context. Define your own `Stratum` bean to replace it. |
-| `BlobStore` beans | One per `stratum.blob-stores` entry, named after the entry. |
-| `Cache<String>` beans | One per `stratum.caches` entry, named after the entry. |
-| `ParameterStore` beans | One per `stratum.parameter-stores` entry, named after the entry. |
-| Config import | `spring.config.import=stratum:app-secrets` (or `stratum:app-secrets/db`, `optional:stratum:...`) loads a store into the `Environment` at startup. Names become property keys with `/` replaced by `.`, so `db/password` becomes `db.password`, and JSON values add their fields (`db.creds.password`). The providers and stores must be defined in the same or an earlier config file. A briefly unavailable backend is retried with backoff (`startup-attempts`). |
-| Reload | With `reload-interval`, imported properties are updated in place when values change or rotate. Stratum publishes a `StratumParametersChangedEvent` (store name and changed keys), and Spring Cloud's `EnvironmentChangeEvent` when Spring Cloud Context is present, so `@ConfigurationProperties` and `@RefreshScope` beans follow. Without Spring Cloud, `Environment` reads and event listeners see changes; `@Value` fields keep their startup values. |
-| `CacheManager` | `stratum.cache-manager.*` backs `@Cacheable`, `@CachePut` and `@CacheEvict` (including `allEntries` and `sync = true`): per-cache TTLs, cached nulls, JDK or JSON values. JSON stores `{"@class", "v"}` and only reads back types from `trusted-packages` (no unsafe polymorphic typing); the JDK codec applies the same allow-list through an `ObjectInputFilter`. Async/reactive `@Cacheable` is not supported. |
-| Parameter metrics | `stratum.parameters.reads{store, source=cache\|backend}`, `stratum.parameters.changes{store}`, `stratum.parameters.watch.failures{store}`. |
+| `Cirrus` bean | Built from `cirrus.providers`, closed with the context. Define your own `Cirrus` bean to replace it. |
+| `BlobStore` beans | One per `cirrus.blob-stores` entry, named after the entry. |
+| `Cache<String>` beans | One per `cirrus.caches` entry, named after the entry. |
+| `ParameterStore` beans | One per `cirrus.parameter-stores` entry, named after the entry. |
+| Config import | `spring.config.import=cirrus:app-secrets` (or `cirrus:app-secrets/db`, `optional:cirrus:...`) loads a store into the `Environment` at startup. Names become property keys with `/` replaced by `.`, so `db/password` becomes `db.password`, and JSON values add their fields (`db.creds.password`). The providers and stores must be defined in the same or an earlier config file. A briefly unavailable backend is retried with backoff (`startup-attempts`). |
+| Reload | With `reload-interval`, imported properties are updated in place when values change or rotate. Cirrus publishes a `CirrusParametersChangedEvent` (store name and changed keys), and Spring Cloud's `EnvironmentChangeEvent` when Spring Cloud Context is present, so `@ConfigurationProperties` and `@RefreshScope` beans follow. Without Spring Cloud, `Environment` reads and event listeners see changes; `@Value` fields keep their startup values. |
+| `CacheManager` | `cirrus.cache-manager.*` backs `@Cacheable`, `@CachePut` and `@CacheEvict` (including `allEntries` and `sync = true`): per-cache TTLs, cached nulls, JDK or JSON values. JSON stores `{"@class", "v"}` and only reads back types from `trusted-packages` (no unsafe polymorphic typing); the JDK codec applies the same allow-list through an `ObjectInputFilter`. Async/reactive `@Cacheable` is not supported. |
+| Parameter metrics | `cirrus.parameters.reads{store, source=cache\|backend}`, `cirrus.parameters.changes{store}`, `cirrus.parameters.watch.failures{store}`. |
 | Cache metrics | With a `MeterRegistry`: Micrometer's standard `cache.gets{result=hit\|miss}`, `cache.puts`, `cache.evictions`, plus `cache.loads{result}` and `cache.fail.open`, tagged `cache=<name>`, for `Cache` beans and `CacheManager` caches. |
 | Interceptors | Every `Interceptor` bean is applied in `@Order` order. Order of application, outermost first: observations, your interceptors, retries. |
-| Customisation | `StratumBuilderCustomizer` beans can add plugins or registrations. |
-| Observations | With Micrometer, every operation records a `stratum.operation` observation (timer + span) tagged with `stratum.service`, `stratum.operation`, `stratum.provider` and `error`. Disable with `stratum.observations.enabled=false`. |
-| Health | A `stratum` health contributor with one indicator per blob store (lists one item), per cache (runs an authenticated command) and per parameter store (an authenticated read). Disable with `management.health.stratum.enabled=false`. |
+| Customisation | `CirrusBuilderCustomizer` beans can add plugins or registrations. |
+| Observations | With Micrometer, every operation records a `cirrus.operation` observation (timer + span) tagged with `cirrus.service`, `cirrus.operation`, `cirrus.provider` and `error`. Disable with `cirrus.observations.enabled=false`. |
+| Health | A `cirrus` health contributor with one indicator per blob store (lists one item), per cache (runs an authenticated command) and per parameter store (an authenticated read). Disable with `management.health.cirrus.enabled=false`. |
 | Fail fast | Startup fails, naming the property, for an unknown provider type (with the module to add), an unknown or ambiguous `provider` reference, or incomplete static credentials. |
-| IDE support | Configuration metadata is generated, so `stratum.*` keys autocomplete. |
+| IDE support | Configuration metadata is generated, so `cirrus.*` keys autocomplete. |
 
 **Supports Spring Boot 3.5.x and 4.x** (Java 21) with the same starter: your application's Boot
 parent or BOM picks the Spring versions. The auto-configuration is compiled against Boot 3.5. Health
 is wired with Actuator's `org.springframework.boot.actuate.health` on Boot 3, and with the new
 `org.springframework.boot.health` module on Boot 4; exactly one of the two activates. The test suite
-runs on both: `stratum-spring-boot-autoconfigure` tests on 3.5, and the unpublished
-`stratum-spring-boot4-tests` module runs the same shared tests on 4.1.
+runs on both: `cirrus-spring-boot-autoconfigure` tests on 3.5, and the unpublished
+`cirrus-spring-boot4-tests` module runs the same shared tests on 4.1.
 
 ## Modules
 
 | Module | Purpose |
 |---|---|
-| `stratum-bom` | Import to align Stratum versions |
-| `stratum-core` | Portable API, provider SPI, error model, interceptors, in-memory provider. No cloud SDKs (enforced) |
-| `stratum-tck` | Conformance test kit every provider must pass |
-| `stratum-redis` | Shared Redis/Valkey cache driver (Lettuce) used by every provider |
-| `stratum-aws` | AWS SDK v2: S3, SSM Parameter Store, Secrets Manager, ElastiCache IAM auth |
-| `stratum-azure` | Azure SDK: Blob Storage, Key Vault, App Configuration, Entra ID cache auth |
-| `stratum-gcp` | Google Cloud: Cloud Storage, Secret Manager, Memorystore IAM auth |
-| `stratum-vault` | HashiCorp Vault (KV v2): parameters and secrets |
-| `stratum-spring-boot-autoconfigure` | Spring Boot auto-configuration, properties, health, observations |
-| `stratum-spring-boot-starter` | The dependency Spring Boot applications add |
+| `cirrus-bom` | Import to align Cirrus versions |
+| `cirrus-core` | Portable API, provider SPI, error model, interceptors, in-memory provider. No cloud SDKs (enforced) |
+| `cirrus-tck` | Conformance test kit every provider must pass |
+| `cirrus-redis` | Shared Redis/Valkey cache driver (Lettuce) used by every provider |
+| `cirrus-aws` | AWS SDK v2: S3, SSM Parameter Store, Secrets Manager, ElastiCache IAM auth |
+| `cirrus-azure` | Azure SDK: Blob Storage, Key Vault, App Configuration, Entra ID cache auth |
+| `cirrus-gcp` | Google Cloud: Cloud Storage, Secret Manager, Memorystore IAM auth |
+| `cirrus-vault` | HashiCorp Vault (KV v2): parameters and secrets |
+| `cirrus-spring-boot-autoconfigure` | Spring Boot auto-configuration, properties, health, observations |
+| `cirrus-spring-boot-starter` | The dependency Spring Boot applications add |
 
-Add `stratum-core` plus the provider jars you need; providers are discovered with `ServiceLoader`.
+Add `cirrus-core` plus the provider jars you need; providers are discovered with `ServiceLoader`.
 
 ```xml
 <dependencyManagement>
   <dependencies>
     <dependency>
       <groupId>org.kamranzafar</groupId>
-      <artifactId>stratum-bom</artifactId>
+      <artifactId>cirrus-bom</artifactId>
       <version>0.1.0-SNAPSHOT</version>
       <type>pom</type>
       <scope>import</scope>
@@ -381,7 +381,7 @@ Add `stratum-core` plus the provider jars you need; providers are discovered wit
 ## Design
 
 ```
- application ──► BlobStore (API)                                   stratum-core
+ application ──► BlobStore (API)                                   cirrus-core
                    │ DefaultBlobStore: validation → capability check →
                    │ interceptor chain → driver call → error translation
                    ▼
@@ -395,7 +395,7 @@ Add `stratum-core` plus the provider jars you need; providers are discovered wit
 | Bridge | `BlobStore` / `DefaultBlobStore` (abstraction) ↔ `BlobStoreDriver` (implementor) |
 | Plugin, Separated Interface (Fowler) | `CloudProvider` in core, discovered from provider jars via `ServiceLoader` |
 | Abstract Factory | `ProviderConnection` creates the family of drivers for one account/region |
-| Registry, Facade | `Stratum` holds named `CloudContext`s |
+| Registry, Facade | `Cirrus` holds named `CloudContext`s |
 | Gateway, Adapter | Each driver wraps a native SDK client |
 | Template Method | `AbstractBlobStoreDriver` (translation fallback, unwrap) |
 | Chain of Responsibility | `Interceptor` / `InterceptorChain` (`RetryInterceptor` included) |
@@ -435,7 +435,7 @@ reason, so the TCK itself stays strict for runs against real clouds:
 |---|---|---|
 | Floci 2.2.0 (AWS) | drops `Content-Language` | `putStoresStandardHttpHeaders` |
 | Floci-az 0.14.0 | ignores `If-None-Match` on Put Block List | `writeInPartsWithIfNotExistsRejectsExistingBlob` |
-| Floci-az 0.14.0 | no server-side copy (Stratum falls back to download + upload) | n/a |
+| Floci-az 0.14.0 | no server-side copy (Cirrus falls back to download + upload) | n/a |
 | Floci-gcp 0.10.0 | drops `cacheControl` on copy | `copyPreservesHttpHeaders` |
 | Floci-az 0.14.0 | no Set Blob Tier, Set Blob Properties or Blob Batch (501); no `x-ms-access-tier` | tier and metadata-update tests (batch delete falls back to single deletes) |
 | Floci-gcp 0.10.0 | metadata PATCH replaces the map and stores `null` instead of removing keys | `updateMetadataReplacesHeadersAndMetadataButNotContent` |
@@ -470,7 +470,7 @@ Manager in a real project, using Application Default Credentials. It is skipped 
 are set:
 
 ```bash
-STRATUM_GCP_PROJECT=my-project STRATUM_GCP_LOCATION=global mvn verify -pl stratum-gcp -Dit.test=GcpParameterStoreIT
+CIRRUS_GCP_PROJECT=my-project CIRRUS_GCP_LOCATION=global mvn verify -pl cirrus-gcp -Dit.test=GcpParameterStoreIT
 ```
 
 Not verified locally: GCP Parameter Manager against real GCP (see above), Vault GCP/Azure login
@@ -487,14 +487,14 @@ a cache yet), Entra ID logins (Floci-az does not emulate them), and failover of 
    notifications, labels on SSM and Secret Manager)
    - Providers: AWS SSM Parameter Store and Secrets Manager; Azure App Configuration and Key Vault;
      GCP Parameter Manager and Secret Manager; HashiCorp Vault (KV v2), in a separate
-     `stratum-vault` module because it is not tied to a cloud
+     `cirrus-vault` module because it is not tied to a cloud
    - API: get by name or path prefix, versions and labels, typed values, cached reads with refresh,
      and rotation notifications where the backend supports them
-   - Spring: load `stratum` parameters and secrets as a property source (`spring.config.import`),
+   - Spring: load `cirrus` parameters and secrets as a property source (`spring.config.import`),
      and use secrets for cache and SQL credentials
    - Tests: Floci for AWS (SSM, Secrets Manager), Azure (App Configuration, Key Vault) and GCP
      (Secret Manager); a Vault dev-server container
 5. Search/index: OpenSearch, Azure AI Search, GCP backend to be decided
-6. ~~Spring Boot starter: `stratum.*` properties, auto-configuration, health and Micrometer~~
+6. ~~Spring Boot starter: `cirrus.*` properties, auto-configuration, health and Micrometer~~
 7. Blob: archive restore, KMS encryption, versioning, tags, retention
 8. JPMS module descriptors, japicmp API compatibility checks, real-cloud CI profile
