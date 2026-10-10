@@ -9,6 +9,21 @@ public final class AzureProperties {
      */
     public static final String STORAGE_ACCOUNT = "azure.storage.account";
 
+    /** Service Bus connection string (shared access key, or the local emulator's). */
+    public static final String SERVICE_BUS_CONNECTION_STRING = "azure.servicebus.connection-string";
+
+    /**
+     * Service Bus namespace, {@code <name>.servicebus.windows.net}, for Entra ID login with the default
+     * credential chain; used when no connection string is set.
+     */
+    public static final String SERVICE_BUS_NAMESPACE = "azure.servicebus.namespace";
+
+    /** Topic property: {@code queue} to send to a queue rather than a topic ({@code topic}, the default). */
+    public static final String SERVICE_BUS_ENTITY = "azure.servicebus.entity";
+
+    /** Largest message body in bytes: 262144 (256 KiB) on the standard tier, the default; up to 100 MB on premium. */
+    public static final String SERVICE_BUS_MAX_MESSAGE_BYTES = "azure.servicebus.max-message-bytes";
+
     private AzureProperties() {
     }
 }

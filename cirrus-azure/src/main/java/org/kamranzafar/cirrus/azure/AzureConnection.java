@@ -1,6 +1,8 @@
 package org.kamranzafar.cirrus.azure;
 
 import com.azure.identity.DefaultAzureCredentialBuilder;
+import com.azure.messaging.servicebus.ServiceBusClientBuilder;
+import com.azure.messaging.servicebus.models.ServiceBusReceiveMode;
 import com.azure.storage.blob.BlobServiceAsyncClient;
 import com.azure.storage.blob.BlobServiceClient;
 import com.azure.storage.blob.BlobServiceClientBuilder;
@@ -20,6 +22,8 @@ import org.kamranzafar.cirrus.parameters.ParameterStoreConfig;
 import org.kamranzafar.cirrus.parameters.spi.ParameterDriver;
 import reactor.core.publisher.Mono;
 import org.kamranzafar.cirrus.azure.redis.EntraIdRedisTokens;
+import org.kamranzafar.cirrus.azure.servicebus.ServiceBusPublisherDriver;
+import org.kamranzafar.cirrus.azure.servicebus.ServiceBusSubscriptionDriver;
 import org.kamranzafar.cirrus.azure.sql.EntraIdSqlTokens;
 import org.kamranzafar.cirrus.cache.CacheAuth;
 import org.kamranzafar.cirrus.cache.CacheConfig;
@@ -28,6 +32,10 @@ import org.kamranzafar.cirrus.config.Credentials;
 import org.kamranzafar.cirrus.config.HttpSettings;
 import org.kamranzafar.cirrus.config.ProviderConfig;
 import org.kamranzafar.cirrus.jdbc.JdbcDatabases;
+import org.kamranzafar.cirrus.messaging.SubscriptionConfig;
+import org.kamranzafar.cirrus.messaging.TopicConfig;
+import org.kamranzafar.cirrus.messaging.spi.PublisherDriver;
+import org.kamranzafar.cirrus.messaging.spi.SubscriptionDriver;
 import org.kamranzafar.cirrus.redis.RedisCaches;
 import org.kamranzafar.cirrus.spi.ProviderConnection;
 import org.kamranzafar.cirrus.sql.Database;
@@ -35,7 +43,10 @@ import org.kamranzafar.cirrus.sql.SqlAuth;
 import org.kamranzafar.cirrus.sql.SqlConfig;
 import org.kamranzafar.cirrus.storage.spi.BlobStoreDriver;
 
+import java.time.Duration;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -47,6 +58,9 @@ final class AzureConnection implements ProviderConnection {
     private final ProviderConfig config;
     private HttpClient http;
     private JdbcDatabases databases;
+    private ServiceBusClientBuilder serviceBus;
+    /** Senders and receivers own AMQP links, closed with the connection. */
+    private final List<AutoCloseable> serviceBusClients = new ArrayList<>();
     private BlobServiceClient blobService;
     private BlobServiceAsyncClient blobAsyncService;
     private RedisCaches caches;
@@ -158,6 +172,56 @@ final class AzureConnection implements ProviderConnection {
         });
     }
 
+    /** A Service Bus topic, or with {@code azure.servicebus.entity=queue} a queue. */
+    @Override
+    public synchronized PublisherDriver publisher(TopicConfig topic) {
+        String entity = topic.property(AzureProperties.SERVICE_BUS_ENTITY).orElse("topic");
+        var sender = serviceBus().sender();
+        switch (entity) {
+            case "topic" -> sender.topicName(topic.name());
+            case "queue" -> sender.queueName(topic.name());
+            default -> throw new IllegalArgumentException(AzureProperties.SERVICE_BUS_ENTITY + " must be topic or queue, not " + entity);
+        }
+        long maxBytes = config.property(AzureProperties.SERVICE_BUS_MAX_MESSAGE_BYTES).map(Long::parseLong).orElse(256L * 1024);
+        var driver = new ServiceBusPublisherDriver(sender.buildClient(), topic.name(), maxBytes);
+        serviceBusClients.add(driver);
+        return driver;
+    }
+
+    /** A Service Bus queue, or a topic subscription named {@code <topic>/subscriptions/<subscription>}. */
+    @Override
+    public synchronized SubscriptionDriver subscription(SubscriptionConfig subscription) {
+        var receiver = serviceBus().receiver().receiveMode(ServiceBusReceiveMode.PEEK_LOCK)
+                .disableAutoComplete().maxAutoLockRenewDuration(Duration.ZERO);
+        String[] parts = subscription.name().split("/subscriptions/", 2);
+        if (parts.length == 2) {
+            receiver.topicName(parts[0]).subscriptionName(parts[1]);
+        } else {
+            receiver.queueName(subscription.name());
+        }
+        var driver = new ServiceBusSubscriptionDriver(receiver.buildClient(), subscription.name());
+        serviceBusClients.add(driver);
+        return driver;
+    }
+
+    /** One builder for every sender and receiver, so they share one AMQP connection. */
+    private ServiceBusClientBuilder serviceBus() {
+        if (serviceBus == null) {
+            var builder = new ServiceBusClientBuilder();
+            var connectionString = config.property(AzureProperties.SERVICE_BUS_CONNECTION_STRING);
+            if (connectionString.isPresent()) {
+                builder.connectionString(connectionString.get());
+            } else {
+                String namespace = config.property(AzureProperties.SERVICE_BUS_NAMESPACE).orElseThrow(() ->
+                        new IllegalArgumentException("Service Bus needs '" + AzureProperties.SERVICE_BUS_CONNECTION_STRING
+                                + "' or '" + AzureProperties.SERVICE_BUS_NAMESPACE + "'"));
+                builder.fullyQualifiedNamespace(namespace).credential(new DefaultAzureCredentialBuilder().build());
+            }
+            serviceBus = builder;
+        }
+        return serviceBus;
+    }
+
     /** Password auth, or Entra ID tokens (Azure Database for PostgreSQL and MySQL, Azure SQL). */
     @Override
     public synchronized Database database(SqlConfig sql) {
@@ -184,6 +248,15 @@ final class AzureConnection implements ProviderConnection {
             databases.close();
             databases = null;
         }
+        for (AutoCloseable client : serviceBusClients) {
+            try {
+                client.close();
+            } catch (Exception ignored) {
+                // closing anyway
+            }
+        }
+        serviceBusClients.clear();
+        serviceBus = null;
         // The sync Azure clients hold no resources that need explicit release.
         blobService = null;
         if (caches != null) {

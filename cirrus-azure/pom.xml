@@ -23,6 +23,11 @@
             <groupId>com.azure</groupId>
             <artifactId>azure-storage-blob</artifactId>
         </dependency>
+        <!-- Messaging: Service Bus queues and topics -->
+        <dependency>
+            <groupId>com.azure</groupId>
+            <artifactId>azure-messaging-servicebus</artifactId>
+        </dependency>
         <dependency>
             <groupId>com.azure</groupId>
             <artifactId>azure-storage-blob-batch</artifactId>
