@@ -27,7 +27,9 @@ import org.kamranzafar.cirrus.storage.PutResult;
 import org.kamranzafar.cirrus.storage.StorageCapability;
 import org.kamranzafar.cirrus.storage.StorageTier;
 import org.kamranzafar.cirrus.storage.spi.AbstractBlobStoreDriver;
+import org.kamranzafar.cirrus.storage.spi.BufferPool;
 import org.kamranzafar.cirrus.storage.spi.MultipartUploadSession;
+import org.kamranzafar.cirrus.storage.spi.PartUploader;
 import software.amazon.awssdk.awscore.presigner.PresignedRequest;
 import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.core.sync.RequestBody;
@@ -57,6 +59,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
 
 /** Blob storage on Amazon S3. */
 public final class S3BlobStoreDriver extends AbstractBlobStoreDriver {
@@ -117,13 +120,22 @@ public final class S3BlobStoreDriver extends AbstractBlobStoreDriver {
     }
 
     private PutResult putInParts(BlobKey key, BlobContent.Sized content, PutOptions options, Checksums expected) {
-        S3MultipartUpload upload = new S3MultipartUpload(s3, bucket, key, options);
-        byte[] buffer = new byte[options.partSize()];
+        BufferPool pool = BufferPool.shared();
+        var upload = new PartUploader(new S3MultipartUpload(s3, bucket, key, options), options.uploadConcurrency(),
+                pool, Function.identity());
         try (InputStream in = content.openStream()) {
             int part = 0;
-            int read;
-            while ((read = in.readNBytes(buffer, 0, buffer.length)) > 0) {
-                upload.uploadPart(++part, buffer, read);
+            while (true) {
+                byte[] buffer = pool.acquire(options.partSize());
+                int read = in.readNBytes(buffer, 0, buffer.length);
+                if (read == 0 && part > 0) {
+                    pool.release(buffer);
+                    break;
+                }
+                upload.submit(++part, buffer, read);
+                if (read < buffer.length) {
+                    break;
+                }
             }
             return upload.complete(expected);
         } catch (IOException e) {
@@ -205,14 +217,15 @@ public final class S3BlobStoreDriver extends AbstractBlobStoreDriver {
     public BlobMetadata updateMetadata(BlobKey key, MetadataUpdate update) {
         // S3 cannot edit metadata in place: copy the object onto itself, replacing its metadata and
         // keeping its storage class (which a copy would otherwise reset to STANDARD).
-        HeadObjectResponse current = currentOrThrow(key, update.ifMatch().isPresent());
         var request = CopyObjectRequest.builder()
                 .sourceBucket(bucket).sourceKey(key.value())
                 .destinationBucket(bucket).destinationKey(key.value())
                 .metadataDirective(MetadataDirective.REPLACE)
                 .metadata(update.metadata());
-        if (current.storageClassAsString() != null) {
-            request.storageClass(current.storageClassAsString());
+        String storageClass = update.basis().flatMap(S3BlobStoreDriver::exactStorageClass)
+                .orElseGet(() -> currentOrThrow(key, update.ifMatch().isPresent()).storageClassAsString());
+        if (storageClass != null) {
+            request.storageClass(storageClass);
         }
         var headers = update.headers();
         headers.contentType().ifPresent(request::contentType);
@@ -221,21 +234,43 @@ public final class S3BlobStoreDriver extends AbstractBlobStoreDriver {
         headers.contentLanguage().ifPresent(request::contentLanguage);
         headers.cacheControl().ifPresent(request::cacheControl);
         update.ifMatch().ifPresent(etag -> request.copySourceIfMatch(etag.value()));
-        s3.copyObject(request.build());
+        try {
+            s3.copyObject(request.build());
+        } catch (S3Exception e) {
+            if (e.statusCode() == 404 && update.ifMatch().isPresent()) {
+                throw new PreconditionFailedException("No blob " + bucket + "/" + key, e, provider, "NoSuchKey");
+            }
+            throw e;
+        }
         return head(key).orElseThrow(() -> new NotFoundException("Blob vanished during update: " + key, null, provider, null));
     }
 
     @Override
     public void setTier(BlobKey key, StorageTier tier) {
-        HeadObjectResponse current = currentOrThrow(key, false);
-        String target = S3Tiers.toNative(tier);
-        if (S3Tiers.fromNative(current.storageClassAsString()).equals(Optional.of(tier))) {
-            return; // S3 rejects a copy onto itself that changes nothing
+        // One request: S3 rejects a copy onto itself that changes nothing, which means the tier is already set.
+        try {
+            s3.copyObject(b -> b.sourceBucket(bucket).sourceKey(key.value())
+                    .destinationBucket(bucket).destinationKey(key.value())
+                    .metadataDirective(MetadataDirective.COPY)
+                    .storageClass(S3Tiers.toNative(tier)));
+        } catch (S3Exception e) {
+            if (isCopyOntoItself(e)) {
+                return;
+            }
+            throw e;
         }
-        s3.copyObject(b -> b.sourceBucket(bucket).sourceKey(key.value())
-                .destinationBucket(bucket).destinationKey(key.value())
-                .metadataDirective(MetadataDirective.COPY)
-                .storageClass(target));
+    }
+
+    /** The native storage class for tiers that map to exactly one class; others need a lookup. */
+    private static Optional<String> exactStorageClass(BlobMetadata basis) {
+        return basis.tier().filter(t -> t == StorageTier.HOT || t == StorageTier.COLD).map(S3Tiers::toNative);
+    }
+
+    /** "This copy request is illegal because it is trying to copy an object to itself without changing ..." */
+    private static boolean isCopyOntoItself(S3Exception e) {
+        var details = e.awsErrorDetails();
+        return e.statusCode() == 400 && details != null && "InvalidRequest".equals(details.errorCode())
+                && details.errorMessage() != null && details.errorMessage().contains("to itself");
     }
 
     private HeadObjectResponse currentOrThrow(BlobKey key, boolean conditional) {

@@ -23,6 +23,11 @@
             <groupId>com.google.cloud</groupId>
             <artifactId>google-cloud-storage</artifactId>
         </dependency>
+        <!-- Pooled Apache transport for GCS; the default HttpURLConnection keeps only 5 idle connections -->
+        <dependency>
+            <groupId>com.google.http-client</groupId>
+            <artifactId>google-http-client-apache-v2</artifactId>
+        </dependency>
         <!-- Secrets -->
         <dependency>
             <groupId>com.google.cloud</groupId>

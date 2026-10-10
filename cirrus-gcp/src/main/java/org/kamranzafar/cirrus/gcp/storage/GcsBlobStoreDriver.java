@@ -69,6 +69,9 @@ import java.util.concurrent.TimeUnit;
  */
 public final class GcsBlobStoreDriver extends AbstractBlobStoreDriver {
 
+    /** Bytes downloaded ahead while the metadata lookup is in flight. */
+    private static final int PREFETCH_BYTES = 256 * 1024;
+
     private final Storage storage;
     private final boolean customEndpoint;
 
@@ -135,16 +138,59 @@ public final class GcsBlobStoreDriver extends AbstractBlobStoreDriver {
 
     @Override
     public Blob get(BlobKey key, GetOptions options) {
+        Long expected = options.ifMatch().map(etag -> generationOf(key, etag)).orElse(null);
+        if (expected != null) {
+            return getGeneration(key, expected, options);
+        }
         com.google.cloud.storage.Blob blob = storage.get(BlobId.of(bucket, key.value()));
         if (blob == null) {
             throw new NotFoundException("No blob " + bucket + "/" + key, null, provider, "notFound");
         }
-        if (options.ifMatch().isPresent() && !options.ifMatch().get().equals(etagOf(blob))) {
+        // Pin the generation we just read metadata for, so content and metadata always agree.
+        return new Blob(toMetadata(key, blob), open(key, blob.getGeneration(), options));
+    }
+
+    /**
+     * With a known generation, the content download starts at once, overlapping the metadata lookup:
+     * both are pinned to that generation, so they agree without a lookup first.
+     */
+    private Blob getGeneration(BlobKey key, long generation, GetOptions options) {
+        InputStream content = new PrefetchingInputStream(open(key, generation, options), PREFETCH_BYTES);
+        try {
+            com.google.cloud.storage.Blob blob = storage.get(BlobId.of(bucket, key.value(), generation));
+            if (blob == null) {
+                if (storage.get(BlobId.of(bucket, key.value())) == null) {
+                    throw new NotFoundException("No blob " + bucket + "/" + key, null, provider, "notFound");
+                }
+                throw new PreconditionFailedException("Generation mismatch for " + key, null, provider,
+                        "conditionNotMet");
+            }
+            return new Blob(toMetadata(key, blob), content);
+        } catch (RuntimeException e) {
+            closeQuietly(content);
+            throw e;
+        }
+    }
+
+    private Long generationOf(BlobKey key, ETag etag) {
+        try {
+            return Long.parseLong(etag.value());
+        } catch (NumberFormatException e) {
             throw new PreconditionFailedException("Generation mismatch for " + key, null, provider, "conditionNotMet");
         }
-        // Pin the generation we just read metadata for, so content and metadata always agree.
-        // Raw bytes: never transcode gzip-encoded objects, matching S3 and Azure.
-        ReadChannel reader = storage.reader(BlobId.of(bucket, key.value(), blob.getGeneration()),
+    }
+
+    private static void closeQuietly(InputStream in) {
+        try {
+            in.close();
+        } catch (IOException | RuntimeException ignored) {
+            // nothing to recover
+        }
+    }
+
+    /** Raw bytes: never transcode gzip-encoded objects, matching S3 and Azure. */
+    private InputStream open(BlobKey key, long generation, GetOptions options) {
+        ReadChannel reader = storage.reader(BlobId.of(bucket, key.value(), generation),
                 Storage.BlobSourceOption.shouldReturnRawInputStream(true));
         try {
             if (options.range().isPresent()) {
@@ -158,7 +204,7 @@ public final class GcsBlobStoreDriver extends AbstractBlobStoreDriver {
             reader.close();
             throw new UncheckedIOException(e);
         }
-        return new Blob(toMetadata(key, blob), Channels.newInputStream(reader));
+        return Channels.newInputStream(reader);
     }
 
     @Override

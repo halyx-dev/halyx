@@ -23,6 +23,11 @@
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>s3</artifactId>
         </dependency>
+        <!-- One tuned, pooled HTTP client shared by S3, SSM and Secrets Manager -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>apache5-client</artifactId>
+        </dependency>
         <!-- Caches: shared Redis driver plus SigV4 signing for ElastiCache IAM tokens -->
         <dependency>
             <groupId>org.kamranzafar</groupId>

@@ -10,6 +10,7 @@ import org.kamranzafar.cirrus.cache.CacheAuth;
 import org.kamranzafar.cirrus.cache.CacheConfig;
 import org.kamranzafar.cirrus.cache.spi.CacheDriver;
 import org.kamranzafar.cirrus.config.Credentials;
+import org.kamranzafar.cirrus.config.HttpSettings;
 import org.kamranzafar.cirrus.config.ProviderConfig;
 import org.kamranzafar.cirrus.redis.RedisCaches;
 import org.kamranzafar.cirrus.spi.ProviderConnection;
@@ -19,6 +20,8 @@ import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.http.SdkHttpClient;
+import software.amazon.awssdk.http.apache5.Apache5HttpClient;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.regions.providers.DefaultAwsRegionProviderChain;
 import software.amazon.awssdk.services.s3.S3Client;
@@ -27,10 +30,14 @@ import software.amazon.awssdk.services.ssm.SsmClient;
 import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 
-/** Owns the AWS SDK clients for one configuration. Clients are created lazily and shared by all buckets. */
+/**
+ * Owns the AWS SDK clients for one configuration. Clients are created lazily and shared by all buckets,
+ * and all of them send requests through one pooled HTTP client tuned by {@link HttpSettings}.
+ */
 final class AwsConnection implements ProviderConnection {
 
     private final ProviderConfig config;
+    private SdkHttpClient http;
     private S3Client s3;
     private S3Presigner presigner;
     private RedisCaches caches;
@@ -48,7 +55,8 @@ final class AwsConnection implements ProviderConnection {
             AwsCredentialsProvider credentials = credentials();
             boolean pathStyle = config.booleanProperty(AwsProperties.S3_PATH_STYLE, false);
 
-            var client = S3Client.builder().region(region).credentialsProvider(credentials).forcePathStyle(pathStyle);
+            var client = S3Client.builder().region(region).credentialsProvider(credentials).forcePathStyle(pathStyle)
+                    .httpClient(http());
             var signer = S3Presigner.builder().region(region).credentialsProvider(credentials)
                     .serviceConfiguration(S3Configuration.builder().pathStyleAccessEnabled(pathStyle).build());
             config.endpoint().ifPresent(endpoint -> {
@@ -76,7 +84,8 @@ final class AwsConnection implements ProviderConnection {
         return switch (storeConfig.kind()) {
             case PARAMETERS -> {
                 if (ssm == null) {
-                    var builder = SsmClient.builder().region(region()).credentialsProvider(credentials());
+                    var builder = SsmClient.builder().region(region()).credentialsProvider(credentials())
+                            .httpClient(http());
                     config.endpoint().ifPresent(builder::endpointOverride);
                     ssm = builder.build();
                 }
@@ -86,7 +95,8 @@ final class AwsConnection implements ProviderConnection {
             }
             case SECRETS -> {
                 if (secretsManager == null) {
-                    var builder = SecretsManagerClient.builder().region(region()).credentialsProvider(credentials());
+                    var builder = SecretsManagerClient.builder().region(region()).credentialsProvider(credentials())
+                            .httpClient(http());
                     config.endpoint().ifPresent(builder::endpointOverride);
                     secretsManager = builder.build();
                 }
@@ -117,6 +127,21 @@ final class AwsConnection implements ProviderConnection {
         };
     }
 
+    private SdkHttpClient http() {
+        if (http == null) {
+            HttpSettings settings = HttpSettings.from(config);
+            http = Apache5HttpClient.builder()
+                    .maxConnections(settings.maxConnections())
+                    .connectionTimeout(settings.connectTimeout())
+                    .socketTimeout(settings.readTimeout())
+                    .connectionMaxIdleTime(settings.idleTimeout())
+                    .connectionAcquisitionTimeout(settings.acquireTimeout())
+                    .tcpKeepAlive(true)
+                    .build();
+        }
+        return http;
+    }
+
     @Override
     public synchronized void close() {
         if (caches != null) {
@@ -136,6 +161,11 @@ final class AwsConnection implements ProviderConnection {
             presigner.close();
             s3 = null;
             presigner = null;
+        }
+        if (http != null) {
+            // Clients never close an HTTP client they were given.
+            http.close();
+            http = null;
         }
     }
 }

@@ -12,7 +12,10 @@ import com.google.cloud.secretmanager.v1.SecretManagerServiceSettings;
 import io.grpc.ManagedChannelBuilder;
 import com.google.cloud.storage.Storage;
 import com.google.cloud.storage.StorageOptions;
+import com.google.cloud.http.HttpTransportOptions;
+import com.google.api.client.http.apache.v2.ApacheHttpTransport;
 import org.kamranzafar.cirrus.config.Credentials;
+import org.kamranzafar.cirrus.config.HttpSettings;
 import org.kamranzafar.cirrus.config.ProviderConfig;
 import org.kamranzafar.cirrus.cache.CacheAuth;
 import org.kamranzafar.cirrus.cache.CacheConfig;
@@ -32,11 +35,13 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 /** Owns the Google Cloud clients for one configuration. Clients are created lazily and shared by all buckets. */
 final class GcpConnection implements ProviderConnection {
 
     private final ProviderConfig config;
+    private ApacheHttpTransport httpTransport;
     private Storage storage;
     private RedisCaches caches;
     private SecretManagerServiceClient secretManager;
@@ -49,7 +54,17 @@ final class GcpConnection implements ProviderConnection {
     @Override
     public synchronized BlobStoreDriver blobStore(String bucket) {
         if (storage == null) {
-            var builder = StorageOptions.http();
+            HttpSettings settings = HttpSettings.from(config);
+            httpTransport = new ApacheHttpTransport(ApacheHttpTransport.newDefaultHttpClientBuilder()
+                    .setMaxConnTotal(settings.maxConnections())
+                    .setMaxConnPerRoute(settings.maxConnections())
+                    .evictIdleConnections(settings.idleTimeout().toMillis(), TimeUnit.MILLISECONDS)
+                    .build());
+            var builder = StorageOptions.http().setTransportOptions(HttpTransportOptions.newBuilder()
+                    .setHttpTransportFactory(() -> httpTransport)
+                    .setConnectTimeout(Math.toIntExact(settings.connectTimeout().toMillis()))
+                    .setReadTimeout(Math.toIntExact(settings.readTimeout().toMillis()))
+                    .build());
             config.property(GcpProperties.PROJECT_ID).ifPresent(builder::setProjectId);
             config.endpoint().ifPresent(endpoint -> builder.setHost(endpoint.toString()));
             switch (config.credentials()) {
@@ -160,7 +175,18 @@ final class GcpConnection implements ProviderConnection {
                 throw new IllegalStateException("Failed to close GCS client", e);
             } finally {
                 storage = null;
+                shutdownTransport();
             }
+        }
+    }
+
+    private void shutdownTransport() {
+        try {
+            httpTransport.shutdown();
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to close GCS HTTP transport", e);
+        } finally {
+            httpTransport = null;
         }
     }
 }

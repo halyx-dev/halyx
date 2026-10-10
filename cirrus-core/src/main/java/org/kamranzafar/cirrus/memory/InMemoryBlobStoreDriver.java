@@ -40,6 +40,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentNavigableMap;
+import java.util.concurrent.ConcurrentSkipListMap;
 
 final class InMemoryBlobStoreDriver extends AbstractBlobStoreDriver {
 
@@ -72,21 +73,23 @@ final class InMemoryBlobStoreDriver extends AbstractBlobStoreDriver {
 
     @Override
     public MultipartUploadSession startMultipartUpload(BlobKey key, PutOptions options) {
-        var parts = new ByteArrayOutputStream();
+        var parts = new ConcurrentSkipListMap<Integer, byte[]>();
         return new MultipartUploadSession() {
             @Override
             public void uploadPart(int partNumber, byte[] data, int length) {
-                parts.write(data, 0, length);
+                parts.put(partNumber, Arrays.copyOf(data, length));
             }
 
             @Override
             public PutResult complete(Checksums expected) {
-                return store(key, parts.toByteArray(), options);
+                var assembled = new ByteArrayOutputStream();
+                parts.values().forEach(assembled::writeBytes);
+                return store(key, assembled.toByteArray(), options);
             }
 
             @Override
             public void abort() {
-                parts.reset();
+                parts.clear();
             }
         };
     }

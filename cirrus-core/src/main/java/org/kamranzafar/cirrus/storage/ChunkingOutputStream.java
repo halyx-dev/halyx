@@ -1,8 +1,9 @@
 package org.kamranzafar.cirrus.storage;
 
 import org.kamranzafar.cirrus.storage.spi.BlobStoreDriver;
+import org.kamranzafar.cirrus.storage.spi.BufferPool;
 import org.kamranzafar.cirrus.storage.spi.ChecksumCalculator;
-import org.kamranzafar.cirrus.storage.spi.MultipartUploadSession;
+import org.kamranzafar.cirrus.storage.spi.PartUploader;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -10,22 +11,22 @@ import java.util.Arrays;
 import java.util.Objects;
 
 /**
- * Buffers written bytes into parts and uploads them one at a time, so memory use is one part
- * whatever the blob size. Content that fits in a single part is uploaded with one plain put instead,
- * so small writes cost one request.
- *
- * <p>Driver errors are translated to the portable error model as they happen.
+ * Buffers written bytes into parts and uploads them through a {@link PartUploader}, with up to
+ * {@link PutOptions#uploadConcurrency()} parts in flight. Memory is bounded by
+ * {@code (concurrency + 1) * partSize}, whatever the blob size, and buffers come from the shared
+ * {@link BufferPool}. Content that fits in a single part is uploaded with one plain put instead.
  */
 final class ChunkingOutputStream extends OutputStream {
 
     private final BlobStoreDriver driver;
     private final BlobKey key;
     private final PutOptions options;
-    private final byte[] buffer;
+    private final BufferPool pool = BufferPool.shared();
+    private final ChecksumCalculator checksums;
+    private byte[] buffer;
     private int count;
     private int partNumber;
-    private final ChecksumCalculator checksums;
-    private MultipartUploadSession session;
+    private PartUploader uploader;
     private boolean closed;
     private Checksums expected = Checksums.none();
 
@@ -33,7 +34,7 @@ final class ChunkingOutputStream extends OutputStream {
         this.driver = driver;
         this.key = key;
         this.options = options;
-        this.buffer = new byte[options.partSize()];
+        this.buffer = pool.acquire(options.partSize());
         this.checksums = options.validateChecksum() ? ChecksumCalculator.forUpload() : null;
     }
 
@@ -76,8 +77,9 @@ final class ChunkingOutputStream extends OutputStream {
     PutResult finish() {
         closed = true;
         try {
-            if (session == null) {
+            if (uploader == null) {
                 byte[] content = Arrays.copyOf(buffer, count);
+                releaseBuffer();
                 if (checksums != null) {
                     checksums.update(content, 0, content.length);
                     expected = checksums.result();
@@ -85,12 +87,14 @@ final class ChunkingOutputStream extends OutputStream {
                 return driver.put(key, new BlobContent.OfBytes(content), options, expected);
             }
             if (count > 0) {
-                uploadPart();
+                submitPart();
+            } else {
+                releaseBuffer();
             }
             if (checksums != null) {
                 expected = checksums.result();
             }
-            return session.complete(expected);
+            return uploader.complete(expected);
         } catch (RuntimeException e) {
             throw driver.translate(e);
         }
@@ -98,28 +102,42 @@ final class ChunkingOutputStream extends OutputStream {
 
     void abort() {
         closed = true;
-        if (session != null) {
-            session.abort();
+        releaseBuffer();
+        if (uploader != null) {
+            uploader.abort();
         }
     }
 
     private void flushPart() {
         try {
-            if (session == null) {
-                session = driver.startMultipartUpload(key, options);
+            if (uploader == null) {
+                uploader = new PartUploader(driver.startMultipartUpload(key, options), options.uploadConcurrency(),
+                        pool, driver::translate);
             }
-            uploadPart();
+            submitPart();
+            buffer = pool.acquire(options.partSize());
         } catch (RuntimeException e) {
             throw driver.translate(e);
         }
     }
 
-    private void uploadPart() {
+    /** Hands the current buffer to the uploader (which releases it), checksumming it first in order. */
+    private void submitPart() {
         if (checksums != null) {
             checksums.update(buffer, 0, count);
         }
-        session.uploadPart(++partNumber, buffer, count);
+        byte[] part = buffer;
+        int length = count;
+        buffer = null;
         count = 0;
+        uploader.submit(++partNumber, part, length);
+    }
+
+    private void releaseBuffer() {
+        if (buffer != null) {
+            pool.release(buffer);
+            buffer = null;
+        }
     }
 
     private void ensureOpen() throws IOException {

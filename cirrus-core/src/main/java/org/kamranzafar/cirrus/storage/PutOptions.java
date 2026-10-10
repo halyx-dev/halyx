@@ -23,8 +23,14 @@ public final class PutOptions {
     private final int partSize;
     private final StorageTier tier;
     private final boolean validateChecksum;
+    private final int uploadConcurrency;
+
+    /** Default number of parts uploaded at once. */
+    public static final int DEFAULT_UPLOAD_CONCURRENCY = 4;
+    public static final int MAX_UPLOAD_CONCURRENCY = 32;
 
     private PutOptions(Builder b) {
+        this.uploadConcurrency = b.uploadConcurrency;
         this.tier = b.tier;
         this.validateChecksum = b.validateChecksum;
         this.headers = b.headers;
@@ -77,6 +83,15 @@ public final class PutOptions {
         return partSize;
     }
 
+    /**
+     * Parts uploaded at once for uploads in parts. Higher values raise throughput for large blobs; peak
+     * memory per upload is about {@code (uploadConcurrency + 1) * partSize}. Providers whose upload
+     * protocol is sequential (GCS resumable uploads) use 1.
+     */
+    public int uploadConcurrency() {
+        return uploadConcurrency;
+    }
+
     /** Storage tier of the new blob; the bucket default when empty. */
     public Optional<StorageTier> tier() {
         return Optional.ofNullable(tier);
@@ -100,8 +115,18 @@ public final class PutOptions {
         private int partSize = DEFAULT_PART_SIZE;
         private StorageTier tier;
         private boolean validateChecksum;
+        private int uploadConcurrency = DEFAULT_UPLOAD_CONCURRENCY;
 
         private Builder() {
+        }
+
+        /** Parts uploaded at once, between 1 and {@link #MAX_UPLOAD_CONCURRENCY}. */
+        public Builder uploadConcurrency(int parts) {
+            if (parts < 1 || parts > MAX_UPLOAD_CONCURRENCY) {
+                throw new IllegalArgumentException("uploadConcurrency must be between 1 and " + MAX_UPLOAD_CONCURRENCY);
+            }
+            this.uploadConcurrency = parts;
+            return this;
         }
 
         public Builder tier(StorageTier tier) {

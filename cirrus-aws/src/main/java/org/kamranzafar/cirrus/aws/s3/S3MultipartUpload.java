@@ -15,10 +15,12 @@ import software.amazon.awssdk.services.s3.model.CompletedPart;
 import software.amazon.awssdk.services.s3.model.CreateMultipartUploadRequest;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.concurrent.ConcurrentSkipListMap;
 
-/** An S3 multipart upload. Parts must be at least 5 MiB except the last, which core guarantees. */
+/**
+ * An S3 multipart upload. Parts must be at least 5 MiB except the last, which core guarantees. Parts may
+ * upload concurrently; they are committed in part-number order.
+ */
 final class S3MultipartUpload implements MultipartUploadSession {
 
     private final S3Client s3;
@@ -26,7 +28,7 @@ final class S3MultipartUpload implements MultipartUploadSession {
     private final BlobKey key;
     private final PutOptions options;
     private final String uploadId;
-    private final List<CompletedPart> parts = new ArrayList<>();
+    private final ConcurrentSkipListMap<Integer, CompletedPart> parts = new ConcurrentSkipListMap<>();
 
     S3MultipartUpload(S3Client s3, String bucket, BlobKey key, PutOptions options) {
         this.s3 = s3;
@@ -57,14 +59,14 @@ final class S3MultipartUpload implements MultipartUploadSession {
         var response = s3.uploadPart(b -> b.bucket(bucket).key(key.value()).uploadId(uploadId)
                         .partNumber(partNumber).contentLength((long) length).checksumCRC32C(partCrc),
                 RequestBody.fromByteBuffer(ByteBuffer.wrap(data, 0, length)));
-        parts.add(CompletedPart.builder().partNumber(partNumber).eTag(response.eTag())
+        parts.put(partNumber, CompletedPart.builder().partNumber(partNumber).eTag(response.eTag())
                 .checksumCRC32C(response.checksumCRC32C()).build());
     }
 
     @Override
     public PutResult complete(Checksums expected) {
         var response = s3.completeMultipartUpload(b -> {
-            b.bucket(bucket).key(key.value()).uploadId(uploadId).multipartUpload(m -> m.parts(parts));
+            b.bucket(bucket).key(key.value()).uploadId(uploadId).multipartUpload(m -> m.parts(parts.values()));
             expected.crc32c().ifPresent(crc -> b.checksumCRC32C(crc).checksumType(ChecksumType.FULL_OBJECT));
             options.ifMatch().ifPresent(etag -> b.ifMatch(etag.value()));
             if (options.ifNotExists()) {

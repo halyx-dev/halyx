@@ -23,8 +23,10 @@ public final class MetadataUpdate {
     private final BlobHeaders headers;
     private final Map<String, String> metadata;
     private final ETag ifMatch;
+    private final BlobMetadata basis;
 
     private MetadataUpdate(Builder b) {
+        this.basis = b.basis;
         this.headers = b.headers;
         this.metadata = Map.copyOf(b.metadata);
         this.ifMatch = b.ifMatch;
@@ -37,7 +39,9 @@ public final class MetadataUpdate {
 
     /** An update pre-filled with the blob's current headers and metadata. */
     public static Builder from(BlobMetadata current) {
-        return new Builder().headers(current.headers()).metadata(current.userMetadata());
+        Builder b = new Builder().headers(current.headers()).metadata(current.userMetadata());
+        b.basis = current;
+        return b;
     }
 
     public BlobHeaders headers() {
@@ -53,10 +57,20 @@ public final class MetadataUpdate {
         return Optional.ofNullable(ifMatch);
     }
 
+    /**
+     * The metadata this update was built from with {@link #from}, when it still describes the blob: that
+     * is, when {@link #ifMatch()} names the same version. Providers that rewrite the blob to update it use
+     * this to skip a lookup.
+     */
+    public Optional<BlobMetadata> basis() {
+        return basis != null && basis.etag().equals(ifMatch) ? Optional.of(basis) : Optional.empty();
+    }
+
     public static final class Builder {
         private BlobHeaders headers = BlobHeaders.none();
         private final Map<String, String> metadata = new LinkedHashMap<>();
         private ETag ifMatch;
+        private BlobMetadata basis;
 
         private Builder() {
         }

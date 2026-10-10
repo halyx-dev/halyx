@@ -37,6 +37,12 @@ final class GcsResumableUpload implements MultipartUploadSession {
         }
     }
 
+    /** A resumable upload is a single ordered byte stream. */
+    @Override
+    public int maxConcurrentParts() {
+        return 1;
+    }
+
     @Override
     public void uploadPart(int partNumber, byte[] data, int length) {
         ByteBuffer buffer = ByteBuffer.wrap(data, 0, length);

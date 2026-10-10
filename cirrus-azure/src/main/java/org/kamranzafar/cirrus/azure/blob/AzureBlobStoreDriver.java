@@ -6,11 +6,15 @@ import com.azure.core.http.rest.Response;
 import com.azure.core.util.BinaryData;
 import com.azure.core.util.Context;
 import com.azure.storage.blob.BlobClient;
+import com.azure.storage.blob.BlobContainerAsyncClient;
 import com.azure.storage.blob.BlobContainerClient;
+import com.azure.storage.blob.BlobServiceAsyncClient;
 import com.azure.storage.blob.BlobServiceClient;
 import com.azure.storage.blob.batch.BlobBatch;
 import com.azure.storage.blob.batch.BlobBatchClient;
 import com.azure.storage.blob.batch.BlobBatchClientBuilder;
+import com.azure.storage.blob.models.BlobDownloadAsyncResponse;
+import com.azure.storage.blob.models.BlobDownloadHeaders;
 import com.azure.storage.blob.models.BlobErrorCode;
 import com.azure.storage.blob.models.BlobHttpHeaders;
 import com.azure.storage.blob.models.BlobItem;
@@ -20,13 +24,12 @@ import com.azure.storage.blob.models.BlobRange;
 import com.azure.storage.blob.models.BlobRequestConditions;
 import com.azure.storage.blob.models.BlobStorageException;
 import com.azure.storage.blob.models.DeleteSnapshotsOptionType;
+import com.azure.storage.blob.models.DownloadRetryOptions;
 import com.azure.storage.blob.models.ListBlobsOptions;
 import com.azure.storage.blob.models.ParallelTransferOptions;
-import com.azure.storage.blob.options.BlobInputStreamOptions;
 import com.azure.storage.blob.options.BlobParallelUploadOptions;
 import com.azure.storage.blob.sas.BlobSasPermission;
 import com.azure.storage.blob.sas.BlobServiceSasSignatureValues;
-import com.azure.storage.blob.specialized.BlobInputStream;
 import org.kamranzafar.cirrus.azure.AzureErrors;
 import org.kamranzafar.cirrus.azure.AzureProvider;
 import org.kamranzafar.cirrus.capability.Capabilities;
@@ -74,17 +77,23 @@ public final class AzureBlobStoreDriver extends AbstractBlobStoreDriver {
 
     private final BlobServiceClient service;
     private final BlobContainerClient container;
+    /** Downloads use the async client: it streams one response instead of a GET per 4 MiB chunk. */
+    private final BlobContainerAsyncClient asyncContainer;
     private final boolean sharedKey;
+
+    private static final DownloadRetryOptions DOWNLOAD_RETRIES = new DownloadRetryOptions().setMaxRetryRequests(3);
 
     /** Blob Batch accepts up to 256 sub-requests. */
     private static final int MAX_BATCH = 256;
 
     private final BlobBatchClient batch;
 
-    public AzureBlobStoreDriver(String container, BlobServiceClient service, boolean sharedKey) {
+    public AzureBlobStoreDriver(String container, BlobServiceClient service, BlobServiceAsyncClient asyncService,
+                                boolean sharedKey) {
         super(AzureProvider.ID, container, Capabilities.of(StorageCapability.values()));
         this.service = service;
         this.container = service.getBlobContainerClient(container);
+        this.asyncContainer = asyncService.getBlobContainerAsyncClient(container);
         this.sharedKey = sharedKey;
         this.batch = new BlobBatchClientBuilder(service).buildClient();
     }
@@ -106,7 +115,8 @@ public final class AzureBlobStoreDriver extends AbstractBlobStoreDriver {
                 .setRequestConditions(requestConditions(options))
                 .setParallelTransferOptions(new ParallelTransferOptions()
                         .setBlockSizeLong((long) options.partSize())
-                        .setMaxSingleUploadSizeLong((long) options.partSize()));
+                        .setMaxSingleUploadSizeLong((long) options.partSize())
+                        .setMaxConcurrency(options.uploadConcurrency()));
         if (!options.metadata().isEmpty()) {
             upload.setMetadata(options.metadata());
         }
@@ -134,19 +144,44 @@ public final class AzureBlobStoreDriver extends AbstractBlobStoreDriver {
 
     @Override
     public Blob get(BlobKey key, GetOptions options) {
-        var read = new BlobInputStreamOptions();
-        options.range().ifPresent(range -> read.setRange(range.length().isPresent()
-                ? new BlobRange(range.offset(), range.length().getAsLong())
-                : new BlobRange(range.offset())));
-        // Read the blob's own properties first: the download responses BlobInputStream sees carry the
-        // MD5 of each range, not of the blob, and no access tier. Pinning the download to that ETag keeps
-        // content and metadata consistent.
+        // One streamed GET: metadata comes from the response headers. If the connection drops, the SDK
+        // resumes from the last byte read, pinned to the same ETag. GET does not return the access tier,
+        // so the metadata has none; head() reports it.
+        BlobRange range = options.range().map(r -> r.length().isPresent()
+                ? new BlobRange(r.offset(), r.length().getAsLong())
+                : new BlobRange(r.offset())).orElse(null);
         var condition = new BlobRequestConditions();
         options.ifMatch().ifPresent(etag -> condition.setIfMatch(etag.value()));
-        BlobProperties properties = blob(key).getPropertiesWithResponse(condition, null, Context.NONE).getValue();
-        read.setRequestConditions(new BlobRequestConditions().setIfMatch(properties.getETag()));
-        BlobInputStream in = blob(key).openInputStream(read);
-        return new Blob(toMetadata(key, properties), in);
+        BlobDownloadAsyncResponse response = asyncContainer.getBlobAsyncClient(key.value())
+                .downloadStreamWithResponse(range, DOWNLOAD_RETRIES, condition, false)
+                .block();
+        BlobDownloadHeaders h = response.getDeserializedHeaders();
+        var metadata = new BlobMetadata(key, totalSize(h), new ETag(h.getETag()), h.getLastModified().toInstant(),
+                BlobHeaders.of(h.getContentType(), h.getContentEncoding(), h.getContentDisposition(),
+                        h.getContentLanguage(), h.getCacheControl()),
+                h.getMetadata(), Optional.empty(), blobMd5(h, range != null));
+        return new Blob(metadata, new ByteBufferStreamInputStream(response.getValue()));
+    }
+
+    /** Content-Range is "bytes start-end/total" for ranged reads; otherwise the body is the whole blob. */
+    private static long totalSize(BlobDownloadHeaders h) {
+        String contentRange = h.getContentRange();
+        if (contentRange != null && contentRange.lastIndexOf('/') >= 0) {
+            String total = contentRange.substring(contentRange.lastIndexOf('/') + 1);
+            if (!total.equals("*")) {
+                return Long.parseLong(total);
+            }
+        }
+        return h.getContentLength() == null ? 0 : h.getContentLength();
+    }
+
+    /**
+     * The whole blob's MD5: x-ms-blob-content-md5 on ranged responses, Content-MD5 on full ones (on a
+     * ranged response Content-MD5 would be the range's, and only when asked for).
+     */
+    private static Checksums blobMd5(BlobDownloadHeaders h, boolean ranged) {
+        byte[] md5 = h.getBlobContentMD5() != null ? h.getBlobContentMD5() : ranged ? null : h.getContentMd5();
+        return md5 == null ? Checksums.none() : Checksums.of(null, Base64.getEncoder().encodeToString(md5), null);
     }
 
     @Override

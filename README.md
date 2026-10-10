@@ -24,7 +24,10 @@ try (Cirrus cirrus = Cirrus.builder()
 ### Large and streamed uploads
 
 `write` streams a blob of any size in parts (8 MiB by default, configurable with
-`PutOptions.partSize`). Memory use stays at one part, whatever the blob size:
+`PutOptions.partSize`). Up to `PutOptions.uploadConcurrency` parts (4 by default, at most 32) upload at
+once, on virtual threads. Writing blocks while every slot is busy, so memory stays at about
+`(uploadConcurrency + 1) × partSize`, whatever the blob size. Part buffers come from a JVM-wide pool
+(at most `cirrus.buffer-pool.max-bytes` idle, 256 MiB by default) instead of being allocated per part:
 
 ```java
 store.write(BlobKey.of("exports/orders.csv.gz"), out -> {
@@ -40,9 +43,43 @@ Streams of unknown length use the same path: `store.put(key, BlobContent.ofStrea
 
 | Provider | Upload in parts | Large known-length `put` |
 |---|---|---|
-| AWS | S3 multipart upload (parts of at least 5 MiB, up to 10,000 parts) | switches to multipart above `aws.s3.multipart-threshold` (64 MiB) |
-| Azure | staged blocks + Put Block List | SDK parallel block upload, block size = part size |
-| GCP | resumable upload session | resumable upload, chunk size = part size |
+| AWS | S3 multipart upload, parts in parallel (parts of at least 5 MiB, up to 10,000 parts) | parallel multipart above `aws.s3.multipart-threshold` (64 MiB) |
+| Azure | staged blocks in parallel + Put Block List | SDK parallel block upload, block size = part size |
+| GCP | resumable upload session (sequential by protocol) | resumable upload, chunk size = part size |
+
+The first failed part aborts the whole upload. Checksums are computed in order as you write, so
+`validateChecksum()` works with parallel parts.
+
+### Downloads and round trips
+
+`get` costs one request on S3 and Azure: metadata comes from the download response. On Azure, `get`
+metadata carries no tier (GET doesn't return it), so use `head` for that. If the connection drops
+mid-download, Azure resumes from the last byte, pinned to the same ETag. On GCS, `get` looks up
+metadata first and pins the download to that generation. With `ifMatch`, the download starts
+alongside the lookup instead of after it.
+
+On S3, `setTier` is a single copy request. `updateMetadata` skips the lookup of the current storage
+class when the update was built with `MetadataUpdate.from(current)` plus `ifMatch(current.etag())`,
+and the class maps to exactly one tier (`HOT`, `COLD`).
+
+### Connection pooling and timeouts
+
+Each provider connection shares one pooled HTTP client across all its services: S3, SSM and Secrets
+Manager; Blob, Key Vault and App Configuration; and GCS. Tune it with the provider properties below
+(in Spring, `cirrus.providers.<name>.properties`):
+
+| Property | Default | Meaning |
+|---|---|---|
+| `http.max-connections` | 200 | pooled connections, which bound concurrent requests |
+| `http.connect-timeout` | 10s | TCP/TLS connect timeout |
+| `http.read-timeout` | 60s | maximum wait for response data |
+| `http.idle-timeout` | 60s | idle connections are closed after this |
+| `http.acquire-timeout` | 10s | maximum wait for a free connection (AWS) |
+
+Durations take `500ms`, `30s` or `5m` style values, or ISO-8601 (`PT30S`). AWS uses the Apache 5
+client and Azure its default (Netty) client. GCS uses an Apache transport instead of the JDK's
+`HttpURLConnection`, which keeps only 5 idle connections. Google's gRPC clients (Secret Manager,
+Parameter Manager) multiplex over HTTP/2 and are not affected.
 
 ### Folder-style listing
 

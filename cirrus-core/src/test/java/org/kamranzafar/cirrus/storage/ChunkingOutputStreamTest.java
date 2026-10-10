@@ -15,14 +15,14 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Checks how core splits streamed writes into driver calls. */
+/** Checks how core splits streamed writes into driver calls (sequentially, so the call order is fixed). */
 class ChunkingOutputStreamTest {
 
     private static final int PART = PutOptions.MIN_PART_SIZE;
 
     private final RecordingDriver driver = new RecordingDriver();
     private final BlobStore store = new DefaultBlobStore("test", "bucket", driver, InterceptorChain.empty());
-    private final PutOptions options = PutOptions.builder().partSize(PART).build();
+    private final PutOptions options = PutOptions.builder().partSize(PART).uploadConcurrency(1).build();
 
     @Test
     void contentWithinOnePartIsASinglePut() {
