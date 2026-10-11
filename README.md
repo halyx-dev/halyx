@@ -461,7 +461,9 @@ store's cache, and failed polls are logged and retried. `statistics()` counts ca
 reads, detected changes and watch failures.
 
 Deletes are idempotent. On Secrets Manager they skip the recovery window. On Key Vault they are soft
-deletes; writing a soft-deleted name recovers it first, so names can be reused without the purge
+deletes that finish asynchronously, and `delete` doesn't wait. Writing a name that is soft-deleted, or
+still being deleted or recovered, throws the retryable `UnavailableException`. If the name was
+soft-deleted, the write also starts its recovery, so a retry stores the new value without the purge
 permission. On Vault they remove all versions.
 
 **`cirrus-vault`** supports token auth (or `VAULT_TOKEN`), a token file (Vault Agent sink; read

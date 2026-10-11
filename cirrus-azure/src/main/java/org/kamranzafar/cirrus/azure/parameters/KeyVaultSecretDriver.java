@@ -8,11 +8,11 @@ import org.kamranzafar.cirrus.azure.AzureErrors;
 import org.kamranzafar.cirrus.azure.AzureProvider;
 import org.kamranzafar.cirrus.capability.Capabilities;
 import org.kamranzafar.cirrus.error.CloudException;
+import org.kamranzafar.cirrus.error.UnavailableException;
 import org.kamranzafar.cirrus.parameters.Parameter;
 import org.kamranzafar.cirrus.parameters.ParameterCapability;
 import org.kamranzafar.cirrus.parameters.spi.AbstractParameterDriver;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -24,12 +24,13 @@ import java.util.Optional;
  * separator {@code /} is stored as {@code --} ({@code orders/db/password} becomes
  * {@code orders--db--password}); portable names never contain {@code --}, so this is reversible.
  *
- * <p>Deletes are soft deletes (Key Vault's recovery protection stays intact). Writing a name that is
- * soft-deleted recovers it first, then stores the new value as a new version.
+ * <p>Deletes are soft deletes (Key Vault's recovery protection stays intact) and finish asynchronously:
+ * {@code delete} starts one and returns. Writing a name that is soft-deleted, or still being deleted or
+ * recovered, fails with {@link UnavailableException} (retryable); if the name was soft-deleted, the write
+ * also starts its recovery, so a retry once that finishes stores the new value as a new version. Nothing
+ * here waits for Key Vault's long-running operations: callers that reuse names right away retry.
  */
 public final class KeyVaultSecretDriver extends AbstractParameterDriver {
-
-    private static final Duration POLL = Duration.ofMillis(200);
 
     private final SecretClient secrets;
 
@@ -85,22 +86,40 @@ public final class KeyVaultSecretDriver extends AbstractParameterDriver {
         try {
             return toPortable(name, secrets.setSecret(encode(name), value));
         } catch (HttpResponseException e) {
-            if (e.getResponse() == null || e.getResponse().getStatusCode() != 409) {
+            if (!conflict(e)) {
                 throw e;
             }
-            // The name is soft-deleted: recover it, then write the new version.
-            secrets.beginRecoverDeletedSecret(encode(name)).setPollInterval(POLL).waitForCompletion();
-            return toPortable(name, secrets.setSecret(encode(name), value));
+            try {
+                secrets.beginRecoverDeletedSecret(encode(name)); // starts recovery; doesn't wait for it
+            } catch (HttpResponseException notRecoverableYet) {
+                // still being deleted, or already being recovered
+            }
+            throw new UnavailableException("Key Vault secret '" + name + "' is deleted, or being deleted or recovered; "
+                    + "it is being recovered, so retry the write shortly", e, AzureProvider.ID, "Conflict");
         }
     }
 
     @Override
     public void delete(String name) {
         try {
-            secrets.beginDeleteSecret(encode(name)).setPollInterval(POLL).waitForCompletion();
+            secrets.beginDeleteSecret(encode(name)); // starts the soft delete; doesn't wait for it
         } catch (ResourceNotFoundException ignored) {
             // already gone
+        } catch (HttpResponseException e) {
+            if (!conflict(e)) {
+                throw e;
+            }
+            String message = e.getMessage() == null ? "" : e.getMessage();
+            if (!message.contains("being deleted")) {
+                throw new UnavailableException("Key Vault secret '" + name + "' is being recovered; retry the delete shortly",
+                        e, AzureProvider.ID, "Conflict");
+            }
+            // already being deleted
         }
+    }
+
+    private static boolean conflict(HttpResponseException e) {
+        return e.getResponse() != null && e.getResponse().getStatusCode() == 409;
     }
 
     private static Parameter toPortable(String name, KeyVaultSecret secret) {

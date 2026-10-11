@@ -19,6 +19,8 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import java.time.Duration;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** The parameter store TCK on Key Vault and App Configuration emulated by Floci-az. */
@@ -88,6 +90,12 @@ class AzureParameterStoreConformanceIT {
         @Override
         protected String nativeName() {
             return "db--password";
+        }
+
+        /** Key Vault deletes and recoveries finish asynchronously, and the driver doesn't wait for them. */
+        @Override
+        protected Duration deleteLag() {
+            return Duration.ofSeconds(30);
         }
     }
 

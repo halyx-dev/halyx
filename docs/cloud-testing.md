@@ -1170,9 +1170,9 @@ Skipped tests, both expected:
 Service Bus passes every messaging test, including the ones other providers skip: duplicate detection
 and delayed delivery.
 
-**Key Vault timing.** The driver waits for Key Vault's delete operation to finish, and writing a
-soft-deleted name recovers it first. `deletedNamesCanBeReused` took 5.0s. These are API-level waits; see
-the findings.
+**Key Vault timing.** In this run the driver still waited for Key Vault's long-running delete and
+recovery operations, so `deletedNamesCanBeReused` took 5.0s inside the API. The waits have since been
+removed (see the findings and the run history).
 
 ### Per-test results
 
@@ -1380,6 +1380,7 @@ the findings.
 |---|---|---|---|---|
 | `r26101120222893` | tier 1 | 150 passed, 1 failed, 6 errors, 2 skipped | clean (checked by hand) | Cosmos: patch returned no document (`NullPointerException`), and ids escaped with `%` couldn't be read back. Blob: `InvalidMetadata` for the name `schema-version`. The final check failed outright: the script passed `--subscription` before the `az` command. It reported `CHECK FAILED` instead of "nothing left", and a manual check found nothing. |
 | `r26101120508d84` | tier 1 | **156/158, 2 skipped** | clean | Latest result, above. |
+| `r26101121415f6f` | tier 1, Key Vault | **22/22** | clean | Key Vault waits removed from the driver; the kit retries via `deleteLag()`. `deletedNamesCanBeReused` took 4.2s. One transient error on a pooled connection to the vault made `missingIsEmptyAndRequireFails` take 43.8s while the SDK retried (0.6s in the run before). |
 
 ## What real Azure found
 
@@ -1390,7 +1391,7 @@ The emulators (Floci-az and Microsoft's Service Bus emulator) missed all of thes
 | Real Cosmos returns no document from a write unless asked (`contentResponseOnWriteEnabled` is off in the Java SDK), so `update` failed after the patch had already applied | Patch asks for the document back |
 | Cosmos ids can't contain `/ \ ? #`, and the gateway URL-decodes ids in point reads, so the driver's `%` escapes were undone (`order%232` was looked up as `order#2`) | Ids are escaped with `~` (`~23`), and `%` itself is escaped too. Ids written by earlier versions with `%` escapes would need migrating; there's no release yet |
 | Azure metadata names must be C# identifiers; `schema-version` is a 400 `InvalidMetadata`. Cirrus documented "letters, digits and '-'" as portable | The portable form is now lower-case letters, digits and `_`, starting with a letter. The Azure driver rejects other names with a clear `InvalidArgumentException` before sending anything |
-| Key Vault deletes and recoveries are long-running operations; the driver waits for them (about 2–5s) | Not changed yet: an API-level wait, open for a decision |
+| Key Vault deletes and recoveries are long-running operations, and the driver waited for them (about 2–5s per call) | Removed: `delete` starts the soft delete and returns. Writing a name that is soft-deleted, or still being deleted or recovered, throws the retryable `UnavailableException`, and starts recovery if the name was soft-deleted. Applications retry; the kit does so through `deleteLag()` |
 
 ## IAM used for Azure tier 1
 

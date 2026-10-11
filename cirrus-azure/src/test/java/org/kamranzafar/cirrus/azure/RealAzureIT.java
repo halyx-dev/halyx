@@ -200,6 +200,12 @@ class RealAzureIT {
         protected String nativeName() {
             return "db--password";
         }
+
+        /** Key Vault deletes and recoveries finish asynchronously, and the driver doesn't wait for them. */
+        @Override
+        protected Duration deleteLag() {
+            return Duration.ofSeconds(60);
+        }
     }
 
     @Nested
