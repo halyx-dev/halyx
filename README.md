@@ -659,11 +659,11 @@ Add the starter plus the provider modules you use:
 
 ```xml
 <dependency>
-  <groupId>org.kamranzafar</groupId>
+  <groupId>org.kamranzafar.cirrus</groupId>
   <artifactId>cirrus-spring-boot-starter</artifactId>
 </dependency>
 <dependency>
-  <groupId>org.kamranzafar</groupId>
+  <groupId>org.kamranzafar.cirrus</groupId>
   <artifactId>cirrus-aws</artifactId>
 </dependency>
 ```
@@ -803,7 +803,7 @@ Add `cirrus-core` plus the provider jars you need; providers are discovered with
 <dependencyManagement>
   <dependencies>
     <dependency>
-      <groupId>org.kamranzafar</groupId>
+      <groupId>org.kamranzafar.cirrus</groupId>
       <artifactId>cirrus-bom</artifactId>
       <version>0.1.0-SNAPSHOT</version>
       <type>pom</type>

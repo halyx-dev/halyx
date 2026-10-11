@@ -1,3 +1,19 @@
+#
+# Copyright 2026 Kamran Zafar
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
 # Tier 1 real-cloud test resources on Azure: Blob Storage, Service Bus, Cosmos DB, Key Vault and App
 # Configuration in a resource group of the run's own. Entra ID only: shared keys and local auth are off,
 # and the test service principal gets data-plane roles on each resource.

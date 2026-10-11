@@ -1,16 +1,41 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+
+    Copyright 2026 Kamran Zafar
+
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+-->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>org.kamranzafar</groupId>
+    <groupId>org.kamranzafar.cirrus</groupId>
     <artifactId>cirrus-parent</artifactId>
     <version>0.1.0-SNAPSHOT</version>
     <packaging>pom</packaging>
 
     <name>Cirrus :: Parent</name>
-    <description>Cloud-agnostic Java API for storage, SQL, search and cache across AWS, Azure and GCP.</description>
+    <description>Cloud-agnostic Java API for storage, NoSQL, messaging, SQL, caches, parameters and secrets across AWS, Azure and GCP.</description>
+
+    <licenses>
+        <license>
+            <name>Apache-2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
 
     <modules>
         <module>cirrus-bom</module>
@@ -87,27 +112,27 @@
         <dependencies>
             <!-- Cirrus modules -->
             <dependency>
-                <groupId>org.kamranzafar</groupId>
+                <groupId>org.kamranzafar.cirrus</groupId>
                 <artifactId>cirrus-core</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>org.kamranzafar</groupId>
+                <groupId>org.kamranzafar.cirrus</groupId>
                 <artifactId>cirrus-tck</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>org.kamranzafar</groupId>
+                <groupId>org.kamranzafar.cirrus</groupId>
                 <artifactId>cirrus-redis</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>org.kamranzafar</groupId>
+                <groupId>org.kamranzafar.cirrus</groupId>
                 <artifactId>cirrus-sql</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>org.kamranzafar</groupId>
+                <groupId>org.kamranzafar.cirrus</groupId>
                 <artifactId>cirrus-aws</artifactId>
                 <version>${project.version}</version>
             </dependency>
@@ -162,12 +187,12 @@
                 <version>${lettuce.version}</version>
             </dependency>
             <dependency>
-                <groupId>org.kamranzafar</groupId>
+                <groupId>org.kamranzafar.cirrus</groupId>
                 <artifactId>cirrus-spring-boot-autoconfigure</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>org.kamranzafar</groupId>
+                <groupId>org.kamranzafar.cirrus</groupId>
                 <artifactId>cirrus-vault</artifactId>
                 <version>${project.version}</version>
             </dependency>
@@ -290,6 +315,69 @@
         </pluginManagement>
 
         <plugins>
+            <!-- Every source file carries the Apache-2.0 header. One run from the root covers the whole tree
+                 (cirrus-bom included); `mvn license:format` adds missing headers, and the build fails without them. -->
+            <plugin>
+                <groupId>com.mycila</groupId>
+                <artifactId>license-maven-plugin</artifactId>
+                <version>5.1.2</version>
+                <inherited>false</inherited>
+                <configuration>
+                    <aggregate>true</aggregate>
+                    <!-- The built-in excludes skip META-INF/services; the includes below are explicit anyway. -->
+                    <defaultUseDefaultExcludes>false</defaultUseDefaultExcludes>
+                    <licenseSets>
+                        <licenseSet>
+                            <inlineHeader><![CDATA[Copyright 2026 Kamran Zafar
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.]]></inlineHeader>
+                            <includes>
+                                <include>**/*.java</include>
+                                <include>**/pom.xml</include>
+                                <include>**/*.sh</include>
+                                <include>**/*.tf</include>
+                                <include>**/*.yml</include>
+                                <include>**/META-INF/services/*</include>
+                                <include>**/META-INF/spring.factories</include>
+                                <include>**/META-INF/spring/*.imports</include>
+                            </includes>
+                            <excludes>
+                                <exclude>**/target/**</exclude>
+                                <exclude>**/.terraform/**</exclude>
+                                <exclude>graphify-out/**</exclude>
+                                <exclude>**/.git/**</exclude>
+                                <exclude>**/.idea/**</exclude>
+                            </excludes>
+                        </licenseSet>
+                    </licenseSets>
+                    <mapping>
+                        <java>SLASHSTAR_STYLE</java>
+                        <tf>SCRIPT_STYLE</tf>
+                        <imports>SCRIPT_STYLE</imports>
+                        <factories>SCRIPT_STYLE</factories>
+                        <cloudprovider>SCRIPT_STYLE</cloudprovider>
+                    </mapping>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>check-license-headers</id>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-enforcer-plugin</artifactId>
