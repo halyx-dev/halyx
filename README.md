@@ -968,7 +968,8 @@ Done:
 Backlog, in order:
 
 1. Real-cloud test profile: Terraform for throwaway resources per cloud and a Maven profile running the
-   conformance kits and IAM tests against them
+   conformance kits and IAM tests against them. AWS tier 1 (S3, DynamoDB, SSM, Secrets Manager, SNS, SQS)
+   passes; tiers 2–3 (RDS, ElastiCache), Azure and GCP remain. Results: [docs/cloud-testing.md](docs/cloud-testing.md)
 2. Release 0.1.0: JPMS module descriptors, japicmp API compatibility checks, CI, Maven Central
 3. On demand
    - Spring Data repositories over document stores (`cirrus-spring-data`): CRUD by composite id

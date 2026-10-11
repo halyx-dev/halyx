@@ -143,17 +143,26 @@ public final class SecretsManagerDriver extends AbstractParameterDriver {
         }
     }
 
+    /** Reads may still return a secret for a moment after its delete is accepted; delete waits up to this long. */
+    private static final Duration DELETE_VISIBLE_WAIT = Duration.ofSeconds(10);
+
     @Override
     public void delete(String name) {
         try {
             secrets.deleteSecret(b -> b.secretId(name).forceDeleteWithoutRecovery(true));
         } catch (ResourceNotFoundException ignored) {
-            // already gone
+            return; // already gone
         } catch (InvalidRequestException e) {
             if (!pendingDeletion(e)) {
                 throw e;
             }
             // already being deleted
+        }
+        long deadline = System.nanoTime() + DELETE_VISIBLE_WAIT.toNanos();
+        long backoff = 100;
+        while (get(name).isPresent() && System.nanoTime() < deadline) {
+            sleep(backoff);
+            backoff = Math.min(backoff * 2, 1_000);
         }
     }
 
@@ -168,7 +177,7 @@ public final class SecretsManagerDriver extends AbstractParameterDriver {
             Thread.sleep(millis);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new IllegalStateException("Interrupted while waiting for a secret's deletion to finish", e);
+            throw new IllegalStateException("Interrupted while waiting for a secret's deletion", e);
         }
     }
 

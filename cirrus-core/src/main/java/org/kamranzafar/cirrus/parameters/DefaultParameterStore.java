@@ -149,6 +149,7 @@ public final class DefaultParameterStore implements ParameterStore {
             baseline.putAll(current);
             if (!changes.isEmpty()) {
                 cache.clear();
+                remember(changes);
                 statistics.changed(changes.added().size() + changes.updated().size() + changes.removed().size());
                 try {
                     listener.accept(changes);
@@ -158,6 +159,20 @@ public final class DefaultParameterStore implements ParameterStore {
             }
         }, interval.toMillis(), interval.toMillis(), TimeUnit.MILLISECONDS);
         return () -> task.cancel(false);
+    }
+
+    /**
+     * Caches what the watch saw, so reads agree with the change just reported even where the backend's
+     * reads lag behind its listing (Secrets Manager).
+     */
+    private void remember(ParameterChanges changes) {
+        if (config.cacheTtl().isZero()) {
+            return;
+        }
+        long expires = System.nanoTime() + config.cacheTtl().toNanos();
+        changes.added().forEach((name, p) -> cache.put("get:" + full(name), new Cached<>(Optional.of(p), expires)));
+        changes.updated().forEach((name, p) -> cache.put("get:" + full(name), new Cached<>(Optional.of(p), expires)));
+        changes.removed().forEach(name -> cache.put("get:" + full(name), new Cached<>(Optional.empty(), expires)));
     }
 
     /** Current values below {@code full}, relative names, bypassing the cache. */
