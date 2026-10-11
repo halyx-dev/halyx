@@ -377,6 +377,12 @@ such as Memorystore in-transit encryption, set `redis.ca-certificate` to a PEM f
 certificates are reported as `AccessDeniedException` (a configuration error, never treated as a
 miss under fail-open).
 
+**DNS.** Lettuce resolves host names with Netty's own DNS client, which reads `/etc/hosts` and the
+system's DNS servers but ignores JVM DNS settings. Set `redis.dns-resolver` to `jdk` to resolve like
+the rest of the JVM: the `jdk.net.hosts.file` hosts file, DNS cache TTLs and custom `InetAddressResolver`s
+then apply, as they do for the cloud SDKs and JDBC drivers. Lookups then block a Netty thread
+briefly, on connect and reconnect only.
+
 | `CacheAuth` | AWS | Azure | GCP |
 |---|---|---|---|
 | `iam()` | ElastiCache IAM: SigV4-signed `connect` token (15 min); username = ElastiCache user id; needs `aws.elasticache.cache-name` | Entra ID token for `https://redis.azure.com/.default`; username = the token's `oid` | Memorystore IAM: OAuth access token from Application Default Credentials |

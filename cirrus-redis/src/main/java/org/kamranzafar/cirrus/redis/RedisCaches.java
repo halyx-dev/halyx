@@ -14,6 +14,7 @@ import io.lettuce.core.cluster.api.StatefulRedisClusterConnection;
 import io.lettuce.core.codec.ByteArrayCodec;
 import io.lettuce.core.resource.ClientResources;
 import io.lettuce.core.resource.DefaultClientResources;
+import io.netty.resolver.DefaultAddressResolverGroup;
 import org.kamranzafar.cirrus.cache.CacheAuth;
 import org.kamranzafar.cirrus.cache.CacheConfig;
 import org.kamranzafar.cirrus.cache.spi.CacheDriver;
@@ -24,6 +25,7 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -42,6 +44,11 @@ import java.util.function.Function;
  *       servers whose certificates are not signed by a public CA, such as Memorystore's
  *       in-transit encryption.</li>
  *   <li>{@code redis.verify-peer}: {@code false} skips TLS certificate checks, for local tunnels only.</li>
+ *   <li>{@code redis.dns-resolver}: {@code netty} (default) resolves host names with Netty's asynchronous
+ *       DNS client, which reads {@code /etc/hosts} and the system's DNS servers itself; {@code jdk}
+ *       resolves them like the rest of the JVM ({@code InetAddress}), so JVM DNS settings apply: the
+ *       {@code jdk.net.hosts.file} hosts file, DNS cache TTLs and custom {@code InetAddressResolver}s.
+ *       Lookups then block a Netty thread briefly, on connect and reconnect only.</li>
  * </ul>
  */
 public final class RedisCaches implements AutoCloseable {
@@ -49,6 +56,7 @@ public final class RedisCaches implements AutoCloseable {
     public static final String COMMAND_TIMEOUT = "redis.command-timeout";
     public static final String VERIFY_PEER = "redis.verify-peer";
     public static final String CA_CERTIFICATE = "redis.ca-certificate";
+    public static final String DNS_RESOLVER = "redis.dns-resolver";
     static final Duration DEFAULT_COMMAND_TIMEOUT = Duration.ofSeconds(2);
 
     private record Key(URI endpoint, boolean cluster, CacheAuth auth, Map<String, String> properties) {
@@ -77,6 +85,8 @@ public final class RedisCaches implements AutoCloseable {
 
     private final String provider;
     private final ClientResources resources = DefaultClientResources.create();
+    /** Created on first use by a cache with {@code redis.dns-resolver=jdk}. */
+    private ClientResources jdkResolverResources;
     private final Map<Key, Endpoint> open = new ConcurrentHashMap<>();
     private volatile boolean closed;
 
@@ -122,6 +132,24 @@ public final class RedisCaches implements AutoCloseable {
         return open.computeIfAbsent(key, k -> new Endpoint(config, credentials)).driver;
     }
 
+    private ClientResources resources(CacheConfig config) {
+        String resolver = config.property(DNS_RESOLVER).orElse("netty").trim().toLowerCase(Locale.ROOT);
+        return switch (resolver) {
+            case "netty" -> resources;
+            case "jdk" -> {
+                synchronized (this) {
+                    if (jdkResolverResources == null) {
+                        jdkResolverResources = DefaultClientResources.builder()
+                                .addressResolverGroup(DefaultAddressResolverGroup.INSTANCE)
+                                .build();
+                    }
+                    yield jdkResolverResources;
+                }
+            }
+            default -> throw new IllegalArgumentException(DNS_RESOLVER + " must be netty or jdk, not '" + resolver + "'");
+        };
+    }
+
     private Opened connect(CacheConfig config, RedisCredentialsSource source) {
         Duration timeout = config.property(COMMAND_TIMEOUT).map(Duration::parse).orElse(DEFAULT_COMMAND_TIMEOUT);
         SslOptions ssl = config.property(CA_CERTIFICATE)
@@ -142,6 +170,7 @@ public final class RedisCaches implements AutoCloseable {
         }
         RedisURI redisUri = uri.build();
         TimeoutOptions timeouts = TimeoutOptions.enabled(timeout);
+        ClientResources resources = resources(config);
         try {
             if (config.cluster()) {
                 RedisClusterClient client = RedisClusterClient.create(resources, redisUri);
@@ -200,6 +229,11 @@ public final class RedisCaches implements AutoCloseable {
         }
         open.clear();
         resources.shutdown();
+        synchronized (this) {
+            if (jdkResolverResources != null) {
+                jdkResolverResources.shutdown();
+            }
+        }
         if (!failures.isEmpty()) {
             throw failures.getFirst();
         }

@@ -103,6 +103,25 @@ class TlsCacheIT {
                 .satisfies(e -> assertThat(((AccessDeniedException) e).isRetryable()).isFalse());
     }
 
+    @Test
+    void jdkResolverConnectsWithVerifiedTls() {
+        var viaJdk = CacheConfig.builder(endpoint()).property(RedisCaches.CA_CERTIFICATE, caCertificate.toString())
+                .property(RedisCaches.DNS_RESOLVER, "jdk").namespace("jdk-resolver").build();
+        var cache = cirrus.provider("redis").cache(viaJdk);
+        cache.put("k", "v");
+
+        assertThat(cache.get("k")).contains("v");
+    }
+
+    @Test
+    void unknownDnsResolverIsRejected() {
+        var unknown = CacheConfig.builder(endpoint()).property(RedisCaches.DNS_RESOLVER, "bind")
+                .namespace("unknown-resolver").build();
+
+        assertThatThrownBy(() -> cirrus.provider("redis").cache(unknown).get("k"))
+                .hasMessageContaining(RedisCaches.DNS_RESOLVER);
+    }
+
     private static String keytool() {
         return Path.of(System.getProperty("java.home"), "bin", "keytool").toString();
     }
