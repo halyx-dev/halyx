@@ -15,6 +15,7 @@
 </div>
 
 <p align="center">
+  <a href="https://kamranzafar.github.io/cirrus/"><img alt="Documentation" src="https://img.shields.io/badge/docs-kamranzafar.github.io%2Fcirrus-0a7bbb"></a>
   <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
   <img alt="Java 21+" src="https://img.shields.io/badge/java-21%2B-orange">
   <img alt="Spring Boot 3.5 and 4" src="https://img.shields.io/badge/spring%20boot-3.5%20%7C%204-6db33f">
@@ -25,8 +26,8 @@
 documents, messaging, SQL databases, caches, and parameters and secrets, on **AWS**, **Azure** and
 **Google Cloud**.
 
-**[Documentation](docs/index.md)** · [Getting started](docs/getting-started.md) · [API guide](docs/api/index.md) ·
-[Spring Boot](docs/spring-boot.md) · [Cloud testing](docs/cloud-testing/index.md) · [Roadmap](docs/roadmap.md)
+**[Documentation](https://kamranzafar.github.io/cirrus/)** · [Getting started](https://kamranzafar.github.io/cirrus/getting-started.html) · [API guide](https://kamranzafar.github.io/cirrus/api/) ·
+[Spring Boot](https://kamranzafar.github.io/cirrus/spring-boot.html) · [Cloud testing](https://kamranzafar.github.io/cirrus/cloud-testing/) · [Roadmap](https://kamranzafar.github.io/cirrus/roadmap.html)
 
 ## Why Cirrus
 
@@ -44,7 +45,7 @@ Cirrus was created to make that code portable too, without giving up what each c
 - **The same behaviour, not just the same signatures.** Conditional writes, versions, ordering, expiry,
   retries and errors such as `NotFoundException` mean the same everywhere. Shared conformance kits check
   every provider against emulators on every build and
-  [against the real clouds](docs/cloud-testing/index.md).
+  [against the real clouds](https://kamranzafar.github.io/cirrus/cloud-testing/).
 - **Several clouds in one service.** Each cloud is a named provider, so one microservice can store files
   on S3, publish to Pub/Sub and cache in Azure, with one error model and one set of tests.
 - **No lowest common denominator.** Differences are declared as capabilities, and `unwrap` hands you the
@@ -151,7 +152,7 @@ the resources at Azure Blob Storage, Service Bus and Azure Database. The Java co
 
 You also get health checks, Micrometer metrics and tracing, `@Cacheable` support, and
 `spring.config.import=cirrus:<store>` for parameters and secrets. See the
-[Spring Boot guide](docs/spring-boot.md).
+[Spring Boot guide](https://kamranzafar.github.io/cirrus/spring-boot.html).
 
 ## Using it without Spring
 
@@ -176,23 +177,23 @@ try (Cirrus cirrus = Cirrus.builder()
 ```
 
 Add `cirrus-core` plus the provider modules (`cirrus-aws`, `cirrus-azure`, `cirrus-gcp`, `cirrus-vault`)
-to your build, ideally through the `cirrus-bom`. See [Getting started](docs/getting-started.md).
+to your build, ideally through the `cirrus-bom`. See [Getting started](https://kamranzafar.github.io/cirrus/getting-started.html).
 
 ## Documentation
 
 | | |
 |---|---|
-| [Getting started](docs/getting-started.md) | dependencies, your first calls, several clouds at once, testing |
-| [API guide](docs/api/index.md) | every service with examples: [storage](docs/api/storage.md), [NoSQL](docs/api/nosql.md), [messaging](docs/api/messaging.md), [SQL](docs/api/sql.md), [caches](docs/api/caches.md), [parameters and secrets](docs/api/parameters.md) |
-| [Errors and retries](docs/api/errors.md) | the portable error model, retries, throttling and interceptors |
-| [Capabilities and native clients](docs/api/capabilities-and-unwrap.md) | provider differences, and `unwrap` for the native SDK clients |
-| [Provider configuration](docs/providers.md) | credentials, regions, endpoints and every provider setting |
-| [Spring Boot](docs/spring-boot.md) | the starter, properties, listeners, health, metrics and configuration import |
-| [Design, build and test](docs/design.md) | architecture, building, the conformance kits and benchmarks |
-| [Cloud testing](docs/cloud-testing/index.md) | results on real [AWS](docs/cloud-testing/aws.md), [Google Cloud](docs/cloud-testing/gcp.md) and [Azure](docs/cloud-testing/azure.md) |
-| [Roadmap](docs/roadmap.md) | what's done and what's next |
+| [Getting started](https://kamranzafar.github.io/cirrus/getting-started.html) | dependencies, your first calls, several clouds at once, testing |
+| [API guide](https://kamranzafar.github.io/cirrus/api/) | every service with examples: [storage](https://kamranzafar.github.io/cirrus/api/storage.html), [NoSQL](https://kamranzafar.github.io/cirrus/api/nosql.html), [messaging](https://kamranzafar.github.io/cirrus/api/messaging.html), [SQL](https://kamranzafar.github.io/cirrus/api/sql.html), [caches](https://kamranzafar.github.io/cirrus/api/caches.html), [parameters and secrets](https://kamranzafar.github.io/cirrus/api/parameters.html) |
+| [Errors and retries](https://kamranzafar.github.io/cirrus/api/errors.html) | the portable error model, retries, throttling and interceptors |
+| [Capabilities and native clients](https://kamranzafar.github.io/cirrus/api/capabilities-and-unwrap.html) | provider differences, and `unwrap` for the native SDK clients |
+| [Provider configuration](https://kamranzafar.github.io/cirrus/providers.html) | credentials, regions, endpoints and every provider setting |
+| [Spring Boot](https://kamranzafar.github.io/cirrus/spring-boot.html) | the starter, properties, listeners, health, metrics and configuration import |
+| [Design, build and test](https://kamranzafar.github.io/cirrus/design.html) | architecture, building, the conformance kits and benchmarks |
+| [Cloud testing](https://kamranzafar.github.io/cirrus/cloud-testing/) | results on real [AWS](https://kamranzafar.github.io/cirrus/cloud-testing/aws.html), [Google Cloud](https://kamranzafar.github.io/cirrus/cloud-testing/gcp.html) and [Azure](https://kamranzafar.github.io/cirrus/cloud-testing/azure.html) |
+| [Roadmap](https://kamranzafar.github.io/cirrus/roadmap.html) | what's done and what's next |
 
-The documentation is also published as a website from the `docs/` folder with GitHub Pages.
+The documentation is published at **[kamranzafar.github.io/cirrus](https://kamranzafar.github.io/cirrus/)**, built from the `docs/` folder.
 
 ## Building
 
@@ -200,7 +201,7 @@ The documentation is also published as a website from the `docs/` folder with Gi
 mvn verify      # unit tests and every conformance kit against emulators (needs Docker)
 ```
 
-Java 21+ and Maven 3.9+. See [Design, build and test](docs/design.md#build).
+Java 21+ and Maven 3.9+. See [Design, build and test](https://kamranzafar.github.io/cirrus/design.html#build).
 
 ## License
 

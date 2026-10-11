@@ -15,11 +15,13 @@
 #
 
 # GitHub Pages site for Cirrus: Settings → Pages → "Deploy from a branch", folder /docs.
-# GitHub Pages sets the site's URL and base path for the repository automatically.
+# Published at https://kamranzafar.github.io/cirrus
 
 title: Cirrus
 description: One Java API for storage, NoSQL, messaging, SQL, caches, parameters and secrets on AWS, Azure and Google Cloud.
 lang: en-US
+url: "https://kamranzafar.github.io"
+baseurl: "/cirrus"
 
 remote_theme: just-the-docs/just-the-docs@v0.12.0
 plugins:
@@ -31,7 +33,7 @@ relative_links:
   enabled: true
   collections: false
 
-color_scheme: light
+color_scheme: dark
 search_enabled: true
 search:
   heading_level: 3
@@ -41,12 +43,16 @@ search:
   tokenizer_separator: /[\s/]+/
   button: true
 
+aux_links:
+  "GitHub":
+    - "https://github.com/kamranzafar/cirrus"
+aux_links_new_tab: true
+
 heading_anchors: true
 back_to_top: true
 back_to_top_text: "Back to top"
 enable_copy_code_button: true
 
-callouts_level: quiet
 callouts:
   note:
     title: Note
