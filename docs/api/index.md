@@ -1,0 +1,106 @@
+---
+title: API guide
+nav_order: 3
+has_children: true
+permalink: /api/
+---
+
+# API guide
+{: .no_toc }
+
+Every Cirrus service follows the same shape: you register providers once, ask a provider for a service,
+and use that service's interface whichever cloud is behind it.
+
+<details open markdown="block">
+  <summary>Contents</summary>
+  {: .text-delta }
+1. TOC
+{:toc}
+</details>
+
+## The object model
+
+```
+Cirrus                                   one per application
+ ├── provider("orders")  → CloudContext   AWS, eu-west-2
+ │     ├── blobStore("acme-invoices")      → BlobStore        (Amazon S3)
+ │     ├── documentStore(TableConfig)       → DocumentStore    (DynamoDB)
+ │     ├── publisher("orders")              → Publisher        (SNS)
+ │     ├── subscription("orders-billing")   → Subscription     (SQS)
+ │     ├── database(SqlConfig)              → Database         (RDS)
+ │     ├── cache(CacheConfig)               → Cache<V>         (ElastiCache)
+ │     └── parameterStore(ParameterStoreConfig) → ParameterStore (Secrets Manager, SSM)
+ └── provider("analytics") → CloudContext  Google Cloud, acme-prod
+       └── ...
+```
+
+| Type | Role |
+|---|---|
+| `Cirrus` | The registry of named providers. Build it once, share it, and close it on shutdown. |
+| `ProviderConfig` | Which cloud (`aws`, `azure`, `gcp`, `vault`, `memory`), plus region, endpoint, credentials and provider properties. See [Provider configuration](../providers.md). |
+| `CloudContext` | One provider connection: an account and region with its credentials. It hands out services, which share its HTTP clients and connection pools. |
+| Service interfaces | `BlobStore`, `DocumentStore`, `Publisher` and `Subscription`, `Database`, `Cache<V>`, `ParameterStore`. |
+
+```java
+Cirrus cirrus = Cirrus.builder()
+        .register("orders", ProviderConfig.of("aws").region("eu-west-2"))
+        .register("analytics", ProviderConfig.of("gcp").property(GcpProperties.PROJECT_ID, "acme-prod"))
+        .interceptor(new RetryInterceptor(RetryPolicy.defaults()))   // optional, applies to every service
+        .build();
+
+CloudContext orders = cirrus.provider("orders");
+cirrus.names();   // [orders, analytics]
+```
+
+## Services
+
+| Page | Interface | What it covers |
+|---|---|---|
+| [Object storage](storage.md) | `BlobStore` | put, get, streams, parallel transfers, listing, conditional writes, checksums, tiers, presigned URLs |
+| [NoSQL documents](nosql.md) | `DocumentStore` | items by partition and sort key, partial updates, queries, secondary indexes, transactions, expiry |
+| [Messaging](messaging.md) | `Publisher`, `Subscription` | publishing, listeners, manual receive, ordering, deduplication, delays, claim checks |
+| [SQL databases](sql.md) | `Database` | a pooled JDBC `DataSource` with IAM, Entra ID or password login |
+| [Caches](caches.md) | `Cache<V>` | Redis and Valkey operations, atomic updates, counters, locks, fail-open |
+| [Parameters and secrets](parameters.md) | `ParameterStore` | configuration values and secrets, versions, JSON fields, watching for changes |
+| [Errors and retries](errors.md) | `CloudException` | the portable error model, retries, throttling and interceptors |
+| [Capabilities and native clients](capabilities-and-unwrap.md) | `Capabilities`, `unwrap` | optional features per provider, and the native SDK clients |
+
+## Conventions shared by every service
+
+**Builders and immutable values.** Options and configs are immutable and built fluently:
+`PutOptions.builder()...build()`, `TableConfig.builder("orders").sortKey("sk").build()`. Keys and other
+small values are records, such as `BlobKey`, `Key`, `ETag` and `Version`.
+
+**Synchronous, thread-safe, virtual-thread friendly.** Every call blocks until it completes, and every
+service object is thread-safe. Calls are cheap to make from virtual threads, and Cirrus itself uses
+virtual threads for parallel transfers and message listeners.
+
+**One error model.** Failures are unchecked `CloudException` subtypes, such as `NotFoundException`,
+`PreconditionFailedException` and `ThrottledException`, with the same meaning on every provider. See
+[Errors and retries](errors.md).
+
+**Capabilities instead of silent differences.** Features not every provider has are declared, and
+asking for a missing one fails rather than being ignored. See
+[Capabilities and native clients](capabilities-and-unwrap.md).
+
+**Infrastructure stays yours.** Cirrus uses buckets, tables, topics, queues, caches and databases; it
+doesn't create them. Create them with Terraform, Bicep, CloudFormation or your usual tooling.
+
+## Lifecycle
+
+`Cirrus` implements `AutoCloseable`. Closing it closes every provider connection, SDK client, cache
+connection and database pool it opened.
+
+Create each service once and keep it, typically in a field or as an injected bean, rather than fetching
+it per request:
+
+- `blobStore(bucket)` returns the same instance for the same bucket.
+- `database(config)` opens a **new connection pool** on every call.
+- Each `ParameterStore` has its own read cache (`cacheTtl`), so separate instances don't share cached
+  values.
+- Publishers and subscriptions may hold their own connections, for example Service Bus senders and
+  receivers.
+- Caches share one connection per endpoint and credentials, whichever instance you use.
+
+In Spring Boot, the starter builds the `Cirrus` bean and one bean per configured service, and closes
+them with the application context. See [Spring Boot](../spring-boot.md).

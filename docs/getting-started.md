@@ -1,0 +1,149 @@
+---
+title: Getting started
+nav_order: 2
+---
+
+# Getting started
+{: .no_toc }
+
+<details open markdown="block">
+  <summary>Contents</summary>
+  {: .text-delta }
+1. TOC
+{:toc}
+</details>
+
+## Requirements
+
+- **Java 21** or later. Cirrus uses virtual threads for parallel transfers and message listeners.
+- The Cirrus provider modules for the clouds you use. Each brings its cloud's SDK.
+- For Spring Boot applications, Spring Boot **3.5** or **4**.
+
+## Add the dependencies
+
+Import the BOM so every Cirrus module has the same version, then add the core API and the providers you
+need:
+
+```xml
+<dependencyManagement>
+  <dependencies>
+    <dependency>
+      <groupId>org.kamranzafar.cirrus</groupId>
+      <artifactId>cirrus-bom</artifactId>
+      <version>0.1.0</version>
+      <type>pom</type>
+      <scope>import</scope>
+    </dependency>
+  </dependencies>
+</dependencyManagement>
+
+<dependencies>
+  <dependency>
+    <groupId>org.kamranzafar.cirrus</groupId>
+    <artifactId>cirrus-core</artifactId>
+  </dependency>
+  <dependency>
+    <groupId>org.kamranzafar.cirrus</groupId>
+    <artifactId>cirrus-aws</artifactId>      <!-- and/or cirrus-azure, cirrus-gcp, cirrus-vault -->
+  </dependency>
+</dependencies>
+```
+
+| Module | What it adds |
+|---|---|
+| `cirrus-core` | The portable API, error model, interceptors and an in-memory provider. No cloud SDKs. |
+| `cirrus-aws` | Amazon S3, DynamoDB, SNS, SQS, SSM Parameter Store, Secrets Manager, ElastiCache and RDS IAM login |
+| `cirrus-azure` | Blob Storage, Cosmos DB, Service Bus, Key Vault, App Configuration, and Entra ID login for caches and databases |
+| `cirrus-gcp` | Cloud Storage, Firestore, Pub/Sub, Secret Manager, Parameter Manager, and IAM login for Memorystore and Cloud SQL |
+| `cirrus-vault` | HashiCorp Vault KV v2 parameters and secrets |
+| `cirrus-spring-boot-starter` | Spring Boot auto-configuration (see [Spring Boot](spring-boot.md)) |
+
+Providers are discovered with `ServiceLoader`: a module on the classpath is all it takes. SQL databases
+also need your JDBC driver (`org.postgresql:postgresql`, `com.mysql:mysql-connector-j` or
+`com.microsoft.sqlserver:mssql-jdbc`).
+
+## Your first calls
+
+A `Cirrus` object holds one named connection per cloud account or region. It is thread-safe, meant to
+live as long as the application, and closes every client it opened:
+
+```java
+try (Cirrus cirrus = Cirrus.builder()
+        .register("orders", ProviderConfig.of("aws").region("eu-west-2"))
+        .build()) {
+
+    CloudContext aws = cirrus.provider("orders");
+
+    BlobStore invoices = aws.blobStore("acme-invoices");
+    invoices.put(BlobKey.of("invoices/42.pdf"), BlobContent.ofFile(Path.of("42.pdf")),
+            PutOptions.builder().contentType("application/pdf").ifNotExists().build());
+
+    try (Blob blob = invoices.get(BlobKey.of("invoices/42.pdf"))) {
+        blob.content().transferTo(response.getOutputStream());
+    } catch (NotFoundException e) {
+        // the same exception on S3, Azure Blob Storage and Cloud Storage
+    }
+}
+```
+
+Credentials come from each cloud's default chain unless you pass them: environment variables, workload
+identity (EKS, AKS, GKE), instance or managed identity, or your CLI login. See
+[Provider configuration](providers.md) for regions, endpoints and every setting.
+
+## Use several clouds at once
+
+Register one provider per cloud, or several per cloud, and use each by name:
+
+```java
+Cirrus cirrus = Cirrus.builder()
+        .register("aws", ProviderConfig.of("aws").region("eu-west-2"))
+        .register("azure", ProviderConfig.of("azure").property(AzureProperties.STORAGE_ACCOUNT, "acmefiles"))
+        .register("gcp", ProviderConfig.of("gcp").property(GcpProperties.PROJECT_ID, "acme-prod"))
+        .build();
+
+BlobStore reports = cirrus.provider("azure").blobStore("reports");          // Azure Blob Storage
+Cache<String> sessions = cirrus.provider("aws").cache(sessionCacheConfig);   // ElastiCache
+Publisher events = cirrus.provider("gcp").publisher("order-events");        // Pub/Sub
+```
+
+## Test without a cloud
+
+The `memory` provider implements object storage, NoSQL, messaging, caches, and parameters and secrets in
+memory, with the same semantics the conformance kits check on the real services. It is ideal for unit
+tests (SQL databases need a real database, for example in a Testcontainers container):
+
+```java
+Cirrus cirrus = Cirrus.builder().register("test", ProviderConfig.of("memory")).build();
+BlobStore store = cirrus.provider("test").blobStore("any-bucket");
+```
+
+For integration tests, point a provider at an emulator with `ProviderConfig.endpoint(...)`, for example
+LocalStack or [Floci](https://floci.io) for AWS.
+
+## With Spring Boot
+
+Add `cirrus-spring-boot-starter` and a provider module, describe your resources in `application.yml`,
+and inject them:
+
+```yaml
+cirrus:
+  providers:
+    aws: { type: aws, region: eu-west-2 }
+  blob-stores:
+    invoices: { bucket: acme-invoices }
+```
+
+```java
+@Service
+class InvoiceService {
+    InvoiceService(BlobStore invoices) { ... }
+}
+```
+
+The [Spring Boot](spring-boot.md) page covers every resource type, listeners, health and metrics.
+
+## Next steps
+
+- [API guide](api/index.md): every service in depth.
+- [Errors and retries](api/errors.md): handling failures the same way on every cloud.
+- [Capabilities and native clients](api/capabilities-and-unwrap.md): provider-specific features.

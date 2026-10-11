@@ -1,0 +1,71 @@
+#
+# Copyright 2026 Kamran Zafar
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# GitHub Pages site for Cirrus: Settings → Pages → "Deploy from a branch", folder /docs.
+# GitHub Pages sets the site's URL and base path for the repository automatically.
+
+title: Cirrus
+description: One Java API for storage, NoSQL, messaging, SQL, caches, parameters and secrets on AWS, Azure and Google Cloud.
+lang: en-US
+
+remote_theme: just-the-docs/just-the-docs@v0.12.0
+plugins:
+  - jekyll-remote-theme
+  - jekyll-relative-links
+  - jekyll-seo-tag
+
+relative_links:
+  enabled: true
+  collections: false
+
+color_scheme: light
+search_enabled: true
+search:
+  heading_level: 3
+  previews: 2
+  preview_words_before: 4
+  preview_words_after: 8
+  tokenizer_separator: /[\s/]+/
+  button: true
+
+heading_anchors: true
+back_to_top: true
+back_to_top_text: "Back to top"
+enable_copy_code_button: true
+
+callouts_level: quiet
+callouts:
+  note:
+    title: Note
+    color: blue
+  tip:
+    title: Tip
+    color: green
+  important:
+    title: Important
+    color: purple
+  warning:
+    title: Warning
+    color: red
+
+footer_content: >-
+  Copyright 2026 Kamran Zafar. Cirrus is distributed under the
+  <a href="https://www.apache.org/licenses/LICENSE-2.0">Apache License 2.0</a>.
+
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - vendor

@@ -1,0 +1,187 @@
+---
+title: Design, build and test
+nav_order: 6
+---
+
+# Design, build, test and benchmarks
+{: .no_toc }
+
+<details open markdown="block">
+  <summary>Contents</summary>
+  {: .text-delta }
+1. TOC
+{:toc}
+</details>
+
+## Design
+
+### Architecture
+
+Every service is split into a portable **API** that applications use, and an **SPI** that each cloud
+implements. The API does validation, capability checks, interceptors and error translation once, for
+every provider:
+
+```
+ application ──► BlobStore (API)                                        cirrus-core
+                   │ DefaultBlobStore: validation → capability check →
+                   │ interceptor chain → driver call → error translation
+                   ▼
+                 BlobStoreDriver (SPI)
+       ┌───────────┼──────────────────┬──────────────────┐
+  S3BlobStoreDriver  AzureBlobStoreDriver  GcsBlobStoreDriver  InMemoryBlobStoreDriver
+   cirrus-aws          cirrus-azure          cirrus-gcp          cirrus-core
+```
+
+The same split repeats for every service: `DocumentStore` and `DocumentStoreDriver`, `Publisher` and
+`PublisherDriver`, `Cache` and `CacheDriver`, `ParameterStore` and `ParameterDriver`. Providers are
+discovered with `ServiceLoader`, so `cirrus-core` has no cloud SDK dependency, and the build enforces
+that.
+
+### Patterns
+
+| Pattern | Where |
+|---|---|
+| Bridge | each API (`BlobStore`, `DefaultBlobStore`) and its SPI (`BlobStoreDriver`) |
+| Plugin, Separated Interface | `CloudProvider` in core, discovered from provider jars through `ServiceLoader` |
+| Abstract Factory | `ProviderConnection` creates the family of drivers for one account and region |
+| Registry, Facade | `Cirrus` holds the named `CloudContext`s |
+| Gateway, Adapter | each driver wraps a native SDK client |
+| Template Method | `AbstractBlobStoreDriver` and friends (translation fallback, `unwrap`) |
+| Chain of Responsibility | `Interceptor` and `InterceptorChain` (`RetryInterceptor` included) |
+| Value Object | `BlobKey`, `ETag`, `Key`, `Version`, `ProviderConfig`: immutable |
+| Service Stub | the `memory` provider, for tests |
+| Exception Translation | the sealed `CloudException` hierarchy with `isRetryable()` |
+
+### Principles
+
+- **Portable semantics, not just portable signatures.** Listing order, idempotent delete, conditional
+  writes, versions and expiry mean the same on every provider, and the conformance kits check it.
+- **Declare differences instead of hiding them.** Optional features are capabilities. Asking for a
+  missing one fails rather than being ignored, and `unwrap` reaches the native client.
+- **No hidden waits.** Cirrus doesn't block your call to paper over eventual consistency or
+  asynchronous deletes. It fails fast with a retryable error, and you choose how to retry.
+- **Infrastructure is yours.** Cirrus never creates buckets, tables, topics or databases.
+- **Fit the platform.** Java 21 virtual threads for parallel transfers and listeners, pooled buffers for
+  part uploads, shared HTTP clients per provider connection, and SDK-native retry modes.
+
+### Modules
+
+| Module | Purpose |
+|---|---|
+| `cirrus-bom` | Import to align Cirrus versions |
+| `cirrus-core` | portable API, provider SPI, error model, interceptors, in-memory provider. No cloud SDKs (enforced) |
+| `cirrus-tck` | the conformance test kits every provider must pass |
+| `cirrus-redis` | the shared Redis and Valkey cache driver (Lettuce), used by every provider |
+| `cirrus-sql` | the shared HikariCP pool with per-connection credentials (passwords, cloud IAM tokens) |
+| `cirrus-aws` | AWS SDK v2: S3, DynamoDB, SNS, SQS, SSM Parameter Store, Secrets Manager, ElastiCache and RDS IAM login |
+| `cirrus-azure` | Azure SDK: Blob Storage, Cosmos DB, Service Bus, Key Vault, App Configuration, Entra ID login for caches and databases |
+| `cirrus-gcp` | Google Cloud: Cloud Storage, Firestore, Pub/Sub, Secret Manager, Parameter Manager, Memorystore and Cloud SQL IAM login |
+| `cirrus-vault` | HashiCorp Vault KV v2 parameters and secrets |
+| `cirrus-spring-boot-autoconfigure` | Spring Boot auto-configuration, properties, health and observations |
+| `cirrus-spring-boot-starter` | the dependency Spring Boot applications add |
+| `cirrus-spring-boot4-tests` | the shared Spring tests run on Boot 4 (not published) |
+| `cirrus-benchmarks` | JMH benchmarks and a load-test harness (not published) |
+
+## Build
+
+```bash
+mvn verify          # unit tests and every conformance kit against emulators (needs Docker)
+mvn test            # unit tests and the kits on the in-memory provider only
+mvn -pl cirrus-aws -am verify -Dit.test='S3BlobStoreConformanceIT'   # one suite
+```
+
+Requirements: Java 21 or later, Maven 3.9 or later, and Docker for the integration tests. They're skipped
+automatically when Docker is unavailable. `docker compose up -d` starts the emulators for manual
+experiments.
+
+Every source file carries the Apache-2.0 license header, and the build checks it. Run
+`mvn -N com.mycila:license-maven-plugin:format` to add any missing ones.
+
+## Testing
+
+### Conformance kits
+
+`cirrus-tck` holds one conformance kit per service. Every provider runs the same kit, so a behaviour is
+either portable or explicitly declared as a capability:
+
+| Kit | Tests | What it covers |
+|---|---|---|
+| Blob store | 75 | round trips, streams, parallel transfers, listing and pagination, conditional writes and deletes, batch delete, copy, metadata, checksums, tiers, presigned URLs and multipart |
+| Document store | 23 | every value type, versions and conditions, partial updates with concurrent increments, batches beyond provider limits, sort-key queries both ways with paging, secondary indexes, transactions with rollback, keys with `/ ? # % \`, expiry |
+| Messaging | 15 | round trips, binary bodies, ack and nack, lease expiry and extension, batches, listener retries and concurrency, claim checks, ordering, deduplication, delays |
+| Cache | 49 | basic and bulk operations, cache-aside, atomic operations, counters, locks, namespaces, expiry (fail-open has its own test against an unreachable server) |
+| Parameter store | 22 | CRUD, versions, prefixes, caching, JSON fields, native names, watching |
+
+### Emulators
+
+Integration tests (`*IT`) run the kits through Testcontainers against
+[Floci](https://floci.io) (`floci/floci` for AWS, `floci/floci-az` for Azure, `floci/floci-gcp` for
+Google Cloud), Google's Pub/Sub and Firestore emulators, Microsoft's Service Bus emulator, Valkey (plain,
+TLS with a private CA, and a 3-master cluster), HashiCorp Vault, PostgreSQL and MySQL. Image versions are
+pinned in the parent POM.
+
+Behaviour an emulator doesn't implement is declared per provider in `knownEnvironmentGaps()`, each case
+confirmed with raw HTTP requests against the emulator. Those tests are reported as skipped with the
+reason, so the kits stay strict for real clouds:
+
+| Emulator | Gap | Test skipped |
+|---|---|---|
+| Floci (AWS) | drops `Content-Language` | `putStoresStandardHttpHeaders` |
+| Floci-az | ignores `If-None-Match` on Put Block List | `writeInPartsWithIfNotExistsRejectsExistingBlob` |
+| Floci-az | no Set Blob Tier, Set Blob Properties or Blob Batch; no `x-ms-access-tier` | tier and metadata-update tests |
+| Floci-gcp | drops `cacheControl` on copy; metadata PATCH replaces the map | `copyPreservesHttpHeaders`, `updateMetadataReplacesHeadersAndMetadataButNotContent` |
+| Floci-gcp | no redelivery on Pub/Sub; increments not atomic in Firestore | the redelivery and increment tests (covered by Google's emulators) |
+
+### Real clouds
+
+The same kits run against real AWS, Google Cloud and Azure, on throwaway infrastructure that's always torn
+down. They found bugs the emulators hid, from unprocessed DynamoDB batches to Cosmos DB id escaping and
+Pub/Sub ordering keys. See [Cloud testing](cloud-testing/index.md) for how the runs work and every result.
+
+### Spring
+
+The Spring tests cover beans from properties, `@CirrusListener` with retries, claim checks, configuration
+import with live reload, health and metrics. They run on Spring Boot 3.5, and the same shared tests run
+again on Boot 4.1.
+
+## Benchmarks
+
+```bash
+mvn -pl cirrus-benchmarks -am package -DskipTests
+java -jar cirrus-benchmarks/target/benchmarks.jar                      # all JMH benchmarks
+java -jar cirrus-benchmarks/target/benchmarks.jar TransferBenchmark -p latencyMillis=50
+```
+
+The JMH benchmarks measure Cirrus itself, so they need no cloud account. `TransferBenchmark` and
+`BulkBenchmark` run against a simulated network: every request pays a round-trip latency, and each
+connection is capped at a bandwidth. That shows what the parallel engines gain, independently of your
+network. One short run on a laptop, at 20 ms latency and 100 MB/s per connection:
+
+| Benchmark | Sequential | Cirrus | Speed-up |
+|---|---|---|---|
+| 64 MiB download, 8 MiB ranges | 1,004 ms | 310 ms (parallelism 4), 219 ms (8) | 3.2x, 4.6x |
+| 64 MiB upload, 8 MiB parts | 1,125 ms | 445 ms (concurrency 4), 228 ms (8) | 2.5x, 4.9x |
+| delete 500 keys, no batch API | 10,934 ms | 705 ms (16 at a time) | 15x |
+| list 5,000 keys in 5 pages, 20 µs of work per key | 291 ms | 194 ms (next page prefetched) | 1.5x |
+| checksum one 8 MiB part | MD5: 660 MiB/s | CRC32C: about 16 GiB/s | about 25x |
+
+Calling the portable API costs about a microsecond more per call than calling the driver directly
+(`CoreBenchmark`), which is noise next to any network round trip. These runs were short, with wide error
+bars; rerun them on your own hardware before relying on the figures.
+
+### Load testing a real bucket
+
+Emulators don't behave like cloud storage under load, so tune against a real bucket with `LoadTest`. It
+uses each cloud's default credentials and deletes its objects afterwards:
+
+```bash
+java -cp cirrus-benchmarks/target/benchmarks.jar \
+  -Dprovider=aws -Dbucket=my-bench-bucket -Dregion=eu-west-1 \
+  -Dconcurrency=64 -Dduration=60s -Dsize=1MiB -Dmix=put:20,get:70,head:10 \
+  -Dcirrus.http.max-connections=256 \
+  org.kamranzafar.cirrus.benchmarks.LoadTest
+```
+
+It prints count, operations per second, MB/s, p50, p90, p99 and maximum latency, and errors, for each
+operation. Any `cirrus.*` property goes to the provider, for example `-Dcirrus.aws.retry-mode=standard`.
+Use `-Dparallelism=8` for parallel ranged gets, and `-Dendpoint=...` for S3-compatible stores.
