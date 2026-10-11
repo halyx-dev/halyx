@@ -33,6 +33,30 @@ in Vault. Each cloud is registered as a named provider and used through the same
   `unwrap` gives the native client when you need a provider-specific feature.
 - **Develop and test locally.** An in-memory provider for unit tests, and emulators for the rest.
 
+One `Cirrus` object holds a named connection to each cloud, and every service is used the same way
+whichever cloud it is on:
+
+```java
+try (Cirrus cirrus = Cirrus.builder()
+        .register("aws", ProviderConfig.of("aws").region("eu-west-2"))
+        .register("azure", ProviderConfig.of("azure").property(AzureProperties.STORAGE_ACCOUNT, "acmefiles"))
+        .register("gcp", ProviderConfig.of("gcp").property(GcpProperties.PROJECT_ID, "acme-prod"))
+        .build()) {
+
+    BlobStore invoices = cirrus.provider("aws").blobStore("acme-invoices");          // Amazon S3
+    BlobStore reports = cirrus.provider("azure").blobStore("reports");              // Azure Blob Storage
+    Publisher events = cirrus.provider("gcp").publisher("order-events");            // Google Cloud Pub/Sub
+
+    invoices.put(BlobKey.of("2026/42.pdf"), BlobContent.ofFile(pdf));
+    reports.put(BlobKey.of("daily/2026-10-11.csv"), BlobContent.ofFile(csv));
+    events.publish(OutgoingMessage.builder(json).attribute("type", "invoiced").build());
+}
+```
+
+Credentials come from each cloud's default chain (environment, workload identity, CLI login) unless you
+pass them. In Spring Boot, the same setup is a few `cirrus.providers.*` properties, with the services
+injected as beans.
+
 ### Supported services
 
 | Service | Cirrus API | AWS | Azure | GCP | Also |
