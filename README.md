@@ -1,3 +1,16 @@
+```text
+             .--.              .--.
+          .-(    ).   .--.   .-(    ).
+         (___.__)__) (    ) (___.__)__)
+  ____ ___ ____  ____  _   _ ____
+ / ___|_ _|  _ \|  _ \| | | / ___|
+| |    | || |_) | |_) | | | \___ \
+| |___ | ||  _ <|  _ <| |_| |___) |
+ \____|___|_| \_\_| \_\\___/|____/
+
+  one Java API for AWS · Azure · GCP
+```
+
 # Cirrus
 
 A cloud-agnostic Java 21 API that gives microservices one consistent way to use Cloud Native services like Storage, SQL, NoSQL,
