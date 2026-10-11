@@ -15,6 +15,11 @@ public final class ReceivedMessage {
     interface Settlement {
         void ack();
 
+        /** Acks in a later batch; a lost ack only means a redelivery. */
+        default void ackDeferred() {
+            ack();
+        }
+
         void nack(Duration delay);
 
         void extendLease(Duration lease);
@@ -81,6 +86,12 @@ public final class ReceivedMessage {
     public void ack() {
         settle();
         settlement.ack();
+    }
+
+    /** Settles now and acks with the next batch, as listeners do; failures are logged, not thrown. */
+    void ackDeferred() {
+        settle();
+        settlement.ackDeferred();
     }
 
     /** Redeliver as soon as possible. */

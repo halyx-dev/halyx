@@ -96,6 +96,16 @@ public final class PubSubSubscriptionDriver implements SubscriptionDriver {
     }
 
     @Override
+    public void ackAll(List<DriverMessage> messages) {
+        client.acknowledge(subscription, messages.stream().map(DriverMessage::receipt).toList());
+    }
+
+    @Override
+    public int maxAckBatch() {
+        return 100;
+    }
+
+    @Override
     public void nack(DriverMessage message, Duration delay) {
         modifyDeadline(message, delay);
     }

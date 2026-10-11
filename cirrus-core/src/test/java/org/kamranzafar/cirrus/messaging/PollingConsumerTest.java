@@ -60,7 +60,12 @@ class PollingConsumerTest {
         }
 
         @Override public int maxReceiveBatch() { return 100; }
-        @Override public void ack(DriverMessage message) { acked.add(message.id()); }
+        int ackBatch = 1;
+        final AtomicInteger ackRequests = new AtomicInteger();
+
+        @Override public void ack(DriverMessage message) { ackRequests.incrementAndGet(); acked.add(message.id()); }
+        @Override public void ackAll(List<DriverMessage> messages) { ackRequests.incrementAndGet(); messages.forEach(m -> acked.add(m.id())); }
+        @Override public int maxAckBatch() { return ackBatch; }
         @Override public void nack(DriverMessage message, Duration delay) { pending.add(message); }
         @Override public void extendLease(DriverMessage message, Duration lease) { extensions.incrementAndGet(); }
         @Override public Duration defaultLease() { return lease; }
@@ -132,5 +137,39 @@ class PollingConsumerTest {
         assertThat(options.backoff(3)).isEqualTo(Duration.ofSeconds(4));
         assertThat(options.backoff(10)).isEqualTo(Duration.ofSeconds(10));
         assertThat(options.backoff(0)).isEqualTo(Duration.ofSeconds(1));
+    }
+
+    @Test
+    void listenerAcksAreSentInBatches() throws InterruptedException {
+        var driver = new BatchDriver(Duration.ofMinutes(1));
+        driver.ackBatch = 10;
+        for (int i = 0; i < 25; i++) {
+            driver.add("m" + i, null);
+        }
+        CountDownLatch all = new CountDownLatch(25);
+
+        try (MessageConsumer ignored = subscription(driver).listen(message -> all.countDown(),
+                ConsumerOptions.DEFAULTS.withConcurrency(25).withPollWait(Duration.ofMillis(50)))) {
+            assertThat(all.await(5, TimeUnit.SECONDS)).isTrue();
+        }
+
+        // close() flushes the last partial batch.
+        assertThat(driver.acked).hasSize(25);
+        assertThat(driver.ackRequests.get()).isLessThanOrEqualTo(5);
+    }
+
+    @Test
+    void lonelyAcksAreFlushedAfterTheLinger() throws InterruptedException {
+        var driver = new BatchDriver(Duration.ofMinutes(1));
+        driver.ackBatch = 10;
+        driver.add("solo", null);
+        CountDownLatch handled = new CountDownLatch(1);
+
+        try (MessageConsumer ignored = subscription(driver).listen(message -> handled.countDown(),
+                ConsumerOptions.DEFAULTS.withPollWait(Duration.ofMillis(50)))) {
+            assertThat(handled.await(5, TimeUnit.SECONDS)).isTrue();
+            Thread.sleep(DefaultSubscription.ACK_LINGER.toMillis() * 3);
+            assertThat(driver.acked).containsExactly("solo");
+        }
     }
 }

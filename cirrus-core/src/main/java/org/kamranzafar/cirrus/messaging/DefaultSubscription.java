@@ -15,6 +15,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 /** The portable subscription: claim-check resolution, settlement and interceptors over a driver. */
@@ -22,9 +25,14 @@ public final class DefaultSubscription implements Subscription {
 
     private static final Logger LOG = LoggerFactory.getLogger(DefaultSubscription.class);
 
+    /** Acks collected for one batch wait at most this long. */
+    static final Duration ACK_LINGER = Duration.ofMillis(100);
+
     private final SubscriptionDriver driver;
     private final SubscriptionConfig config;
     private final InterceptorChain interceptors;
+    private final List<DriverMessage> pendingAcks = new ArrayList<>();
+    private ScheduledExecutorService ackFlusher;
 
     public DefaultSubscription(SubscriptionDriver driver, SubscriptionConfig config, InterceptorChain interceptors) {
         this.driver = Objects.requireNonNull(driver, "driver");
@@ -97,6 +105,11 @@ public final class DefaultSubscription implements Subscription {
             }
 
             @Override
+            public void ackDeferred() {
+                deferAck(message);
+            }
+
+            @Override
             public void nack(Duration delay) {
                 execute("nack", true, () -> {
                     driver.nack(message, delay);
@@ -112,6 +125,69 @@ public final class DefaultSubscription implements Subscription {
                 });
             }
         });
+    }
+
+    private void deferAck(DriverMessage message) {
+        int batch = driver.maxAckBatch();
+        if (batch <= 1) {
+            execute("ack", true, () -> {
+                driver.ack(message);
+                return null;
+            });
+            return;
+        }
+        List<DriverMessage> full = null;
+        synchronized (pendingAcks) {
+            pendingAcks.add(message);
+            if (pendingAcks.size() >= batch) {
+                full = new ArrayList<>(pendingAcks);
+                pendingAcks.clear();
+            } else if (pendingAcks.size() == 1) {
+                if (ackFlusher == null) {
+                    ackFlusher = Executors.newSingleThreadScheduledExecutor(Thread.ofPlatform().daemon()
+                            .name("cirrus-ack-" + driver.name()).factory());
+                }
+                ackFlusher.schedule(this::flushAcks, ACK_LINGER.toMillis(), TimeUnit.MILLISECONDS);
+            }
+        }
+        if (full != null) {
+            sendAcks(full);
+        }
+    }
+
+    /** Sends any acks waiting for a batch. */
+    void flushAcks() {
+        List<DriverMessage> batch;
+        synchronized (pendingAcks) {
+            if (pendingAcks.isEmpty()) {
+                return;
+            }
+            batch = new ArrayList<>(pendingAcks);
+            pendingAcks.clear();
+        }
+        sendAcks(batch);
+    }
+
+    private void sendAcks(List<DriverMessage> batch) {
+        try {
+            execute("ack", true, () -> {
+                driver.ackAll(batch);
+                return null;
+            });
+        } catch (RuntimeException e) {
+            LOG.warn("Batched ack of {} message(s) on {} failed; they will be redelivered", batch.size(), name(), e);
+        }
+    }
+
+    /** Flushes pending acks and stops the flusher (when a consumer stops). */
+    void stopAckBatching() {
+        flushAcks();
+        synchronized (pendingAcks) {
+            if (ackFlusher != null) {
+                ackFlusher.shutdown();
+                ackFlusher = null;
+            }
+        }
     }
 
     private <T> T execute(String operation, boolean idempotent, Supplier<T> call) {

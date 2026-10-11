@@ -159,7 +159,7 @@ final class PollingConsumer implements MessageConsumer {
     private void settleQuietly(ReceivedMessage message, boolean ack, Duration delay) {
         try {
             if (ack) {
-                message.ack();
+                message.ackDeferred();
                 acked.incrementAndGet();
             } else {
                 message.nack(delay);
@@ -202,6 +202,9 @@ final class PollingConsumer implements MessageConsumer {
         } finally {
             leases.shutdownNow();
             handlers.shutdown();
+            if (subscription instanceof DefaultSubscription portable) {
+                portable.stopAckBatching();
+            }
         }
     }
 

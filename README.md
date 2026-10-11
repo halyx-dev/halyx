@@ -435,7 +435,10 @@ at once. It only asks for as many messages as it has free slots, so slow handler
 piling up leased messages. While a handler runs, its lease is extended. Returning acks the message; throwing
 nacks it for redelivery with exponential backoff (1s doubling up to 5 minutes by default). Messages with the
 same ordering key are handled one at a time, in order. `close()` stops pulling and lets running handlers
-finish. Use `receive(max, wait)` with `ack()`, `nack(delay)` and `extendLease(d)` to pull by hand.
+finish. Listener acks are sent in batches (10 per request on SQS, 100 on Pub/Sub; Service Bus settles one
+at a time), flushed when a batch fills or 100 ms after its first ack. A lost batched ack only means a
+redelivery. Use `receive(max, wait)` with `ack()`, `nack(delay)` and `extendLease(d)` to pull by hand;
+those acks are sent at once.
 
 | | AWS | Azure | GCP |
 |---|---|---|---|
@@ -852,8 +855,6 @@ Backlog, in order:
    - NoSQL secondary-index queries (DynamoDB GSIs, Cosmos and Firestore field queries)
    - NoSQL transactions within a partition (DynamoDB transactions, Cosmos transactional batch,
      Firestore transactions)
-   - Messaging ack batching (SQS DeleteMessageBatch, Pub/Sub batched acknowledge, Service Bus
-     batched settlement)
    - Service Bus sessions, for ordering keys on Azure
 2. Real-cloud test profile: Terraform for throwaway resources per cloud and a Maven profile running the
    conformance kits and IAM tests against them

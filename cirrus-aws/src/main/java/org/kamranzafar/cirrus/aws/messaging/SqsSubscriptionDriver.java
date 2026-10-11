@@ -10,6 +10,7 @@ import org.kamranzafar.cirrus.messaging.spi.DriverMessage;
 import org.kamranzafar.cirrus.messaging.spi.MessagingErrors;
 import org.kamranzafar.cirrus.messaging.spi.SubscriptionDriver;
 import software.amazon.awssdk.services.sqs.SqsClient;
+import software.amazon.awssdk.services.sqs.model.DeleteMessageBatchRequestEntry;
 import software.amazon.awssdk.services.sqs.model.Message;
 import software.amazon.awssdk.services.sqs.model.MessageSystemAttributeName;
 import software.amazon.awssdk.services.sqs.model.QueueAttributeName;
@@ -146,6 +147,27 @@ public final class SqsSubscriptionDriver implements SubscriptionDriver {
     @Override
     public void ack(DriverMessage message) {
         sqs.deleteMessage(b -> b.queueUrl(queueUrl).receiptHandle(message.receipt()));
+    }
+
+    /** DeleteMessageBatch: up to 10 per request. Entries SQS rejects are logged and redelivered later. */
+    @Override
+    public void ackAll(List<DriverMessage> messages) {
+        List<DeleteMessageBatchRequestEntry> entries = new ArrayList<>(messages.size());
+        for (int i = 0; i < messages.size(); i++) {
+            entries.add(DeleteMessageBatchRequestEntry.builder().id(String.valueOf(i))
+                    .receiptHandle(messages.get(i).receipt()).build());
+        }
+        var response = sqs.deleteMessageBatch(b -> b.queueUrl(queueUrl).entries(entries));
+        if (!response.failed().isEmpty()) {
+            var failure = response.failed().getFirst();
+            throw AwsErrors.fromCode(failure.code(), "SQS rejected " + response.failed().size()
+                    + " of " + messages.size() + " acks: " + failure.message());
+        }
+    }
+
+    @Override
+    public int maxAckBatch() {
+        return 10;
     }
 
     @Override

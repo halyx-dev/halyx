@@ -29,6 +29,16 @@ public interface SubscriptionDriver extends AutoCloseable {
 
     void ack(DriverMessage message);
 
+    /** Acks up to {@link #maxAckBatch()} messages in as few requests as the provider allows. */
+    default void ackAll(List<DriverMessage> messages) {
+        messages.forEach(this::ack);
+    }
+
+    /** Most messages per {@link #ackAll} request; 1 means the provider has no batch ack. */
+    default int maxAckBatch() {
+        return 1;
+    }
+
     /** Makes the message available again, after {@code delay} where {@code NACK_DELAY} is supported. */
     void nack(DriverMessage message, Duration delay);
 
