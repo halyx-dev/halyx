@@ -44,7 +44,7 @@ class TlsCacheIT {
     static void start() throws Exception {
         Path keystore = dir.resolve("server.p12");
         run(keytool(), "-genkeypair", "-alias", "server", "-keyalg", "RSA", "-keysize", "2048", "-validity", "2",
-                "-dname", "CN=localhost", "-ext", "SAN=dns:localhost,ip:127.0.0.1",
+                "-dname", "CN=localhost", "-ext", "SAN=dns:localhost", // not 127.0.0.1: see the verify-peer tests
                 "-keystore", keystore.toString(), "-storetype", "PKCS12", "-storepass", "changeit");
         caCertificate = dir.resolve("server.crt");
         run(keytool(), "-exportcert", "-rfc", "-alias", "server", "-keystore", keystore.toString(),
@@ -101,6 +101,40 @@ class TlsCacheIT {
                 .isInstanceOf(AccessDeniedException.class)
                 .hasMessageContaining(RedisCaches.CA_CERTIFICATE)
                 .satisfies(e -> assertThat(((AccessDeniedException) e).isRetryable()).isFalse());
+    }
+
+    /** The address the certificate doesn't name, as when connecting through a tunnel. */
+    private static URI unnamedAddress() {
+        return URI.create("rediss://127.0.0.1:" + valkey.getMappedPort(6379));
+    }
+
+    @Test
+    void fullVerificationRejectsACertificateForAnotherName() {
+        var mismatched = CacheConfig.builder(unnamedAddress())
+                .property(RedisCaches.CA_CERTIFICATE, caCertificate.toString()).namespace("full").build();
+
+        assertThatThrownBy(() -> cirrus.provider("redis").cache(mismatched).get("k"))
+                .isInstanceOf(AccessDeniedException.class);
+    }
+
+    @Test
+    void caVerificationChecksTheChainButNotTheName() {
+        var tunnelled = CacheConfig.builder(unnamedAddress())
+                .property(RedisCaches.CA_CERTIFICATE, caCertificate.toString())
+                .property(RedisCaches.VERIFY_PEER, "ca").namespace("ca-only").build();
+        var cache = cirrus.provider("redis").cache(tunnelled);
+        cache.put("k", "v");
+
+        assertThat(cache.get("k")).contains("v");
+    }
+
+    @Test
+    void caVerificationStillRejectsAnUntrustedChain() {
+        var untrusted = CacheConfig.builder(unnamedAddress())
+                .property(RedisCaches.VERIFY_PEER, "ca").namespace("ca-untrusted").build();
+
+        assertThatThrownBy(() -> cirrus.provider("redis").cache(untrusted).get("k"))
+                .isInstanceOf(AccessDeniedException.class);
     }
 
     @Test

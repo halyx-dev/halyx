@@ -43,7 +43,10 @@ import java.util.function.Function;
  *   <li>{@code redis.ca-certificate}: path to a PEM file of CA certificates to trust for TLS, for
  *       servers whose certificates are not signed by a public CA, such as Memorystore's
  *       in-transit encryption.</li>
- *   <li>{@code redis.verify-peer}: {@code false} skips TLS certificate checks, for local tunnels only.</li>
+ *   <li>{@code redis.verify-peer}: {@code true} (default) checks the server certificate's chain and that it
+ *       names the host connected to; {@code ca} checks the chain only, for a tunnel or proxy whose local
+ *       address the certificate can't name; {@code false} skips TLS certificate checks, for local tests
+ *       only.</li>
  *   <li>{@code redis.dns-resolver}: {@code netty} (default) resolves host names with Netty's asynchronous
  *       DNS client, which reads {@code /etc/hosts} and the system's DNS servers itself; {@code jdk}
  *       resolves them like the rest of the JVM ({@code InetAddress}), so JVM DNS settings apply: the
@@ -132,6 +135,16 @@ public final class RedisCaches implements AutoCloseable {
         return open.computeIfAbsent(key, k -> new Endpoint(config, credentials)).driver;
     }
 
+    private static SslVerifyMode verifyMode(CacheConfig config) {
+        String mode = config.property(VERIFY_PEER).orElse("true").trim().toLowerCase(Locale.ROOT);
+        return switch (mode) {
+            case "true", "full" -> SslVerifyMode.FULL;
+            case "ca" -> SslVerifyMode.CA;
+            case "false", "none" -> SslVerifyMode.NONE;
+            default -> throw new IllegalArgumentException(VERIFY_PEER + " must be true, ca or false, not '" + mode + "'");
+        };
+    }
+
     private ClientResources resources(CacheConfig config) {
         String resolver = config.property(DNS_RESOLVER).orElse("netty").trim().toLowerCase(Locale.ROOT);
         return switch (resolver) {
@@ -161,8 +174,8 @@ public final class RedisCaches implements AutoCloseable {
                 .withPort(endpoint.getPort() > 0 ? endpoint.getPort() : RedisURI.DEFAULT_REDIS_PORT)
                 .withTimeout(timeout)
                 .withSsl(config.tls());
-        if (config.tls() && "false".equalsIgnoreCase(config.property(VERIFY_PEER).orElse("true"))) {
-            uri.withVerifyPeer(SslVerifyMode.NONE);
+        if (config.tls()) {
+            uri.withVerifyPeer(verifyMode(config));
         }
         RefreshingCredentialsProvider credentials = source == null ? null : new RefreshingCredentialsProvider(source);
         if (credentials != null) {
