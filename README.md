@@ -17,6 +17,19 @@ in Vault. Each cloud is registered as a named provider and used through the same
   `unwrap` gives the native client when you need a provider-specific feature.
 - **Develop and test locally.** An in-memory provider for unit tests, and emulators for the rest.
 
+### Supported services
+
+| Service | Cirrus API | AWS | Azure | GCP | Also |
+|---|---|---|---|---|---|
+| [Storage](#storage) | `BlobStore` | Amazon S3 | Azure Blob Storage | Google Cloud Storage | in-memory |
+| [Caches](#caches) | `Cache` | Amazon ElastiCache | Azure Cache for Redis, Azure Managed Redis | Memorystore | any Redis or Valkey server, in-memory |
+| [Parameters and secrets](#parameters-and-secrets) | `ParameterStore` | SSM Parameter Store, Secrets Manager | App Configuration, Key Vault | Parameter Manager, Secret Manager | HashiCorp Vault, in-memory |
+| [NoSQL document stores](#nosql-document-stores) | `DocumentStore` | Amazon DynamoDB | Azure Cosmos DB for NoSQL | Cloud Firestore | in-memory |
+| [Messaging](#messaging) | `Publisher`, `Subscription` | Amazon SNS, Amazon SQS | Azure Service Bus | Google Cloud Pub/Sub | in-memory |
+| [SQL databases](#sql-databases) | `Database` (a JDBC `DataSource`) | Amazon RDS, Aurora | Azure Database for PostgreSQL and MySQL, Azure SQL | Cloud SQL | any PostgreSQL, MySQL or SQL Server |
+
+Every service has a Spring Boot integration: beans from `cirrus.*` properties, health, metrics and
+tracing ([Spring Boot](#spring-boot)), on Boot 3.5 and 4.
 
 ## Storage
 
