@@ -22,16 +22,19 @@
   <img alt="AWS, Azure, Google Cloud" src="https://img.shields.io/badge/clouds-AWS%20%7C%20Azure%20%7C%20Google%20Cloud-informational">
 </p>
 
-**Cirrus** is a cloud-agnostic Java API for the services microservices depend on: object storage, NoSQL
-documents, messaging, SQL databases, caches, and parameters and secrets, on **AWS**, **Azure** and
-**Google Cloud**.
+**Cirrus** is a cloud-agnostic Java 21 API that gives microservices one consistent way to use Cloud Native services like Storage, SQL, NoSQL,
+Caches, Messaging, and Parameters and Secrets across **AWS**, **Azure** and **GCP**.
+
+With Cirrus you can build **multi-cloud microservices and applications**. A single microservice or application can work with
+services on several clouds at once, such as files on S3, a cache on Azure, events on Pub/Sub and secrets
+in Vault. Each cloud is registered as a named provider and used through the same API.
 
 **[Documentation](https://kamranzafar.github.io/cirrus/)** · [Getting started](https://kamranzafar.github.io/cirrus/getting-started.html) · [API guide](https://kamranzafar.github.io/cirrus/api/) ·
 [Spring Boot](https://kamranzafar.github.io/cirrus/spring-boot.html) · [Cloud testing](https://kamranzafar.github.io/cirrus/cloud-testing/) · [Roadmap](https://kamranzafar.github.io/cirrus/roadmap.html)
 
 ## Why Cirrus
 
-Most "cloud-agnostic" microservices aren't. The business logic may be portable, but the code around it is
+Most "cloud-agnostic" microservices aren't portable. The business logic may be portable, but the code around it is
 written against one cloud's SDK: `S3Client` here, `ServiceBusSenderClient` there, each with its own types,
 error codes, retry rules and consistency quirks. Moving a service to another cloud, or running it on two,
 means rewriting and retesting all of that.
