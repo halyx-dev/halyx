@@ -10,13 +10,11 @@
 ╚██████╗██║██║  ██║██║  ██║╚██████╔╝███████║
  ╚═════╝╚═╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝
                                             
-     one Java API for AWS · Azure · GCP     
+     Cirrus: one Java API for AWS · Azure · GCP     
 </pre>
 </div>
 
-# Cirrus
-
-A cloud-agnostic Java 21 API that gives microservices one consistent way to use Cloud Native services like Storage, SQL, NoSQL,
+<b>Cirrus</b> is a cloud-agnostic Java 21 API that gives microservices one consistent way to use Cloud Native services like Storage, SQL, NoSQL,
 Caches, Messaging, and Parameters and Secrets across **AWS**, **Azure** and **GCP**.
 
 With Cirrus you can build **multi-cloud microservices and applications**. A single microservice or application can work with
@@ -602,6 +600,14 @@ DataSource dataSource = orders.dataSource();   // to JDBC, JPA, jOOQ, Flyway
 | AWS | RDS IAM token (SigV4, signed locally, 15 min) | PostgreSQL, MySQL | the database user granted `rds_iam` |
 | Azure | Entra ID access token | PostgreSQL, MySQL, Azure SQL | the identity's database role; not used for Azure SQL (`accessToken` property) |
 | GCP | OAuth token, `sqlservice.login` scope | PostgreSQL, MySQL | derived from the service account if omitted (`app@project.iam` / `app`) |
+
+An RDS IAM login is slower than a password login, because RDS checks every token on the server side.
+Measured from the same client against `db.t4g.micro` instances, a password login took about 0.35s and a
+token login 0.5–1.1s. The first token login a new instance sees took 5–6s. Signing the token takes
+about 1ms. Pooled connections pay this only when they are opened. To keep it off the first request, set
+`minIdle` above zero so the pool opens connections in the background, and keep `maxLifetime` long.
+RDS also limits how fast new IAM connections can be opened, so pool rather than connect per request
+([docs/cloud-testing.md](docs/cloud-testing.md#login-latency)).
 
 RDS Proxy works as is: use the proxy endpoint as `host`, with `SqlAuth.iam(...)` when the proxy requires
 IAM authentication. IAM logins turn on TLS (`sslmode=require`, `sslMode=REQUIRED` or `encrypt=true`); override it with

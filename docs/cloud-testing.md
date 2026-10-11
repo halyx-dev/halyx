@@ -294,14 +294,15 @@ Terraform (`infra/aws/tier2`) creates RDS for PostgreSQL 17 and RDS for MySQL 8.
 
 | | |
 |---|---|
-| Date | 2026-10-11, 03:53–04:03 UTC (10m 30s: create 6m 18s, tests 53s, destroy and check about 3m) |
-| Run id | `r2610111453e0bc` |
+| Date | 2026-10-11, 04:14–04:23 UTC |
+| Run id | `r26101115149618` |
 | Engines | PostgreSQL 17, MySQL 8.4 |
-| Result | **BUILD SUCCESS**: 10 passed, 0 failed |
+| Result | **BUILD SUCCESS**: 12 passed, 0 failed |
 | Teardown | instances, security group and subnet group destroyed; state deleted; check: **nothing left** |
 
 | Test | PostgreSQL | MySQL |
 |---|---|---|
+| `loginLatency`: runs first and times each login (see below); a warm token login must take under 3s | passed | passed |
 | `passwordLoginRunsQueriesOverTls`: master password login, and the session is encrypted | passed (1.2s) | passed (1.2s) |
 | `iamTokenLoginRunsQueriesOverTls`: `SqlAuth.iam("cirrus_iam")` runs queries as `cirrus_iam` over TLS, and the pool reports healthy | passed (9.4s) | passed (10.2s) |
 | `replacedConnectionsLogInAgainWithTokens`: three rounds of filling the pool, then evicting it, with every new connection signing in by token | passed (9.7s) | passed (8.9s) |
@@ -309,7 +310,35 @@ Terraform (`infra/aws/tier2`) creates RDS for PostgreSQL 17 and RDS for MySQL 8.
 | `wrongPasswordDoesNotLogIn` | passed (1.4s) | passed (1.6s) |
 
 TLS is checked on the server side: `pg_stat_ssl` for the session on PostgreSQL, and `Ssl_version` on
-MySQL. It isn't inferred from the client settings.
+MySQL. It isn't inferred from the client settings. The per-test times above come from the earlier run
+`r2610111453e0bc`, before `loginLatency` existed. Without it, the first IAM test also paid the
+first-login cost described below.
+
+### Login latency
+
+Run `r26101115149618` timed every login on newly created instances, in order. It measured plain JDBC with
+no Cirrus code in the path, and then a Cirrus IAM pool:
+
+| Login | PostgreSQL | MySQL |
+|---|---|---|
+| plain JDBC, password (×3) | 327–369 ms | 344–368 ms |
+| plain JDBC, **first** token on the instance | **6,120 ms** | **5,202 ms** |
+| plain JDBC, later tokens (×4) | 650–945 ms | 791–1,078 ms |
+| Cirrus pool, new token connections (×3) | 569–1,327 ms | 518–1,196 ms |
+| token signing, client side | 1 ms (122 ms on first use, when credentials resolve) | 0–3 ms |
+
+Findings:
+
+- **Cirrus adds no measurable cost.** Signing is local and takes about 1ms, and the token is cached per
+  pool. Pool connections cost the same as plain JDBC with a token.
+- **The cost is on the server.** RDS checks each token as the connection logs in. That adds about
+  0.3–0.7s per new connection over a password login. The first token login a new instance sees takes
+  5–6s.
+- **Pools hide the cost.** Only opening a connection pays it. `minIdle > 0` opens connections in the
+  background, so the first request doesn't wait.
+
+Earlier, `iamTokenLoginRunsQueriesOverTls` took about 9.4s because it was the first IAM login on the
+instance. `replacedConnectionsLogInAgainWithTokens` took about 9s because it opens 12 connections.
 
 ## Run history
 
@@ -325,7 +354,8 @@ MySQL. It isn't inferred from the client settings.
 | `r2610111422284e` | tier 1 | **170 passed, 2 skipped** | clean | Latest tier 1 result, above. |
 | `r26101114370e5e` | tier 1, Secrets Manager | 22/22 | clean | The waits were removed from the driver. Writing a name that is still being deleted now fails with `UnavailableException`, and the kit retries via `deleteLag()`. `deletedNamesCanBeReused` took 18.2s, which is how long AWS took to finish that delete. |
 | `r26101114471b0c` | tier 2 | not run | clean (subnet group deleted) | Stopped at `terraform apply`: no `ec2:CreateSecurityGroup` permission. |
-| `r2610111453e0bc` | tier 2 | **10/10** | clean | Latest tier 2 result, above. |
+| `r2610111453e0bc` | tier 2 | 10/10 | clean | The first IAM login took about 9s, which led to the latency investigation. |
+| `r26101115149618` | tier 2 | **12/12** | clean | Latest tier 2 result. `loginLatency` added: the slow first token login also happens with plain JDBC, so the cost is on the RDS side. |
 
 ## What real AWS found
 

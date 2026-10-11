@@ -3,11 +3,15 @@ package org.kamranzafar.cirrus.aws;
 import com.zaxxer.hikari.HikariDataSource;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.api.TestMethodOrder;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.kamranzafar.cirrus.Cirrus;
+import org.kamranzafar.cirrus.aws.rds.RdsIamTokens;
 import org.kamranzafar.cirrus.CloudContext;
 import org.kamranzafar.cirrus.config.ProviderConfig;
 import org.kamranzafar.cirrus.sql.Database;
@@ -15,14 +19,17 @@ import org.kamranzafar.cirrus.sql.PoolSettings;
 import org.kamranzafar.cirrus.sql.SqlAuth;
 import org.kamranzafar.cirrus.sql.SqlConfig;
 import org.kamranzafar.cirrus.sql.SqlEngine;
+import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 
 import java.sql.Connection;
+import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Properties;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -56,6 +63,7 @@ class RealAwsSqlIT {
         }
     }
 
+    @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
     abstract static class Engine {
 
         private final List<Database> open = new ArrayList<>();
@@ -114,6 +122,58 @@ class RealAwsSqlIT {
         @AfterAll
         void closeDatabases() {
             open.forEach(Database::close);
+        }
+
+        /**
+         * Login latency, connection by connection: plain JDBC with a password, plain JDBC with a token, then a
+         * Cirrus IAM pool. Runs first, so the first token login is the first one the new instance has seen.
+         */
+        @Test
+        @Order(1)
+        void loginLatency() throws SQLException {
+            String url = SqlConfig.builder(engine()).host(host()).port(port()).database("app")
+                    .auth(SqlAuth.iam(IAM_USER)).build().jdbcUrl();
+            String[] tls = engine().tlsProperty();
+            String master = System.getProperty("cirrus.real.aws.sql.master-user");
+            String region = System.getenv().getOrDefault("AWS_REGION", "ap-southeast-2");
+            var tokens = new RdsIamTokens(host(), port(), IAM_USER, region, DefaultCredentialsProvider.builder().build());
+            List<String> timings = new ArrayList<>();
+
+            for (int i = 1; i <= 3; i++) {
+                timings.add("jdbc password #" + i + ": " + connectMillis(url, tls, master,
+                        System.getenv("CIRRUS_RDS_MASTER_PASSWORD")) + " ms");
+            }
+            long[] tokenMillis = new long[5];
+            for (int i = 0; i < 5; i++) {
+                long sign = System.nanoTime();
+                String token = tokens.login().password();
+                long signed = (System.nanoTime() - sign) / 1_000_000;
+                tokenMillis[i] = connectMillis(url, tls, IAM_USER, token);
+                timings.add("jdbc token #" + (i + 1) + ": " + tokenMillis[i] + " ms (signing " + signed + " ms)");
+            }
+            Database database = database(SqlAuth.iam(IAM_USER));
+            HikariDataSource pool = (HikariDataSource) database.dataSource();
+            for (int i = 1; i <= 3; i++) {
+                long start = System.nanoTime();
+                pool.getConnection().close();
+                timings.add("cirrus pool, new connection #" + i + ": " + (System.nanoTime() - start) / 1_000_000 + " ms");
+                pool.getHikariPoolMXBean().softEvictConnections();
+            }
+            System.out.println("[login latency] " + engine() + "\n  " + String.join("\n  ", timings));
+
+            // A warm token login must cost about what a password login does, not seconds.
+            assertThat(tokenMillis[4]).as("warm token login, ms").isLessThan(3_000);
+        }
+
+        private static long connectMillis(String url, String[] tls, String user, String password) throws SQLException {
+            Properties props = new Properties();
+            props.setProperty(tls[0], tls[1]);
+            props.setProperty("user", user);
+            props.setProperty("password", password);
+            long start = System.nanoTime();
+            try (Connection c = DriverManager.getConnection(url, props)) {
+                return (System.nanoTime() - start) / 1_000_000;
+            }
         }
 
         @Test
