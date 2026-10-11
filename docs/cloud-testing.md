@@ -15,6 +15,8 @@ eventual consistency and asynchronous deletes.
 | GCP | 2 | Cloud SQL for PostgreSQL and MySQL with IAM auth, direct and through the Cloud SQL connector | **18/18** |
 | GCP | 3 | Memorystore for Valkey with IAM auth and TLS (private CA) | **54/54** |
 | Azure | 1 | Blob Storage, Cosmos DB, Service Bus, Key Vault, App Configuration (Entra ID only) | **156/158** passed, 2 skipped (expected) |
+| Azure | 2 | Azure Database for PostgreSQL and Azure SQL with Entra ID login | **11/11** |
+| Azure | 3 | Azure Managed Redis with Entra ID (access keys off) | **52/52** |
 
 ## How an AWS run works
 
@@ -1374,6 +1376,83 @@ removed (see the findings and the run history).
 
 </details>
 
+## Azure tier 2: latest result
+
+```bash
+TIER=2 scripts/azure-real-cloud.sh
+```
+
+The script first registers `Microsoft.DBforPostgreSQL` and `Microsoft.Sql`, as the service principal
+through the REST API. Terraform (`infra/azure/tier2`) then creates:
+- **PostgreSQL:** a flexible server (16, `B_Standard_B1ms`) with Entra and password auth. The service
+  principal is its Entra admin (role `cirrus-test`), and a password admin `cirrus_admin` gets a password
+  generated for the run and passed through the environment only.
+- **Azure SQL:** a Basic database on a server that allows **Entra ID only**, with the service principal as
+  its admin. SQL logins are refused.
+
+Both accept only the test machine's address. Teardown deletes the Terraform state, which held the password.
+
+**MySQL is not run.** An Entra admin on Azure Database for MySQL needs a managed identity that can read the
+directory (Graph `User.Read.All`, `GroupMember.Read.All` and `Application.Read.All`, or Directory Readers),
+which only a directory admin can grant. Left out by choice for now.
+
+| | |
+|---|---|
+| Date | 2026-10-11, 11:36–11:49 UTC (13 min: PostgreSQL ready in 6m 4s, Azure SQL in under 4 min, tests 45s) |
+| Run id | `r26101122362e30` |
+| Engines | PostgreSQL 16 (flexible server), Azure SQL Database (Basic) |
+| Result | **BUILD SUCCESS**: 11 passed, 0 failed |
+| Teardown | resource group destroyed; state deleted; check: **nothing left** |
+
+| Test | PostgreSQL | Azure SQL |
+|---|---|---|
+| `loginLatency`: runs first; a warm Entra login must take under 3s | passed (6.0s) | passed (2.0s) |
+| `entraLoginRunsQueriesOverTls`: the server reports the session encrypted (`pg_stat_ssl` / `sys.dm_exec_connections.encrypt_option`) | passed (1.0s) | passed (0.9s) |
+| `replacedConnectionsLogInAgainWithTokens` | passed (5.2s) | passed (4.5s) |
+| `entraLoginIsThePrincipalsRole`: `current_user` is `cirrus-test` | passed (9.4s) | — |
+| `passwordLoginRunsQueriesOverTls`: the password admin, over TLS | passed (2.5s) | — |
+| `tokenDoesNotLogInARoleThatIsNotAnEntraPrincipal`: a token for `cirrus_admin` is refused | passed (6.8s) | — |
+| `wrongPasswordDoesNotLogIn` | passed (3.4s) | — |
+| `sqlPasswordLoginIsRefusedOnAnEntraOnlyServer` | — | passed (2.5s) |
+
+On Azure SQL the service principal's session runs as `<application id>@<tenant id>`
+(`SUSER_SNAME()`). The token is the driver's `accessToken` property, with no username.
+
+| Entra login, per new connection | PostgreSQL | Azure SQL |
+|---|---|---|
+| first on the new server | 4,391 ms | 1,026 ms |
+| then | 343–366 ms | 300–316 ms |
+
+## Azure tier 3: latest result
+
+```bash
+TIER=3 scripts/azure-real-cloud.sh
+```
+
+The script registers `Microsoft.Cache`, then Terraform (`infra/azure/tier3`) creates an **Azure Managed
+Redis** cache (`Balanced_B0`, no high availability) with:
+- **access keys off**, so only Entra ID works
+- the `EnterpriseCluster` clustering policy: one endpoint, with no redirects to node addresses
+- encrypted connections on the public endpoint (port 10000)
+
+The service principal gets the cache's `default` access policy. This subscription doesn't offer classic
+Azure Cache for Redis in Australia East, and Managed Redis is its successor. The username is the
+principal's object id, which Cirrus reads from the token's `oid` claim.
+
+| | |
+|---|---|
+| Date | 2026-10-11, 11:24–11:40 UTC (16 min: cache ready in 7m 27s, a 60s wait for the access policy, tests 15s) |
+| Run id | `r2610112224c642` |
+| Result | **BUILD SUCCESS**: 52 passed, 0 failed, on the first run |
+| Teardown | resource group destroyed; check: **nothing left** |
+
+| Test | Result |
+|---|---|
+| Cache conformance kit, with Entra tokens over TLS (public certificate, full host name checks) | **49/49 passed** (11.2s) |
+| `entraTokenReadsAndWrites` | passed |
+| `unauthenticatedConnectionIsRejected` | passed |
+| `forgedTokenIsRejected`: an unsigned token is refused | passed |
+
 ## Azure run history
 
 | Run id | Scope | Result | Teardown | Notes |
@@ -1381,6 +1460,9 @@ removed (see the findings and the run history).
 | `r26101120222893` | tier 1 | 150 passed, 1 failed, 6 errors, 2 skipped | clean (checked by hand) | Cosmos: patch returned no document (`NullPointerException`), and ids escaped with `%` couldn't be read back. Blob: `InvalidMetadata` for the name `schema-version`. The final check failed outright: the script passed `--subscription` before the `az` command. It reported `CHECK FAILED` instead of "nothing left", and a manual check found nothing. |
 | `r26101120508d84` | tier 1 | **156/158, 2 skipped** | clean | Latest result, above. |
 | `r26101121415f6f` | tier 1, Key Vault | **22/22** | clean | Key Vault waits removed from the driver; the kit retries via `deleteLag()`. `deletedNamesCanBeReused` took 4.2s. One transient error on a pooled connection to the vault made `missingIsEmptyAndRequireFails` take 43.8s while the SDK retried (0.6s in the run before). |
+| `r26101122061ed2` | tier 2 | not run | clean | Creating the PostgreSQL flexible server failed with `InternalServerError` (no detail) on Azure's side; the subscription isn't restricted (`OfferRestricted` is disabled, Burstable available). Retried unchanged. |
+| `r2610112224c642` | tier 3 | **52/52** | clean | Latest tier 3 result, above, on the first run. |
+| `r26101122362e30` | tier 2 | **11/11** | clean | Latest tier 2 result, above. The same configuration succeeded on retry. |
 
 ## What real Azure found
 
@@ -1391,9 +1473,10 @@ The emulators (Floci-az and Microsoft's Service Bus emulator) missed all of thes
 | Real Cosmos returns no document from a write unless asked (`contentResponseOnWriteEnabled` is off in the Java SDK), so `update` failed after the patch had already applied | Patch asks for the document back |
 | Cosmos ids can't contain `/ \ ? #`, and the gateway URL-decodes ids in point reads, so the driver's `%` escapes were undone (`order%232` was looked up as `order#2`) | Ids are escaped with `~` (`~23`), and `%` itself is escaped too. Ids written by earlier versions with `%` escapes would need migrating; there's no release yet |
 | Azure metadata names must be C# identifiers; `schema-version` is a 400 `InvalidMetadata`. Cirrus documented "letters, digits and '-'" as portable | The portable form is now lower-case letters, digits and `_`, starting with a letter. The Azure driver rejects other names with a clear `InvalidArgumentException` before sending anything |
+| Azure SQL's Entra-only servers refuse every SQL login, and an Entra admin can be a service principal, whose session runs as `<application id>@<tenant id>` | Nothing to change: `SqlAuth.iam()` sends the token as `accessToken`, with no username |
 | Key Vault deletes and recoveries are long-running operations, and the driver waited for them (about 2–5s per call) | Removed: `delete` starts the soft delete and returns. Writing a name that is soft-deleted, or still being deleted or recovered, throws the retryable `UnavailableException`, and starts recovery if the name was soft-deleted. Applications retry; the kit does so through `deleteLag()` |
 
-## IAM used for Azure tier 1
+## IAM used for Azure
 
 | Who | Role | Scope | Why |
 |---|---|---|---|
@@ -1401,9 +1484,14 @@ The emulators (Floci-az and Microsoft's Service Bus emulator) missed all of thes
 | | Role Based Access Control Administrator, with a condition | subscription | assign and remove only Storage Blob Data Contributor, Azure Service Bus Data Owner, Key Vault Secrets Officer and App Configuration Data Owner |
 | | Storage Blob Data Contributor, Azure Service Bus Data Owner, Key Vault Secrets Officer, App Configuration Data Owner | each run's resources (Terraform) | the data planes the tests use |
 | | Cosmos DB Built-in Data Contributor (Cosmos RBAC) | each run's Cosmos account (Terraform) | Cosmos' own data-plane roles |
+| | Entra admin (tier 2) | each run's PostgreSQL server and Azure SQL server (Terraform) | the database logins under test |
+| | `default` access policy (tier 3) | each run's Managed Redis cache (Terraform) | the cache's data plane |
+
+Tiers 2 and 3 need nothing beyond tier 1's setup: Contributor covers registering their resource providers,
+creating the servers and caches, and naming the principal as their Entra admin or access-policy holder.
 
 ## Not yet run
 
 | Tier | Services | Status |
 |---|---|---|
-| Azure | Azure Cache for Redis and Azure Database (PostgreSQL, MySQL, SQL) with Entra ID | not run |
+| Azure | Azure Database for MySQL with Entra ID | not run: needs a directory-level grant (see tier 2) |

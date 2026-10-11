@@ -997,7 +997,8 @@ Backlog, in order:
    one IAM-policy check, and GCP tier 1 (Cloud Storage, Firestore, Pub/Sub, Secret Manager, Parameter
    Manager), tier 2 (Cloud SQL with IAM, direct and through the connector) and tier 3 (Memorystore
    for Valkey with IAM) pass, and so does Azure tier 1 (Blob, Cosmos DB, Service Bus, Key Vault, App
-   Configuration, Entra ID only). Azure caches and databases remain. Results: [docs/cloud-testing.md](docs/cloud-testing.md)
+   Configuration, Entra ID only), tier 2 (Azure Database for PostgreSQL and Azure SQL with Entra ID) and
+   tier 3 (Azure Managed Redis with Entra ID) pass. Azure MySQL with Entra ID remains. Results: [docs/cloud-testing.md](docs/cloud-testing.md)
 2. Release 0.1.0: JPMS module descriptors, japicmp API compatibility checks, CI, Maven Central
 3. On demand
    - Spring Data repositories over document stores (`cirrus-spring-data`): CRUD by composite id

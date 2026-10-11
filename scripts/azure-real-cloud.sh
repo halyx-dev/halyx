@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Runs the tier 1 conformance kits against real Azure, then deletes everything the run created.
+# Runs the real-Azure tests, then deletes everything the run created.
 #
 #   scripts/azure-real-cloud.sh
 #   AZURE_LOCATION=australiaeast IT_TEST='RealAzureIT$Cosmos' scripts/azure-real-cloud.sh   # one suite only
+#   TIER=2 scripts/azure-real-cloud.sh     # Azure Database for PostgreSQL and Azure SQL with Entra ID login
+#   TIER=3 scripts/azure-real-cloud.sh     # Azure Managed Redis with Entra ID
 #
 # Terraform and the tests act as the test service principal, whose credentials are read from
 # AZURE_CREDENTIALS_FILE (default ~/.azure/cirrus-test.env, outside the repository):
@@ -17,6 +19,13 @@
 # 3. Always, even if tests fail or the script is interrupted: terraform destroy (the resource group with
 #    everything in it; the Key Vault and App Configuration store are purged, not left soft-deleted), and list
 #    what remains (expected: nothing).
+#
+# Tier 2: a PostgreSQL flexible server (Entra and password auth, a password admin generated for the run and
+# passed through the environment only) and an Entra-only Azure SQL database, the principal as Entra admin of
+# both, reachable only from this machine's address. RealAzureSqlIT logs in with Entra tokens.
+# Tier 3: Azure Managed Redis with access keys off; the principal gets the "default" access policy.
+# RealAzureCacheIT runs the cache kit with Entra tokens over TLS on the public endpoint.
+# Tiers 2 and 3 register their resource providers first, as the principal.
 set -uo pipefail
 
 CREDS="${AZURE_CREDENTIALS_FILE:-$HOME/.azure/cirrus-test.env}"
@@ -30,13 +39,45 @@ export ARM_CLIENT_ID="$AZURE_CLIENT_ID" ARM_CLIENT_SECRET="$AZURE_CLIENT_SECRET"
 
 LOCATION="${AZURE_LOCATION:-australiaeast}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-TF_DIR="$ROOT/infra/azure/tier1"
+TIER="${TIER:-1}"
+TF_DIR="$ROOT/infra/azure/tier$TIER"
 RUN="r$(date +%y%m%d%H%M)$(openssl rand -hex 2)"
 TF_VARS=(-var "location=$LOCATION" -var "run_id=$RUN")
 # az takes --subscription after the command, not before it.
 az_() { az "$@" --subscription "$AZURE_SUBSCRIPTION_ID" --only-show-errors; }
 
 log() { printf '\n== %s\n' "$*"; }
+
+token() {  # the secret goes in on stdin, never on a command line other processes can see
+  printf '%s' "$AZURE_CLIENT_SECRET" | curl -s -m 20 "https://login.microsoftonline.com/$AZURE_TENANT_ID/oauth2/v2.0/token" \
+      --data-urlencode "client_id=$AZURE_CLIENT_ID" --data-urlencode "client_secret@-" \
+      --data-urlencode "grant_type=client_credentials" --data-urlencode "scope=$1" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token",""))'
+}
+
+# Registers resource providers as the principal (Contributor may), waiting until they are ready to use.
+register() {
+  local arm="https://management.azure.com/subscriptions/$AZURE_SUBSCRIPTION_ID/providers"
+  for ns in "$@"; do
+    local bearer="Authorization: Bearer $(token https://management.azure.com/.default)"
+    curl -s -m 30 -o /dev/null -X POST -H "$bearer" -H "Content-Length: 0" "$arm/$ns/register?api-version=2021-04-01"
+    for _ in $(seq 1 60); do
+      state=$(curl -s -m 30 -H "$bearer" "$arm/$ns?api-version=2021-04-01" \
+          | python3 -c 'import json,sys; print(json.load(sys.stdin).get("registrationState",""))')
+      [[ "$state" == Registered ]] && break
+      sleep 10
+    done
+    echo "  $ns: $state"
+  done
+}
+
+if [[ "$TIER" == 2 ]]; then
+  CLIENT_IP=$(dig -4 +short myip.opendns.com A @208.67.222.222 | tail -1)
+  [[ "$CLIENT_IP" =~ ^[0-9.]+$ ]] || { echo "Could not find this machine's public IPv4 address"; exit 1; }
+  TF_VARS+=(-var "client_ip=$CLIENT_IP")
+  export TF_VAR_pg_admin_password="$(openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | head -c 30)Aa1"
+  export CIRRUS_AZURE_PG_ADMIN_PASSWORD="$TF_VAR_pg_admin_password"
+fi
 
 # Runs a listing for the final check: its output, or a CHECK FAILED marker if the listing itself failed,
 # so an error is never mistaken for "nothing left".
@@ -56,6 +97,7 @@ teardown() {
   log "terraform destroy"
   if terraform -chdir="$TF_DIR" destroy -auto-approve -input=false "${TF_VARS[@]}" >/dev/null; then
     echo "  destroyed"
+    rm -f "$TF_DIR"/terraform.tfstate "$TF_DIR"/terraform.tfstate.backup # tier 2 state held the run's password
   else
     echo "  TERRAFORM DESTROY FAILED: run it again in $TF_DIR"
   fi
@@ -77,20 +119,40 @@ teardown() {
 trap teardown EXIT INT TERM
 
 log "Subscription $AZURE_SUBSCRIPTION_ID, location $LOCATION, acting as principal $AZURE_CLIENT_ID, run $RUN"
+case "$TIER" in
+  2) log "Registering resource providers"; register Microsoft.DBforPostgreSQL Microsoft.Sql ;;
+  3) log "Registering resource providers"; register Microsoft.Cache ;;
+esac
 log "terraform apply"
 terraform -chdir="$TF_DIR" init -input=false >/dev/null || exit 1
 terraform -chdir="$TF_DIR" apply -auto-approve -input=false "${TF_VARS[@]}" || exit 1
+cd "$ROOT"
+
+if [[ "$TIER" == 2 ]]; then
+  log "Running the Azure Database tests against real Azure"
+  mvn -o verify -pl cirrus-azure -Dit.test="${IT_TEST:-RealAzureSqlIT}" -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+      -Dcirrus.real.azure.sql=true -Dcirrus.real.azure.run="$RUN" \
+      -Dcirrus.real.azure.sql.principal-name="$(terraform -chdir="$TF_DIR" output -raw principal_name)" \
+      -Dcirrus.real.azure.sql.postgres-host="$(terraform -chdir="$TF_DIR" output -raw postgres_host)" \
+      -Dcirrus.real.azure.sql.sql-host="$(terraform -chdir="$TF_DIR" output -raw sql_host)"
+  exit $?
+fi
+if [[ "$TIER" == 3 ]]; then
+  log "Waiting for the access policy assignment to take effect"
+  sleep 60
+  log "Running the Azure Managed Redis tests against real Azure"
+  mvn -o verify -pl cirrus-azure -Dit.test="${IT_TEST:-RealAzureCacheIT}" -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+      -Dcirrus.real.azure.cache=true -Dcirrus.real.azure.run="$RUN" \
+      -Dcirrus.real.azure.cache.host="$(terraform -chdir="$TF_DIR" output -raw cache_host)" \
+      -Dcirrus.real.azure.cache.port="$(terraform -chdir="$TF_DIR" output -raw cache_port)"
+  exit $?
+fi
+
 STORAGE=$(terraform -chdir="$TF_DIR" output -raw storage_account)
 CONTAINER=$(terraform -chdir="$TF_DIR" output -raw container)
 
 # Role assignments take a while to reach the data plane. Wait until the principal can list the container.
 log "Waiting for the principal's data-plane roles to take effect"
-token() {  # the secret goes in on stdin, never on a command line other processes can see
-  printf '%s' "$AZURE_CLIENT_SECRET" | curl -s -m 20 "https://login.microsoftonline.com/$AZURE_TENANT_ID/oauth2/v2.0/token" \
-      --data-urlencode "client_id=$AZURE_CLIENT_ID" --data-urlencode "client_secret@-" \
-      --data-urlencode "grant_type=client_credentials" --data-urlencode "scope=$1" \
-    | python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token",""))'
-}
 for attempt in $(seq 1 30); do
   code=$(curl -s -m 20 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $(token https://storage.azure.com/.default)" \
       -H "x-ms-version: 2023-11-03" "https://$STORAGE.blob.core.windows.net/$CONTAINER?restype=container&comp=list")
@@ -100,7 +162,6 @@ done
 sleep 30 # the other services' assignments were made at the same time; give them a little longer
 
 log "Running the conformance kits against real Azure"
-cd "$ROOT"
 mvn -o verify -pl cirrus-azure -Dit.test="${IT_TEST:-RealAzureIT}" -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
     -Dcirrus.real.azure=true -Dcirrus.real.azure.run="$RUN" \
     -Dcirrus.real.azure.storage-account="$STORAGE" -Dcirrus.real.azure.container="$CONTAINER" \
