@@ -913,13 +913,11 @@ extension, batches, listener retries and concurrency, claim checks, ordering, de
 | Azure Service Bus | Microsoft's Service Bus emulator with SQL Edge | the full TCK: topics with subscriptions, a queue, duplicate detection, scheduled delivery, lock renewal past the lock duration, ordering through sessions |
 | Spring | in-memory broker | on Boot 3.5 and 4.1: beans from properties, `@CirrusListener` with retries, claim checks, metrics, health, trace propagation |
 
-**On real GCP:** `GcpParameterStoreIT` runs the same TCK against Secret Manager and Parameter
-Manager in a real project, using Application Default Credentials. It is skipped unless the variables
-are set:
-
-```bash
-CIRRUS_GCP_PROJECT=my-project CIRRUS_GCP_LOCATION=global mvn verify -pl cirrus-gcp -Dit.test=GcpParameterStoreIT
-```
+**On real clouds:** `scripts/aws-real-cloud.sh` and `scripts/gcp-real-cloud.sh` run the kits against
+real services on throwaway resources (Terraform in `infra/`), and always tear them down. The GCP run
+covers Cloud Storage, Firestore, Pub/Sub, Secret Manager and Parameter Manager (global and regional),
+using Application Default Credentials that impersonate a test service account. Results are in
+[docs/cloud-testing.md](docs/cloud-testing.md).
 
 Not verified locally: GCP Parameter Manager against real GCP (see above), Vault GCP/Azure login
 against real Vault auth backends, Vault Kubernetes
@@ -984,7 +982,9 @@ Backlog, in order:
 
 1. Real-cloud test profile: Terraform for throwaway resources per cloud and a Maven profile running the
    conformance kits and IAM tests against them. AWS tier 1 (S3, DynamoDB, SSM, Secrets Manager, SNS, SQS)
-   and tier 2 (RDS PostgreSQL and MySQL with IAM auth) pass; tier 3 (ElastiCache), Azure and GCP remain. Results: [docs/cloud-testing.md](docs/cloud-testing.md)
+   and tier 2 (RDS PostgreSQL and MySQL with IAM auth) pass, tier 3 (ElastiCache with IAM) passes but for
+   one IAM-policy check, and GCP tier 1 (Cloud Storage, Firestore, Pub/Sub, Secret Manager, Parameter
+   Manager) passes. Azure, and GCP Memorystore and Cloud SQL, remain. Results: [docs/cloud-testing.md](docs/cloud-testing.md)
 2. Release 0.1.0: JPMS module descriptors, japicmp API compatibility checks, CI, Maven Central
 3. On demand
    - Spring Data repositories over document stores (`cirrus-spring-data`): CRUD by composite id

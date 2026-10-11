@@ -4,7 +4,16 @@ Every Cirrus driver passes its conformance kit (TCK) against emulators on each b
 of the same kits against **real cloud services**. Those runs catch what emulators don't model, such as IAM,
 eventual consistency and asynchronous deletes.
 
-## How a run works
+**Summary**
+
+| Cloud | Tier | Services | Latest result |
+|---|---|---|---|
+| AWS | 1 | S3, DynamoDB, SSM Parameter Store, Secrets Manager, SNS, SQS | **170/172** passed, 2 skipped (expected) |
+| AWS | 2 | RDS for PostgreSQL and MySQL with IAM auth | **12/12** |
+| AWS | 3 | ElastiCache for Valkey with IAM auth | 52/53: the IAM policy still needs checking |
+| GCP | 1 | Cloud Storage, Firestore, Pub/Sub, Secret Manager, Parameter Manager | **176/179** passed, 3 skipped (expected) |
+
+## How an AWS run works
 
 ```bash
 AWS_PROFILE=default AWS_REGION=ap-southeast-2 scripts/aws-real-cloud.sh
@@ -26,7 +35,7 @@ IT_TEST='RealAwsIT$SecretsManager' AWS_PROFILE=default AWS_REGION=ap-southeast-2
 
 Credentials come from the named AWS profile and never from the repository.
 
-## Tier 1, AWS: latest result
+## AWS tier 1: latest result
 
 | | |
 |---|---|
@@ -276,7 +285,7 @@ Skipped tests, both expected:
 
 </details>
 
-## Tier 2, AWS: latest result
+## AWS tier 2: latest result
 
 ```bash
 TIER=2 AWS_PROFILE=default AWS_REGION=ap-southeast-2 scripts/aws-real-cloud.sh
@@ -340,7 +349,7 @@ Findings:
 Earlier, `iamTokenLoginRunsQueriesOverTls` took about 9.4s because it was the first IAM login on the
 instance. `replacedConnectionsLogInAgainWithTokens` took about 9s because it opens 12 connections.
 
-## Tier 3, AWS: latest result
+## AWS tier 3: latest result
 
 ```bash
 TIER=3 AWS_PROFILE=default AWS_REGION=ap-southeast-2 scripts/aws-real-cloud.sh
@@ -447,7 +456,7 @@ catch.
 
 </details>
 
-## Run history
+## AWS run history
 
 | Run id | Scope | Result | Teardown | Notes |
 |---|---|---|---|---|
@@ -483,7 +492,7 @@ Emulators missed all of these:
 | Lettuce resolves host names with Netty's own DNS client, which ignores JVM DNS settings (`jdk.net.hosts.file`, DNS cache TTLs, custom `InetAddressResolver`s) | New opt-in cache property `redis.dns-resolver=jdk` resolves like the rest of the JVM; the default is unchanged |
 | Not every policy grants `BatchGetSecretValue` | If batch reads are denied, `getAll` reads secrets one at a time and logs a warning |
 
-## IAM used for tier 1
+## IAM used for AWS tier 1
 
 The `cirrus_test` user needs the following. Secrets are limited to the `tck-*` names the kits use.
 
@@ -510,7 +519,7 @@ The user also needs:
 - SNS, SQS and SSM access for the topics, queues and parameters the tests create
 - `tag:GetResources` for the teardown check
 
-## IAM used for tier 2
+## IAM used for AWS tier 2
 
 In addition to tier 1:
 
@@ -553,7 +562,7 @@ In addition to tier 1:
 `cirrus_password_only` is refused. `iam:CreateServiceLinkedRole` is needed only the first time an account
 uses RDS.
 
-## IAM used for tier 3
+## IAM used for AWS tier 3
 
 A customer-managed policy, not an inline one. Inline policies on a user share a 2,048-character limit, and
 tiers 1 and 2 had used most of it. The EC2 security-group permissions come from tier 2.
@@ -602,9 +611,324 @@ tiers 1 and 2 had used most of it. The EC2 security-group permissions come from 
 }
 ```
 
+## GCP tier 1: latest result
+
+```bash
+GCP_PROJECT=<project> GCP_REGION=australia-southeast1 scripts/gcp-real-cloud.sh
+IT_TEST='RealGcpIT$Firestore' scripts/gcp-real-cloud.sh     # one suite only
+```
+
+**Identity.** Terraform and the tests act as a dedicated `cirrus-test` service account, through
+Application Default Credentials that impersonate it:
+
+```bash
+gcloud auth application-default login --impersonate-service-account=cirrus-test@<project>.iam.gserviceaccount.com
+```
+
+**Provision.** Terraform (`infra/gcp/tier1`) creates the following, labelled `cirrus-test=<run id>`:
+- a Cloud Storage bucket, which also holds the messaging kit's claim-check payloads
+- a Firestore database of the run's own, so the project's `(default)` database is never touched
+- the composite indexes the document store's index queries need: `status` with `placedAt` ascending and
+  descending, on both test tables, plus a collection-group index on `owner`
+
+**Test.** `RealGcpIT` creates Pub/Sub topics and subscriptions named after the run, plus `tck-*` secrets
+and parameters (Parameter Manager both global and regional).
+
+**Tear down.** A sweep deletes what the tests left behind, then `terraform destroy` runs, then a check
+lists every kind of resource. A listing that fails is reported as `CHECK FAILED`, never taken as empty.
+
+| | |
+|---|---|
+| Date | 2026-10-11, 06:48–07:19 UTC (31 min: Firestore indexes about 7 min, tests about 14 min, teardown the rest) |
+| Run id | `r2610111748599e` |
+| Project and region | dedicated test project, `australia-southeast1` |
+| Result | **BUILD SUCCESS**: 176 passed, 0 failed, 3 skipped (expected) |
+| Teardown | bucket and Firestore database destroyed; check: **nothing left** |
+
+| Service | Cirrus API | Tests | Passed | Skipped | Time |
+|---|---|---|---|---|---|
+| Cloud Storage | `BlobStore` | 75 | 74 | 1 | 183.8s |
+| Firestore | `DocumentStore` | 23 | 23 | 0 | 47.4s |
+| Pub/Sub | `Publisher` / `Subscription` | 15 | 13 | 2 | 292.8s |
+| Secret Manager | `ParameterStore` | 22 | 22 | 0 | 173.1s |
+| Parameter Manager, global | `ParameterStore` | 22 | 22 | 0 | 113.1s |
+| Parameter Manager, `australia-southeast1` | `ParameterStore` | 22 | 22 | 0 | 42.5s |
+| **Total** | | **179** | **176** | **3** | |
+
+Skipped tests, all expected:
+
+- **Cloud Storage `presignWithoutCapabilityIsRejected`.** This test only applies to providers that can't
+  presign; GCS can.
+- **Pub/Sub `repeatedDeduplicationIdIsDeliveredOnce` and `delayedMessageIsHeldBack`.** Pub/Sub has no
+  publish-side deduplication and no per-message delay, so the driver declares neither capability.
+
+Pub/Sub's time is mostly the redelivery tests, which wait for the 10s ack deadline to pass.
+
+### Per-test results
+
+<details>
+<summary>Cloud Storage — BlobStore: 74/75 passed, 183.8s</summary>
+
+| Test | Result | Time (s) |
+|---|---|---|
+| `abortedPresignedUploadCreatesNoBlob` | passed | 1.14 |
+| `closingTheStreamInsideWriteDoesNotCommitEarly` | passed | 0.36 |
+| `contentEncodingIsStoredAndBytesAreReturnedUnchanged` | passed | 0.39 |
+| `copyDuplicatesContentAndKeepsSource` | passed | 0.60 |
+| `copyMissingSourceThrowsNotFound` | passed | 0.08 |
+| `copyPreservesHttpHeaders` | passed | 0.42 |
+| `defaultTierIsHot` | passed | 0.26 |
+| `deleteAllRemovesEveryKeyIncludingMissingOnes` | passed | 1.34 |
+| `deleteAllSpansSeveralProviderBatches` | passed | 55.20 |
+| `deleteAllWithNoKeys` | passed | 0.00 |
+| `deleteIfMatchOnMissingBlobFails` | passed | 0.42 |
+| `deleteIfMatchWithCurrentETagDeletes` | passed | 0.38 |
+| `deleteIfMatchWithStaleETagFails` | passed | 0.65 |
+| `deleteMissingBlobIsIdempotent` | passed | 0.05 |
+| `deleteRemovesBlob` | passed | 0.32 |
+| `downloadWritesCompleteFile(Path)` | passed | 2.36 |
+| `emptyBlobRoundTrips` | passed | 0.41 |
+| `failedWriteKeepsExistingBlob` | passed | 0.43 |
+| `failedWriteStoresNothing` | passed | 0.21 |
+| `getMissingBlobThrowsNotFound` | passed | 0.07 |
+| `getReturnsMetadataWithContent` | passed | 0.36 |
+| `getWithStaleETagThrowsPreconditionFailed` | passed | 0.60 |
+| `headMissingBlobReturnsEmpty` | passed | 0.16 |
+| `headReturnsSizeAndLastModified` | passed | 0.31 |
+| `ifMatchWithCurrentETagSucceeds` | passed | 0.60 |
+| `ifMatchWithStaleETagThrowsPreconditionFailed` | passed | 0.80 |
+| `ifNotExistsCreatesMissingBlob` | passed | 0.32 |
+| `ifNotExistsRejectsExistingBlob` | passed | 0.53 |
+| `listAllStreamsEveryBlob` | passed | 1.52 |
+| `listEmptyPrefixReturnsNothing` | passed | 0.07 |
+| `listFiltersByPrefix` | passed | 0.74 |
+| `listPaginatesInKeyOrder` | passed | 1.65 |
+| `listSummariesCarrySize` | passed | 0.34 |
+| `listWithDelimiterGroupsKeysIntoPrefixes` | passed | 1.34 |
+| `listWithDelimiterPaginatesOverItemsAndPrefixes` | passed | 1.44 |
+| `listWithoutDelimiterReturnsNoPrefixes` | passed | 0.28 |
+| `openEndedRangeReadsToEnd` | passed | 0.34 |
+| `parallelReadReassemblesRangesInOrder` | passed | 4.45 |
+| `parallelReadValidatesChecksum` | passed | 2.83 |
+| `presignWithoutCapabilityIsRejected` | skipped | 0.00 |
+| `presignedDownloadUrlDownloadsBlob` | passed | 2.05 |
+| `presignedMultipartUploadAssemblesPartsInOrder` | passed | 11.77 |
+| `presignedUploadUrlReplacesExistingBlob` | passed | 0.96 |
+| `presignedUploadUrlUploadsBlob` | passed | 0.88 |
+| `presignedUploadWithContentTypeSetsContentType` | passed | 0.90 |
+| `presignedUrlReportsExpiry` | passed | 0.21 |
+| `putFromFile(Path)` | passed | 0.37 |
+| `putFromStream` | passed | 0.36 |
+| `putLargeFile(Path)` | passed | 7.35 |
+| `putOverwritesExistingBlob` | passed | 0.54 |
+| `putReturnsETagMatchingHead` | passed | 0.27 |
+| `putSmallUnknownLengthStream` | passed | 0.36 |
+| `putStoresContentTypeAndUserMetadata` | passed | 0.30 |
+| `putStoresStandardHttpHeaders` | passed | 0.29 |
+| `putThenGetRoundTripsContent` | passed | 0.37 |
+| `putUnknownLengthStream` | passed | 11.24 |
+| `putWithTierStoresTier` | passed | 0.53 |
+| `rangeReadReturnsSlice` | passed | 0.38 |
+| `setTierChangesTierButNotContent` | passed | 0.79 |
+| `setTierToCurrentTierIsANoOp` | passed | 0.81 |
+| `storedChecksumsMatchTheContent` | passed | 0.29 |
+| `unwrapUnknownTypeThrows` | passed | 0.00 |
+| `updateMetadataKeepsTier` | passed | 0.41 |
+| `updateMetadataOfMissingBlobThrowsNotFound` | passed | 0.07 |
+| `updateMetadataReplacesHeadersAndMetadataButNotContent` | passed | 0.75 |
+| `updateMetadataWithStaleETagFails` | passed | 0.55 |
+| `validatedFileAndStreamUploads(Path)` | passed | 1.17 |
+| `validatedLargeFileUploadRoundTrips(Path)` | passed | 13.98 |
+| `validatedPutStoresAChecksumThatValidatesOnDownload` | passed | 0.39 |
+| `validatedWriteInParts` | passed | 13.03 |
+| `writeEmptyBlob` | passed | 0.37 |
+| `writeExactMultipleOfPartSize` | passed | 10.25 |
+| `writeInPartsWithIfNotExistsRejectsExistingBlob` | passed | 7.47 |
+| `writeLargeBlobInParts` | passed | 10.15 |
+| `writeSmallBlobInOneRequest` | passed | 0.46 |
+
+</details>
+
+<details>
+<summary>Firestore — DocumentStore: 23/23 passed, 47.4s</summary>
+
+| Test | Result | Time (s) |
+|---|---|---|
+| `checksGuardATransactionWithoutWriting` | passed | 2.98 |
+| `concurrentIncrementsAreNotLost` | passed | 3.62 |
+| `decimalsRoundTripAsNumbers` | passed | 0.53 |
+| `deleteReportsWhetherAnItemWasRemoved` | passed | 1.86 |
+| `expiredItemsAreNeverReturned` | passed | 6.28 |
+| `failedConditionRollsBackTheWholeTransaction` | passed | 4.32 |
+| `getAllReturnsWhatExistsAcrossBatches` | passed | 1.37 |
+| `ifNotExistsCreatesOnlyOnce` | passed | 1.03 |
+| `indexQueryFindsItemsAcrossPartitionsInSortOrder` | passed | 4.00 |
+| `indexQueryPagesThroughManyMatches` | passed | 1.38 |
+| `indexWithoutSortAttributeFindsEveryMatch` | passed | 1.11 |
+| `invalidKeysAndReservedFieldsAreRejected` | passed | 0.01 |
+| `keysWithSpecialCharactersRoundTrip` | passed | 2.10 |
+| `missingItemIsEmpty` | passed | 0.53 |
+| `putAndGetRoundTripsEveryValueType` | passed | 0.54 |
+| `putReplacesTheWholeItem` | passed | 0.79 |
+| `queryPagesThroughLargePartitions` | passed | 3.38 |
+| `queryReturnsAPartitionInSortOrder` | passed | 2.14 |
+| `transactionAppliesEveryWriteTogether` | passed | 2.93 |
+| `transactionsStayWithinOnePartition` | passed | 0.00 |
+| `updateNeedsAnExistingItemAndTheRightVersion` | passed | 1.91 |
+| `updateSetsRemovesAndIncrements` | passed | 1.14 |
+| `versionsGuardConcurrentWrites` | passed | 3.41 |
+
+</details>
+
+<details>
+<summary>Pub/Sub — messaging: 13/15 passed, 292.8s</summary>
+
+| Test | Result | Time (s) |
+|---|---|---|
+| `ackedMessageIsNotRedelivered` | passed | 30.24 |
+| `binaryBodiesArriveUnchanged` | passed | 15.96 |
+| `claimCheckSendsLargeBodiesThroughBlobStorage` | passed | 22.62 |
+| `delayedMessageIsHeldBack` | skipped | 0.00 |
+| `extendedLeaseKeepsMessageHidden` | passed | 35.10 |
+| `listenerAcksSuccessesAndRetriesFailures` | passed | 35.91 |
+| `listenerLimitsConcurrency` | passed | 24.69 |
+| `nackedMessageIsRedelivered` | passed | 16.57 |
+| `orderingKeyDeliversEachKeyInOrder` | passed | 21.52 |
+| `publishAllDeliversEveryMessage` | passed | 23.24 |
+| `publishedMessageArrivesWithBodyAndAttributes` | passed | 15.88 |
+| `repeatedDeduplicationIdIsDeliveredOnce` | skipped | 0.00 |
+| `reservedAttributesAndUnsupportedControlsAreRejected` | passed | 9.69 |
+| `settlingTwiceIsRejected` | passed | 17.30 |
+| `unsettledMessageReturnsAfterItsLease` | passed | 24.08 |
+
+</details>
+
+<details>
+<summary>Secret Manager — ParameterStore: 22/22 passed, 173.1s</summary>
+
+| Test | Result | Time (s) |
+|---|---|---|
+| `cachedReadsAreServedUntilRefresh` | passed | 8.02 |
+| `deleteIsIdempotent` | passed | 5.61 |
+| `deletedNamesCanBeReused` | passed | 10.01 |
+| `earlierVersionsCanBeRead` | passed | 7.20 |
+| `getAllDoesNotMatchPartialSegments` | passed | 16.20 |
+| `getAllReturnsEverythingBelowAPrefix` | passed | 19.77 |
+| `invalidNamesAreRejected` | passed | 0.51 |
+| `jsonFieldsCanBeRead` | passed | 7.35 |
+| `largeValues` | passed | 7.50 |
+| `missingIsEmptyAndRequireFails` | passed | 0.96 |
+| `nativeNamesAreUsedAsTheyAre` | passed | 7.10 |
+| `plainValuesHaveNoFields` | passed | 5.20 |
+| `putReplacesWithANewVersion` | passed | 7.97 |
+| `putThenGet` | passed | 7.20 |
+| `reportsKindAndProvider` | passed | 0.30 |
+| `statisticsCountCacheHits` | passed | 5.50 |
+| `storesAreIsolatedByPrefix` | passed | 7.49 |
+| `typedReads` | passed | 7.35 |
+| `valuesKeepSpecialCharactersAndLines` | passed | 7.13 |
+| `watchReportsAddedUpdatedAndRemovedValues` | passed | 15.77 |
+| `watchedChangesInvalidateTheCache` | passed | 9.87 |
+| `writesInvalidateTheirOwnCache` | passed | 9.13 |
+
+</details>
+
+<details>
+<summary>Parameter Manager (global) — ParameterStore: 22/22 passed, 113.1s</summary>
+
+| Test | Result | Time (s) |
+|---|---|---|
+| `cachedReadsAreServedUntilRefresh` | passed | 5.55 |
+| `deleteIsIdempotent` | passed | 3.23 |
+| `deletedNamesCanBeReused` | passed | 6.10 |
+| `earlierVersionsCanBeRead` | passed | 4.55 |
+| `getAllDoesNotMatchPartialSegments` | passed | 9.30 |
+| `getAllReturnsEverythingBelowAPrefix` | passed | 12.64 |
+| `invalidNamesAreRejected` | passed | 0.23 |
+| `jsonFieldsCanBeRead` | passed | 5.71 |
+| `largeValues` | passed | 4.20 |
+| `missingIsEmptyAndRequireFails` | passed | 0.71 |
+| `nativeNamesAreUsedAsTheyAre` | passed | 4.97 |
+| `plainValuesHaveNoFields` | passed | 4.17 |
+| `putReplacesWithANewVersion` | passed | 4.74 |
+| `putThenGet` | passed | 4.42 |
+| `reportsKindAndProvider` | passed | 0.23 |
+| `statisticsCountCacheHits` | passed | 4.10 |
+| `storesAreIsolatedByPrefix` | passed | 6.10 |
+| `typedReads` | passed | 4.07 |
+| `valuesKeepSpecialCharactersAndLines` | passed | 3.81 |
+| `watchReportsAddedUpdatedAndRemovedValues` | passed | 11.45 |
+| `watchedChangesInvalidateTheCache` | passed | 7.00 |
+| `writesInvalidateTheirOwnCache` | passed | 5.86 |
+
+</details>
+
+<details>
+<summary>Parameter Manager (australia-southeast1) — ParameterStore: 22/22 passed, 42.5s</summary>
+
+| Test | Result | Time (s) |
+|---|---|---|
+| `cachedReadsAreServedUntilRefresh` | passed | 1.77 |
+| `deleteIsIdempotent` | passed | 1.21 |
+| `deletedNamesCanBeReused` | passed | 2.57 |
+| `earlierVersionsCanBeRead` | passed | 1.66 |
+| `getAllDoesNotMatchPartialSegments` | passed | 2.88 |
+| `getAllReturnsEverythingBelowAPrefix` | passed | 4.77 |
+| `invalidNamesAreRejected` | passed | 0.06 |
+| `jsonFieldsCanBeRead` | passed | 1.87 |
+| `largeValues` | passed | 1.46 |
+| `missingIsEmptyAndRequireFails` | passed | 0.24 |
+| `nativeNamesAreUsedAsTheyAre` | passed | 1.61 |
+| `plainValuesHaveNoFields` | passed | 1.87 |
+| `putReplacesWithANewVersion` | passed | 1.62 |
+| `putThenGet` | passed | 1.75 |
+| `reportsKindAndProvider` | passed | 0.06 |
+| `statisticsCountCacheHits` | passed | 1.34 |
+| `storesAreIsolatedByPrefix` | passed | 4.14 |
+| `typedReads` | passed | 1.40 |
+| `valuesKeepSpecialCharactersAndLines` | passed | 1.41 |
+| `watchReportsAddedUpdatedAndRemovedValues` | passed | 4.00 |
+| `watchedChangesInvalidateTheCache` | passed | 2.77 |
+| `writesInvalidateTheirOwnCache` | passed | 2.02 |
+
+</details>
+
+## GCP run history
+
+| Run id | Scope | Result | Teardown | Notes |
+|---|---|---|---|---|
+| `r2610111704a192` | tier 1 | 176 passed, 1 failed, 1 error, 3 skipped | clean (checked by hand) | Pub/Sub `orderingKeyDeliversEachKeyInOrder` and Cloud Storage `updateMetadataWithStaleETagFails` failed (see below). The regional Parameter Manager check failed with a misleading `PERMISSION_DENIED`, and the script took the failure as empty. |
+| `r2610111748599e` | tier 1 | **176/179, 3 skipped** | clean | Latest result, above. |
+
+## What real GCP found
+
+The emulators (Floci-gcp, and Google's Pub/Sub and Firestore emulators) missed all of these:
+
+| Finding | Fix |
+|---|---|
+| Pub/Sub rejects a publish request whose messages have different ordering keys (`FAILED_PRECONDITION: ... all messages must have no ordering key or they must all have the same ordering key`) | The publisher sends one request per ordering key, keeping each key's messages in order, and returns ids in the caller's order |
+| `updateMetadata` with a stale ETag patched the *old* generation, which no longer exists in an unversioned bucket, so GCS answered 404 instead of 412 | Patch the live object with an `ifGenerationMatch` precondition, which GCS answers with 412 |
+| `gcloud parametermanager` sends regional locations to the global endpoint and gets `PERMISSION_DENIED` | The test script uses the regional endpoint (`parametermanager.<region>.rep.googleapis.com`). The Java client was already correct |
+| Firestore collection-group queries need indexes the emulator doesn't ask for | Terraform creates them; the driver's documentation already lists them |
+
+## IAM used for GCP tier 1
+
+| Who | Role | Why |
+|---|---|---|
+| `cirrus-test` service account | `roles/storage.admin` | create and destroy the bucket; read and write objects |
+| | `roles/datastore.owner` | create and destroy the Firestore database and its indexes |
+| | `roles/pubsub.admin` | create and delete topics and subscriptions; publish and pull |
+| | `roles/secretmanager.admin` | secrets |
+| | `roles/parametermanager.admin` | parameters, global and regional |
+| | `roles/serviceusage.serviceUsageConsumer` | call APIs billed to the project |
+| the person running the tests | `roles/iam.serviceAccountTokenCreator` on `cirrus-test` | impersonate it. Project Owner doesn't include this |
+
+The project also needs the IAM Service Account Credentials API (`iamcredentials.googleapis.com`) enabled
+for impersonation.
+
 ## Not yet run
 
 | Tier | Services | Status |
 |---|---|---|
 | Azure | Blob, Service Bus, Cosmos DB, Key Vault, App Configuration | no real-cloud profile yet |
-| GCP tier 1 | Cloud Storage, Firestore, Pub/Sub, Secret Manager, Parameter Manager | profile ready (`scripts/gcp-real-cloud.sh`), not run yet |
+| GCP | Memorystore and Cloud SQL with IAM auth | not run |
