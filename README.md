@@ -25,9 +25,11 @@ try (Cirrus cirrus = Cirrus.builder()
         .register("archive", ProviderConfig.of("gcp").property(GcpProperties.PROJECT_ID, "acme-prod"))
         .build()) {
 
-    BlobStore orders = cirrus.provider("orders").blobStore("orders-bucket");
+    BlobStore orders = cirrus.provider("orders").blobStore("orders-bucket");          // Amazon S3
+    BlobStore archive = cirrus.provider("archive").blobStore("acme-archive");         // Google Cloud Storage
     orders.put(BlobKey.of("invoices/42.pdf"), BlobContent.ofFile(path),
             PutOptions.builder().contentType("application/pdf").ifNotExists().build());
+    archive.put(BlobKey.of("2026/invoices/42.pdf"), BlobContent.ofFile(path));        // same API, other cloud
 
     try (Blob blob = orders.get(BlobKey.of("invoices/42.pdf"))) {
         blob.content().transferTo(out);
