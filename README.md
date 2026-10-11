@@ -418,9 +418,10 @@ try (AutoCloseable watch = secrets.watch("db", Duration.ofMinutes(1), changes ->
 ```
 
 On AWS Secrets Manager, `getAll` (and so `watch` and config reloads) is eventually consistent: AWS lists
-secrets with a short delay, so a secret written moments ago may not appear yet. Reads by name are
-immediate. A deleted secret's name is reusable once AWS finishes the delete, which takes a few seconds;
-a write in that window waits for it (up to 30s). The IAM policy needs `secretsmanager:ListSecrets` for `getAll`,
+secrets with a short delay, so a secret written moments ago may not appear yet, and a read by name can
+briefly lag a write. Deletes finish asynchronously (up to ~20s measured): until then a deleted secret may still be read,
+and writing its name fails with `UnavailableException`, which is retryable. Cirrus doesn't wait for either;
+an application that reuses a name right after deleting it retries the write. The IAM policy needs `secretsmanager:ListSecrets` for `getAll`,
 plus `GetSecretValue`, `PutSecretValue`, `CreateSecret` and `DeleteSecret`. Granting
 `BatchGetSecretValue` on `"*"` (it has no resource-level permissions) lets `getAll` read 20 secrets per call;
 without it Cirrus reads them one by one.

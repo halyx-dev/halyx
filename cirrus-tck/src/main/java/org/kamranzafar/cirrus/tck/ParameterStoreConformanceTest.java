@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInfo;
 import org.kamranzafar.cirrus.CloudContext;
 import org.kamranzafar.cirrus.error.NotFoundException;
+import org.kamranzafar.cirrus.error.UnavailableException;
 import org.kamranzafar.cirrus.parameters.Parameter;
 import org.kamranzafar.cirrus.parameters.ParameterCapability;
 import org.kamranzafar.cirrus.parameters.ParameterChanges;
@@ -59,6 +60,51 @@ public abstract class ParameterStoreConformanceTest {
      */
     protected Duration listingLag() {
         return Duration.ZERO;
+    }
+
+    /**
+     * How long a delete may take to finish. Zero for most backends; AWS Secrets Manager deletes
+     * asynchronously. Until it finishes, reads may still return the value, and writing the name fails with
+     * the retryable {@link UnavailableException}. The store doesn't wait; callers that reuse names retry.
+     */
+    protected Duration deleteLag() {
+        return Duration.ZERO;
+    }
+
+    /** Waits up to {@link #deleteLag()} for {@code name} to read as absent. */
+    protected boolean gone(ParameterStore store, String name) {
+        long deadline = System.nanoTime() + deleteLag().toNanos();
+        while (store.get(name).isPresent()) {
+            if (System.nanoTime() >= deadline) {
+                return false;
+            }
+            pause();
+        }
+        return true;
+    }
+
+    /** {@code put}, retrying {@link UnavailableException} for up to {@link #deleteLag()}. */
+    protected Parameter putAfterDelete(ParameterStore store, String name, String value) {
+        long deadline = System.nanoTime() + deleteLag().toNanos();
+        while (true) {
+            try {
+                return store.put(name, value);
+            } catch (UnavailableException e) {
+                if (System.nanoTime() >= deadline) {
+                    throw e;
+                }
+                pause();
+            }
+        }
+    }
+
+    private static void pause() {
+        try {
+            Thread.sleep(500);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
     }
 
     /** {@code getAll(prefix)} once it lists exactly {@code expected}, waiting up to {@link #listingLag()}. */
@@ -165,14 +211,14 @@ public abstract class ParameterStoreConformanceTest {
         store().delete("temp");
         store().delete("temp");
 
-        assertThat(store().get("temp")).isEmpty();
+        assertThat(gone(store(), "temp")).as("deleted").isTrue();
     }
 
     @Test
     void deletedNamesCanBeReused() {
         store().put("reused", "a");
         store().delete("reused");
-        store().put("reused", "b");
+        putAfterDelete(store(), "reused", "b");
 
         assertThat(store().require("reused")).isEqualTo("b");
     }
@@ -271,7 +317,7 @@ public abstract class ParameterStoreConformanceTest {
         } finally {
             nativeStore.delete(nativeName());
         }
-        assertThat(nativeStore.get(nativeName())).isEmpty();
+        assertThat(gone(nativeStore, nativeName())).as("deleted").isTrue();
     }
 
     // --- watching ------------------------------------------------------------------------------

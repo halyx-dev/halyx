@@ -4,6 +4,7 @@ import org.kamranzafar.cirrus.aws.AwsErrors;
 import org.kamranzafar.cirrus.aws.AwsProvider;
 import org.kamranzafar.cirrus.capability.Capabilities;
 import org.kamranzafar.cirrus.error.CloudException;
+import org.kamranzafar.cirrus.error.UnavailableException;
 import org.kamranzafar.cirrus.parameters.Parameter;
 import org.kamranzafar.cirrus.parameters.ParameterCapability;
 import org.kamranzafar.cirrus.parameters.spi.AbstractParameterDriver;
@@ -14,10 +15,8 @@ import software.amazon.awssdk.services.secretsmanager.model.FilterNameStringType
 import software.amazon.awssdk.services.secretsmanager.model.GetSecretValueResponse;
 import software.amazon.awssdk.services.secretsmanager.model.ResourceNotFoundException;
 import software.amazon.awssdk.services.secretsmanager.model.SecretsManagerException;
-import software.amazon.awssdk.services.secretsmanager.model.ResourceExistsException;
 import software.amazon.awssdk.services.secretsmanager.model.InvalidRequestException;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -114,55 +113,33 @@ public final class SecretsManagerDriver extends AbstractParameterDriver {
         return e.awsErrorDetails() != null && "AccessDeniedException".equals(e.awsErrorDetails().errorCode());
     }
 
-    /**
-     * Even a forced delete finishes asynchronously: for a few seconds the name is "marked for deletion" and
-     * can be neither written nor created. A write then waits for the delete to finish, up to this long.
-     */
-    private static final Duration PENDING_DELETION_WAIT = Duration.ofSeconds(30);
-
     @Override
     public Parameter put(String name, String value) {
-        long deadline = System.nanoTime() + PENDING_DELETION_WAIT.toNanos();
-        long backoff = 250;
-        while (true) {
-            try {
-                try {
-                    var response = secrets.putSecretValue(b -> b.secretId(name).secretString(value));
-                    return new Parameter(name, value, response.versionId(), null);
-                } catch (ResourceNotFoundException e) {
-                    var response = secrets.createSecret(b -> b.name(name).secretString(value));
-                    return new Parameter(name, value, response.versionId(), null);
-                }
-            } catch (InvalidRequestException | ResourceExistsException e) {
-                if (!pendingDeletion(e) || System.nanoTime() > deadline) {
-                    throw e;
-                }
-                sleep(backoff);
-                backoff = Math.min(backoff * 2, 2_000);
-            }
+        try {
+            var response = secrets.putSecretValue(b -> b.secretId(name).secretString(value));
+            return new Parameter(name, value, response.versionId(), null);
+        } catch (ResourceNotFoundException e) {
+            var response = secrets.createSecret(b -> b.name(name).secretString(value));
+            return new Parameter(name, value, response.versionId(), null);
         }
     }
 
-    /** Reads may still return a secret for a moment after its delete is accepted; delete waits up to this long. */
-    private static final Duration DELETE_VISIBLE_WAIT = Duration.ofSeconds(10);
-
+    /**
+     * Even a forced delete finishes asynchronously. For a few seconds reads may still return the secret,
+     * and writing the name fails with {@link UnavailableException} (retryable) because it is "marked for
+     * deletion". Nothing here waits for that: callers that reuse a name right away retry.
+     */
     @Override
     public void delete(String name) {
         try {
             secrets.deleteSecret(b -> b.secretId(name).forceDeleteWithoutRecovery(true));
         } catch (ResourceNotFoundException ignored) {
-            return; // already gone
+            // already gone
         } catch (InvalidRequestException e) {
             if (!pendingDeletion(e)) {
                 throw e;
             }
             // already being deleted
-        }
-        long deadline = System.nanoTime() + DELETE_VISIBLE_WAIT.toNanos();
-        long backoff = 100;
-        while (get(name).isPresent() && System.nanoTime() < deadline) {
-            sleep(backoff);
-            backoff = Math.min(backoff * 2, 1_000);
         }
     }
 
@@ -172,21 +149,16 @@ public final class SecretsManagerDriver extends AbstractParameterDriver {
         return message != null && (message.contains("marked for deletion") || message.contains("scheduled for deletion"));
     }
 
-    private static void sleep(long millis) {
-        try {
-            Thread.sleep(millis);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("Interrupted while waiting for a secret's deletion", e);
-        }
-    }
-
     private static Parameter toPortable(String name, GetSecretValueResponse r) {
         return new Parameter(name, r.secretString(), r.versionId(), r.createdDate());
     }
 
     @Override
     protected Optional<CloudException> translateNative(Throwable error) {
+        if (error instanceof SecretsManagerException e && pendingDeletion(e)) {
+            return Optional.of(new UnavailableException("Secret is still being deleted; retry shortly: " + e.getMessage(),
+                    e, AwsProvider.ID, e.awsErrorDetails() == null ? null : e.awsErrorDetails().errorCode()));
+        }
         return AwsErrors.translate(error);
     }
 

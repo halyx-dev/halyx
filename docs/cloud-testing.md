@@ -288,6 +288,7 @@ Skipped tests, both expected:
 | `r2610111402665b` | full | 169 passed, 1 failed, 2 skipped | clean | Secrets Manager `nativeNamesAreUsedAsTheyAre`: `get` returned a secret just after its delete was accepted. |
 | `r2610111411c824` | full | 169 passed, 1 failed, 2 skipped | clean | Secrets Manager `watchedChangesInvalidateTheCache`: the watch saw the new value, but the read after it returned the old one. |
 | `r2610111422284e` | full | **170 passed, 2 skipped** | clean | Latest result, above. |
+| `r26101114370e5e` | Secrets Manager | 22/22 | clean | The waits were removed from the driver. Writing a name that is still being deleted now fails with `UnavailableException`, and the kit retries via `deleteLag()`. `deletedNamesCanBeReused` took 18.2s, which is how long AWS took to finish that delete. |
 
 ## What real AWS found
 
@@ -296,9 +297,9 @@ Emulators missed all of these:
 | Finding | Fix |
 |---|---|
 | A 400 `AccessDeniedException` (and other auth error codes) was mapped by status to `InvalidArgument` | `AwsErrors` checks auth error codes before status codes, so they map to `AccessDenied` |
-| A deleted secret's name can't be reused for a few seconds ("marked for deletion") | `put` waits for the delete to finish (up to 30s); `delete` treats an in-progress delete as done |
+| A deleted secret's name can't be reused until AWS finishes the delete ("marked for deletion"; 18s measured) | The write fails with the retryable `UnavailableException`; `delete` treats an in-progress delete as done. Cirrus doesn't wait, so callers retry. The TCK allows for this with `deleteLag()` |
 | Reading a secret whose delete is still in progress throws | `get` returns empty |
-| `GetSecretValue` can return a secret for a moment after its delete is accepted | `delete` waits until reads no longer see the secret (up to 10s) |
+| `GetSecretValue` can return a secret for a moment after its delete is accepted | Documented as eventual. The TCK allows for it with `deleteLag()`. The API doesn't wait |
 | `ListSecrets` lags behind writes | Documented as eventual. The Secrets Manager TCK allows a listing lag (`listingLag()`) |
 | A listing can see a new value before `GetSecretValue` does | When a watch reports a change, it caches the values it saw, so reads agree with the event on every provider |
 | Not every policy grants `BatchGetSecretValue` | If batch reads are denied, `getAll` reads secrets one at a time and logs a warning |

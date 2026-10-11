@@ -145,6 +145,11 @@ class RealAwsIT {
         protected Duration listingLag() {
             return Duration.ofMinutes(2);
         }
+
+        @Override
+        protected Duration deleteLag() {
+            return Duration.ofSeconds(30);
+        }
     }
 
     /** A queue with a short visibility timeout, named after the run; deleted at the end. */
