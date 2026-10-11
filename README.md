@@ -487,7 +487,8 @@ DataSource dataSource = orders.dataSource();   // to JDBC, JPA, jOOQ, Flyway
 | Azure | Entra ID access token | PostgreSQL, MySQL, Azure SQL | the identity's database role; not used for Azure SQL (`accessToken` property) |
 | GCP | OAuth token, `sqlservice.login` scope | PostgreSQL, MySQL | derived from the service account if omitted (`app@project.iam` / `app`) |
 
-IAM logins turn on TLS (`sslmode=require`, `sslMode=REQUIRED` or `encrypt=true`); override it with
+RDS Proxy works as is: use the proxy endpoint as `host`, with `SqlAuth.iam(...)` when the proxy requires
+IAM authentication. IAM logins turn on TLS (`sslmode=require`, `sslMode=REQUIRED` or `encrypt=true`); override it with
 `jdbcProperty(...)`, for example to `verify-full` with the cloud's CA bundle. On GCP, set
 `property("gcp.sql.instance", "project:region:instance")` to go through the Cloud SQL Java connector
 instead of a host. The connector handles TLS and IAM itself and needs no authorized networks. Add
@@ -834,51 +835,38 @@ property goes to the provider (for example `-Dcirrus.aws.retry-mode=standard`). 
 
 ## Roadmap
 
-1. ~~Core, SPI, storage on AWS/Azure/GCP, TCK, Floci tests~~
-2. ~~Cache: one Redis/Valkey driver plus cloud auth (ElastiCache IAM, Entra ID, Memorystore IAM)~~ (next: endpoint discovery, cross-instance stampede protection)
-3. ~~SQL: `DataSource` factory with cloud IAM auth and token refresh (RDS IAM, Entra ID, Cloud SQL connector)~~
-   (next: RDS Proxy and Aurora failover-aware URLs, R2DBC)
-4. ~~Parameters and secrets: one portable API for configuration values and secrets~~ (next: change
-   notifications, labels on SSM and Secret Manager)
-   - Providers: AWS SSM Parameter Store and Secrets Manager; Azure App Configuration and Key Vault;
-     GCP Parameter Manager and Secret Manager; HashiCorp Vault (KV v2), in a separate
-     `cirrus-vault` module because it is not tied to a cloud
-   - API: get by name or path prefix, versions and labels, typed values, cached reads with refresh,
-     and rotation notifications where the backend supports them
-   - Spring: load `cirrus` parameters and secrets as a property source (`spring.config.import`),
-     and use secrets for cache and SQL credentials
-   - Tests: Floci for AWS (SSM, Secrets Manager), Azure (App Configuration, Key Vault) and GCP
-     (Secret Manager); a Vault dev-server container
-5. ~~NoSQL: one portable API for document and key-value stores~~ (next: transactions within a partition,
-   secondary-index queries, nested field paths in updates)
-   - Providers: Amazon DynamoDB, Azure Cosmos DB (NoSQL API), Google Cloud Firestore (native mode)
-   - Model: items in a table, container or collection, addressed by a partition key and an optional sort
-     key, held as a portable document (nested maps, lists, strings, numbers, booleans, binary) and mapped
-     to records through a codec
-   - Operations: get, put, update and delete; conditional writes for optimistic concurrency (DynamoDB
-     condition expressions, Cosmos ETags, Firestore update times); batch reads and writes; queries within a
-     partition by sort-key range, with pagination; per-item TTL
-   - Portable semantics documented where stores differ: read consistency, item size limits (400 KB on
-     DynamoDB, 2 MB on Cosmos DB, 1 MiB on Firestore), transaction scope and secondary indexes, with
-     `unwrap` for native queries
-   - Spring: `DocumentStore` beans from `cirrus.document-stores`, health and Micrometer metrics
-   - Tests: a conformance kit on Floci (DynamoDB), Floci-az or the Cosmos DB emulator, and the Firestore
-     emulator
-6. ~~Spring Boot starter: `cirrus.*` properties, auto-configuration, health and Micrometer~~
-7. Blob: archive restore, KMS encryption, versioning, tags, retention
-8. JPMS module descriptors, japicmp API compatibility checks, real-cloud CI profile
-9. ~~Pub/sub messaging: one portable API for topics, subscriptions and queues~~ (next: Service Bus sessions
-   for ordering on Azure, ack batching, EventBridge and Event Grid)
-   - Providers: AWS SNS topics with SQS subscriptions (and plain SQS queues); Azure Service Bus topics,
-     subscriptions and queues; GCP Pub/Sub
-   - Publish: payload plus attributes, batching, ordering keys (SQS FIFO message groups, Service Bus
-     sessions, Pub/Sub ordering keys), delayed delivery where supported, and claim-check offload of
-     large payloads to a `BlobStore`
-   - Consume: at-least-once delivery with explicit ack/nack, automatic visibility or lease extension
-     while a handler runs, retry with backoff, dead-letter queues, and bounded concurrency on virtual
-     threads with backpressure
-   - Portable semantics documented where clouds differ: ordering, deduplication (FIFO dedup ids,
-     Service Bus duplicate detection), message size limits and retention
-   - Spring: `Publisher` and listener beans from `cirrus.topics` / `cirrus.subscriptions`, health and
-     Micrometer metrics (lag, in-flight, failures), with trace context carried in message attributes
-   - Tests: a conformance kit run on Floci (SNS, SQS), the Service Bus emulator and the Pub/Sub emulator
+Done:
+
+1. ~~Core, SPI, blob storage on AWS, Azure and GCP, conformance kits, emulator tests~~
+2. ~~Caches: one Redis/Valkey driver with cloud auth (ElastiCache IAM, Entra ID, Memorystore IAM)~~
+3. ~~SQL: pooled `DataSource` with cloud IAM auth and token refresh (RDS IAM, Entra ID, Cloud SQL)~~
+4. ~~Parameters and secrets: SSM, Secrets Manager, App Configuration, Key Vault, Parameter Manager,
+   Secret Manager, HashiCorp Vault; Spring config import with reload~~
+5. ~~NoSQL document stores: DynamoDB, Cosmos DB, Firestore~~
+6. ~~Spring Boot starter: properties, auto-configuration, health, Micrometer, Boot 3.5 and 4~~
+7. ~~Messaging: SNS/SQS, Service Bus, Pub/Sub; listeners, claim checks, tracing~~
+
+Backlog, in order:
+
+1. Production gaps
+   - NoSQL secondary-index queries (DynamoDB GSIs, Cosmos and Firestore field queries)
+   - NoSQL transactions within a partition (DynamoDB transactions, Cosmos transactional batch,
+     Firestore transactions)
+   - Messaging ack batching (SQS DeleteMessageBatch, Pub/Sub batched acknowledge, Service Bus
+     batched settlement)
+   - Service Bus sessions, for ordering keys on Azure
+2. Real-cloud test profile: Terraform for throwaway resources per cloud and a Maven profile running the
+   conformance kits and IAM tests against them
+3. Release 0.1.0: JPMS module descriptors, japicmp API compatibility checks, CI, Maven Central
+4. On demand
+   - R2DBC for reactive Spring Data, with cloud IAM
+   - Aurora fast failover through the AWS Advanced JDBC Wrapper
+   - Nested field paths in NoSQL updates
+   - Cross-instance cache stampede protection (a single-flight `getOrLoad`)
+   - Blob: archive restore, KMS encryption, versioning, tags, retention
+
+Dropped, because they work already or don't earn their weight: cache endpoint discovery through cloud
+APIs; push notifications for parameter changes (polling watch and reload cover it); SSM and Secret
+Manager labels; EventBridge and Event Grid; GCS parallel composite uploads, the AWS CRT client and an
+async API (the parallel transfer engines cover large objects). RDS Proxy needs nothing: point `host` at
+the proxy endpoint, with IAM auth if the proxy requires it.
