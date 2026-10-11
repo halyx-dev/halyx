@@ -293,7 +293,9 @@ public final class GcsBlobStoreDriver extends AbstractBlobStoreDriver {
         metadata.putAll(update.metadata());
         var headers = update.headers();
         long generation = update.ifMatch().map(etag -> generation(key, etag)).orElse(current.getGeneration());
-        BlobInfo patch = BlobInfo.newBuilder(BlobId.of(bucket, key.value(), generation))
+        // Patch the live object with an ifGenerationMatch precondition. Addressing the expected generation
+        // instead would make a stale ETag a 404 (that generation no longer exists), not a 412.
+        BlobInfo patch = BlobInfo.newBuilder(BlobId.of(bucket, key.value()))
                 .setContentType(headers.contentType().orElse(null))
                 .setContentEncoding(headers.contentEncoding().orElse(null))
                 .setContentDisposition(headers.contentDisposition().orElse(null))
@@ -302,7 +304,7 @@ public final class GcsBlobStoreDriver extends AbstractBlobStoreDriver {
                 .setMetadata(metadata)
                 .build();
         // Generation match: fail rather than patch a blob that was replaced meanwhile.
-        com.google.cloud.storage.Blob updated = storage.update(patch, BlobTargetOption.generationMatch());
+        com.google.cloud.storage.Blob updated = storage.update(patch, BlobTargetOption.generationMatch(generation));
         return toMetadata(key, updated);
     }
 

@@ -13,7 +13,9 @@ import org.kamranzafar.cirrus.messaging.spi.MessagingErrors;
 import org.kamranzafar.cirrus.messaging.spi.PublisherDriver;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Publishes to a Pub/Sub topic with synchronous batch requests, so messages sharing an ordering key keep
@@ -45,17 +47,34 @@ public final class PubSubPublisherDriver implements PublisherDriver {
         return Capabilities.of(MessagingCapability.ORDERING);
     }
 
+    /**
+     * Pub/Sub requires every message in one publish request to share an ordering key (or have none), so the
+     * batch goes out as one request per key, each keeping its messages in order. Ids come back in the
+     * caller's order. Not atomic: if a later request fails, earlier keys' messages are already published.
+     */
     @Override
     public List<String> publish(List<OutgoingMessage> messages) {
-        List<PubsubMessage> batch = new ArrayList<>(messages.size());
-        for (OutgoingMessage message : messages) {
-            var builder = PubsubMessage.newBuilder()
-                    .setData(ByteString.copyFrom(message.bodyUnsafe()))
-                    .putAllAttributes(message.attributes());
-            message.orderingKey().ifPresent(builder::setOrderingKey);
-            batch.add(builder.build());
+        Map<String, List<Integer>> byKey = new LinkedHashMap<>();
+        for (int i = 0; i < messages.size(); i++) {
+            byKey.computeIfAbsent(messages.get(i).orderingKey().orElse(""), k -> new ArrayList<>()).add(i);
         }
-        return List.copyOf(client.publish(topic, batch).getMessageIdsList());
+        String[] ids = new String[messages.size()];
+        for (List<Integer> positions : byKey.values()) {
+            List<PubsubMessage> batch = new ArrayList<>(positions.size());
+            for (int i : positions) {
+                OutgoingMessage message = messages.get(i);
+                var builder = PubsubMessage.newBuilder()
+                        .setData(ByteString.copyFrom(message.bodyUnsafe()))
+                        .putAllAttributes(message.attributes());
+                message.orderingKey().ifPresent(builder::setOrderingKey);
+                batch.add(builder.build());
+            }
+            List<String> published = client.publish(topic, batch).getMessageIdsList();
+            for (int j = 0; j < positions.size(); j++) {
+                ids[positions.get(j)] = published.get(j);
+            }
+        }
+        return List.of(ids);
     }
 
     @Override
