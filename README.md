@@ -22,7 +22,7 @@
   <img alt="AWS, Azure, Google Cloud" src="https://img.shields.io/badge/clouds-AWS%20%7C%20Azure%20%7C%20Google%20Cloud-informational">
 </p>
 
-**Cirrus** is a cloud-agnostic Java 21 API that gives microservices one consistent way to use Cloud Native services like Storage, SQL, NoSQL,
+**Cirrus** is a cloud-agnostic Java API that gives microservices one consistent way to use Cloud Native services like Storage, SQL, NoSQL,
 Caches, Messaging, and Parameters and Secrets across **AWS**, **Azure** and **GCP**.
 
 With Cirrus you can build **multi-cloud microservices and applications**. A single microservice or application can work with
