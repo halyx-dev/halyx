@@ -44,6 +44,11 @@ public final class SecretsManagerDriver extends AbstractParameterDriver {
             return Optional.of(toPortable(name, secrets.getSecretValue(b -> b.secretId(name))));
         } catch (ResourceNotFoundException e) {
             return Optional.empty();
+        } catch (InvalidRequestException e) {
+            if (!pendingDeletion(e)) {
+                throw e;
+            }
+            return Optional.empty();
         }
     }
 
@@ -52,6 +57,11 @@ public final class SecretsManagerDriver extends AbstractParameterDriver {
         try {
             return Optional.of(toPortable(name, secrets.getSecretValue(b -> b.secretId(name).versionId(version))));
         } catch (ResourceNotFoundException e) {
+            return Optional.empty();
+        } catch (InvalidRequestException e) {
+            if (!pendingDeletion(e)) {
+                throw e;
+            }
             return Optional.empty();
         }
     }
@@ -71,10 +81,32 @@ public final class SecretsManagerDriver extends AbstractParameterDriver {
         Map<String, Parameter> found = new LinkedHashMap<>();
         for (int from = 0; from < names.size(); from += BATCH) {
             List<String> batch = names.subList(from, Math.min(from + BATCH, names.size()));
-            secrets.batchGetSecretValue(b -> b.secretIdList(batch)).secretValues().forEach(v ->
-                    found.put(v.name(), new Parameter(v.name(), v.secretString(), v.versionId(), v.createdDate())));
+            if (batchReads) {
+                try {
+                    // secrets deleted since they were listed come back in errors() and are left out
+                    secrets.batchGetSecretValue(b -> b.secretIdList(batch)).secretValues().forEach(v ->
+                            found.put(v.name(), new Parameter(v.name(), v.secretString(), v.versionId(), v.createdDate())));
+                    continue;
+                } catch (SecretsManagerException e) {
+                    if (!accessDenied(e)) {
+                        throw e;
+                    }
+                    batchReads = false;
+                }
+            }
+            batch.forEach(name -> get(name).ifPresent(p -> found.put(name, p)));
         }
         return found;
+    }
+
+    /**
+     * BatchGetSecretValue needs its own permission on {@code "*"}. A policy that grants only GetSecretValue
+     * still works: the first denial switches listing to one read per secret.
+     */
+    private volatile boolean batchReads = true;
+
+    private static boolean accessDenied(SecretsManagerException e) {
+        return e.awsErrorDetails() != null && "AccessDeniedException".equals(e.awsErrorDetails().errorCode());
     }
 
     /**
