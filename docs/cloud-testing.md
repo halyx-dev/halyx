@@ -13,6 +13,7 @@ eventual consistency and asynchronous deletes.
 | AWS | 3 | ElastiCache for Valkey with IAM auth | 52/53: the IAM policy still needs checking |
 | GCP | 1 | Cloud Storage, Firestore, Pub/Sub, Secret Manager, Parameter Manager | **176/179** passed, 3 skipped (expected) |
 | GCP | 2 | Cloud SQL for PostgreSQL and MySQL with IAM auth, direct and through the Cloud SQL connector | **18/18** |
+| GCP | 3 | Memorystore for Valkey with IAM auth and TLS (private CA) | **54/54** |
 
 ## How an AWS run works
 
@@ -953,6 +954,110 @@ Times per new connection, in the order they ran, on newly created instances:
   logins (up to 2.3s) are near the test's 3s limit, so that limit could become flaky on this tier.
 - **The connector** costs the same as a direct connection once warm.
 
+## GCP tier 3: latest result
+
+```bash
+TIER=3 GCP_PROJECT=<project> GCP_REGION=australia-southeast1 scripts/gcp-real-cloud.sh
+```
+
+Terraform (`infra/gcp/tier3`) creates the following, in a VPC and subnet of the run's own:
+- **Cache:** a Memorystore for Valkey 8.0 instance: cluster mode disabled, `SHARED_CORE_NANO`, IAM
+  authorization, and TLS (`SERVER_AUTHENTICATION`) with a server certificate from Memorystore's private CA.
+  Cluster mode is off so the client gets one endpoint and no redirects to node IPs a tunnel can't reach.
+- **Private endpoint:** a service-connection policy (`gcp-memorystore`), under which Memorystore creates
+  its Private Service Connect endpoint in the subnet.
+- **Bastion:** an `e2-micro` VM with no service account. A firewall rule allows SSH only from the test
+  machine's `/32`, with a key generated for each run.
+
+The script then:
+1. fetches the instance's CA (`gcloud memorystore instances get-certificate-authority`)
+2. forwards `127.0.0.1:16380` through the bastion to the private endpoint
+3. runs `RealGcpCacheIT`
+
+The certificate names the private endpoint, not the tunnel's 127.0.0.1, so the caches use
+`redis.verify-peer=ca`. That checks the chain against the instance's CA, but not the name.
+
+| | |
+|---|---|
+| Date | 2026-10-11, 08:38–09:07 UTC (29 min: Memorystore ready in 7m 6s, tests 17s, teardown about 20 min) |
+| Run id | `r261011193814e3` |
+| Engine | Valkey 8.0, cluster mode disabled |
+| Result | **BUILD SUCCESS**: 54 passed, 0 failed, on the first run |
+| Teardown | instance, VM, firewall, connection policy, subnet and VPC destroyed; run key and CA deleted; check: **nothing left** |
+
+| Test | Result | Time |
+|---|---|---|
+| Cache conformance kit, logged in with the identity's access token over TLS against the instance's CA | **49/49 passed** | 12.1s |
+| `iamTokenReadsAndWrites` | passed | 0.55s |
+| `unauthenticatedConnectionIsRejected` | passed | 0.25s |
+| `invalidTokenIsRejected`: `AUTH` with a made-up token | passed | 0.49s |
+| `fullVerificationRejectsTheTunnelAddress`: with full checks, the certificate doesn't name 127.0.0.1 | passed | 0.25s |
+| `chainIsRejectedWithoutTheInstanceCa`: the CA is private, and the JDK's public roots don't trust it | passed | 2.77s |
+
+This is the first time Memorystore IAM authentication has been verified end to end. Before this,
+`MemorystoreIamTokens` was only unit-tested, against a plain Valkey container with a password.
+
+Unlike AWS tier 3, Memorystore IAM has no per-user access: the token's principal needs
+`memorystore.instances.connect` (`roles/memorystore.dbConnectionUser`), and there are no database users to
+mix up. So there is no "denied user" test. The rejection tests cover a missing and a forged token.
+
+<details>
+<summary>Cache conformance kit: 49/49 passed, 12.1s</summary>
+
+| Test | Result | Time (s) |
+|---|---|---|
+| `binaryValuesWithBytesCodec` | passed | 0.09 |
+| `clearMatchesNamespaceLiterally` | passed | 0.20 |
+| `clearRemovesOnlyThisNamespace` | passed | 0.85 |
+| `clearWithoutNamespaceIsRefused` | passed | 0.00 |
+| `concurrentGetOrLoadSharesOneLoad` | passed | 0.46 |
+| `customCodec` | passed | 0.10 |
+| `defaultTtlApplies` | passed | 0.07 |
+| `deleteAllCountsExistingKeys` | passed | 0.15 |
+| `deleteIfEqualsOnlyDeletesMatchingValue` | passed | 0.20 |
+| `deleteReportsWhetherKeyExisted` | passed | 0.15 |
+| `emptyBulkOperations` | passed | 0.01 |
+| `entriesExpire` | passed | 0.46 |
+| `expireOnMissingKeyReturnsFalse` | passed | 0.04 |
+| `expireSetsNewTtl` | passed | 0.41 |
+| `expiredLeaseCannotReleaseTheNextHoldersLock` | passed | 0.59 |
+| `extendKeepsTheLockAlive` | passed | 0.84 |
+| `failingLoaderCachesNothing` | passed | 0.25 |
+| `getAndDeleteConsumesOnce` | passed | 0.15 |
+| `getOrLoadLoadsOnceThenServesFromCache` | passed | 0.18 |
+| `getOrLoadWithTtl` | passed | 0.15 |
+| `incrementCreatesAndAdds` | passed | 0.16 |
+| `incrementKeepsTtl` | passed | 0.19 |
+| `incrementOnNonNumberFails` | passed | 0.08 |
+| `incrementWithTtlStartsAWindowOnce` | passed | 0.92 |
+| `invalidKeysAreRejected` | passed | 0.01 |
+| `largeValue` | passed | 1.72 |
+| `lockGivesUpAfterWaiting` | passed | 0.30 |
+| `lockIsExclusiveUntilReleased` | passed | 0.16 |
+| `lockWaitsForTheHolder` | passed | 0.52 |
+| `missingKeyIsEmpty` | passed | 0.14 |
+| `namespacesAreIsolated` | passed | 0.12 |
+| `nonPositiveTtlIsRejected` | passed | 0.01 |
+| `nullLoadResultIsNotCached` | passed | 0.15 |
+| `putAllAndGetAll` | passed | 0.14 |
+| `putAllWithTtl` | passed | 0.17 |
+| `putIfAbsentOnlyStoresOnce` | passed | 0.14 |
+| `putIfAbsentWithTtlExpires` | passed | 0.41 |
+| `putOverwrites` | passed | 0.14 |
+| `putThenGet` | passed | 0.09 |
+| `replaceIsCompareAndSet` | passed | 0.27 |
+| `reportsProviderAndNamespace` | passed | 0.00 |
+| `statisticsCountHitsMissesAndLoads` | passed | 0.37 |
+| `ttlOfMissingKeyIsEmpty` | passed | 0.04 |
+| `ttlReportsRemainingTime` | passed | 0.08 |
+| `unicodeKeysAndValues` | passed | 0.08 |
+| `unwrapUnknownTypeThrows` | passed | 0.00 |
+| `updateOfMissingKeyStoresNothing` | passed | 0.08 |
+| `updateReplacesExistingValueAndKeepsTtl` | passed | 0.17 |
+| `withoutTtlEntriesDoNotExpire` | passed | 0.11 |
+
+</details>
+
 ## GCP run history
 
 | Run id | Scope | Result | Teardown | Notes |
@@ -961,6 +1066,7 @@ Times per new connection, in the order they ran, on newly created instances:
 | `r2610111748599e` | tier 1 | **176/179, 3 skipped** | clean | Latest tier 1 result, above. |
 | `r26101118357636` | tier 2 | 13/18 | clean | PostgreSQL 9/9. MySQL's five IAM tests logged in, then were refused the `app` database: IAM users have no privileges until granted. |
 | `r2610111859cad1` | tier 2 | **18/18** | clean | Latest tier 2 result, above. The test now grants the MySQL IAM user `SELECT` on `app`. |
+| `r261011193814e3` | tier 3 | **54/54** | clean | Latest tier 3 result, above, on the first run. Teardown took about 20 min: the VPC can only go once Memorystore's delete has finished. |
 
 ## What real GCP found
 
@@ -972,6 +1078,7 @@ The emulators (Floci-gcp, and Google's Pub/Sub and Firestore emulators) missed a
 | `updateMetadata` with a stale ETag patched the *old* generation, which no longer exists in an unversioned bucket, so GCS answered 404 instead of 412 | Patch the live object with an `ifGenerationMatch` precondition, which GCS answers with 412 |
 | `gcloud parametermanager` sends regional locations to the global endpoint and gets `PERMISSION_DENIED` | The test script uses the regional endpoint (`parametermanager.<region>.rep.googleapis.com`). The Java client was already correct |
 | Cloud SQL for MySQL IAM users have no privileges, so a connection naming a database is refused (`Access denied for user 'cirrus-test'@'%' to database 'app'`). PostgreSQL grants `CONNECT` to everyone | Documented in the README; the test grants `SELECT` as the admin, as an application's setup would |
+| Memorystore's server certificate comes from a private, per-instance CA and names the private endpoint, so through a tunnel or proxy the name never matches | New `redis.verify-peer=ca` checks the chain against the CA (`redis.ca-certificate`) without the name. Full checks stay the default |
 | Firestore collection-group queries need indexes the emulator doesn't ask for | Terraform creates them; the driver's documentation already lists them |
 
 ## IAM used for GCP
@@ -984,16 +1091,20 @@ The emulators (Floci-gcp, and Google's Pub/Sub and Firestore emulators) missed a
 | | `roles/secretmanager.admin` | secrets |
 | | `roles/parametermanager.admin` | parameters, global and regional |
 | | `roles/serviceusage.serviceUsageConsumer` | call APIs billed to the project |
+| | `roles/compute.admin` (tier 3) | the run's VPC, subnet, firewall rule and bastion VM |
+| | `roles/memorystore.admin` (tier 3) | create and delete the instance; read its CA |
+| | `roles/memorystore.dbConnectionUser` (tier 3) | IAM login to the instance (`memorystore.instances.connect`), the role an application gets |
+| | `roles/networkconnectivity.consumerNetworkAdmin` (tier 3) | the service-connection policy for Memorystore's private endpoint |
 | | `roles/cloudsql.admin` (tier 2) | create instances and database users. It also includes what an application needs: `cloudsql.instances.login` for IAM database login (`roles/cloudsql.instanceUser`) and `cloudsql.instances.connect` for the connector (`roles/cloudsql.client`) |
 | the person running the tests | `roles/iam.serviceAccountTokenCreator` on `cirrus-test` | impersonate it. Project Owner doesn't include this |
 
 The project also needs these APIs enabled: the IAM Service Account Credentials API
 (`iamcredentials.googleapis.com`) for impersonation, and the Cloud SQL Admin API
-(`sqladmin.googleapis.com`) for tier 2.
+(`sqladmin.googleapis.com`) for tier 2, and Compute Engine, Memorystore, Network Connectivity and Service
+Consumer Management (`compute`, `memorystore`, `networkconnectivity`, `serviceconsumermanagement`) for tier 3.
 
 ## Not yet run
 
 | Tier | Services | Status |
 |---|---|---|
 | Azure | Blob, Service Bus, Cosmos DB, Key Vault, App Configuration | no real-cloud profile yet |
-| GCP | Memorystore with IAM auth | not run: VPC-only, like ElastiCache |

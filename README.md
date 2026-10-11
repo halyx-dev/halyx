@@ -375,7 +375,9 @@ even while its cache is down. The default command timeout is 2 s (`redis.command
 **TLS.** `rediss://` endpoints use TLS with hostname verification. For servers with a private CA,
 such as Memorystore in-transit encryption, set `redis.ca-certificate` to a PEM file. Untrusted
 certificates are reported as `AccessDeniedException` (a configuration error, never treated as a
-miss under fail-open).
+miss under fail-open). Through a tunnel or proxy, where the certificate can't name the local address, set
+`redis.verify-peer` to `ca`: the chain is still checked against the trusted CA, but not the name.
+(`false` skips certificate checks altogether, for local tests only.)
 
 **DNS.** Lettuce resolves host names with Netty's own DNS client, which reads `/etc/hosts` and the
 system's DNS servers but ignores JVM DNS settings. Set `redis.dns-resolver` to `jdk` to resolve like
@@ -988,8 +990,8 @@ Backlog, in order:
    conformance kits and IAM tests against them. AWS tier 1 (S3, DynamoDB, SSM, Secrets Manager, SNS, SQS)
    and tier 2 (RDS PostgreSQL and MySQL with IAM auth) pass, tier 3 (ElastiCache with IAM) passes but for
    one IAM-policy check, and GCP tier 1 (Cloud Storage, Firestore, Pub/Sub, Secret Manager, Parameter
-   Manager) and tier 2 (Cloud SQL with IAM, direct and through the connector) pass. Azure and GCP
-   Memorystore remain. Results: [docs/cloud-testing.md](docs/cloud-testing.md)
+   Manager), tier 2 (Cloud SQL with IAM, direct and through the connector) and tier 3 (Memorystore
+   for Valkey with IAM) pass. Azure remains. Results: [docs/cloud-testing.md](docs/cloud-testing.md)
 2. Release 0.1.0: JPMS module descriptors, japicmp API compatibility checks, CI, Maven Central
 3. On demand
    - Spring Data repositories over document stores (`cirrus-spring-data`): CRUD by composite id
