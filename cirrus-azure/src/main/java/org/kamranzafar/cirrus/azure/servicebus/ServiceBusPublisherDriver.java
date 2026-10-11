@@ -21,18 +21,21 @@ import java.util.UUID;
 /**
  * Sends to a Service Bus queue or topic. The message id is the deduplication id when given (Service Bus
  * drops repeats within the entity's duplicate-detection window, if enabled on it), otherwise a random UUID.
- * Delays become scheduled enqueue times. Ordering keys (sessions) are not supported yet.
+ * Delays become scheduled enqueue times. On session-enabled entities ({@code sessions}), ordering keys become
+ * session ids, and messages without one get a unique session id, since such entities require one.
  */
 public final class ServiceBusPublisherDriver implements PublisherDriver {
 
     private final ServiceBusSenderClient sender;
     private final String entity;
     private final long maxMessageBytes;
+    private final boolean sessions;
 
-    public ServiceBusPublisherDriver(ServiceBusSenderClient sender, String entity, long maxMessageBytes) {
+    public ServiceBusPublisherDriver(ServiceBusSenderClient sender, String entity, long maxMessageBytes, boolean sessions) {
         this.sender = sender;
         this.entity = entity;
         this.maxMessageBytes = maxMessageBytes;
+        this.sessions = sessions;
     }
 
     @Override
@@ -47,7 +50,9 @@ public final class ServiceBusPublisherDriver implements PublisherDriver {
 
     @Override
     public Capabilities capabilities() {
-        return Capabilities.of(MessagingCapability.DEDUPLICATION, MessagingCapability.DELAYED_DELIVERY);
+        return sessions
+                ? Capabilities.of(MessagingCapability.ORDERING, MessagingCapability.DEDUPLICATION, MessagingCapability.DELAYED_DELIVERY)
+                : Capabilities.of(MessagingCapability.DEDUPLICATION, MessagingCapability.DELAYED_DELIVERY);
     }
 
     @Override
@@ -60,6 +65,9 @@ public final class ServiceBusPublisherDriver implements PublisherDriver {
             ids.add(id);
             ServiceBusMessage native_ = new ServiceBusMessage(BinaryData.fromBytes(message.bodyUnsafe())).setMessageId(id);
             message.attributes().forEach((k, v) -> native_.getApplicationProperties().put(k, v));
+            if (sessions) {
+                native_.setSessionId(message.orderingKey().orElseGet(() -> UUID.randomUUID().toString()));
+            }
             if (message.delay().isPresent()) {
                 native_.setScheduledEnqueueTime(OffsetDateTime.now().plus(message.delay().get()));
                 scheduled.add(native_);

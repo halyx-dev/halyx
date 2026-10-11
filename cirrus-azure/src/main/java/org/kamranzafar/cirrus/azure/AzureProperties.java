@@ -30,6 +30,15 @@ public final class AzureProperties {
     /** Topic property: {@code queue} to send to a queue rather than a topic ({@code topic}, the default). */
     public static final String SERVICE_BUS_ENTITY = "azure.servicebus.entity";
 
+    /**
+     * Topic and subscription property: {@code true} for session-enabled entities, which turns ordering keys
+     * into session ids and receives session by session.
+     */
+    public static final String SERVICE_BUS_SESSIONS = "azure.servicebus.sessions";
+
+    /** Subscription property: sessions a session subscription holds at once (default 8). */
+    public static final String SERVICE_BUS_MAX_SESSIONS = "azure.servicebus.max-sessions";
+
     /** Largest message body in bytes: 262144 (256 KiB) on the standard tier, the default; up to 100 MB on premium. */
     public static final String SERVICE_BUS_MAX_MESSAGE_BYTES = "azure.servicebus.max-message-bytes";
 

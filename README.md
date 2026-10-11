@@ -1,7 +1,7 @@
 # Cirrus
 
-A cloud-agnostic Java 21 API that gives microservices one consistent way to use storage, SQL, NoSQL,
-caches, messaging, and parameters and secrets across **AWS**, **Azure** and **GCP**.
+A cloud-agnostic Java 21 API that gives microservices one consistent way to use Cloud Native services like Storage, SQL, NoSQL,
+Caches, Messaging, and Parameters and Secrets across **AWS**, **Azure** and **GCP**.
 
 ```java
 try (Cirrus cirrus = Cirrus.builder()
@@ -453,12 +453,16 @@ those acks are sent at once.
 | Topic | SNS topic, or an SQS queue with `aws.target=sqs` | Service Bus topic, or a queue with `azure.servicebus.entity=queue` | Pub/Sub topic |
 | Subscription | SQS queue (raw delivery or SNS envelope, both handled) | queue, or `<topic>/subscriptions/<name>` | pull subscription |
 | Lease | queue visibility timeout | lock duration (renewed repeatedly to extend further) | ack deadline |
-| Ordering keys | FIFO topics and queues (message groups) | not yet (sessions) | with message ordering enabled on the subscription |
+| Ordering keys | FIFO topics and queues (message groups) | session-enabled entities, with `azure.servicebus.sessions=true` on the topic and subscription | with message ordering enabled on the subscription |
 | Deduplication ids | FIFO topics and queues | entities with duplicate detection | no |
 | Delayed delivery | SQS queues, up to 15 minutes | yes (scheduled enqueue) | no |
 | `nack(delay)` | honoured | redelivers at once | honoured |
 | Max body | 256 KiB | 256 KiB standard, up to 100 MB premium (`azure.servicebus.max-message-bytes`) | 10 MB |
 | Dead letters | queue redrive policy | max delivery count | dead-letter policy |
+
+On Service Bus, a session subscription holds up to `azure.servicebus.max-sessions` sessions (8) at once.
+No other consumer can take a session while it's held, so each ordering key is processed in order across
+instances. Messages published without an ordering key to a session entity each get their own session.
 
 Capabilities are declared (`MessagingCapability.ORDERING`, `DEDUPLICATION`, `DELAYED_DELIVERY`, `NACK_DELAY`).
 Asking for one that isn't there fails rather than being ignored. Topics, subscriptions and dead-letter
@@ -791,7 +795,7 @@ extension, batches, listener retries and concurrency, claim checks, ordering, de
 | in-memory broker | none | the full TCK, which also checks the TCK itself |
 | AWS SNS → SQS, plain SQS | Floci | standard and FIFO topics and queues; SNS envelope unwrapping and base64 bodies without raw delivery; SNS skips delays |
 | GCP Pub/Sub | Google's Pub/Sub emulator, and Floci-gcp | everything but deduplication and delays (not in Pub/Sub). Floci never redelivers, so its run skips the three redelivery tests, which the Google emulator covers |
-| Azure Service Bus | Microsoft's Service Bus emulator with SQL Edge | topics with subscriptions, a queue, duplicate detection, scheduled delivery, lock renewal past the lock duration; ordering skipped (sessions not yet supported) |
+| Azure Service Bus | Microsoft's Service Bus emulator with SQL Edge | the full TCK: topics with subscriptions, a queue, duplicate detection, scheduled delivery, lock renewal past the lock duration, ordering through sessions |
 | Spring | in-memory broker | on Boot 3.5 and 4.1: beans from properties, `@CirrusListener` with retries, claim checks, metrics, health, trace propagation |
 
 **On real GCP:** `GcpParameterStoreIT` runs the same TCK against Secret Manager and Parameter
@@ -859,15 +863,14 @@ Done:
 5. ~~NoSQL document stores: DynamoDB, Cosmos DB, Firestore~~
 6. ~~Spring Boot starter: properties, auto-configuration, health, Micrometer, Boot 3.5 and 4~~
 7. ~~Messaging: SNS/SQS, Service Bus, Pub/Sub; listeners, claim checks, tracing~~
+8. ~~Production gaps: NoSQL secondary indexes and transactions, batched acks, Service Bus sessions~~
 
 Backlog, in order:
 
-1. Production gaps
-   - Service Bus sessions, for ordering keys on Azure
-2. Real-cloud test profile: Terraform for throwaway resources per cloud and a Maven profile running the
+1. Real-cloud test profile: Terraform for throwaway resources per cloud and a Maven profile running the
    conformance kits and IAM tests against them
-3. Release 0.1.0: JPMS module descriptors, japicmp API compatibility checks, CI, Maven Central
-4. On demand
+2. Release 0.1.0: JPMS module descriptors, japicmp API compatibility checks, CI, Maven Central
+3. On demand
    - R2DBC for reactive Spring Data, with cloud IAM
    - Aurora fast failover through the AWS Advanced JDBC Wrapper
    - Nested field paths in NoSQL updates

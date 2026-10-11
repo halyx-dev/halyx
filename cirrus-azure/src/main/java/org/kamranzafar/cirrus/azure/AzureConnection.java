@@ -26,6 +26,7 @@ import org.kamranzafar.cirrus.parameters.spi.ParameterDriver;
 import reactor.core.publisher.Mono;
 import org.kamranzafar.cirrus.azure.redis.EntraIdRedisTokens;
 import org.kamranzafar.cirrus.azure.servicebus.ServiceBusPublisherDriver;
+import org.kamranzafar.cirrus.azure.servicebus.ServiceBusSessionSubscriptionDriver;
 import org.kamranzafar.cirrus.azure.servicebus.ServiceBusSubscriptionDriver;
 import org.kamranzafar.cirrus.azure.sql.EntraIdSqlTokens;
 import org.kamranzafar.cirrus.cache.CacheAuth;
@@ -209,7 +210,8 @@ final class AzureConnection implements ProviderConnection {
             default -> throw new IllegalArgumentException(AzureProperties.SERVICE_BUS_ENTITY + " must be topic or queue, not " + entity);
         }
         long maxBytes = config.property(AzureProperties.SERVICE_BUS_MAX_MESSAGE_BYTES).map(Long::parseLong).orElse(256L * 1024);
-        var driver = new ServiceBusPublisherDriver(sender.buildClient(), topic.name(), maxBytes);
+        boolean sessions = topic.property(AzureProperties.SERVICE_BUS_SESSIONS).map(Boolean::parseBoolean).orElse(false);
+        var driver = new ServiceBusPublisherDriver(sender.buildClient(), topic.name(), maxBytes, sessions);
         serviceBusClients.add(driver);
         return driver;
     }
@@ -217,6 +219,20 @@ final class AzureConnection implements ProviderConnection {
     /** A Service Bus queue, or a topic subscription named {@code <topic>/subscriptions/<subscription>}. */
     @Override
     public synchronized SubscriptionDriver subscription(SubscriptionConfig subscription) {
+        if (subscription.property(AzureProperties.SERVICE_BUS_SESSIONS).map(Boolean::parseBoolean).orElse(false)) {
+            var sessions = serviceBus().sessionReceiver().receiveMode(ServiceBusReceiveMode.PEEK_LOCK)
+                    .disableAutoComplete().maxAutoLockRenewDuration(Duration.ZERO);
+            String[] parts = subscription.name().split("/subscriptions/", 2);
+            if (parts.length == 2) {
+                sessions.topicName(parts[0]).subscriptionName(parts[1]);
+            } else {
+                sessions.queueName(subscription.name());
+            }
+            int max = subscription.property(AzureProperties.SERVICE_BUS_MAX_SESSIONS).map(Integer::parseInt).orElse(8);
+            var driver = new ServiceBusSessionSubscriptionDriver(sessions.buildClient(), subscription.name(), max);
+            serviceBusClients.add(driver);
+            return driver;
+        }
         var receiver = serviceBus().receiver().receiveMode(ServiceBusReceiveMode.PEEK_LOCK)
                 .disableAutoComplete().maxAutoLockRenewDuration(Duration.ZERO);
         String[] parts = subscription.name().split("/subscriptions/", 2);

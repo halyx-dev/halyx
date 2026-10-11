@@ -87,10 +87,10 @@ class ServiceBusConformanceIT extends MessagingConformanceTest {
     private static String config() {
         List<String> topics = new ArrayList<>();
         for (int i = 0; i < TOPICS; i++) {
-            topics.add(topic("tck-" + i, false));
+            topics.add(topic("tck-" + i, false, false));
         }
         for (int i = 0; i < DEDUP_TOPICS; i++) {
-            topics.add(topic("tck-dedup-" + i, true));
+            topics.add(topic("tck-dedup-" + i, true, true));
         }
         return """
                 {"UserConfig":{"Namespaces":[{"Name":"sbemulatorns",
@@ -103,19 +103,25 @@ class ServiceBusConformanceIT extends MessagingConformanceTest {
                 """.formatted(String.join(",", topics));
     }
 
-    private static String topic(String name, boolean dedup) {
+    private static String topic(String name, boolean dedup, boolean sessions) {
         return """
                 {"Name":"%s","Properties":{"DefaultMessageTimeToLive":"PT1H","DuplicateDetectionHistoryTimeWindow":"PT1M",
                   "RequiresDuplicateDetection":%s},
                  "Subscriptions":[{"Name":"sub","Properties":{"DeadLetteringOnMessageExpiration":false,
                    "DefaultMessageTimeToLive":"PT1H","LockDuration":"PT5S","MaxDeliveryCount":10,
-                   "ForwardDeadLetteredMessagesTo":"","ForwardTo":"","RequiresSession":false},"Rules":[]}]}
-                """.formatted(name, dedup);
+                   "ForwardDeadLetteredMessagesTo":"","ForwardTo":"","RequiresSession":%s},"Rules":[]}]}
+                """.formatted(name, dedup, sessions);
     }
 
     private Channel channelOn(String topic, ClaimCheck claimCheck) {
-        TopicConfig.Builder topicConfig = TopicConfig.builder(topic);
-        SubscriptionConfig.Builder subscriptionConfig = SubscriptionConfig.builder(topic + "/subscriptions/sub");
+        return channelOn(topic, claimCheck, false);
+    }
+
+    private Channel channelOn(String topic, ClaimCheck claimCheck, boolean sessions) {
+        TopicConfig.Builder topicConfig = TopicConfig.builder(topic)
+                .property(AzureProperties.SERVICE_BUS_SESSIONS, String.valueOf(sessions));
+        SubscriptionConfig.Builder subscriptionConfig = SubscriptionConfig.builder(topic + "/subscriptions/sub")
+                .property(AzureProperties.SERVICE_BUS_SESSIONS, String.valueOf(sessions));
         if (claimCheck != null) {
             topicConfig.claimCheck(claimCheck);
             subscriptionConfig.claimCheck(claimCheck);
@@ -133,10 +139,10 @@ class ServiceBusConformanceIT extends MessagingConformanceTest {
         return channelOn("tck-" + index, claimCheck);
     }
 
-    /** Topics with duplicate detection on, for the deduplication test. */
+    /** Session-enabled topics with duplicate detection: ordering keys, deduplication and delays. */
     @Override
     protected Channel orderedChannel(String name) {
-        return channelOn("tck-dedup-" + NEXT_DEDUP_TOPIC.getAndIncrement(), null);
+        return channelOn("tck-dedup-" + NEXT_DEDUP_TOPIC.getAndIncrement(), null, true);
     }
 
     @Override
