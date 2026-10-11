@@ -7,6 +7,8 @@ import org.kamranzafar.cirrus.error.CloudException;
 import org.kamranzafar.cirrus.parameters.Parameter;
 import org.kamranzafar.cirrus.parameters.ParameterCapability;
 import org.kamranzafar.cirrus.parameters.spi.AbstractParameterDriver;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
 import software.amazon.awssdk.services.secretsmanager.model.FilterNameStringType;
 import software.amazon.awssdk.services.secretsmanager.model.GetSecretValueResponse;
@@ -30,6 +32,8 @@ public final class SecretsManagerDriver extends AbstractParameterDriver {
 
     /** BatchGetSecretValue accepts up to 20 secret ids. */
     private static final int BATCH = 20;
+
+    private static final Logger LOG = LoggerFactory.getLogger(SecretsManagerDriver.class);
 
     private final SecretsManagerClient secrets;
 
@@ -92,6 +96,7 @@ public final class SecretsManagerDriver extends AbstractParameterDriver {
                         throw e;
                     }
                     batchReads = false;
+                    LOG.warn("secretsmanager:BatchGetSecretValue is denied; listing reads secrets one by one");
                 }
             }
             batch.forEach(name -> get(name).ifPresent(p -> found.put(name, p)));
