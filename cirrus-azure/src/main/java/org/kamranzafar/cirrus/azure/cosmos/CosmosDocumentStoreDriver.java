@@ -98,8 +98,25 @@ public final class CosmosDocumentStoreDriver implements DocumentStoreDriver {
         return names;
     }
 
+    /**
+     * Cosmos ids can't contain {@code / \\ ? #}, and the gateway URL-decodes the id in a point read, so a
+     * {@code %} escape would be undone ({@code order%232} is looked up as {@code order#2}). Escape with
+     * {@code ~} instead, which nothing decodes; {@code %} is escaped too, for the same reason.
+     */
     static String encodeId(String key) {
-        return key.replace("%", "%25").replace("/", "%2F").replace("\\", "%5C").replace("?", "%3F").replace("#", "%23");
+        StringBuilder id = new StringBuilder(key.length());
+        for (char c : key.toCharArray()) {
+            switch (c) {
+                case '~' -> id.append("~7E");
+                case '%' -> id.append("~25");
+                case '/' -> id.append("~2F");
+                case '\\' -> id.append("~5C");
+                case '?' -> id.append("~3F");
+                case '#' -> id.append("~23");
+                default -> id.append(c);
+            }
+        }
+        return id.toString();
     }
 
     private static String id(Key key) {
@@ -195,6 +212,7 @@ public final class CosmosDocumentStoreDriver implements DocumentStoreDriver {
     private Item patch(Key key, DocumentUpdate update, Set<String> removes, Optional<Version> ifVersion, Instant expiresAt) {
         CosmosPatchOperations operations = patchOperations(update, removes, expiresAt);
         var options = new CosmosPatchItemRequestOptions();
+        options.setContentResponseOnWriteEnabled(true); // off by default: Cosmos then returns no document
         ifVersion.ifPresent(v -> options.setIfMatchETag(v.value()));
         var response = container.patchItem(id(key), new PartitionKey(key.partition()), operations, options, ObjectNode.class);
         return toItem(response.getItem(), response.getETag());

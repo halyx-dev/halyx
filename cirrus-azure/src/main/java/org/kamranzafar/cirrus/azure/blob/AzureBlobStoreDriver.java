@@ -35,6 +35,7 @@ import org.kamranzafar.cirrus.azure.AzureErrors;
 import org.kamranzafar.cirrus.azure.AzureProvider;
 import org.kamranzafar.cirrus.capability.Capabilities;
 import org.kamranzafar.cirrus.error.CloudException;
+import org.kamranzafar.cirrus.error.InvalidArgumentException;
 import org.kamranzafar.cirrus.error.PreconditionFailedException;
 import org.kamranzafar.cirrus.storage.BatchDeleteResult;
 import org.kamranzafar.cirrus.storage.Blob;
@@ -76,6 +77,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /** Blob storage on Azure Blob Storage. A Cirrus bucket maps to a blob container. */
 public final class AzureBlobStoreDriver extends AbstractBlobStoreDriver {
@@ -107,6 +109,7 @@ public final class AzureBlobStoreDriver extends AbstractBlobStoreDriver {
 
     @Override
     public PutResult put(BlobKey key, BlobContent.Sized content, PutOptions options, Checksums expected) {
+        requireValidMetadataNames(options.metadata());
         BinaryData data = switch (content) {
             case BlobContent.OfBytes bytes -> BinaryData.fromBytes(bytes.bytes());
             case BlobContent.OfFile file -> BinaryData.fromFile(file.path());
@@ -152,6 +155,7 @@ public final class AzureBlobStoreDriver extends AbstractBlobStoreDriver {
 
     @Override
     public MultipartUploadSession startMultipartUpload(BlobKey key, PutOptions options) {
+        requireValidMetadataNames(options.metadata());
         return new AzureBlockUpload(blob(key).getBlockBlobClient(), key, options);
     }
 
@@ -255,6 +259,7 @@ public final class AzureBlobStoreDriver extends AbstractBlobStoreDriver {
 
     @Override
     public BlobMetadata updateMetadata(BlobKey key, MetadataUpdate update) {
+        requireValidMetadataNames(update.metadata());
         BlobClient blob = blob(key);
         var read = new BlobRequestConditions();
         update.ifMatch().ifPresent(etag -> read.setIfMatch(etag.value()));
@@ -332,6 +337,7 @@ public final class AzureBlobStoreDriver extends AbstractBlobStoreDriver {
     /** No request: the upload exists only as staged blocks until it is committed. */
     @Override
     public PresignedUpload startPresignedUpload(BlobKey key, PutOptions options) {
+        requireValidMetadataNames(options.metadata());
         return new PresignedUpload(key, AzurePresignedUpload.start(options).encode());
     }
 
@@ -383,6 +389,19 @@ public final class AzureBlobStoreDriver extends AbstractBlobStoreDriver {
             request.contentType().ifPresent(ct -> headers.put("x-ms-blob-content-type", ct));
         }
         return new PresignedUrl(request.method(), URI.create(blob.getBlobUrl() + "?" + sas), expiry.toInstant(), headers);
+    }
+
+    /** Azure metadata names are C# identifiers; anything else fails with a 400 that doesn't say which name. */
+    private static final Pattern METADATA_NAME = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");
+
+    private void requireValidMetadataNames(Map<String, String> metadata) {
+        for (String name : metadata.keySet()) {
+            if (!METADATA_NAME.matcher(name).matches()) {
+                throw new InvalidArgumentException("Azure blob metadata names are letters, digits and '_', not starting "
+                        + "with a digit: '" + name + "' (use '_' rather than '-' for names that work on every cloud)",
+                        null, provider, "InvalidMetadata");
+            }
+        }
     }
 
     @Override

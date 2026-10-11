@@ -3,10 +3,15 @@ package org.kamranzafar.cirrus.azure;
 import com.azure.storage.blob.BlobContainerClient;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 import org.kamranzafar.cirrus.Cirrus;
 import org.kamranzafar.cirrus.config.Credentials;
 import org.kamranzafar.cirrus.config.ProviderConfig;
+import org.kamranzafar.cirrus.error.InvalidArgumentException;
+import org.kamranzafar.cirrus.storage.BlobContent;
+import org.kamranzafar.cirrus.storage.BlobKey;
 import org.kamranzafar.cirrus.storage.BlobStore;
+import org.kamranzafar.cirrus.storage.PutOptions;
 import org.kamranzafar.cirrus.tck.BlobStoreConformanceTest;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
@@ -16,6 +21,9 @@ import org.testcontainers.utility.DockerImageName;
 
 import java.net.URI;
 import java.util.Map;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Runs the storage TCK against Azure Blob Storage emulated by Floci. */
 @Testcontainers(disabledWithoutDocker = true)
@@ -68,6 +76,16 @@ class AzureBlobStoreConformanceIT extends BlobStoreConformanceTest {
                 "putWithTierStoresTier", noTier,
                 "updateMetadataReplacesHeadersAndMetadataButNotContent", noSetProperties,
                 "updateMetadataKeepsTier", noSetProperties);
+    }
+
+    @Test
+    void metadataNamesAzureCannotStoreAreRejectedClearly() {
+        var options = PutOptions.builder().metadata("schema-version", "2").build();
+
+        assertThatThrownBy(() -> blobStore().put(BlobKey.of("dashed.txt"), BlobContent.ofString("x"), options))
+                .isInstanceOf(InvalidArgumentException.class)
+                .hasMessageContaining("schema-version");
+        assertThat(blobStore().exists(BlobKey.of("dashed.txt"))).isFalse();
     }
 
     @Override

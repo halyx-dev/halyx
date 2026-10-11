@@ -204,14 +204,14 @@ public abstract class BlobStoreConformanceTest {
         blobStore().put(key, BlobContent.ofString("{}"), PutOptions.builder()
                 .contentType("application/json")
                 .metadata("owner", "orders-service")
-                .metadata("schema-version", "2")
+                .metadata("schema_version", "2")
                 .build());
 
         BlobMetadata metadata = blobStore().head(key).orElseThrow();
         assertThat(metadata.contentType()).hasValue("application/json");
         assertThat(metadata.userMetadata())
                 .containsEntry("owner", "orders-service")
-                .containsEntry("schema-version", "2");
+                .containsEntry("schema_version", "2");
     }
 
     @Test

@@ -172,7 +172,10 @@ public final class PutOptions {
             return this;
         }
 
-        /** Adds user metadata. Use lower-case keys of letters, digits and '-' for portability. */
+        /**
+         * Adds user metadata. For names that work on every cloud, use lower-case letters, digits and '_',
+         * starting with a letter: Azure rejects '-', and S3 lower-cases names.
+         */
         public Builder metadata(String key, String value) {
             metadata.put(Objects.requireNonNull(key, "key"), Objects.requireNonNull(value, "value"));
             return this;
