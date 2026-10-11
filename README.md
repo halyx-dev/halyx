@@ -3,6 +3,22 @@
 A cloud-agnostic Java 21 API that gives microservices one consistent way to use Cloud Native services like Storage, SQL, NoSQL,
 Caches, Messaging, and Parameters and Secrets across **AWS**, **Azure** and **GCP**.
 
+With Cirrus you can build **multi-cloud microservices and applications**. A single service can work with
+services on several clouds at once, such as files on S3, a cache on Azure, events on Pub/Sub and secrets
+in Vault. Each cloud is registered as a named provider and used through the same API:
+
+- **Mix clouds in one application.** Use each cloud for what it does best, or meet data-residency and
+  customer requirements, without a second SDK and a second set of error handling in your code.
+- **Move between clouds by configuration.** Point a blob store, cache or topic at another provider and
+  the code stays the same, which keeps migrations, failover and exit plans realistic.
+- **The same behaviour everywhere.** Conditional writes, versions, retries, expiry and errors such as
+  `NotFoundException` mean the same on every provider. Shared conformance kits check this for each one.
+- **No lowest common denominator.** Differences are declared as capabilities rather than hidden, and
+  `unwrap` gives the native client when you need a provider-specific feature.
+- **Develop and test locally.** An in-memory provider for unit tests, and emulators for the rest.
+
+Two clouds in one service:
+
 ```java
 try (Cirrus cirrus = Cirrus.builder()
         .register("orders", ProviderConfig.of("aws").region("eu-west-2"))
