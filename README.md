@@ -871,6 +871,10 @@ Backlog, in order:
    conformance kits and IAM tests against them
 2. Release 0.1.0: JPMS module descriptors, japicmp API compatibility checks, CI, Maven Central
 3. On demand
+   - Spring Data repositories over document stores (`cirrus-spring-data`): CRUD by composite id
+     (`@PartitionKey`, `@SortKey`), `@Version` optimistic locking, derived queries on the partition key, sort
+     range and declared indexes, keyset scrolling (`Window`/`ScrollPosition`); no table scans, general
+     `@Transactional` or reactive repositories
    - R2DBC for reactive Spring Data, with cloud IAM
    - Aurora fast failover through the AWS Advanced JDBC Wrapper
    - Nested field paths in NoSQL updates
