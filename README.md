@@ -3,7 +3,7 @@
 A cloud-agnostic Java 21 API that gives microservices one consistent way to use Cloud Native services like Storage, SQL, NoSQL,
 Caches, Messaging, and Parameters and Secrets across **AWS**, **Azure** and **GCP**.
 
-With Cirrus you can build **multi-cloud microservices and applications**. A single service can work with
+With Cirrus you can build **multi-cloud microservices and applications**. A single microservice can work with
 services on several clouds at once, such as files on S3, a cache on Azure, events on Pub/Sub and secrets
 in Vault. Each cloud is registered as a named provider and used through the same API:
 
@@ -17,7 +17,14 @@ in Vault. Each cloud is registered as a named provider and used through the same
   `unwrap` gives the native client when you need a provider-specific feature.
 - **Develop and test locally.** An in-memory provider for unit tests, and emulators for the rest.
 
-Two clouds in one service:
+
+## Storage
+
+| | AWS | Azure | GCP | Also |
+|---|---|---|---|---|
+| Blob storage | Amazon S3 | Azure Blob Storage (block blobs) | Google Cloud Storage | in-memory provider |
+
+Below is an example of a service that stores invoices on S3 and archives them on GCS, using the same API for both:
 
 ```java
 try (Cirrus cirrus = Cirrus.builder()
@@ -273,8 +280,11 @@ user or anonymous credentials, which cannot sign.
 
 ## Caches
 
-A portable Redis/Valkey cache on every cloud: ElastiCache, Azure Cache for Redis / Azure Managed
-Redis, and Memorystore. Only authentication differs between clouds.
+| | AWS | Azure | GCP | Also |
+|---|---|---|---|---|
+| Cache | Amazon ElastiCache (Redis OSS and Valkey, including Serverless) | Azure Cache for Redis, Azure Managed Redis | Memorystore (Redis, Redis Cluster, Valkey) | any Redis or Valkey server; in-memory provider |
+
+A portable Redis/Valkey cache on every cloud. Only authentication differs between clouds.
 
 ```java
 Cache<String> sessions = cirrus.provider("orders").cache(
@@ -334,6 +344,11 @@ read-from-replica, near caching, and data structures beyond strings (use `unwrap
 
 ## Parameters and secrets
 
+| `ParameterKind` | AWS | Azure | GCP | Also |
+|---|---|---|---|---|
+| `PARAMETERS` | AWS Systems Manager Parameter Store (`SecureString` with `aws.ssm.secure=true`) | Azure App Configuration (optional label; no reads by version) | Google Cloud Parameter Manager (location `global` or a region; `gcp.parametermanager.render=true` resolves Secret Manager references) | HashiCorp Vault KV v2; in-memory provider |
+| `SECRETS` | AWS Secrets Manager | Azure Key Vault (location = vault URL) | Google Cloud Secret Manager | HashiCorp Vault KV v2; in-memory provider |
+
 One API for configuration values and secrets on every cloud and on HashiCorp Vault:
 
 ```java
@@ -349,11 +364,6 @@ String rdsPassword = secrets.require("db/rds", "password");  // a field of a JSO
 try (AutoCloseable watch = secrets.watch("db", Duration.ofMinutes(1), changes ->
         changes.updated().forEach((name, p) -> pool.rotateCredentials(p.fields())))) { ... }
 ```
-
-| `ParameterKind` | AWS | Azure | GCP | Vault |
-|---|---|---|---|---|
-| `PARAMETERS` | SSM Parameter Store (`SecureString` with `aws.ssm.secure=true`) | App Configuration (optional label; no reads by version) | Parameter Manager (location `global` or a region; `gcp.parametermanager.render=true` resolves Secret Manager references) | KV v2 |
-| `SECRETS` | Secrets Manager | Key Vault (location = vault URL) | Secret Manager | KV v2 |
 
 Names are portable: segments of letters, digits and single dashes separated by `/`
 (`orders/db/password`). Each backend stores them in its own naming scheme: SSM uses a leading `/`,
@@ -393,6 +403,10 @@ could clash with the cloud SDKs. Secrets written by other tools without a `value
 their JSON data.
 
 ## NoSQL document stores
+
+| | AWS | Azure | GCP | Also |
+|---|---|---|---|---|
+| Document store | Amazon DynamoDB | Azure Cosmos DB for NoSQL | Cloud Firestore (native mode) | in-memory provider |
 
 Items keyed by a partition key and an optional sort key, holding a portable `Document`:
 
@@ -444,6 +458,11 @@ portable API doesn't cover, such as secondary indexes and transactions.
 
 ## Messaging
 
+| | AWS | Azure | GCP | Also |
+|---|---|---|---|---|
+| Topic (`Publisher`) | Amazon SNS topic (standard or FIFO), or an Amazon SQS queue with `aws.target=sqs` | Azure Service Bus topic, or a queue with `azure.servicebus.entity=queue` | Google Cloud Pub/Sub topic | in-memory broker |
+| Subscription (`Subscription`) | Amazon SQS queue subscribed to the topic (raw delivery or SNS envelope, both handled) | Service Bus queue, or `<topic>/subscriptions/<name>` | Pub/Sub pull subscription | in-memory broker |
+
 Publish to topics and consume subscriptions with one API. Delivery is **at least once** on every provider,
 so make handlers idempotent.
 
@@ -468,8 +487,6 @@ those acks are sent at once.
 
 | | AWS | Azure | GCP |
 |---|---|---|---|
-| Topic | SNS topic, or an SQS queue with `aws.target=sqs` | Service Bus topic, or a queue with `azure.servicebus.entity=queue` | Pub/Sub topic |
-| Subscription | SQS queue (raw delivery or SNS envelope, both handled) | queue, or `<topic>/subscriptions/<name>` | pull subscription |
 | Lease | queue visibility timeout | lock duration (renewed repeatedly to extend further) | ack deadline |
 | Ordering keys | FIFO topics and queues (message groups) | session-enabled entities, with `azure.servicebus.sessions=true` on the topic and subscription | with message ordering enabled on the subscription |
 | Deduplication ids | FIFO topics and queues | entities with duplicate detection | no |
@@ -499,6 +516,11 @@ bucket lifecycle rule. On SNS and SQS, binary bodies travel base64-encoded, and 
 attributes. Cirrus' own (`cirrus-encoding`, `cirrus-claim-check`, trace headers) count towards that limit.
 
 ## SQL databases
+
+| | AWS | Azure | GCP |
+|---|---|---|---|
+| Database | Amazon RDS and Aurora (PostgreSQL, MySQL; SQL Server with passwords) | Azure Database for PostgreSQL and for MySQL (flexible server), Azure SQL Database | Cloud SQL (PostgreSQL, MySQL; SQL Server with passwords) |
+| Passwordless login | RDS IAM authentication | Microsoft Entra ID | Cloud SQL IAM database authentication, or the Cloud SQL Java connector |
 
 A pooled `DataSource` (HikariCP) whose connections log in with the cloud's identity instead of a stored
 password. Tokens are fetched when a new physical connection opens, and cached until shortly before
