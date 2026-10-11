@@ -50,3 +50,10 @@ Thumbs.db
 
 # --- graphify (generated locally; rebuild with `graphify update .`) ---
 graphify-out/
+
+# --- Terraform (real-cloud test infrastructure; state is per run and local) ---
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+crash.log

@@ -23,6 +23,15 @@ public final class AwsErrors {
     private static final Set<String> THROTTLING_CODES =
             Set.of("SlowDown", "Throttling", "ThrottlingException", "RequestLimitExceeded", "TooManyRequestsException");
 
+    /**
+     * Access failures, whatever the HTTP status: JSON-protocol services such as Secrets Manager, SSM and
+     * DynamoDB report AccessDeniedException with 400, not 403.
+     */
+    private static final Set<String> ACCESS_DENIED_CODES = Set.of("AccessDenied", "AccessDeniedException",
+            "UnauthorizedOperation", "UnrecognizedClientException", "InvalidClientTokenId", "ExpiredToken",
+            "ExpiredTokenException", "SignatureDoesNotMatch", "AuthorizationError", "AuthorizationErrorException",
+            "KMS.AccessDeniedException");
+
     /** Services that report a missing resource with 400 and a specific code. */
     private static final Set<String> NOT_FOUND_CODES =
             Set.of("ParameterNotFound", "ParameterVersionNotFound", "ResourceNotFoundException",
@@ -54,6 +63,9 @@ public final class AwsErrors {
             int status = e.statusCode();
             if (status == 429 || (code != null && THROTTLING_CODES.contains(code)) || e.isThrottlingException()) {
                 return Optional.of(new ThrottledException(message, e, provider, code, retryAfter(e)));
+            }
+            if (code != null && ACCESS_DENIED_CODES.contains(code)) {
+                return Optional.of(new AccessDeniedException(message, e, provider, code));
             }
             if ("ConditionalCheckFailedException".equals(code) || "TransactionConflictException".equals(code)) {
                 return Optional.of(new PreconditionFailedException(message, e, provider, code));
