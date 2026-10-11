@@ -340,6 +340,113 @@ Findings:
 Earlier, `iamTokenLoginRunsQueriesOverTls` took about 9.4s because it was the first IAM login on the
 instance. `replacedConnectionsLogInAgainWithTokens` took about 9s because it opens 12 connections.
 
+## Tier 3, AWS: latest result
+
+```bash
+TIER=3 AWS_PROFILE=default AWS_REGION=ap-southeast-2 scripts/aws-real-cloud.sh
+```
+
+Terraform (`infra/aws/tier3`) creates the following in the default VPC:
+- **Cache:** an ElastiCache for Valkey 8.0 replication group, one `cache.t4g.micro` node, with TLS in
+  transit and encryption at rest.
+- **Users:** a user group with the required `default` user, switched off. Valkey users can't be
+  password-free, so it gets a random password for each run that nothing uses. There are also two IAM
+  users:
+  - `cirrus-<run>-app`, which the caller's policy may connect as
+  - `cirrus-<run>-denied`, which it may not
+- **Bastion:** a `t4g.micro` instance. The cache accepts connections only from the bastion. The bastion
+  accepts SSH only from the test machine's `/32`, with a key pair generated for each run.
+
+ElastiCache has no public endpoint, so the script forwards `127.0.0.1:16379` through the bastion. It also
+gives the test JVM a hosts file (`-Djdk.net.hosts.file`) that points the cache's real hostname at
+127.0.0.1. The client connects to the real name, so TLS checks the real certificate *and* hostname, just
+as in production. The caches use `redis.dns-resolver=jdk`, because Lettuce's own DNS client ignores JVM
+hosts files (see the findings below).
+
+| | |
+|---|---|
+| Date | 2026-10-11, 05:28–05:46 UTC (18 min: cache created in 8m 59s, tests 18s, teardown the rest) |
+| Run id | `r2610111628619f` |
+| Engine | Valkey 8.0 |
+| Result | **52 passed, 1 failed** (`iamUserWithoutConnectPermissionIsRejected`, see below) |
+| Teardown | replication group, users, user group, subnet group, bastion, key pair and security groups destroyed; state and run key deleted; check: **nothing left** |
+
+| Test | Result | Time |
+|---|---|---|
+| Cache conformance kit, logged in as `cirrus-<run>-app` with IAM tokens over verified TLS | **49/49 passed** | 13.5s |
+| `iamUserReadsAndWritesOverVerifiedTls` | passed | 0.90s |
+| `unauthenticatedConnectionIsRejected` | passed | 0.20s |
+| `tokenSignedForAnotherCacheIsRejected`: a token signed for another replication group id | passed | 2.83s |
+| `iamUserWithoutConnectPermissionIsRejected` | **failed**: the `-denied` user connected | 0.33s |
+
+This is the first time ElastiCache IAM authentication has been verified end to end. The emulator can't
+attach IAM users to a replication group, so until now tokens had only been checked against a SigV4
+validator.
+
+**The open failure.** `cirrus-<run>-denied` is a real IAM-enabled user. The test signs the token for that
+user and opens its own connection, because connections are keyed by user. ElastiCache accepted it, so the
+caller's effective IAM permissions include `elasticache:Connect` on that user. The intended policy, below,
+grants it only for `user:cirrus-*-app`. The policy actually attached to `cirrus_test` still needs checking
+for a broader grant. The test stays strict, since a policy that's too broad is exactly what it should
+catch.
+
+<details>
+<summary>Cache conformance kit: 49/49 passed, 13.5s</summary>
+
+| Test | Result | Time (s) |
+|---|---|---|
+| `binaryValuesWithBytesCodec` | passed | 0.12 |
+| `clearMatchesNamespaceLiterally` | passed | 0.23 |
+| `clearRemovesOnlyThisNamespace` | passed | 0.81 |
+| `clearWithoutNamespaceIsRefused` | passed | 0.00 |
+| `concurrentGetOrLoadSharesOneLoad` | passed | 0.48 |
+| `customCodec` | passed | 0.11 |
+| `defaultTtlApplies` | passed | 0.10 |
+| `deleteAllCountsExistingKeys` | passed | 0.18 |
+| `deleteIfEqualsOnlyDeletesMatchingValue` | passed | 0.23 |
+| `deleteReportsWhetherKeyExisted` | passed | 0.20 |
+| `emptyBulkOperations` | passed | 0.00 |
+| `entriesExpire` | passed | 0.47 |
+| `expireOnMissingKeyReturnsFalse` | passed | 0.05 |
+| `expireSetsNewTtl` | passed | 0.45 |
+| `expiredLeaseCannotReleaseTheNextHoldersLock` | passed | 0.55 |
+| `extendKeepsTheLockAlive` | passed | 0.82 |
+| `failingLoaderCachesNothing` | passed | 0.26 |
+| `getAndDeleteConsumesOnce` | passed | 0.18 |
+| `getOrLoadLoadsOnceThenServesFromCache` | passed | 0.20 |
+| `getOrLoadWithTtl` | passed | 0.18 |
+| `incrementCreatesAndAdds` | passed | 0.25 |
+| `incrementKeepsTtl` | passed | 0.20 |
+| `incrementOnNonNumberFails` | passed | 0.09 |
+| `incrementWithTtlStartsAWindowOnce` | passed | 0.93 |
+| `invalidKeysAreRejected` | passed | 0.00 |
+| `largeValue` | passed | 2.27 |
+| `lockGivesUpAfterWaiting` | passed | 0.35 |
+| `lockIsExclusiveUntilReleased` | passed | 0.20 |
+| `lockWaitsForTheHolder` | passed | 0.60 |
+| `missingKeyIsEmpty` | passed | 0.09 |
+| `namespacesAreIsolated` | passed | 0.16 |
+| `nonPositiveTtlIsRejected` | passed | 0.00 |
+| `nullLoadResultIsNotCached` | passed | 0.17 |
+| `putAllAndGetAll` | passed | 0.12 |
+| `putAllWithTtl` | passed | 0.20 |
+| `putIfAbsentOnlyStoresOnce` | passed | 0.12 |
+| `putIfAbsentWithTtlExpires` | passed | 0.42 |
+| `putOverwrites` | passed | 0.16 |
+| `putThenGet` | passed | 0.09 |
+| `replaceIsCompareAndSet` | passed | 0.35 |
+| `reportsProviderAndNamespace` | passed | 0.00 |
+| `statisticsCountHitsMissesAndLoads` | passed | 0.36 |
+| `ttlOfMissingKeyIsEmpty` | passed | 0.05 |
+| `ttlReportsRemainingTime` | passed | 0.10 |
+| `unicodeKeysAndValues` | passed | 0.09 |
+| `unwrapUnknownTypeThrows` | passed | 0.00 |
+| `updateOfMissingKeyStoresNothing` | passed | 0.10 |
+| `updateReplacesExistingValueAndKeepsTtl` | passed | 0.19 |
+| `withoutTtlEntriesDoNotExpire` | passed | 0.16 |
+
+</details>
+
 ## Run history
 
 | Run id | Scope | Result | Teardown | Notes |
@@ -356,6 +463,10 @@ instance. `replacedConnectionsLogInAgainWithTokens` took about 9s because it ope
 | `r26101114471b0c` | tier 2 | not run | clean (subnet group deleted) | Stopped at `terraform apply`: no `ec2:CreateSecurityGroup` permission. |
 | `r2610111453e0bc` | tier 2 | 10/10 | clean | The first IAM login took about 9s, which led to the latency investigation. |
 | `r26101115149618` | tier 2 | **12/12** | clean | Latest tier 2 result. `loginLatency` added: the slow first token login also happens with plain JDBC, so the cost is on the RDS side. |
+| `r26101115384945` | tier 1, DynamoDB | 23/23 | clean | DynamoDB batches no longer sleep and resend unprocessed items; they throw `ThrottledException`. |
+| `r2610111548cee8` | tier 3 | not run | clean | Stopped at `terraform apply`. The account is on the Free Tier plan, which can't launch `t4g.nano` (bastion moved to `t4g.micro`), and Valkey refuses password-free users (the `default` user now gets a random password). |
+| `r26101115542175` | tier 3 | 5/53 | clean | Every connection failed: Lettuce resolved the cache's name with Netty's DNS client, which ignores the JVM hosts file, so nothing went through the tunnel. Led to `redis.dns-resolver=jdk`. The bastion showed in the tagging index after termination, so the check now looks at instances and volumes directly. |
+| `r2610111628619f` | tier 3 | **52/53** | clean | Latest tier 3 result, above. The IAM user without `Connect` permission was let in. |
 
 ## What real AWS found
 
@@ -369,6 +480,7 @@ Emulators missed all of these:
 | `GetSecretValue` can return a secret for a moment after its delete is accepted | Documented as eventual. The TCK allows for it with `deleteLag()`. The API doesn't wait |
 | `ListSecrets` lags behind writes | Documented as eventual. The Secrets Manager TCK allows a listing lag (`listingLag()`) |
 | A listing can see a new value before `GetSecretValue` does | When a watch reports a change, it caches the values it saw, so reads agree with the event on every provider |
+| Lettuce resolves host names with Netty's own DNS client, which ignores JVM DNS settings (`jdk.net.hosts.file`, DNS cache TTLs, custom `InetAddressResolver`s) | New opt-in cache property `redis.dns-resolver=jdk` resolves like the rest of the JVM; the default is unchanged |
 | Not every policy grants `BatchGetSecretValue` | If batch reads are denied, `getAll` reads secrets one at a time and logs a warning |
 
 ## IAM used for tier 1
@@ -441,10 +553,58 @@ In addition to tier 1:
 `cirrus_password_only` is refused. `iam:CreateServiceLinkedRole` is needed only the first time an account
 uses RDS.
 
+## IAM used for tier 3
+
+A customer-managed policy, not an inline one. Inline policies on a user share a 2,048-character limit, and
+tiers 1 and 2 had used most of it. The EC2 security-group permissions come from tier 2.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ec2:RunInstances", "ec2:TerminateInstances", "ec2:DescribeInstances", "ec2:DescribeInstanceAttribute",
+        "ec2:DescribeInstanceTypes", "ec2:DescribeInstanceCreditSpecifications", "ec2:DescribeImages",
+        "ec2:DescribeTags", "ec2:DescribeVolumes", "ec2:ImportKeyPair", "ec2:DeleteKeyPair", "ec2:DescribeKeyPairs"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "elasticache:CreateReplicationGroup", "elasticache:DeleteReplicationGroup",
+        "elasticache:DescribeReplicationGroups", "elasticache:ModifyReplicationGroup",
+        "elasticache:DescribeCacheClusters",
+        "elasticache:CreateCacheSubnetGroup", "elasticache:DeleteCacheSubnetGroup", "elasticache:DescribeCacheSubnetGroups",
+        "elasticache:CreateUser", "elasticache:DeleteUser", "elasticache:ModifyUser", "elasticache:DescribeUsers",
+        "elasticache:CreateUserGroup", "elasticache:DeleteUserGroup", "elasticache:ModifyUserGroup", "elasticache:DescribeUserGroups",
+        "elasticache:AddTagsToResource", "elasticache:RemoveTagsFromResource", "elasticache:ListTagsForResource"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": "elasticache:Connect",
+      "Resource": [
+        "arn:aws:elasticache:<region>:<account>:replicationgroup:cirrus-*",
+        "arn:aws:elasticache:<region>:<account>:user:cirrus-*-app"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": "iam:CreateServiceLinkedRole",
+      "Resource": "*",
+      "Condition": { "StringEquals": { "iam:AWSServiceName": "elasticache.amazonaws.com" } }
+    }
+  ]
+}
+```
+
 ## Not yet run
 
 | Tier | Services | Status |
 |---|---|---|
-| AWS tier 3 | ElastiCache with IAM auth | not run |
 | Azure | Blob, Service Bus, Cosmos DB, Key Vault, App Configuration | no real-cloud profile yet |
-| GCP | GCS, Pub/Sub, Firestore, Secret Manager, Parameter Manager | no real-cloud profile yet |
+| GCP tier 1 | Cloud Storage, Firestore, Pub/Sub, Secret Manager, Parameter Manager | profile ready (`scripts/gcp-real-cloud.sh`), not run yet |
