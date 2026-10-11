@@ -12,6 +12,7 @@ eventual consistency and asynchronous deletes.
 | AWS | 2 | RDS for PostgreSQL and MySQL with IAM auth | **12/12** |
 | AWS | 3 | ElastiCache for Valkey with IAM auth | 52/53: the IAM policy still needs checking |
 | GCP | 1 | Cloud Storage, Firestore, Pub/Sub, Secret Manager, Parameter Manager | **176/179** passed, 3 skipped (expected) |
+| GCP | 2 | Cloud SQL for PostgreSQL and MySQL with IAM auth, direct and through the Cloud SQL connector | **18/18** |
 
 ## How an AWS run works
 
@@ -893,12 +894,73 @@ Pub/Sub's time is mostly the redelivery tests, which wait for the 10s ack deadli
 
 </details>
 
+## GCP tier 2: latest result
+
+```bash
+TIER=2 GCP_PROJECT=<project> GCP_REGION=australia-southeast1 scripts/gcp-real-cloud.sh
+```
+
+Terraform (`infra/gcp/tier2`) creates Cloud SQL for PostgreSQL 17 and for MySQL 8.4:
+- shared-core `db-f1-micro` on the `ENTERPRISE` edition (newer versions default to Enterprise Plus, which
+  has no shared-core tiers)
+- IAM authentication on, encrypted connections only, no backups, no deletion protection
+- a public IP that accepts only the test machine's `/32`; the Cloud SQL Java connector needs no
+  authorized network
+
+Each instance has three users:
+- `cirrus_admin`, a built-in user with a password generated for the run
+- the test service account as an IAM user: `cirrus-test@<project>.iam` on PostgreSQL and `cirrus-test`
+  on MySQL
+- `cirrus_password_only`, a built-in user that an IAM token must not log in
+
+On MySQL the test then grants the IAM user `SELECT` on the `app` database, as the admin. IAM users start
+with no privileges there; see the findings below.
+
+| | |
+|---|---|
+| Date | 2026-10-11, 07:59–08:21 UTC (22 min: PostgreSQL ready in 11m 34s, MySQL in 16m 14s, tests 1m 57s, teardown about 4 min) |
+| Run id | `r2610111859cad1` |
+| Engines | PostgreSQL 17, MySQL 8.4 |
+| Result | **BUILD SUCCESS**: 18 passed, 0 failed |
+| Teardown | instances (with their databases and users) destroyed; state deleted; check: **nothing left** |
+
+| Test | PostgreSQL | MySQL |
+|---|---|---|
+| `loginLatency`: runs first and times each login (see below); a warm direct-token login must take under 3s | passed (6.1s) | passed (35.1s) |
+| `passwordLoginRunsQueriesOverTls`: direct, and the server reports the session encrypted | passed (0.9s) | passed (3.3s) |
+| `iamLoginWithDerivedUserRunsQueriesOverTls`: `SqlAuth.iam()` derives the user from the service account | passed (1.3s) | passed (17.7s) |
+| `iamLoginWithExplicitUser`: `SqlAuth.iam("<user>")` | passed (1.2s) | passed (4.3s) |
+| `connectorIamLogin`: `gcp.sql.instance` through the Cloud SQL Java connector, no host or authorized network | passed (0.9s) | passed (4.1s) |
+| `connectorPasswordLogin` | passed (1.1s) | passed (1.4s) |
+| `replacedConnectionsLogInAgainWithTokens`: three rounds of filling the pool, then evicting it | passed (6.8s) | passed (13.9s) |
+| `tokenDoesNotLogInAUserNotEnabledForIam`: a token for `cirrus_password_only` is rejected | passed (3.1s) | passed (2.9s) |
+| `wrongPasswordDoesNotLogIn` | passed (1.3s) | passed (2.0s) |
+
+### Login latency
+
+Times per new connection, in the order they ran, on newly created instances:
+
+| Login | PostgreSQL | MySQL |
+|---|---|---|
+| direct, password | 841 ms, then 332–339 ms | 4,515 ms, then 1,184–1,501 ms |
+| direct, token | 1,426 ms, then 471–472 ms | 11,402 ms, then 1,538–2,299 ms |
+| connector, token | 1,454 ms, then 354–368 ms | 8,700 ms, then 1,706–2,065 ms |
+
+- **PostgreSQL:** a token login costs about 140 ms more than a password login. There's no slow first
+  login like RDS's 5–6s.
+- **MySQL on `db-f1-micro`:** slow for *every* login, passwords included. The shared-core instance is the
+  bottleneck, not IAM or Cirrus, and a larger tier would bring it close to PostgreSQL. Its warm token
+  logins (up to 2.3s) are near the test's 3s limit, so that limit could become flaky on this tier.
+- **The connector** costs the same as a direct connection once warm.
+
 ## GCP run history
 
 | Run id | Scope | Result | Teardown | Notes |
 |---|---|---|---|---|
 | `r2610111704a192` | tier 1 | 176 passed, 1 failed, 1 error, 3 skipped | clean (checked by hand) | Pub/Sub `orderingKeyDeliversEachKeyInOrder` and Cloud Storage `updateMetadataWithStaleETagFails` failed (see below). The regional Parameter Manager check failed with a misleading `PERMISSION_DENIED`, and the script took the failure as empty. |
-| `r2610111748599e` | tier 1 | **176/179, 3 skipped** | clean | Latest result, above. |
+| `r2610111748599e` | tier 1 | **176/179, 3 skipped** | clean | Latest tier 1 result, above. |
+| `r26101118357636` | tier 2 | 13/18 | clean | PostgreSQL 9/9. MySQL's five IAM tests logged in, then were refused the `app` database: IAM users have no privileges until granted. |
+| `r2610111859cad1` | tier 2 | **18/18** | clean | Latest tier 2 result, above. The test now grants the MySQL IAM user `SELECT` on `app`. |
 
 ## What real GCP found
 
@@ -909,9 +971,10 @@ The emulators (Floci-gcp, and Google's Pub/Sub and Firestore emulators) missed a
 | Pub/Sub rejects a publish request whose messages have different ordering keys (`FAILED_PRECONDITION: ... all messages must have no ordering key or they must all have the same ordering key`) | The publisher sends one request per ordering key, keeping each key's messages in order, and returns ids in the caller's order |
 | `updateMetadata` with a stale ETag patched the *old* generation, which no longer exists in an unversioned bucket, so GCS answered 404 instead of 412 | Patch the live object with an `ifGenerationMatch` precondition, which GCS answers with 412 |
 | `gcloud parametermanager` sends regional locations to the global endpoint and gets `PERMISSION_DENIED` | The test script uses the regional endpoint (`parametermanager.<region>.rep.googleapis.com`). The Java client was already correct |
+| Cloud SQL for MySQL IAM users have no privileges, so a connection naming a database is refused (`Access denied for user 'cirrus-test'@'%' to database 'app'`). PostgreSQL grants `CONNECT` to everyone | Documented in the README; the test grants `SELECT` as the admin, as an application's setup would |
 | Firestore collection-group queries need indexes the emulator doesn't ask for | Terraform creates them; the driver's documentation already lists them |
 
-## IAM used for GCP tier 1
+## IAM used for GCP
 
 | Who | Role | Why |
 |---|---|---|
@@ -921,14 +984,16 @@ The emulators (Floci-gcp, and Google's Pub/Sub and Firestore emulators) missed a
 | | `roles/secretmanager.admin` | secrets |
 | | `roles/parametermanager.admin` | parameters, global and regional |
 | | `roles/serviceusage.serviceUsageConsumer` | call APIs billed to the project |
+| | `roles/cloudsql.admin` (tier 2) | create instances and database users. It also includes what an application needs: `cloudsql.instances.login` for IAM database login (`roles/cloudsql.instanceUser`) and `cloudsql.instances.connect` for the connector (`roles/cloudsql.client`) |
 | the person running the tests | `roles/iam.serviceAccountTokenCreator` on `cirrus-test` | impersonate it. Project Owner doesn't include this |
 
-The project also needs the IAM Service Account Credentials API (`iamcredentials.googleapis.com`) enabled
-for impersonation.
+The project also needs these APIs enabled: the IAM Service Account Credentials API
+(`iamcredentials.googleapis.com`) for impersonation, and the Cloud SQL Admin API
+(`sqladmin.googleapis.com`) for tier 2.
 
 ## Not yet run
 
 | Tier | Services | Status |
 |---|---|---|
 | Azure | Blob, Service Bus, Cosmos DB, Key Vault, App Configuration | no real-cloud profile yet |
-| GCP | Memorystore and Cloud SQL with IAM auth | not run |
+| GCP | Memorystore with IAM auth | not run: VPC-only, like ElastiCache |

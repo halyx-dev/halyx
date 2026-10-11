@@ -57,6 +57,7 @@
         <postgresql.version>42.7.11</postgresql.version>
         <mysql-connector-j.version>9.7.0</mysql-connector-j.version>
         <mssql-jdbc.version>12.10.2.jre11</mssql-jdbc.version>
+        <cloud-sql-connector.version>1.30.0</cloud-sql-connector.version>
         <valkey.image>valkey/valkey:9.1.2-alpine</valkey.image>
         <vault.image>hashicorp/vault:2.1.2</vault.image>
 
@@ -144,6 +145,16 @@
                 <groupId>com.microsoft.sqlserver</groupId>
                 <artifactId>mssql-jdbc</artifactId>
                 <version>${mssql-jdbc.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.google.cloud.sql</groupId>
+                <artifactId>postgres-socket-factory</artifactId>
+                <version>${cloud-sql-connector.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.google.cloud.sql</groupId>
+                <artifactId>mysql-socket-factory-connector-j-8</artifactId>
+                <version>${cloud-sql-connector.version}</version>
             </dependency>
             <dependency>
                 <groupId>io.lettuce</groupId>

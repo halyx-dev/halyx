@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Runs the tier 1 conformance kits against real GCP, then deletes everything the run created.
+# Runs the real-GCP tests, then deletes everything the run created.
 #
 #   scripts/gcp-real-cloud.sh                                   # project from gcloud config
 #   GCP_PROJECT=my-project GCP_REGION=australia-southeast1 scripts/gcp-real-cloud.sh
 #   IT_TEST='RealGcpIT$Firestore' scripts/gcp-real-cloud.sh     # one suite only
+#   TIER=2 scripts/gcp-real-cloud.sh                            # Cloud SQL PostgreSQL and MySQL with IAM auth
 #
 # The tests and Terraform act as the test service account (GCP_IMPERSONATE, default cirrus-test@<project>),
 # through Application Default Credentials that impersonate it:
@@ -15,6 +16,11 @@
 #    subscriptions named after the run, and secrets and parameters under tck-<random> names, and deletes them.
 # 3. Always, even if tests fail or the script is interrupted: sweep anything of this run the tests left behind,
 #    terraform destroy, and list what remains (expected: nothing).
+#
+# Tier 2: Terraform creates Cloud SQL for PostgreSQL and MySQL (shared-core, IAM auth on, no backups) whose
+# public IP accepts only this machine, with the test service account as an IAM database user and passwords
+# generated for the run (passed through the environment only). RealGcpSqlIT logs in directly over TLS and
+# through the Cloud SQL Java connector. Creating the instances takes 5-15 minutes.
 set -uo pipefail
 
 PROJECT="${GCP_PROJECT:-$(gcloud config get-value project 2>/dev/null)}"
@@ -26,11 +32,20 @@ gcloud auth application-default print-access-token >/dev/null 2>&1 || {
   echo "Application Default Credentials can't get a token; run:"
   echo "  gcloud auth application-default login --impersonate-service-account=$IMPERSONATE"; exit 1; }
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-TF_DIR="$ROOT/infra/gcp/tier1"
+TIER="${TIER:-1}"
+TF_DIR="$ROOT/infra/gcp/tier$TIER"
 RUN="r$(date +%y%m%d%H%M)$(openssl rand -hex 2)"
 START="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 TF_VARS=(-var "project=$PROJECT" -var "region=$REGION" -var "run_id=$RUN")
 GCLOUD=(gcloud --project "$PROJECT" --quiet)
+if [[ "$TIER" == 2 ]]; then
+  CLIENT_IP=$(dig -4 +short myip.opendns.com A @208.67.222.222 | tail -1)
+  [[ "$CLIENT_IP" =~ ^[0-9.]+$ ]] || { echo "Could not find this machine's public IPv4 address"; exit 1; }
+  TF_VARS+=(-var "client_cidr=$CLIENT_IP/32" -var "iam_service_account=$IMPERSONATE")
+  export TF_VAR_admin_password="$(openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | head -c 32)"
+  export TF_VAR_password_only_password="$(openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | head -c 32)"
+  export CIRRUS_CLOUDSQL_ADMIN_PASSWORD="$TF_VAR_admin_password"
+fi
 
 log() { printf '\n== %s\n' "$*"; }
 
@@ -89,6 +104,7 @@ teardown() {
   log "terraform destroy"
   if (cd "$TF_DIR" && terraform destroy -auto-approve -input=false "${TF_VARS[@]}" >/dev/null); then
     echo "  destroyed"
+    rm -f "$TF_DIR"/terraform.tfstate "$TF_DIR"/terraform.tfstate.backup # tier 2 state held the run's passwords
   else
     echo "  TERRAFORM DESTROY FAILED: run it again in $TF_DIR"
   fi
@@ -100,6 +116,7 @@ teardown() {
   left+=$(check topics "${GCLOUD[@]}" pubsub topics list --filter="name~/cirrus-$RUN-" --format='value(name)')
   left+=$(check subscriptions "${GCLOUD[@]}" pubsub subscriptions list --filter="name~/cirrus-$RUN-" --format='value(name)')
   left+=$(check secrets "${GCLOUD[@]}" secrets list --filter="name~/secrets/tck- AND createTime>=$START" --format='value(name)')
+  left+=$(check "Cloud SQL" "${GCLOUD[@]}" sql instances list --filter="name~^cirrus-$RUN-" --format='value(name)')
   for location in global "$REGION"; do
     left+=$(check "parameters in $location" pm "$location" parameters list \
         --filter="name~/parameters/tck- AND createTime>=$START" --format='value(name)')
@@ -119,8 +136,20 @@ log "terraform apply"
 terraform -chdir="$TF_DIR" init -input=false >/dev/null || exit 1
 terraform -chdir="$TF_DIR" apply -auto-approve -input=false "${TF_VARS[@]}" || exit 1
 
-log "Running the conformance kits against real GCP"
 cd "$ROOT"
+if [[ "$TIER" == 2 ]]; then
+  log "Running the Cloud SQL tests against real GCP"
+  mvn -o verify -pl cirrus-gcp -Dit.test="${IT_TEST:-RealGcpSqlIT}" -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+      -Dcirrus.real.gcp.sql=true -Dcirrus.real.gcp.run="$RUN" -Dcirrus.real.gcp.project="$PROJECT" \
+      -Dcirrus.real.gcp.service-account="$IMPERSONATE" \
+      -Dcirrus.real.gcp.sql.admin-user="$(terraform -chdir="$TF_DIR" output -raw admin_user)" \
+      -Dcirrus.real.gcp.sql.postgres-host="$(terraform -chdir="$TF_DIR" output -raw postgres_host)" \
+      -Dcirrus.real.gcp.sql.mysql-host="$(terraform -chdir="$TF_DIR" output -raw mysql_host)" \
+      -Dcirrus.real.gcp.sql.postgres-instance="$(terraform -chdir="$TF_DIR" output -raw postgres_instance)" \
+      -Dcirrus.real.gcp.sql.mysql-instance="$(terraform -chdir="$TF_DIR" output -raw mysql_instance)"
+  exit $?
+fi
+log "Running the conformance kits against real GCP"
 mvn -o verify -pl cirrus-gcp -Dit.test="${IT_TEST:-RealGcpIT}" -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
     -Dcirrus.real.gcp=true -Dcirrus.real.gcp.run="$RUN" -Dcirrus.real.gcp.project="$PROJECT" \
     -Dcirrus.real.gcp.region="$REGION" \

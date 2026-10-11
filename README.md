@@ -607,7 +607,7 @@ DataSource dataSource = orders.dataSource();   // to JDBC, JPA, jOOQ, Flyway
 |---|---|---|---|
 | AWS | RDS IAM token (SigV4, signed locally, 15 min) | PostgreSQL, MySQL | the database user granted `rds_iam` |
 | Azure | Entra ID access token | PostgreSQL, MySQL, Azure SQL | the identity's database role; not used for Azure SQL (`accessToken` property) |
-| GCP | OAuth token, `sqlservice.login` scope | PostgreSQL, MySQL | derived from the service account if omitted (`app@project.iam` / `app`) |
+| GCP | OAuth token, `sqlservice.login` scope | PostgreSQL, MySQL | derived from the service account if omitted (`app@project.iam` / `app`); on MySQL, grant it privileges first |
 
 An RDS IAM login is slower than a password login, because RDS checks every token on the server side.
 Measured from the same client against `db.t4g.micro` instances, a password login took about 0.35s and a
@@ -616,6 +616,10 @@ about 1ms. Pooled connections pay this only when they are opened. To keep it off
 `minIdle` above zero so the pool opens connections in the background, and keep `maxLifetime` long.
 RDS also limits how fast new IAM connections can be opened, so pool rather than connect per request
 ([docs/cloud-testing.md](docs/cloud-testing.md#login-latency)).
+
+IAM database users on MySQL (RDS and Cloud SQL) start with no privileges. Until they're granted some,
+for example `GRANT SELECT ON app.* TO 'app'@'%'`, even selecting the database in the JDBC URL is refused.
+PostgreSQL lets every user connect.
 
 RDS Proxy works as is: use the proxy endpoint as `host`, with `SqlAuth.iam(...)` when the proxy requires
 IAM authentication. IAM logins turn on TLS (`sslmode=require`, `sslMode=REQUIRED` or `encrypt=true`); override it with
@@ -984,7 +988,8 @@ Backlog, in order:
    conformance kits and IAM tests against them. AWS tier 1 (S3, DynamoDB, SSM, Secrets Manager, SNS, SQS)
    and tier 2 (RDS PostgreSQL and MySQL with IAM auth) pass, tier 3 (ElastiCache with IAM) passes but for
    one IAM-policy check, and GCP tier 1 (Cloud Storage, Firestore, Pub/Sub, Secret Manager, Parameter
-   Manager) passes. Azure, and GCP Memorystore and Cloud SQL, remain. Results: [docs/cloud-testing.md](docs/cloud-testing.md)
+   Manager) and tier 2 (Cloud SQL with IAM, direct and through the connector) pass. Azure and GCP
+   Memorystore remain. Results: [docs/cloud-testing.md](docs/cloud-testing.md)
 2. Release 0.1.0: JPMS module descriptors, japicmp API compatibility checks, CI, Maven Central
 3. On demand
    - Spring Data repositories over document stores (`cirrus-spring-data`): CRUD by composite id
