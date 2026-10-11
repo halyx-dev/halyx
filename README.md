@@ -256,6 +256,9 @@ Replaces headers and user metadata without re-uploading. S3 does this as a serve
 itself (limited to 5 GiB, storage class preserved). Azure uses Set Blob Properties plus Set Blob
 Metadata, chained by ETag and keeping the stored Content-MD5. GCS uses a generation-matched patch.
 
+User metadata names that work on every cloud are lower-case letters, digits and `_`, starting with a
+letter. Azure rejects `-` (its names are C# identifiers), and S3 lower-cases names.
+
 ### Storage tiers
 
 | `StorageTier` | AWS S3 | Azure | GCS |
@@ -991,7 +994,8 @@ Backlog, in order:
    and tier 2 (RDS PostgreSQL and MySQL with IAM auth) pass, tier 3 (ElastiCache with IAM) passes but for
    one IAM-policy check, and GCP tier 1 (Cloud Storage, Firestore, Pub/Sub, Secret Manager, Parameter
    Manager), tier 2 (Cloud SQL with IAM, direct and through the connector) and tier 3 (Memorystore
-   for Valkey with IAM) pass. Azure remains. Results: [docs/cloud-testing.md](docs/cloud-testing.md)
+   for Valkey with IAM) pass, and so does Azure tier 1 (Blob, Cosmos DB, Service Bus, Key Vault, App
+   Configuration, Entra ID only). Azure caches and databases remain. Results: [docs/cloud-testing.md](docs/cloud-testing.md)
 2. Release 0.1.0: JPMS module descriptors, japicmp API compatibility checks, CI, Maven Central
 3. On demand
    - Spring Data repositories over document stores (`cirrus-spring-data`): CRUD by composite id
