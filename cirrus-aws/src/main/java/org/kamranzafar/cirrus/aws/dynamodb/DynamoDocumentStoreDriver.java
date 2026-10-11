@@ -5,6 +5,7 @@ import org.kamranzafar.cirrus.aws.AwsProvider;
 import org.kamranzafar.cirrus.error.CloudException;
 import org.kamranzafar.cirrus.error.NotFoundException;
 import org.kamranzafar.cirrus.error.PreconditionFailedException;
+import org.kamranzafar.cirrus.error.ThrottledException;
 import org.kamranzafar.cirrus.error.UnknownCloudException;
 import org.kamranzafar.cirrus.json.Json;
 import org.kamranzafar.cirrus.nosql.Document;
@@ -95,9 +96,13 @@ public final class DynamoDocumentStoreDriver implements DocumentStoreDriver {
         return attributes;
     }
 
-    private Item toItem(Map<String, AttributeValue> attributes) {
-        Key key = table.sortKey().map(sk -> Key.of(attributes.get(table.partitionKey()).s(), attributes.get(sk).s()))
+    private Key keyOf(Map<String, AttributeValue> attributes) {
+        return table.sortKey().map(sk -> Key.of(attributes.get(table.partitionKey()).s(), attributes.get(sk).s()))
                 .orElseGet(() -> Key.of(attributes.get(table.partitionKey()).s()));
+    }
+
+    private Item toItem(Map<String, AttributeValue> attributes) {
+        Key key = keyOf(attributes);
         AttributeValue version = attributes.get(VERSION);
         AttributeValue expires = attributes.get(ttl);
         return new Item(key, DynamoValues.fromAttributes(attributes, internal()),
@@ -225,21 +230,24 @@ public final class DynamoDocumentStoreDriver implements DocumentStoreDriver {
         }
     }
 
+    /**
+     * One BatchGetItem. Keys DynamoDB leaves unprocessed (it does under throttling) fail the call with
+     * {@link ThrottledException}, which is retryable; nothing here waits and resends them.
+     */
     @Override
     public Map<Key, Item> getAll(List<Key> keys) {
-        Map<Key, Item> found = new LinkedHashMap<>();
         Map<String, KeysAndAttributes> request = Map.of(table.name(), KeysAndAttributes.builder()
                 .keys(keys.stream().map(this::keyAttributes).toList()).consistentRead(true).build());
-        for (int attempt = 0; !request.isEmpty(); attempt++) {
-            var requestNow = request;
-            var response = dynamo.batchGetItem(b -> b.requestItems(requestNow));
-            response.responses().getOrDefault(table.name(), List.of()).forEach(a -> {
-                Item item = toItem(a);
-                found.put(item.key(), item);
-            });
-            request = response.hasUnprocessedKeys() ? response.unprocessedKeys() : Map.of();
-            backoff(attempt, !request.isEmpty());
+        var response = dynamo.batchGetItem(b -> b.requestItems(request));
+        KeysAndAttributes unprocessed = response.hasUnprocessedKeys() ? response.unprocessedKeys().get(table.name()) : null;
+        if (unprocessed != null && !unprocessed.keys().isEmpty()) {
+            throw throttled("read", unprocessed.keys().stream().map(this::keyOf).toList());
         }
+        Map<Key, Item> found = new LinkedHashMap<>();
+        response.responses().getOrDefault(table.name(), List.of()).forEach(a -> {
+            Item item = toItem(a);
+            found.put(item.key(), item);
+        });
         return found;
     }
 
@@ -248,6 +256,11 @@ public final class DynamoDocumentStoreDriver implements DocumentStoreDriver {
         return 100;
     }
 
+    /**
+     * One BatchWriteItem. Items DynamoDB leaves unprocessed (it does under throttling) fail the call with
+     * {@link ThrottledException}, which is retryable; the processed ones stay written, and writing them
+     * again replaces them with the same content. Nothing here waits and resends.
+     */
     @Override
     public void putAll(Map<Key, Document> items) {
         List<WriteRequest> writes = new ArrayList<>();
@@ -257,30 +270,17 @@ public final class DynamoDocumentStoreDriver implements DocumentStoreDriver {
             item.put(VERSION, AttributeValue.fromS(UUID.randomUUID().toString()));
             writes.add(WriteRequest.builder().putRequest(PutRequest.builder().item(item).build()).build());
         });
-        Map<String, List<WriteRequest>> request = Map.of(table.name(), writes);
-        for (int attempt = 0; !request.isEmpty(); attempt++) {
-            var requestNow = request;
-            var response = dynamo.batchWriteItem(b -> b.requestItems(requestNow));
-            request = response.hasUnprocessedItems() ? response.unprocessedItems() : Map.of();
-            request = request.values().stream().allMatch(List::isEmpty) ? Map.of() : request;
-            backoff(attempt, !request.isEmpty());
+        var response = dynamo.batchWriteItem(b -> b.requestItems(Map.of(table.name(), writes)));
+        List<WriteRequest> unprocessed = response.hasUnprocessedItems()
+                ? response.unprocessedItems().getOrDefault(table.name(), List.of()) : List.of();
+        if (!unprocessed.isEmpty()) {
+            throw throttled("written", unprocessed.stream().map(w -> keyOf(w.putRequest().item())).toList());
         }
     }
 
-    /** Unprocessed batch entries mean throttling: wait a little longer each time before retrying them. */
-    private static void backoff(int attempt, boolean retrying) {
-        if (!retrying) {
-            return;
-        }
-        if (attempt >= 8) {
-            throw new UnknownCloudException("DynamoDB left batch entries unprocessed after " + attempt + " retries");
-        }
-        try {
-            Thread.sleep(Math.min(2_000, 50L << attempt));
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new UnknownCloudException("Interrupted while retrying a DynamoDB batch");
-        }
+    private ThrottledException throttled(String what, List<Key> keys) {
+        return new ThrottledException("DynamoDB is throttling table " + table.name() + "; " + keys.size()
+                + " item(s) were not " + what + ": " + keys, null, AwsProvider.ID, "UnprocessedItems");
     }
 
     @Override

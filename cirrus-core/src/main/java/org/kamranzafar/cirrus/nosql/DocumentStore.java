@@ -40,10 +40,19 @@ public interface DocumentStore {
     /** Deletes the item if it is still at {@code ifVersion} (when not null). */
     boolean delete(Key key, Version ifVersion);
 
-    /** The items that exist among {@code keys}, read in as few requests as the store allows. */
+    /**
+     * The items that exist among {@code keys}, read in as few requests as the store allows. If the store
+     * throttles part of a batch, this throws the retryable {@link org.kamranzafar.cirrus.error.ThrottledException}
+     * rather than waiting; the caller decides whether to retry.
+     */
     Map<Key, Item> getAll(Collection<Key> keys);
 
-    /** Creates or replaces many items in batches. Not atomic: on failure, earlier batches stay written. */
+    /**
+     * Creates or replaces many items in batches. Not atomic: on failure, the items already written stay
+     * written. If the store throttles part of a batch, this throws the retryable
+     * {@link org.kamranzafar.cirrus.error.ThrottledException} rather than waiting; retrying the whole call
+     * is safe, as it replaces items with the same content.
+     */
     void putAll(Map<Key, Document> items);
 
     QueryPage query(Query query);

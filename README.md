@@ -483,7 +483,9 @@ orders.queryAll(Query.builder("acme").where(SortCondition.beginsWith("2026-10"))
 
 - **Operations:** get, put (create or replace), atomic partial `update` (set, remove, increment), delete,
   `getAll` and `putAll` in batches, and queries within one partition by sort-key range, both directions,
-  with page tokens.
+  with page tokens. If the store throttles part of a batch (DynamoDB returns unprocessed items), the call
+  throws the retryable `ThrottledException` naming the items instead of waiting and resending; retrying
+  `putAll` is safe, as it rewrites the same content.
 - **Secondary indexes:** declare them on the table (`TableConfig.index("by-status", "status", "placedAt")`)
   and query across partitions with `queryIndex(IndexQuery.builder("by-status").equalTo("PAID").build())`,
   ordered and narrowed by the string sort attribute. Items without the attribute aren't in the index.
