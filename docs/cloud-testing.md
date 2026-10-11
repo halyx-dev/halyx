@@ -276,19 +276,56 @@ Skipped tests, both expected:
 
 </details>
 
+## Tier 2, AWS: latest result
+
+```bash
+TIER=2 AWS_PROFILE=default AWS_REGION=ap-southeast-2 scripts/aws-real-cloud.sh
+```
+
+Terraform (`infra/aws/tier2`) creates RDS for PostgreSQL 17 and RDS for MySQL 8.4 instances in the default VPC:
+- `db.t4g.micro`, IAM database authentication on, no backups, no final snapshot
+- reachable only from the test machine's public IPv4 address (a `/32` security group rule)
+- a master password generated for the run and passed through the environment only. Terraform's state
+  holds it, and teardown deletes the state once destroy succeeds.
+
+`RealAwsSqlIT` signs in as the master user and creates two database users:
+- `cirrus_iam`, enabled for IAM (`GRANT rds_iam` on PostgreSQL, `AWSAuthenticationPlugin` on MySQL)
+- `cirrus_password_only`, which is not
+
+| | |
+|---|---|
+| Date | 2026-10-11, 03:53–04:03 UTC (10m 30s: create 6m 18s, tests 53s, destroy and check about 3m) |
+| Run id | `r2610111453e0bc` |
+| Engines | PostgreSQL 17, MySQL 8.4 |
+| Result | **BUILD SUCCESS**: 10 passed, 0 failed |
+| Teardown | instances, security group and subnet group destroyed; state deleted; check: **nothing left** |
+
+| Test | PostgreSQL | MySQL |
+|---|---|---|
+| `passwordLoginRunsQueriesOverTls`: master password login, and the session is encrypted | passed (1.2s) | passed (1.2s) |
+| `iamTokenLoginRunsQueriesOverTls`: `SqlAuth.iam("cirrus_iam")` runs queries as `cirrus_iam` over TLS, and the pool reports healthy | passed (9.4s) | passed (10.2s) |
+| `replacedConnectionsLogInAgainWithTokens`: three rounds of filling the pool, then evicting it, with every new connection signing in by token | passed (9.7s) | passed (8.9s) |
+| `tokenDoesNotLogInAUserNotEnabledForIam`: a token for `cirrus_password_only` is rejected, and the pool reports unhealthy | passed (2.6s) | passed (2.5s) |
+| `wrongPasswordDoesNotLogIn` | passed (1.4s) | passed (1.6s) |
+
+TLS is checked on the server side: `pg_stat_ssl` for the session on PostgreSQL, and `Ssl_version` on
+MySQL. It isn't inferred from the client settings.
+
 ## Run history
 
 | Run id | Scope | Result | Teardown | Notes |
 |---|---|---|---|---|
-| `r26101113239811` | full | 148 passed, 22 errors, 2 skipped | clean | Secrets Manager 0/22: the IAM user had no Secrets Manager permissions. This also exposed that `AwsErrors` mapped a 400 `AccessDeniedException` to an invalid argument instead of access denied. |
-| `r26101113365837` | Secrets Manager | 14/22 | clean | `BatchGetSecretValue` not yet granted. Writes failed while a deleted name was still being deleted, and listings lagged behind writes. |
-| `r2610111345e031` | Secrets Manager | 19/22 | clean | A read during a pending delete threw. `BatchGetSecretValue` was still denied right after it was granted, probably because IAM changes take time to propagate. |
-| `r26101113510091` | Secrets Manager | 22/22 | clean | |
-| `r26101113562b9e` | Secrets Manager | 22/22 | clean | Confirmed the batch read path with the final policy. |
-| `r2610111402665b` | full | 169 passed, 1 failed, 2 skipped | clean | Secrets Manager `nativeNamesAreUsedAsTheyAre`: `get` returned a secret just after its delete was accepted. |
-| `r2610111411c824` | full | 169 passed, 1 failed, 2 skipped | clean | Secrets Manager `watchedChangesInvalidateTheCache`: the watch saw the new value, but the read after it returned the old one. |
-| `r2610111422284e` | full | **170 passed, 2 skipped** | clean | Latest result, above. |
-| `r26101114370e5e` | Secrets Manager | 22/22 | clean | The waits were removed from the driver. Writing a name that is still being deleted now fails with `UnavailableException`, and the kit retries via `deleteLag()`. `deletedNamesCanBeReused` took 18.2s, which is how long AWS took to finish that delete. |
+| `r26101113239811` | tier 1 | 148 passed, 22 errors, 2 skipped | clean | Secrets Manager 0/22: the IAM user had no Secrets Manager permissions. This also exposed that `AwsErrors` mapped a 400 `AccessDeniedException` to an invalid argument instead of access denied. |
+| `r26101113365837` | tier 1, Secrets Manager | 14/22 | clean | `BatchGetSecretValue` not yet granted. Writes failed while a deleted name was still being deleted, and listings lagged behind writes. |
+| `r2610111345e031` | tier 1, Secrets Manager | 19/22 | clean | A read during a pending delete threw. `BatchGetSecretValue` was still denied right after it was granted, probably because IAM changes take time to propagate. |
+| `r26101113510091` | tier 1, Secrets Manager | 22/22 | clean | |
+| `r26101113562b9e` | tier 1, Secrets Manager | 22/22 | clean | Confirmed the batch read path with the final policy. |
+| `r2610111402665b` | tier 1 | 169 passed, 1 failed, 2 skipped | clean | Secrets Manager `nativeNamesAreUsedAsTheyAre`: `get` returned a secret just after its delete was accepted. |
+| `r2610111411c824` | tier 1 | 169 passed, 1 failed, 2 skipped | clean | Secrets Manager `watchedChangesInvalidateTheCache`: the watch saw the new value, but the read after it returned the old one. |
+| `r2610111422284e` | tier 1 | **170 passed, 2 skipped** | clean | Latest tier 1 result, above. |
+| `r26101114370e5e` | tier 1, Secrets Manager | 22/22 | clean | The waits were removed from the driver. Writing a name that is still being deleted now fails with `UnavailableException`, and the kit retries via `deleteLag()`. `deletedNamesCanBeReused` took 18.2s, which is how long AWS took to finish that delete. |
+| `r26101114471b0c` | tier 2 | not run | clean (subnet group deleted) | Stopped at `terraform apply`: no `ec2:CreateSecurityGroup` permission. |
+| `r2610111453e0bc` | tier 2 | **10/10** | clean | Latest tier 2 result, above. |
 
 ## What real AWS found
 
@@ -331,11 +368,53 @@ The user also needs:
 - SNS, SQS and SSM access for the topics, queues and parameters the tests create
 - `tag:GetResources` for the teardown check
 
+## IAM used for tier 2
+
+In addition to tier 1:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateSecurityGroup", "ec2:DeleteSecurityGroup",
+        "ec2:AuthorizeSecurityGroupIngress", "ec2:AuthorizeSecurityGroupEgress",
+        "ec2:RevokeSecurityGroupIngress", "ec2:RevokeSecurityGroupEgress",
+        "ec2:CreateTags", "ec2:DescribeSecurityGroups", "ec2:DescribeVpcs", "ec2:DescribeSubnets",
+        "ec2:DescribeVpcAttribute", "ec2:DescribeNetworkInterfaces", "ec2:DescribeAccountAttributes"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "rds:CreateDBInstance", "rds:DeleteDBInstance", "rds:DescribeDBInstances", "rds:ModifyDBInstance",
+        "rds:CreateDBSubnetGroup", "rds:DeleteDBSubnetGroup", "rds:DescribeDBSubnetGroups",
+        "rds:AddTagsToResource", "rds:RemoveTagsFromResource", "rds:ListTagsForResource"
+      ],
+      "Resource": "*"
+    },
+    { "Effect": "Allow", "Action": "rds-db:connect", "Resource": "arn:aws:rds-db:<region>:<account>:dbuser:*/cirrus_iam" },
+    {
+      "Effect": "Allow",
+      "Action": "iam:CreateServiceLinkedRole",
+      "Resource": "*",
+      "Condition": { "StringEquals": { "iam:AWSServiceName": "rds.amazonaws.com" } }
+    }
+  ]
+}
+```
+
+`rds-db:connect` is what the tests exercise. It is granted for `cirrus_iam` only, so the token for
+`cirrus_password_only` is refused. `iam:CreateServiceLinkedRole` is needed only the first time an account
+uses RDS.
+
 ## Not yet run
 
 | Tier | Services | Status |
 |---|---|---|
-| AWS tier 2 | RDS with IAM auth (`cirrus-sql`) | not run |
 | AWS tier 3 | ElastiCache with IAM auth | not run |
 | Azure | Blob, Service Bus, Cosmos DB, Key Vault, App Configuration | no real-cloud profile yet |
 | GCP | GCS, Pub/Sub, Firestore, Secret Manager, Parameter Manager | no real-cloud profile yet |
