@@ -6,8 +6,11 @@ import org.kamranzafar.cirrus.error.CloudException;
 import org.kamranzafar.cirrus.error.NotFoundException;
 import org.kamranzafar.cirrus.error.PreconditionFailedException;
 import org.kamranzafar.cirrus.error.UnknownCloudException;
+import org.kamranzafar.cirrus.json.Json;
 import org.kamranzafar.cirrus.nosql.Document;
 import org.kamranzafar.cirrus.nosql.DocumentUpdate;
+import org.kamranzafar.cirrus.nosql.Index;
+import org.kamranzafar.cirrus.nosql.IndexQuery;
 import org.kamranzafar.cirrus.nosql.Item;
 import org.kamranzafar.cirrus.nosql.Key;
 import org.kamranzafar.cirrus.nosql.Query;
@@ -320,6 +323,73 @@ public final class DynamoDocumentStoreDriver implements DocumentStoreDriver {
                         response.lastEvaluatedKey().get(sk).s().getBytes(StandardCharsets.UTF_8)))
                 : Optional.empty();
         return new QueryPage(items, next);
+    }
+
+    /** A global secondary index of the index's name; GSI reads are eventually consistent. */
+    @Override
+    public QueryPage queryIndex(Index index, IndexQuery query) {
+        Map<String, String> names = new HashMap<>(Map.of("#a", index.partitionAttribute()));
+        Map<String, AttributeValue> values = new HashMap<>(Map.of(":v", DynamoValues.toAttribute(query.value())));
+        StringBuilder condition = new StringBuilder("#a = :v");
+        query.condition().ifPresent(c -> {
+            names.put("#s", index.sortAttribute().orElseThrow());
+            condition.append(sortCondition("#s", c, values));
+        });
+        var response = dynamo.query(b -> {
+            b.tableName(table.name()).indexName(index.name()).keyConditionExpression(condition.toString())
+                    .expressionAttributeNames(names).expressionAttributeValues(values)
+                    .scanIndexForward(!query.descending()).limit(query.limit());
+            query.pageToken().ifPresent(token -> b.exclusiveStartKey(decodeKey(token)));
+        });
+        List<Item> items = response.items().stream().map(this::toItem).toList();
+        Optional<String> next = response.hasLastEvaluatedKey() && !response.lastEvaluatedKey().isEmpty()
+                ? Optional.of(encodeKey(response.lastEvaluatedKey()))
+                : Optional.empty();
+        return new QueryPage(items, next);
+    }
+
+    /** A sort-key condition clause on {@code name}, with its values added to {@code values}. */
+    private static String sortCondition(String name, SortCondition condition, Map<String, AttributeValue> values) {
+        return switch (condition) {
+            case SortCondition.BeginsWith b -> {
+                values.put(":a", AttributeValue.fromS(b.prefix()));
+                yield " AND begins_with(" + name + ", :a)";
+            }
+            case SortCondition.Between b -> {
+                values.put(":a", AttributeValue.fromS(b.from()));
+                values.put(":b", AttributeValue.fromS(b.to()));
+                yield " AND " + name + " BETWEEN :a AND :b";
+            }
+            case SortCondition.Compare c -> {
+                values.put(":a", AttributeValue.fromS(c.value()));
+                yield " AND " + name + switch (c.operator()) {
+                    case GT -> " > ";
+                    case GE -> " >= ";
+                    case LT -> " < ";
+                    case LE -> " <= ";
+                } + ":a";
+            }
+        };
+    }
+
+    /** An index query's last evaluated key holds table and index keys: kept as JSON of their S or N values. */
+    private static String encodeKey(Map<String, AttributeValue> key) {
+        Map<String, Object> json = new LinkedHashMap<>();
+        key.forEach((name, value) -> json.put(name, value.s() != null ? Map.of("S", value.s()) : Map.of("N", value.n())));
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(Json.write(json).getBytes(StandardCharsets.UTF_8));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, AttributeValue> decodeKey(String token) {
+        Map<String, Object> json = Json.parseObject(new String(Base64.getUrlDecoder().decode(token), StandardCharsets.UTF_8))
+                .orElseThrow(() -> new IllegalArgumentException("Not a page token: " + token));
+        Map<String, AttributeValue> key = new HashMap<>();
+        json.forEach((name, value) -> {
+            Map<String, Object> typed = (Map<String, Object>) value;
+            key.put(name, typed.containsKey("S") ? AttributeValue.fromS(String.valueOf(typed.get("S")))
+                    : AttributeValue.fromN(String.valueOf(typed.get("N"))));
+        });
+        return key;
     }
 
     @Override

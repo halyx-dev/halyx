@@ -176,6 +176,19 @@ public final class DefaultDocumentStore implements DocumentStore {
     }
 
     @Override
+    public QueryPage queryIndex(IndexQuery query) {
+        Objects.requireNonNull(query, "query");
+        Index index = table().index(query.index()).orElseThrow(() -> new IllegalArgumentException(
+                "Table " + table().name() + " has no index '" + query.index() + "'; declare it with TableConfig.index"));
+        if (query.condition().isPresent() && index.sortAttribute().isEmpty()) {
+            throw new IllegalArgumentException("Index " + index.name() + " has no sort attribute to put a condition on");
+        }
+        QueryPage page = execute("queryIndex", Key.of(index.name()), true, () -> driver.queryIndex(index, query));
+        List<Item> live = page.items().stream().filter(this::live).toList();
+        return live.size() == page.items().size() ? page : new QueryPage(live, page.nextPageToken());
+    }
+
+    @Override
     public <T> T unwrap(Class<T> nativeType) {
         return driver.unwrap(nativeType);
     }

@@ -23,6 +23,8 @@ import org.kamranzafar.cirrus.error.UnavailableException;
 import org.kamranzafar.cirrus.error.UnknownCloudException;
 import org.kamranzafar.cirrus.nosql.Document;
 import org.kamranzafar.cirrus.nosql.DocumentUpdate;
+import org.kamranzafar.cirrus.nosql.Index;
+import org.kamranzafar.cirrus.nosql.IndexQuery;
 import org.kamranzafar.cirrus.nosql.Item;
 import org.kamranzafar.cirrus.nosql.Key;
 import org.kamranzafar.cirrus.nosql.Query;
@@ -312,6 +314,51 @@ public final class CosmosDocumentStoreDriver implements DocumentStoreDriver {
         var page = pages.next();
         List<Item> items = page.getResults().stream().map(n -> toItem(n, null)).toList();
         return new QueryPage(items, Optional.ofNullable(page.getContinuationToken()));
+    }
+
+    /** A cross-partition query on the index's fields; Cosmos' default indexing covers it. */
+    @Override
+    public QueryPage queryIndex(Index index, IndexQuery query) {
+        String attribute = "c[\"" + index.partitionAttribute() + "\"]";
+        StringBuilder sql = new StringBuilder("SELECT * FROM c WHERE " + attribute + " = @v");
+        List<SqlParameter> parameters = new ArrayList<>(List.of(new SqlParameter("@v", CosmosValues.toJson(query.value()))));
+        if (index.sortAttribute().isPresent()) {
+            String sort = "c[\"" + index.sortAttribute().get() + "\"]";
+            sql.append(" AND IS_STRING(").append(sort).append(")");
+            query.condition().ifPresent(c -> sql.append(sortClause(sort, c, parameters)));
+            sql.append(" ORDER BY ").append(sort).append(query.descending() ? " DESC" : " ASC");
+        }
+        var pages = container.queryItems(new SqlQuerySpec(sql.toString(), parameters), new CosmosQueryRequestOptions(),
+                ObjectNode.class).iterableByPage(query.pageToken().orElse(null), query.limit()).iterator();
+        if (!pages.hasNext()) {
+            return new QueryPage(List.of(), Optional.empty());
+        }
+        var page = pages.next();
+        return new QueryPage(page.getResults().stream().map(n -> toItem(n, null)).toList(),
+                Optional.ofNullable(page.getContinuationToken()));
+    }
+
+    private static String sortClause(String field, SortCondition condition, List<SqlParameter> parameters) {
+        return switch (condition) {
+            case SortCondition.BeginsWith b -> {
+                parameters.add(new SqlParameter("@a", b.prefix()));
+                yield " AND STARTSWITH(" + field + ", @a)";
+            }
+            case SortCondition.Between b -> {
+                parameters.add(new SqlParameter("@a", b.from()));
+                parameters.add(new SqlParameter("@b", b.to()));
+                yield " AND " + field + " >= @a AND " + field + " <= @b";
+            }
+            case SortCondition.Compare c -> {
+                parameters.add(new SqlParameter("@a", c.value()));
+                yield " AND " + field + switch (c.operator()) {
+                    case GT -> " > ";
+                    case GE -> " >= ";
+                    case LT -> " < ";
+                    case LE -> " <= ";
+                } + "@a";
+            }
+        };
     }
 
     @Override

@@ -6,6 +6,8 @@ import org.kamranzafar.cirrus.error.PreconditionFailedException;
 import org.kamranzafar.cirrus.error.UnknownCloudException;
 import org.kamranzafar.cirrus.nosql.Document;
 import org.kamranzafar.cirrus.nosql.DocumentUpdate;
+import org.kamranzafar.cirrus.nosql.Index;
+import org.kamranzafar.cirrus.nosql.IndexQuery;
 import org.kamranzafar.cirrus.nosql.Item;
 import org.kamranzafar.cirrus.nosql.Key;
 import org.kamranzafar.cirrus.nosql.Query;
@@ -18,6 +20,7 @@ import org.kamranzafar.cirrus.nosql.spi.WriteCondition;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -187,6 +190,34 @@ final class InMemoryDocumentStoreDriver implements DocumentStoreDriver {
             last = entry.getKey();
         }
         return new QueryPage(items, Optional.empty());
+    }
+
+    /** A scan: fine for tests and local development. Page tokens are offsets. */
+    @Override
+    public QueryPage queryIndex(Index index, IndexQuery query) {
+        Comparator<Item> order = Comparator.comparing((Item i) -> index.sortAttribute()
+                        .map(s -> String.valueOf(i.document().get(s))).orElse(""))
+                .thenComparing(i -> i.key().toString());
+        if (query.descending()) {
+            order = order.reversed();
+        }
+        List<Item> matches = table.partitions.values().stream().flatMap(p -> p.values().stream())
+                .filter(i -> valueEquals(i.document().get(index.partitionAttribute()), query.value()))
+                .filter(i -> index.sortAttribute().isEmpty() || i.document().get(index.sortAttribute().get()) instanceof String)
+                .filter(i -> query.condition().isEmpty()
+                        || query.condition().get().test((String) i.document().get(index.sortAttribute().orElseThrow())))
+                .sorted(order).toList();
+        int from = query.pageToken().map(Integer::parseInt).orElse(0);
+        int to = Math.min(matches.size(), from + query.limit());
+        return new QueryPage(matches.subList(Math.min(from, to), to),
+                to < matches.size() ? Optional.of(String.valueOf(to)) : Optional.empty());
+    }
+
+    private static boolean valueEquals(Object stored, Object wanted) {
+        if (stored instanceof Number a && wanted instanceof Number b) {
+            return new BigDecimal(a.toString()).compareTo(new BigDecimal(b.toString())) == 0;
+        }
+        return stored != null && stored.equals(wanted);
     }
 
     @Override

@@ -393,6 +393,9 @@ orders.queryAll(Query.builder("acme").where(SortCondition.beginsWith("2026-10"))
 - **Operations:** get, put (create or replace), atomic partial `update` (set, remove, increment), delete,
   `getAll` and `putAll` in batches, and queries within one partition by sort-key range, both directions,
   with page tokens.
+- **Secondary indexes:** declare them on the table (`TableConfig.index("by-status", "status", "placedAt")`)
+  and query across partitions with `queryIndex(IndexQuery.builder("by-status").equalTo("PAID").build())`,
+  ordered and narrowed by the string sort attribute. Items without the attribute aren't in the index.
 - **Optimistic concurrency:** every item has a `Version`. `WriteOptions.ifVersion` and `ifNotExists` turn
   lost updates into `PreconditionFailedException`.
 - **Expiry:** `WriteOptions.ttl(...)` items are never returned once expired, even before the store deletes
@@ -403,10 +406,11 @@ orders.queryAll(Query.builder("acme").where(SortCondition.beginsWith("2026-10"))
 
 | | DynamoDB | Cosmos DB (NoSQL API) | Firestore (native mode) |
 |---|---|---|---|
-| Table | table with string `pk` (and `sk`) keys | container partitioned on `/pk` | collection; sorted items in `<pk>/items/<sk>` |
+| Table | table with string `pk` (and `sk`) keys | container partitioned on `/pk` | collection; sorted items in `<table>/<pk>/<table>/<sk>` |
 | Version | `cirrus_version` attribute | ETag | update time |
 | Expiry | `cirrus_expires` (epoch seconds): enable TTL on it | `ttl` (container default TTL must be on, e.g. -1) | `cirrus_expires` Timestamp: add a TTL policy |
 | Query | key condition on `sk` | SQL within the partition, `ORDER BY sk` | ordered on the `cirrus_sort` field (automatic single-field index) |
+| Index | a global secondary index of that name (eventually consistent) | a cross-partition query (default indexing) | a collection-group query on the table's name: add a composite index on the index fields |
 | Decimals | exact | exact (stored as a string wrapper) | stored as doubles |
 | Item size | 400 KB | 2 MB | about 1 MiB |
 | Reads | strongly consistent | the account's consistency level | strongly consistent |
@@ -571,6 +575,8 @@ cirrus:
     orders:                        # DocumentStore bean name
       table: orders-v2             # DynamoDB table / Cosmos container / Firestore collection; defaults to the key
       sort-key: sk                 # omit for tables keyed by partition key only
+      indexes:
+        by-status: { partition-attribute: status, sort-attribute: placedAt }
   topics:
     order-events:                  # Publisher bean name
       name: orders                 # SNS topic / Service Bus topic / Pub/Sub topic; defaults to the key
@@ -760,9 +766,9 @@ fields, native names, watching):
 | HashiCorp Vault | Vault dev server (plain and TLS with a private CA) | plus AppRole with token renewal, token-file rotation, wrong tokens, multi-field secrets, CA trust; GCP and Azure login requests against a fake metadata service |
 | Spring `spring.config.import` | Vault dev server | on Boot 3.5 and 4.1: JSON expansion, native names, live reload with change events, prefixes, optional imports |
 
-Document store tests (the same 16-test TCK: every value type, versions and conditions, partial updates
+Document store tests (the same 19-test TCK: every value type, versions and conditions, partial updates
 with concurrent increments, batches beyond provider limits, sort-key queries in both directions with
-paging, keys with `/ ? # % \`, expiry):
+paging, secondary-index queries across partitions, keys with `/ ? # % \`, expiry):
 
 | Backend | Server | Notes |
 |---|---|---|
@@ -852,7 +858,6 @@ Done:
 Backlog, in order:
 
 1. Production gaps
-   - NoSQL secondary-index queries (DynamoDB GSIs, Cosmos and Firestore field queries)
    - NoSQL transactions within a partition (DynamoDB transactions, Cosmos transactional batch,
      Firestore transactions)
    - Service Bus sessions, for ordering keys on Azure

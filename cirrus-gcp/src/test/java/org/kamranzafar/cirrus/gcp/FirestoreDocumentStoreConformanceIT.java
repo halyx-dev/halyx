@@ -62,6 +62,6 @@ class FirestoreDocumentStoreConformanceIT extends DocumentStoreConformanceTest {
         if (sorted) {
             table.sortKey("sk");
         }
-        return cirrus.provider("gcp").documentStore(table.build());
+        return cirrus.provider("gcp").documentStore(indexes(table, sorted).build());
     }
 }

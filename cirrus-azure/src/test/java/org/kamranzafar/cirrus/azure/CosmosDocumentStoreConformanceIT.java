@@ -98,6 +98,6 @@ class CosmosDocumentStoreConformanceIT extends DocumentStoreConformanceTest {
         if (sorted) {
             table.sortKey("sk");
         }
-        return cirrus.provider("azure").documentStore(table.build());
+        return cirrus.provider("azure").documentStore(indexes(table, sorted).build());
     }
 }

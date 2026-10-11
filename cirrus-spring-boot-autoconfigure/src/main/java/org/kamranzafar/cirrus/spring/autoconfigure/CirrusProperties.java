@@ -225,12 +225,15 @@ public record CirrusProperties(Map<String, Provider> providers, Map<String, Blob
      * @param table        the DynamoDB table, Cosmos DB container or Firestore collection; defaults to the key
      * @param partitionKey partition key attribute (default {@code pk})
      * @param sortKey      sort key attribute, for tables that have one
+     * @param indexes      secondary indexes by name
      * @param properties   provider-specific settings, such as {@code aws.dynamodb.ttl-attribute}
      */
     public record DocumentStoreProperties(String provider, String table, @DefaultValue("pk") String partitionKey,
-                                          String sortKey, Map<String, String> properties) {
+                                          String sortKey, Map<String, IndexProperties> indexes,
+                                          Map<String, String> properties) {
 
         public DocumentStoreProperties {
+            indexes = ordered(indexes);
             properties = ordered(properties);
         }
 
@@ -240,9 +243,27 @@ public record CirrusProperties(Map<String, Provider> providers, Map<String, Blob
             if (sortKey != null && !sortKey.isBlank()) {
                 config.sortKey(sortKey);
             }
+            indexes.forEach((index, attributes) -> {
+                if (attributes.partitionAttribute() == null) {
+                    throw new IllegalStateException("cirrus.document-stores." + key + ".indexes." + index
+                            + ".partition-attribute is required");
+                }
+                if (attributes.sortAttribute() == null) {
+                    config.index(index, attributes.partitionAttribute());
+                } else {
+                    config.index(index, attributes.partitionAttribute(), attributes.sortAttribute());
+                }
+            });
             properties.forEach(config::property);
             return config.build();
         }
+    }
+
+    /**
+     * @param partitionAttribute the field queried for equality
+     * @param sortAttribute      the string field results are ordered and narrowed by, if any
+     */
+    public record IndexProperties(String partitionAttribute, String sortAttribute) {
     }
 
     /**

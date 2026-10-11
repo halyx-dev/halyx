@@ -28,6 +28,6 @@ class InMemoryDocumentStoreConformanceTest extends DocumentStoreConformanceTest 
         if (sorted) {
             table.sortKey("sk");
         }
-        return cirrus.provider("test").documentStore(table.build());
+        return cirrus.provider("test").documentStore(indexes(table, sorted).build());
     }
 }

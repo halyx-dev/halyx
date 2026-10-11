@@ -26,6 +26,8 @@ import org.kamranzafar.cirrus.gcp.GcpErrors;
 import org.kamranzafar.cirrus.gcp.GcpProvider;
 import org.kamranzafar.cirrus.nosql.Document;
 import org.kamranzafar.cirrus.nosql.DocumentUpdate;
+import org.kamranzafar.cirrus.nosql.Index;
+import org.kamranzafar.cirrus.nosql.IndexQuery;
 import org.kamranzafar.cirrus.nosql.Item;
 import org.kamranzafar.cirrus.nosql.Key;
 import org.kamranzafar.cirrus.nosql.Query;
@@ -50,8 +52,9 @@ import java.util.concurrent.ExecutionException;
 
 /**
  * A Firestore collection. Without a sort key, each item is the document {@code <table>/<partition>}; with
- * one, {@code <table>/<partition>/items/<sort>}, so a partition query reads one subcollection in document-id
- * order and needs no composite index. Ids escape {@code %} and {@code /}, which keeps ordering for all other
+ * one, {@code <table>/<partition>/<table>/<sort>}, so a partition query reads one subcollection and needs no
+ * composite index, and an index query is a collection-group query on the table's name (it needs a composite
+ * index on the index attributes). Ids escape {@code %} and {@code /}, which keeps ordering for all other
  * keys. Items of sorted tables also keep their sort key in {@value #SORT}, which queries order and filter on
  * (Firestore can't scan document ids in descending order); its automatic single-field index is enough. The
  * version is the document's update time. Expiry is the Timestamp field {@value #EXPIRES}: give the collection
@@ -61,7 +64,7 @@ public final class FirestoreDocumentStoreDriver implements DocumentStoreDriver {
 
     static final String EXPIRES = "cirrus_expires";
     static final String SORT = "cirrus_sort";
-    /** Table property: the subcollection name under each partition (default {@code items}). */
+    /** Table property: the subcollection name under each partition (default: the table's name). */
     public static final String ITEMS_COLLECTION = "gcp.firestore.items-collection";
 
     private final Firestore firestore;
@@ -71,7 +74,8 @@ public final class FirestoreDocumentStoreDriver implements DocumentStoreDriver {
     public FirestoreDocumentStoreDriver(Firestore firestore, TableConfig table) {
         this.firestore = firestore;
         this.table = table;
-        this.items = table.property(ITEMS_COLLECTION).orElse("items");
+        // The subcollection shares the table's name, so a collection-group query by that name sees this table only.
+        this.items = table.property(ITEMS_COLLECTION).orElse(table.name());
     }
 
     @Override
@@ -383,6 +387,51 @@ public final class FirestoreDocumentStoreDriver implements DocumentStoreDriver {
                 ? Optional.of(Base64.getUrlEncoder().withoutPadding().encodeToString(
                         page.getLast().key().sort().orElseThrow().getBytes(StandardCharsets.UTF_8)))
                 : Optional.empty();
+        return new QueryPage(page, next);
+    }
+
+    /** A collection-group query on the items' collection id, ordered by the sort attribute, then the id. */
+    @Override
+    public QueryPage queryIndex(Index index, IndexQuery query) {
+        String group = table.hasSortKey() ? items : table.name();
+        var direction = query.descending() ? com.google.cloud.firestore.Query.Direction.DESCENDING
+                : com.google.cloud.firestore.Query.Direction.ASCENDING;
+        com.google.cloud.firestore.Query q = firestore.collectionGroup(group)
+                .whereEqualTo(index.partitionAttribute(), query.value());
+        if (index.sortAttribute().isPresent()) {
+            String sort = index.sortAttribute().get();
+            if (query.condition().isPresent()) {
+                q = switch (query.condition().get()) {
+                    case SortCondition.BeginsWith b -> q.whereGreaterThanOrEqualTo(sort, b.prefix()).whereLessThan(sort, b.prefix() + "\uffff");
+                    case SortCondition.Between b -> q.whereGreaterThanOrEqualTo(sort, b.from()).whereLessThanOrEqualTo(sort, b.to());
+                    case SortCondition.Compare c -> switch (c.operator()) {
+                        case GT -> q.whereGreaterThan(sort, c.value());
+                        case GE -> q.whereGreaterThanOrEqualTo(sort, c.value());
+                        case LT -> q.whereLessThan(sort, c.value());
+                        case LE -> q.whereLessThanOrEqualTo(sort, c.value());
+                    };
+                };
+            }
+            q = q.orderBy(sort, direction);
+        }
+        q = q.orderBy(FieldPath.documentId(), direction);
+        if (query.pageToken().isPresent()) {
+            String[] cursor = new String(Base64.getUrlDecoder().decode(query.pageToken().get()), StandardCharsets.UTF_8)
+                    .split("\n", 2);
+            DocumentReference last = firestore.document(cursor[cursor.length - 1]);
+            q = index.sortAttribute().isPresent() ? q.startAfter(cursor[0], last) : q.startAfter(last);
+        }
+        var documents = await(q.limit(query.limit() + 1).get()).getDocuments();
+        List<Item> page = new ArrayList<>();
+        for (int i = 0; i < Math.min(query.limit(), documents.size()); i++) {
+            page.add(toItem(documents.get(i)));
+        }
+        Optional<String> next = Optional.empty();
+        if (documents.size() > query.limit()) {
+            DocumentSnapshot last = documents.get(query.limit() - 1);
+            String cursor = index.sortAttribute().map(s -> last.getString(s) + "\n").orElse("") + last.getReference().getPath();
+            next = Optional.of(Base64.getUrlEncoder().withoutPadding().encodeToString(cursor.getBytes(StandardCharsets.UTF_8)));
+        }
         return new QueryPage(page, next);
     }
 

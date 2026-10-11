@@ -16,8 +16,10 @@ import org.testcontainers.utility.DockerImageName;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeDefinition;
 import software.amazon.awssdk.services.dynamodb.model.BillingMode;
+import software.amazon.awssdk.services.dynamodb.model.GlobalSecondaryIndex;
 import software.amazon.awssdk.services.dynamodb.model.KeySchemaElement;
 import software.amazon.awssdk.services.dynamodb.model.KeyType;
+import software.amazon.awssdk.services.dynamodb.model.ProjectionType;
 import software.amazon.awssdk.services.dynamodb.model.ScalarAttributeType;
 
 import java.net.URI;
@@ -57,8 +59,20 @@ class DynamoDocumentStoreConformanceIT extends DocumentStoreConformanceTest {
             attributes.add(AttributeDefinition.builder().attributeName("sk").attributeType(ScalarAttributeType.S).build());
             keys.add(KeySchemaElement.builder().attributeName("sk").keyType(KeyType.RANGE).build());
         }
+        attributes.add(AttributeDefinition.builder().attributeName("status").attributeType(ScalarAttributeType.S).build());
+        attributes.add(AttributeDefinition.builder().attributeName("placedAt").attributeType(ScalarAttributeType.S).build());
+        List<GlobalSecondaryIndex> indexes = new ArrayList<>(List.of(GlobalSecondaryIndex.builder().indexName(BY_STATUS)
+                .keySchema(KeySchemaElement.builder().attributeName("status").keyType(KeyType.HASH).build(),
+                        KeySchemaElement.builder().attributeName("placedAt").keyType(KeyType.RANGE).build())
+                .projection(p -> p.projectionType(ProjectionType.ALL)).build()));
+        if (!sorted) {
+            attributes.add(AttributeDefinition.builder().attributeName("owner").attributeType(ScalarAttributeType.S).build());
+            indexes.add(GlobalSecondaryIndex.builder().indexName(BY_OWNER)
+                    .keySchema(KeySchemaElement.builder().attributeName("owner").keyType(KeyType.HASH).build())
+                    .projection(p -> p.projectionType(ProjectionType.ALL)).build());
+        }
         dynamo.createTable(b -> b.tableName(name).attributeDefinitions(attributes).keySchema(keys)
-                .billingMode(BillingMode.PAY_PER_REQUEST));
+                .globalSecondaryIndexes(indexes).billingMode(BillingMode.PAY_PER_REQUEST));
         dynamo.waiter().waitUntilTableExists(b -> b.tableName(name));
         dynamo.updateTimeToLive(b -> b.tableName(name).timeToLiveSpecification(t -> t.attributeName("cirrus_expires").enabled(true)));
     }
@@ -76,6 +90,6 @@ class DynamoDocumentStoreConformanceIT extends DocumentStoreConformanceTest {
         if (sorted) {
             table.sortKey("sk");
         }
-        return cirrus.provider("aws").documentStore(table.build());
+        return cirrus.provider("aws").documentStore(indexes(table, sorted).build());
     }
 }

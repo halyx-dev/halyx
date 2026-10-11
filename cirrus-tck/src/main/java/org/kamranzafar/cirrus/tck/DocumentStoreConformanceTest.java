@@ -9,11 +9,13 @@ import org.kamranzafar.cirrus.error.PreconditionFailedException;
 import org.kamranzafar.cirrus.nosql.Document;
 import org.kamranzafar.cirrus.nosql.DocumentStore;
 import org.kamranzafar.cirrus.nosql.DocumentUpdate;
+import org.kamranzafar.cirrus.nosql.IndexQuery;
 import org.kamranzafar.cirrus.nosql.Item;
 import org.kamranzafar.cirrus.nosql.Key;
 import org.kamranzafar.cirrus.nosql.Query;
 import org.kamranzafar.cirrus.nosql.QueryPage;
 import org.kamranzafar.cirrus.nosql.SortCondition;
+import org.kamranzafar.cirrus.nosql.TableConfig;
 import org.kamranzafar.cirrus.nosql.WriteOptions;
 
 import java.math.BigDecimal;
@@ -23,6 +25,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -32,10 +35,25 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * Conformance suite for document stores. Every provider supplies two existing tables: one keyed by
  * partition key only, one with a sort key. Each test works under fresh random partition keys, so the
  * tables can be shared between tests and runs.
+ *
+ * <p>Both tables declare the index {@value #BY_STATUS} on ({@code status}, {@code placedAt}); the plain
+ * table also declares {@value #BY_OWNER} on {@code owner} alone (see {@link #indexes}).
  */
 public abstract class DocumentStoreConformanceTest {
 
+    public static final String BY_STATUS = "by-status";
+    public static final String BY_OWNER = "by-owner";
+
     private String prefix;
+
+    /** The indexes a test table declares: {@code sorted} tables only need {@value #BY_STATUS}. */
+    public static TableConfig.Builder indexes(TableConfig.Builder table, boolean sorted) {
+        table.index(BY_STATUS, "status", "placedAt");
+        if (!sorted) {
+            table.index(BY_OWNER, "owner");
+        }
+        return table;
+    }
 
     /** A store over a table keyed by partition key only ({@code sorted = false}) or with a sort key. */
     protected abstract DocumentStore store(boolean sorted);
@@ -313,6 +331,94 @@ public abstract class DocumentStoreConformanceTest {
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("no sort key");
         assertThatThrownBy(() -> plain.query(Query.partition(partition("x")))).isInstanceOf(InvalidArgumentException.class);
         assertThatThrownBy(() -> Document.builder().put("bad", new Object())).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void indexQueryFindsItemsAcrossPartitionsInSortOrder() {
+        DocumentStore store = store(true);
+        String paid = prefix + "PAID";
+        Map<Key, Document> items = new LinkedHashMap<>();
+        items.put(Key.of(partition("acme"), "o1"), order(paid, "2026-10-03"));
+        items.put(Key.of(partition("acme"), "o2"), order(prefix + "OPEN", "2026-10-01"));
+        items.put(Key.of(partition("globex"), "o1"), order(paid, "2026-10-01"));
+        items.put(Key.of(partition("initech"), "o9"), order(paid, "2026-10-02"));
+        items.put(Key.of(partition("initech"), "o10"), Document.builder().put("placedAt", "2026-10-04").build()); // no status
+        store.putAll(items);
+
+        List<Key> keys = eventually(() -> store.queryIndexAll(IndexQuery.builder(BY_STATUS).equalTo(paid).build())
+                .map(Item::key).toList(), 3);
+
+        assertThat(keys).containsExactly(Key.of(partition("globex"), "o1"), Key.of(partition("initech"), "o9"),
+                Key.of(partition("acme"), "o1"));
+        assertThat(store.queryIndexAll(IndexQuery.builder(BY_STATUS).equalTo(paid).descending().build())
+                .map(i -> i.document().getString("placedAt").orElseThrow()).toList())
+                .containsExactly("2026-10-03", "2026-10-02", "2026-10-01");
+        assertThat(store.queryIndexAll(IndexQuery.builder(BY_STATUS).equalTo(paid)
+                        .where(SortCondition.greaterThan("2026-10-01")).build())
+                .map(i -> i.document().getString("placedAt").orElseThrow()).toList())
+                .containsExactly("2026-10-02", "2026-10-03");
+        Item found = store.queryIndexAll(IndexQuery.builder(BY_STATUS).equalTo(paid).build()).findFirst().orElseThrow();
+        assertThat(found.document().getString("status")).hasValue(paid);
+    }
+
+    @Test
+    void indexQueryPagesThroughManyMatches() {
+        DocumentStore store = store(true);
+        String status = prefix + "BULK";
+        Map<Key, Document> items = new LinkedHashMap<>();
+        for (int i = 0; i < 23; i++) {
+            items.put(Key.of(partition("p" + (i % 4)), "o" + i), order(status, String.format("2026-10-%02d", i + 1)));
+        }
+        store.putAll(items);
+
+        QueryPage first = eventually(() -> store.queryIndex(IndexQuery.builder(BY_STATUS).equalTo(status).limit(10).build()), 10);
+        List<String> all = eventually(() -> store.queryIndexAll(IndexQuery.builder(BY_STATUS).equalTo(status).limit(10).build())
+                .map(i -> i.document().getString("placedAt").orElseThrow()).toList(), 23);
+
+        assertThat(first.nextPageToken()).isPresent();
+        assertThat(all).hasSize(23).isSorted().doesNotHaveDuplicates();
+    }
+
+    @Test
+    void indexWithoutSortAttributeFindsEveryMatch() {
+        DocumentStore store = store(false);
+        String owner = prefix + "ada";
+        store.put(key("doc-1"), Document.builder().put("owner", owner).put("title", "a").build());
+        store.put(key("doc-2"), Document.builder().put("owner", owner).put("title", "b").build());
+        store.put(key("doc-3"), Document.builder().put("owner", prefix + "bob").put("title", "c").build());
+
+        List<String> titles = eventually(() -> store.queryIndexAll(IndexQuery.builder(BY_OWNER).equalTo(owner).build())
+                .map(i -> i.document().getString("title").orElseThrow()).sorted().toList(), 2);
+
+        assertThat(titles).containsExactly("a", "b");
+        assertThatThrownBy(() -> store.queryIndex(IndexQuery.builder("no-such-index").equalTo("x").build()))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> store.queryIndex(IndexQuery.builder(BY_OWNER).equalTo("x")
+                .where(SortCondition.beginsWith("a")).build())).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    private static Document order(String status, String placedAt) {
+        return Document.builder().put("status", status).put("placedAt", placedAt).build();
+    }
+
+    /** Index reads may lag writes (DynamoDB GSIs): retry until {@code expected} results show up, briefly. */
+    private static <T> T eventually(Supplier<T> read, int expected) {
+        long deadline = System.nanoTime() + Duration.ofSeconds(15).toNanos();
+        T result = read.get();
+        while (size(result) < expected && System.nanoTime() < deadline) {
+            try {
+                Thread.sleep(200);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+            result = read.get();
+        }
+        return result;
+    }
+
+    private static int size(Object result) {
+        return result instanceof List<?> list ? list.size() : result instanceof QueryPage page ? page.items().size() : 0;
     }
 
     private static List<String> months(QueryPage page) {

@@ -56,6 +56,17 @@ public interface DocumentStore {
                 .flatMap(page -> page.items().stream());
     }
 
+    /** Items found through a secondary index declared on the table. */
+    QueryPage queryIndex(IndexQuery query);
+
+    /** Every page of {@code query}, fetched as the stream is consumed. */
+    default Stream<Item> queryIndexAll(IndexQuery query) {
+        return Stream.iterate(queryIndex(query),
+                        page -> page != null,
+                        page -> page.nextPageToken().map(t -> queryIndex(query.withPageToken(t))).orElse(null))
+                .flatMap(page -> page.items().stream());
+    }
+
     /** The native client, such as {@code DynamoDbClient}. */
     <T> T unwrap(Class<T> nativeType);
 }

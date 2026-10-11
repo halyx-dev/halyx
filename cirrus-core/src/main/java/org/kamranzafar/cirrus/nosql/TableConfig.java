@@ -1,6 +1,7 @@
 package org.kamranzafar.cirrus.nosql;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -16,8 +17,10 @@ public final class TableConfig {
     private final String partitionKey;
     private final String sortKey;
     private final Map<String, String> properties;
+    private final Map<String, Index> indexes;
 
     private TableConfig(Builder b) {
+        this.indexes = Map.copyOf(b.indexes);
         this.name = b.name;
         this.partitionKey = b.partitionKey;
         this.sortKey = b.sortKey;
@@ -48,6 +51,15 @@ public final class TableConfig {
         return sortKey != null;
     }
 
+    /** The table's secondary indexes by name. */
+    public Map<String, Index> indexes() {
+        return indexes;
+    }
+
+    public Optional<Index> index(String name) {
+        return Optional.ofNullable(indexes.get(name));
+    }
+
     public Optional<String> property(String key) {
         return Optional.ofNullable(properties.get(key));
     }
@@ -66,6 +78,7 @@ public final class TableConfig {
         private String partitionKey = "pk";
         private String sortKey;
         private final Map<String, String> properties = new LinkedHashMap<>();
+        private final Map<String, Index> indexes = new LinkedHashMap<>();
 
         private Builder(String name) {
             Objects.requireNonNull(name, "name");
@@ -85,6 +98,21 @@ public final class TableConfig {
             return this;
         }
 
+        /** A secondary index found by {@code partitionAttribute}, without ordering. */
+        public Builder index(String name, String partitionAttribute) {
+            return index(new Index(name, partitionAttribute, Optional.empty()));
+        }
+
+        /** A secondary index found by {@code partitionAttribute} and ordered by the string {@code sortAttribute}. */
+        public Builder index(String name, String partitionAttribute, String sortAttribute) {
+            return index(new Index(name, partitionAttribute, Optional.of(sortAttribute)));
+        }
+
+        public Builder index(Index index) {
+            indexes.put(index.name(), Objects.requireNonNull(index, "index"));
+            return this;
+        }
+
         public Builder property(String key, String value) {
             properties.put(Objects.requireNonNull(key, "key"), Objects.requireNonNull(value, "value"));
             return this;
@@ -101,6 +129,15 @@ public final class TableConfig {
         public TableConfig build() {
             if (partitionKey.equals(sortKey)) {
                 throw new IllegalStateException("Partition and sort key attributes must differ");
+            }
+            for (Index index : indexes.values()) {
+                for (String attribute : index.sortAttribute().map(s -> List.of(index.partitionAttribute(), s))
+                        .orElse(List.of(index.partitionAttribute()))) {
+                    if (attribute.equals(partitionKey) || attribute.equals(sortKey)) {
+                        throw new IllegalStateException("Index " + index.name() + " must use document fields, not key "
+                                + "attributes; query by key with Query instead");
+                    }
+                }
             }
             return new TableConfig(this);
         }

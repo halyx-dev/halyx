@@ -3,6 +3,8 @@ package org.kamranzafar.cirrus.nosql.spi;
 import org.kamranzafar.cirrus.error.CloudException;
 import org.kamranzafar.cirrus.nosql.Document;
 import org.kamranzafar.cirrus.nosql.DocumentUpdate;
+import org.kamranzafar.cirrus.nosql.Index;
+import org.kamranzafar.cirrus.nosql.IndexQuery;
 import org.kamranzafar.cirrus.nosql.Item;
 import org.kamranzafar.cirrus.nosql.Key;
 import org.kamranzafar.cirrus.nosql.Query;
@@ -55,6 +57,9 @@ public interface DocumentStoreDriver extends AutoCloseable {
 
     /** Needs a table with a sort key. */
     QueryPage query(Query query);
+
+    /** {@code index} is the table's declared index named by the query. */
+    QueryPage queryIndex(Index index, IndexQuery query);
 
     CloudException translate(Throwable error);
 

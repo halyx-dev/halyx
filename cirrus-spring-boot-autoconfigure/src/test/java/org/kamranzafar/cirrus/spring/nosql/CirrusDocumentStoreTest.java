@@ -3,6 +3,7 @@ package org.kamranzafar.cirrus.spring.nosql;
 import org.junit.jupiter.api.Test;
 import org.kamranzafar.cirrus.nosql.Document;
 import org.kamranzafar.cirrus.nosql.DocumentStore;
+import org.kamranzafar.cirrus.nosql.IndexQuery;
 import org.kamranzafar.cirrus.nosql.Key;
 import org.kamranzafar.cirrus.nosql.Query;
 import org.kamranzafar.cirrus.nosql.RecordMapper;
@@ -22,6 +23,7 @@ class CirrusDocumentStoreTest {
             .withPropertyValues("cirrus.providers.local.type=memory",
                     "cirrus.document-stores.orders.table=orders-table",
                     "cirrus.document-stores.orders.sort-key=sk",
+                    "cirrus.document-stores.orders.indexes.by-customer.partition-attribute=customer",
                     "cirrus.document-stores.profiles.partition-key=id");
 
     @Test
@@ -40,6 +42,7 @@ class CirrusDocumentStoreTest {
             assertThat(orders.queryAll(Query.partition("acme")).map(i -> mapper.fromDocument(i.document())).toList())
                     .containsExactly(new Order("acme", 42));
             assertThat(profiles.get(Key.of("u1")).orElseThrow().document().getString("name")).hasValue("Ada");
+            assertThat(orders.queryIndexAll(IndexQuery.builder("by-customer").equalTo("acme").build()).count()).isEqualTo(1);
         });
     }
 }
