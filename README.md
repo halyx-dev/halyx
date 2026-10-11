@@ -396,6 +396,9 @@ orders.queryAll(Query.builder("acme").where(SortCondition.beginsWith("2026-10"))
 - **Secondary indexes:** declare them on the table (`TableConfig.index("by-status", "status", "placedAt")`)
   and query across partitions with `queryIndex(IndexQuery.builder("by-status").equalTo("PAID").build())`,
   ordered and narrowed by the string sort attribute. Items without the attribute aren't in the index.
+- **Transactions:** `transact(Transaction.builder().put(...).update(...).delete(...).check(key, version).build())`
+  applies up to 100 operations on one partition atomically. Any failed condition cancels all of them with
+  `PreconditionFailedException`. It returns the new versions.
 - **Optimistic concurrency:** every item has a `Version`. `WriteOptions.ifVersion` and `ifNotExists` turn
   lost updates into `PreconditionFailedException`.
 - **Expiry:** `WriteOptions.ttl(...)` items are never returned once expired, even before the store deletes
@@ -410,6 +413,7 @@ orders.queryAll(Query.builder("acme").where(SortCondition.beginsWith("2026-10"))
 | Version | `cirrus_version` attribute | ETag | update time |
 | Expiry | `cirrus_expires` (epoch seconds): enable TTL on it | `ttl` (container default TTL must be on, e.g. -1) | `cirrus_expires` Timestamp: add a TTL policy |
 | Query | key condition on `sk` | SQL within the partition, `ORDER BY sk` | ordered on the `cirrus_sort` field (automatic single-field index) |
+| Transaction | `TransactWriteItems` | transactional batch; a `check` patches a hidden field, so it moves that item's version | read-check-write transaction |
 | Index | a global secondary index of that name (eventually consistent) | a cross-partition query (default indexing) | a collection-group query on the table's name: add a composite index on the index fields |
 | Decimals | exact | exact (stored as a string wrapper) | stored as doubles |
 | Item size | 400 KB | 2 MB | about 1 MiB |
@@ -766,15 +770,16 @@ fields, native names, watching):
 | HashiCorp Vault | Vault dev server (plain and TLS with a private CA) | plus AppRole with token renewal, token-file rotation, wrong tokens, multi-field secrets, CA trust; GCP and Azure login requests against a fake metadata service |
 | Spring `spring.config.import` | Vault dev server | on Boot 3.5 and 4.1: JSON expansion, native names, live reload with change events, prefixes, optional imports |
 
-Document store tests (the same 19-test TCK: every value type, versions and conditions, partial updates
+Document store tests (the same 23-test TCK: every value type, versions and conditions, partial updates
 with concurrent increments, batches beyond provider limits, sort-key queries in both directions with
-paging, secondary-index queries across partitions, keys with `/ ? # % \`, expiry):
+paging, secondary-index queries across partitions, transactions with rollback, keys with `/ ? # % \`,
+expiry):
 
 | Backend | Server | Notes |
 |---|---|---|
 | in-memory store | none | the full TCK |
 | DynamoDB | Floci | the full TCK |
-| Firestore | Google's Firestore emulator, and Floci-gcp | the full TCK on Google's emulator; Floci skips concurrent increments, which it doesn't apply atomically |
+| Firestore | Google's Firestore emulator, and Floci-gcp | the full TCK on Google's emulator; Floci skips the three tests relying on increments, which it doesn't apply reliably (lost when concurrent, set rather than added in transactions) |
 | Cosmos DB | Floci-az, over TLS with a throwaway certificate (the SDK requires HTTPS) | the full TCK |
 | Spring | in-memory store | on Boot 3.5 and 4.1: `DocumentStore` beans and health |
 
@@ -858,8 +863,6 @@ Done:
 Backlog, in order:
 
 1. Production gaps
-   - NoSQL transactions within a partition (DynamoDB transactions, Cosmos transactional batch,
-     Firestore transactions)
    - Service Bus sessions, for ordering keys on Azure
 2. Real-cloud test profile: Terraform for throwaway resources per cloud and a Maven profile running the
    conformance kits and IAM tests against them

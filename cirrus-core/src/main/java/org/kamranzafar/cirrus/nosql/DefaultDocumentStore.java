@@ -6,6 +6,7 @@ import org.kamranzafar.cirrus.error.PreconditionFailedException;
 import org.kamranzafar.cirrus.interceptor.InterceptorChain;
 import org.kamranzafar.cirrus.interceptor.OperationContext;
 import org.kamranzafar.cirrus.nosql.spi.DocumentStoreDriver;
+import org.kamranzafar.cirrus.nosql.spi.TransactionWrite;
 import org.kamranzafar.cirrus.nosql.spi.WriteCondition;
 
 import java.time.Clock;
@@ -173,6 +174,32 @@ public final class DefaultDocumentStore implements DocumentStore {
         QueryPage page = execute("query", Key.of(query.partitionKey()), true, () -> driver.query(query));
         List<Item> live = page.items().stream().filter(this::live).toList();
         return live.size() == page.items().size() ? page : new QueryPage(live, page.nextPageToken());
+    }
+
+    @Override
+    public Map<Key, Version> transact(Transaction transaction) {
+        Objects.requireNonNull(transaction, "transaction");
+        Instant now = clock.instant();
+        List<TransactionWrite> writes = new ArrayList<>();
+        for (Transaction.Operation operation : transaction.operations()) {
+            checkKey(operation.key());
+            writes.add(switch (operation) {
+                case Transaction.Put put -> {
+                    checkDocument(put.document());
+                    WriteCondition condition = put.options().notExists() ? new WriteCondition.NotExists()
+                            : put.options().version().<WriteCondition>map(WriteCondition.IfVersion::new).orElse(WriteCondition.NONE);
+                    yield new TransactionWrite.Put(put.key(), put.document(), condition, put.options().expiresAt(now));
+                }
+                case Transaction.Update update -> {
+                    update.update().fields().forEach(this::checkField);
+                    yield new TransactionWrite.Update(update.key(), update.update(), update.options().version(),
+                            update.options().expiresAt(now));
+                }
+                case Transaction.Delete delete -> new TransactionWrite.Delete(delete.key(), delete.ifVersion());
+                case Transaction.Check check -> new TransactionWrite.Check(check.key(), check.version());
+            });
+        }
+        return execute("transact", Key.of(transaction.partition()), false, () -> driver.transact(writes));
     }
 
     @Override

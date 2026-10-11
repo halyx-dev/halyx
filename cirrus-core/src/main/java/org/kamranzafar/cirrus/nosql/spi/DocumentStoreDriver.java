@@ -58,6 +58,13 @@ public interface DocumentStoreDriver extends AutoCloseable {
     /** Needs a table with a sort key. */
     QueryPage query(Query query);
 
+    /**
+     * Applies {@code operations} (one partition, validated by core) atomically; conditions are already
+     * resolved. Returns the new versions of written items. Any failed condition is a
+     * {@code PreconditionFailedException}.
+     */
+    Map<Key, Version> transact(List<TransactionWrite> operations);
+
     /** {@code index} is the table's declared index named by the query. */
     QueryPage queryIndex(Index index, IndexQuery query);
 

@@ -16,6 +16,8 @@ import org.kamranzafar.cirrus.nosql.Query;
 import org.kamranzafar.cirrus.nosql.QueryPage;
 import org.kamranzafar.cirrus.nosql.SortCondition;
 import org.kamranzafar.cirrus.nosql.TableConfig;
+import org.kamranzafar.cirrus.nosql.Transaction;
+import org.kamranzafar.cirrus.nosql.Version;
 import org.kamranzafar.cirrus.nosql.WriteOptions;
 
 import java.math.BigDecimal;
@@ -395,6 +397,85 @@ public abstract class DocumentStoreConformanceTest {
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> store.queryIndex(IndexQuery.builder(BY_OWNER).equalTo("x")
                 .where(SortCondition.beginsWith("a")).build())).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void transactionAppliesEveryWriteTogether() {
+        DocumentStore store = store(true);
+        String p = partition("tx");
+        Item counter = store.put(Key.of(p, "counter"), Document.builder().put("orders", 1).build());
+        store.put(Key.of(p, "draft"), Document.builder().put("temp", true).build());
+
+        Map<Key, Version> versions = store.transact(Transaction.builder()
+                .put(Key.of(p, "order#2"), Document.builder().put("total", 30).build(), WriteOptions.ifNotExists())
+                .put(Key.of(p, "order#2#line#1"), Document.builder().put("sku", "A").build())
+                .update(Key.of(p, "counter"), DocumentUpdate.builder().increment("orders", 1).build(),
+                        WriteOptions.ifVersion(counter.version()))
+                .delete(Key.of(p, "draft"))
+                .build());
+
+        assertThat(versions).containsOnlyKeys(Key.of(p, "order#2"), Key.of(p, "order#2#line#1"), Key.of(p, "counter"));
+        assertThat(store.get(Key.of(p, "counter")).orElseThrow().document().getLong("orders")).hasValue(2L);
+        assertThat(store.get(Key.of(p, "counter")).orElseThrow().version()).isEqualTo(versions.get(Key.of(p, "counter")));
+        assertThat(store.get(Key.of(p, "order#2")).orElseThrow().version()).isEqualTo(versions.get(Key.of(p, "order#2")));
+        assertThat(store.get(Key.of(p, "draft"))).isEmpty();
+    }
+
+    @Test
+    void failedConditionRollsBackTheWholeTransaction() {
+        DocumentStore store = store(true);
+        String p = partition("rollback");
+        Item account = store.put(Key.of(p, "account"), Document.builder().put("balance", 100).build());
+        store.update(Key.of(p, "account"), DocumentUpdate.builder().increment("balance", -10).build()); // version moves on
+        store.put(Key.of(p, "existing"), Document.builder().put("a", 1).build());
+
+        assertThatThrownBy(() -> store.transact(Transaction.builder()
+                .put(Key.of(p, "new"), Document.builder().put("a", 1).build())
+                .update(Key.of(p, "account"), DocumentUpdate.builder().increment("balance", -50).build(),
+                        WriteOptions.ifVersion(account.version()))
+                .build())).isInstanceOf(PreconditionFailedException.class);
+        assertThatThrownBy(() -> store.transact(Transaction.builder()
+                .put(Key.of(p, "new"), Document.builder().put("a", 1).build())
+                .put(Key.of(p, "existing"), Document.builder().put("a", 2).build(), WriteOptions.ifNotExists())
+                .build())).isInstanceOf(PreconditionFailedException.class);
+        assertThatThrownBy(() -> store.transact(Transaction.builder()
+                .put(Key.of(p, "new"), Document.builder().put("a", 1).build())
+                .update(Key.of(p, "missing"), DocumentUpdate.builder().set("a", 1).build())
+                .build())).isInstanceOf(PreconditionFailedException.class);
+
+        assertThat(store.get(Key.of(p, "new"))).isEmpty();
+        assertThat(store.get(Key.of(p, "account")).orElseThrow().document().getLong("balance")).hasValue(90L);
+        assertThat(store.get(Key.of(p, "existing")).orElseThrow().document().getLong("a")).hasValue(1L);
+    }
+
+    @Test
+    void checksGuardATransactionWithoutWriting() {
+        DocumentStore store = store(true);
+        String p = partition("check");
+        Item rule = store.put(Key.of(p, "rule"), Document.builder().put("limit", 5).build());
+
+        store.transact(Transaction.builder().check(Key.of(p, "rule"), rule.version())
+                .put(Key.of(p, "entry"), Document.builder().put("n", 1).build()).build());
+        Item changed = store.put(Key.of(p, "rule"), Document.builder().put("limit", 3).build());
+
+        assertThatThrownBy(() -> store.transact(Transaction.builder().check(Key.of(p, "rule"), rule.version())
+                .put(Key.of(p, "entry"), Document.builder().put("n", 2).build()).build()))
+                .isInstanceOf(PreconditionFailedException.class);
+        assertThat(store.get(Key.of(p, "entry")).orElseThrow().document().getLong("n")).hasValue(1L);
+        assertThat(store.get(Key.of(p, "rule")).orElseThrow().version()).isEqualTo(changed.version());
+    }
+
+    @Test
+    void transactionsStayWithinOnePartition() {
+        assertThatThrownBy(() -> Transaction.builder().put(Key.of("a", "1"), Document.empty())
+                .put(Key.of("b", "1"), Document.empty()).build()).hasMessageContaining("one partition");
+        assertThatThrownBy(() -> Transaction.builder().put(Key.of("a", "1"), Document.empty())
+                .delete(Key.of("a", "1")).build()).hasMessageContaining("twice");
+        Transaction.Builder big = Transaction.builder();
+        for (int i = 0; i <= Transaction.MAX_OPERATIONS; i++) {
+            big.put(Key.of("a", "k" + i), Document.empty());
+        }
+        assertThatThrownBy(big::build).hasMessageContaining("at most");
     }
 
     private static Document order(String status, String placedAt) {

@@ -56,6 +56,12 @@ public interface DocumentStore {
                 .flatMap(page -> page.items().stream());
     }
 
+    /**
+     * Applies the transaction atomically and returns the new version of every item it put or updated.
+     * Throws {@code PreconditionFailedException}, with nothing written, if any condition fails.
+     */
+    Map<Key, Version> transact(Transaction transaction);
+
     /** Items found through a secondary index declared on the table. */
     QueryPage queryIndex(IndexQuery query);
 

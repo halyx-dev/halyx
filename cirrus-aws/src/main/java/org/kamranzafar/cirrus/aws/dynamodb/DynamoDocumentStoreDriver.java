@@ -19,6 +19,7 @@ import org.kamranzafar.cirrus.nosql.SortCondition;
 import org.kamranzafar.cirrus.nosql.TableConfig;
 import org.kamranzafar.cirrus.nosql.Version;
 import org.kamranzafar.cirrus.nosql.spi.DocumentStoreDriver;
+import org.kamranzafar.cirrus.nosql.spi.TransactionWrite;
 import org.kamranzafar.cirrus.nosql.spi.WriteCondition;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
@@ -26,6 +27,8 @@ import software.amazon.awssdk.services.dynamodb.model.ConditionalCheckFailedExce
 import software.amazon.awssdk.services.dynamodb.model.KeysAndAttributes;
 import software.amazon.awssdk.services.dynamodb.model.PutRequest;
 import software.amazon.awssdk.services.dynamodb.model.ReturnValue;
+import software.amazon.awssdk.services.dynamodb.model.TransactWriteItem;
+import software.amazon.awssdk.services.dynamodb.model.TransactionCanceledException;
 import software.amazon.awssdk.services.dynamodb.model.WriteRequest;
 
 import java.nio.charset.StandardCharsets;
@@ -137,8 +140,12 @@ public final class DynamoDocumentStoreDriver implements DocumentStoreDriver {
         return new Version(version);
     }
 
-    @Override
-    public Item update(Key key, DocumentUpdate update, Optional<Version> ifVersion, Instant expiresAt) {
+    /** An UpdateItem expression for {@code update}, conditional on the item existing (and on its version). */
+    private record UpdateSpec(String expression, String condition, Map<String, String> names,
+                              Map<String, AttributeValue> values) {
+    }
+
+    private UpdateSpec updateSpec(DocumentUpdate update, Optional<Version> ifVersion, Instant expiresAt) {
         Map<String, String> names = new HashMap<>();
         Map<String, AttributeValue> values = new HashMap<>();
         List<String> sets = new ArrayList<>();
@@ -183,11 +190,16 @@ public final class DynamoDocumentStoreDriver implements DocumentStoreDriver {
             values.put(":oldv", AttributeValue.fromS(ifVersion.get().value()));
             condition += " AND #v = :oldv";
         }
-        String conditionExpression = condition;
+        return new UpdateSpec(expression.toString(), condition, names, values);
+    }
+
+    @Override
+    public Item update(Key key, DocumentUpdate update, Optional<Version> ifVersion, Instant expiresAt) {
+        UpdateSpec spec = updateSpec(update, ifVersion, expiresAt);
         try {
             var response = dynamo.updateItem(b -> b.tableName(table.name()).key(keyAttributes(key))
-                    .updateExpression(expression.toString()).conditionExpression(conditionExpression)
-                    .expressionAttributeNames(names).expressionAttributeValues(values)
+                    .updateExpression(spec.expression()).conditionExpression(spec.condition())
+                    .expressionAttributeNames(spec.names()).expressionAttributeValues(spec.values())
                     .returnValues(ReturnValue.ALL_NEW));
             return toItem(response.attributes());
         } catch (ConditionalCheckFailedException e) {
@@ -323,6 +335,68 @@ public final class DynamoDocumentStoreDriver implements DocumentStoreDriver {
                         response.lastEvaluatedKey().get(sk).s().getBytes(StandardCharsets.UTF_8)))
                 : Optional.empty();
         return new QueryPage(items, next);
+    }
+
+    /** TransactWriteItems; a cancelled transaction for a failed condition is a PreconditionFailedException. */
+    @Override
+    public Map<Key, Version> transact(List<TransactionWrite> operations) {
+        Map<Key, Version> versions = new LinkedHashMap<>();
+        List<TransactWriteItem> items = new ArrayList<>();
+        for (TransactionWrite op : operations) {
+            switch (op) {
+                case TransactionWrite.Put put -> {
+                    Map<String, AttributeValue> item = new LinkedHashMap<>(DynamoValues.toAttributes(put.document(), Set.of()));
+                    item.putAll(keyAttributes(put.key()));
+                    String version = UUID.randomUUID().toString();
+                    item.put(VERSION, AttributeValue.fromS(version));
+                    if (put.expiresAt() != null) {
+                        item.put(ttl, AttributeValue.fromN(String.valueOf(put.expiresAt().getEpochSecond())));
+                    }
+                    versions.put(put.key(), new Version(version));
+                    items.add(TransactWriteItem.builder().put(p -> {
+                        p.tableName(table.name()).item(item);
+                        switch (put.condition()) {
+                            case WriteCondition.None ignored -> { }
+                            case WriteCondition.NotExists ignored -> p.conditionExpression("attribute_not_exists(#pk) OR #ttl < :now")
+                                    .expressionAttributeNames(Map.of("#pk", table.partitionKey(), "#ttl", ttl))
+                                    .expressionAttributeValues(Map.of(":now", AttributeValue.fromN(String.valueOf(Instant.now().getEpochSecond()))));
+                            case WriteCondition.IfVersion v -> p.conditionExpression("#v = :v")
+                                    .expressionAttributeNames(Map.of("#v", VERSION))
+                                    .expressionAttributeValues(Map.of(":v", AttributeValue.fromS(v.version().value())));
+                        }
+                    }).build());
+                }
+                case TransactionWrite.Update update -> {
+                    UpdateSpec spec = updateSpec(update.update(), update.ifVersion(), update.expiresAt());
+                    versions.put(update.key(), new Version(spec.values().get(":newv").s()));
+                    items.add(TransactWriteItem.builder().update(u -> u.tableName(table.name()).key(keyAttributes(update.key()))
+                            .updateExpression(spec.expression()).conditionExpression(spec.condition())
+                            .expressionAttributeNames(spec.names()).expressionAttributeValues(spec.values())).build());
+                }
+                case TransactionWrite.Delete delete -> items.add(TransactWriteItem.builder().delete(d -> {
+                    d.tableName(table.name()).key(keyAttributes(delete.key()));
+                    delete.ifVersion().ifPresent(v -> d.conditionExpression("#v = :v")
+                            .expressionAttributeNames(Map.of("#v", VERSION))
+                            .expressionAttributeValues(Map.of(":v", AttributeValue.fromS(v.value()))));
+                }).build());
+                case TransactionWrite.Check check -> items.add(TransactWriteItem.builder().conditionCheck(c -> c
+                        .tableName(table.name()).key(keyAttributes(check.key())).conditionExpression("#v = :v")
+                        .expressionAttributeNames(Map.of("#v", VERSION))
+                        .expressionAttributeValues(Map.of(":v", AttributeValue.fromS(check.version().value())))).build());
+            }
+        }
+        try {
+            dynamo.transactWriteItems(b -> b.transactItems(items));
+        } catch (TransactionCanceledException e) {
+            boolean conditionFailed = e.hasCancellationReasons() && e.cancellationReasons().stream()
+                    .anyMatch(r -> "ConditionalCheckFailed".equals(r.code()));
+            if (conditionFailed) {
+                throw new PreconditionFailedException("Transaction cancelled: a condition failed", e, AwsProvider.ID,
+                        "ConditionalCheckFailed");
+            }
+            throw e;
+        }
+        return versions;
     }
 
     /** A global secondary index of the index's name; GSI reads are eventually consistent. */

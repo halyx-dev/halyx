@@ -36,6 +36,7 @@ import org.kamranzafar.cirrus.nosql.SortCondition;
 import org.kamranzafar.cirrus.nosql.TableConfig;
 import org.kamranzafar.cirrus.nosql.Version;
 import org.kamranzafar.cirrus.nosql.spi.DocumentStoreDriver;
+import org.kamranzafar.cirrus.nosql.spi.TransactionWrite;
 import org.kamranzafar.cirrus.nosql.spi.WriteCondition;
 
 import java.math.BigDecimal;
@@ -388,6 +389,83 @@ public final class FirestoreDocumentStoreDriver implements DocumentStoreDriver {
                         page.getLast().key().sort().orElseThrow().getBytes(StandardCharsets.UTF_8)))
                 : Optional.empty();
         return new QueryPage(page, next);
+    }
+
+    /**
+     * A Firestore transaction: read every item, check the conditions (an expired item counts as absent), then
+     * write. Firestore doesn't return update times from transactions, so new versions are read afterwards.
+     */
+    @Override
+    public Map<Key, Version> transact(List<TransactionWrite> operations) {
+        List<DocumentReference> refs = operations.stream().map(op -> ref(op.key())).toList();
+        Instant now = Instant.now();
+        await(firestore.runTransaction(tx -> {
+            List<DocumentSnapshot> snapshots = tx.getAll(refs.toArray(DocumentReference[]::new)).get();
+            for (int i = 0; i < operations.size(); i++) {
+                TransactionWrite op = operations.get(i);
+                DocumentSnapshot current = snapshots.get(i);
+                boolean exists = current.exists() && toItem(current).expiresAt().map(now::isBefore).orElse(true);
+                Optional<Version> required = switch (op) {
+                    case TransactionWrite.Put put -> put.condition() instanceof WriteCondition.IfVersion v ? Optional.of(v.version()) : Optional.empty();
+                    case TransactionWrite.Update update -> update.ifVersion();
+                    case TransactionWrite.Delete delete -> delete.ifVersion();
+                    case TransactionWrite.Check check -> Optional.of(check.version());
+                };
+                boolean needsExisting = required.isPresent() || op instanceof TransactionWrite.Update;
+                if (op instanceof TransactionWrite.Put put && put.condition() instanceof WriteCondition.NotExists && exists) {
+                    throw new PreconditionFailedException("Item exists: " + op.key());
+                }
+                if (needsExisting && !exists) {
+                    throw new PreconditionFailedException("No item " + op.key());
+                }
+                if (required.isPresent() && !version(current.getUpdateTime()).equals(required.get())) {
+                    throw new PreconditionFailedException("Item " + op.key() + " is not at version " + required.get());
+                }
+            }
+            for (int i = 0; i < operations.size(); i++) {
+                DocumentReference ref = refs.get(i);
+                switch (operations.get(i)) {
+                    case TransactionWrite.Put put -> tx.set(ref, data(put.key(), put.document(), put.expiresAt()));
+                    case TransactionWrite.Update update -> {
+                        List<Object> changes = changes(update.update(), update.expiresAt());
+                        tx.update(ref, (FieldPath) changes.get(0), changes.get(1), changes.subList(2, changes.size()).toArray());
+                    }
+                    case TransactionWrite.Delete ignored -> tx.delete(ref);
+                    case TransactionWrite.Check ignored -> { }
+                }
+            }
+            return null;
+        }));
+        Map<Key, Version> versions = new LinkedHashMap<>();
+        List<Key> written = operations.stream()
+                .filter(op -> op instanceof TransactionWrite.Put || op instanceof TransactionWrite.Update)
+                .map(TransactionWrite::key).toList();
+        if (!written.isEmpty()) {
+            getAll(written).forEach((key, item) -> versions.put(key, item.version()));
+        }
+        return versions;
+    }
+
+    /** Field paths and values for an update, as Firestore's update(...) takes them. */
+    private static List<Object> changes(DocumentUpdate update, Instant expiresAt) {
+        List<Object> fieldsAndValues = new ArrayList<>();
+        update.set().forEach((field, value) -> {
+            fieldsAndValues.add(FieldPath.of(field));
+            fieldsAndValues.add(toFirestore(value));
+        });
+        update.remove().forEach(field -> {
+            fieldsAndValues.add(FieldPath.of(field));
+            fieldsAndValues.add(FieldValue.delete());
+        });
+        update.increment().forEach((field, amount) -> {
+            fieldsAndValues.add(FieldPath.of(field));
+            fieldsAndValues.add(amount instanceof Double d ? FieldValue.increment(d) : FieldValue.increment(amount.longValue()));
+        });
+        if (expiresAt != null) {
+            fieldsAndValues.add(FieldPath.of(EXPIRES));
+            fieldsAndValues.add(Timestamp.of(java.util.Date.from(expiresAt)));
+        }
+        return fieldsAndValues;
     }
 
     /** A collection-group query on the items' collection id, ordered by the sort attribute, then the id. */

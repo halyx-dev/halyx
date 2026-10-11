@@ -2,6 +2,9 @@ package org.kamranzafar.cirrus.azure.cosmos;
 
 import com.azure.cosmos.CosmosContainer;
 import com.azure.cosmos.CosmosException;
+import com.azure.cosmos.models.CosmosBatch;
+import com.azure.cosmos.models.CosmosBatchItemRequestOptions;
+import com.azure.cosmos.models.CosmosBatchPatchItemRequestOptions;
 import com.azure.cosmos.models.CosmosItemIdentity;
 import com.azure.cosmos.models.CosmosItemRequestOptions;
 import com.azure.cosmos.models.CosmosPatchItemRequestOptions;
@@ -33,6 +36,7 @@ import org.kamranzafar.cirrus.nosql.SortCondition;
 import org.kamranzafar.cirrus.nosql.TableConfig;
 import org.kamranzafar.cirrus.nosql.Version;
 import org.kamranzafar.cirrus.nosql.spi.DocumentStoreDriver;
+import org.kamranzafar.cirrus.nosql.spi.TransactionWrite;
 import org.kamranzafar.cirrus.nosql.spi.WriteCondition;
 
 import java.time.Duration;
@@ -57,6 +61,8 @@ import java.util.concurrent.Future;
 public final class CosmosDocumentStoreDriver implements DocumentStoreDriver {
 
     static final String EXPIRES = "cirrus_expires";
+    /** Written by transaction checks: Cosmos only enforces if-match on writes. */
+    static final String CHECKED = "cirrus_checked";
     private static final Set<String> SYSTEM = Set.of("id", "ttl", "_rid", "_self", "_etag", "_attachments", "_ts", "_lsn");
 
     private final CosmosContainer container;
@@ -81,6 +87,7 @@ public final class CosmosDocumentStoreDriver implements DocumentStoreDriver {
     public Set<String> reservedFields() {
         Set<String> names = new HashSet<>(SYSTEM);
         names.add(EXPIRES);
+        names.add(CHECKED);
         return names;
     }
 
@@ -186,6 +193,14 @@ public final class CosmosDocumentStoreDriver implements DocumentStoreDriver {
     }
 
     private Item patch(Key key, DocumentUpdate update, Set<String> removes, Optional<Version> ifVersion, Instant expiresAt) {
+        CosmosPatchOperations operations = patchOperations(update, removes, expiresAt);
+        var options = new CosmosPatchItemRequestOptions();
+        ifVersion.ifPresent(v -> options.setIfMatchETag(v.value()));
+        var response = container.patchItem(id(key), new PartitionKey(key.partition()), operations, options, ObjectNode.class);
+        return toItem(response.getItem(), response.getETag());
+    }
+
+    private static CosmosPatchOperations patchOperations(DocumentUpdate update, Set<String> removes, Instant expiresAt) {
         CosmosPatchOperations operations = CosmosPatchOperations.create();
         update.set().forEach((field, value) -> operations.set(path(field), CosmosValues.toJson(value)));
         removes.forEach(field -> operations.remove(path(field)));
@@ -200,10 +215,7 @@ public final class CosmosDocumentStoreDriver implements DocumentStoreDriver {
             operations.set("/ttl", Math.max(1, Duration.between(Instant.now(), expiresAt).toSeconds() + 1));
             operations.set("/" + EXPIRES, expiresAt.toEpochMilli());
         }
-        var options = new CosmosPatchItemRequestOptions();
-        ifVersion.ifPresent(v -> options.setIfMatchETag(v.value()));
-        var response = container.patchItem(id(key), new PartitionKey(key.partition()), operations, options, ObjectNode.class);
-        return toItem(response.getItem(), response.getETag());
+        return operations;
     }
 
     /** A JSON pointer to a top-level field. */
@@ -314,6 +326,94 @@ public final class CosmosDocumentStoreDriver implements DocumentStoreDriver {
         var page = pages.next();
         List<Item> items = page.getResults().stream().map(n -> toItem(n, null)).toList();
         return new QueryPage(items, Optional.ofNullable(page.getContinuationToken()));
+    }
+
+    /**
+     * A transactional batch on the partition. Updates that remove fields and unconditional deletes read the
+     * items first, because Cosmos fails a batch on removing an absent field or deleting a missing item; the
+     * read ETag then guards the write. A check is a version-conditioned patch of {@value #CHECKED}, so it
+     * moves the checked item's version.
+     */
+    @Override
+    public Map<Key, Version> transact(List<TransactionWrite> operations) {
+        CosmosBatch batch = CosmosBatch.createCosmosBatch(new PartitionKey(operations.getFirst().key().partition()));
+        // The key whose new version each batch operation yields (null for deletes and checks), by position.
+        List<Key> written = new ArrayList<>();
+        for (TransactionWrite op : operations) {
+            switch (op) {
+                case TransactionWrite.Put put -> {
+                    ObjectNode node = toNode(put.key(), put.document(), put.expiresAt());
+                    switch (put.condition()) {
+                        case WriteCondition.None ignored -> batch.upsertItemOperation(node);
+                        case WriteCondition.NotExists ignored -> batch.createItemOperation(node);
+                        case WriteCondition.IfVersion v -> batch.replaceItemOperation(id(put.key()), node,
+                                new CosmosBatchItemRequestOptions().setIfMatchETag(v.version().value()));
+                    }
+                    written.add(put.key());
+                }
+                case TransactionWrite.Update update -> {
+                    Set<String> removes = update.update().remove();
+                    Optional<Version> guard = update.ifVersion();
+                    if (!removes.isEmpty()) {
+                        Item current = get(update.key()).orElseThrow(() ->
+                                new PreconditionFailedException("No item " + update.key() + " to update"));
+                        if (guard.isPresent() && !guard.get().equals(current.version())) {
+                            throw new PreconditionFailedException("Item " + update.key() + " changed");
+                        }
+                        removes = new HashSet<>(removes);
+                        removes.retainAll(current.document().fieldNames());
+                        guard = Optional.of(current.version());
+                    }
+                    CosmosPatchOperations patch = patchOperations(update.update(), removes, update.expiresAt());
+                    var options = new CosmosBatchPatchItemRequestOptions();
+                    guard.ifPresent(v -> options.setIfMatchETag(v.value()));
+                    batch.patchItemOperation(id(update.key()), patch, options);
+                    written.add(update.key());
+                }
+                case TransactionWrite.Delete delete -> {
+                    if (delete.ifVersion().isPresent()) {
+                        batch.deleteItemOperation(id(delete.key()),
+                                new CosmosBatchItemRequestOptions().setIfMatchETag(delete.ifVersion().get().value()));
+                        written.add(null);
+                    } else {
+                        Optional<Item> current = get(delete.key());
+                        current.ifPresent(item -> {
+                            batch.deleteItemOperation(id(delete.key()),
+                                    new CosmosBatchItemRequestOptions().setIfMatchETag(item.version().value()));
+                            written.add(null);
+                        });
+                    }
+                }
+                case TransactionWrite.Check check -> {
+                    batch.patchItemOperation(id(check.key()),
+                            CosmosPatchOperations.create().set("/" + CHECKED, System.currentTimeMillis()),
+                            new CosmosBatchPatchItemRequestOptions().setIfMatchETag(check.version().value()));
+                    written.add(null);
+                }
+            }
+        }
+        if (batch.getOperations().isEmpty()) {
+            return Map.of();
+        }
+        var response = container.executeCosmosBatch(batch);
+        if (!response.isSuccessStatusCode()) {
+            int status = response.getResults().stream().mapToInt(r -> r.getStatusCode())
+                    .filter(c -> c != 424).findFirst().orElse(response.getStatusCode());
+            if (status == 404 || status == 409 || status == 412) {
+                throw new PreconditionFailedException("Transaction cancelled: a condition failed (" + status + ")",
+                        null, AzureProvider.ID, String.valueOf(status));
+            }
+            throw new UnknownCloudException("Cosmos transaction failed with " + status + ": " + response.getErrorMessage(),
+                    null, AzureProvider.ID, String.valueOf(status));
+        }
+        Map<Key, Version> versions = new LinkedHashMap<>();
+        var results = response.getResults();
+        for (int i = 0; i < results.size() && i < written.size(); i++) {
+            if (written.get(i) != null && results.get(i).getETag() != null) {
+                versions.put(written.get(i), new Version(results.get(i).getETag()));
+            }
+        }
+        return versions;
     }
 
     /** A cross-partition query on the index's fields; Cosmos' default indexing covers it. */

@@ -52,8 +52,11 @@ class FirestoreDocumentStoreConformanceIT extends DocumentStoreConformanceTest {
 
     @Override
     protected Map<String, String> knownEnvironmentGaps() {
-        return Map.of("concurrentIncrementsAreNotLost", "Floci-gcp 0.10.0 applies Firestore increments without "
-                + "server-side atomicity (concurrent increments are lost); covered by FirestoreEmulatorDocumentStoreIT");
+        String increments = "Floci-gcp 0.10.0 doesn't apply Firestore increments reliably (lost when concurrent, "
+                + "set rather than added inside transactions); covered by FirestoreEmulatorDocumentStoreIT";
+        return Map.of("concurrentIncrementsAreNotLost", increments,
+                "transactionAppliesEveryWriteTogether", increments,
+                "failedConditionRollsBackTheWholeTransaction", increments);
     }
 
     @Override

@@ -15,6 +15,7 @@ import org.kamranzafar.cirrus.nosql.QueryPage;
 import org.kamranzafar.cirrus.nosql.TableConfig;
 import org.kamranzafar.cirrus.nosql.Version;
 import org.kamranzafar.cirrus.nosql.spi.DocumentStoreDriver;
+import org.kamranzafar.cirrus.nosql.spi.TransactionWrite;
 import org.kamranzafar.cirrus.nosql.spi.WriteCondition;
 
 import java.math.BigDecimal;
@@ -190,6 +191,41 @@ final class InMemoryDocumentStoreDriver implements DocumentStoreDriver {
             last = entry.getKey();
         }
         return new QueryPage(items, Optional.empty());
+    }
+
+    /** Checks every condition first, then applies all writes, under the table's lock. */
+    @Override
+    public Map<Key, Version> transact(List<TransactionWrite> operations) {
+        synchronized (table) {
+            Instant now = Instant.now();
+            for (TransactionWrite op : operations) {
+                Item current = get(op.key()).filter(i -> i.expiresAt().map(now::isBefore).orElse(true)).orElse(null);
+                switch (op) {
+                    case TransactionWrite.Put put -> check(op.key(), current, put.condition());
+                    case TransactionWrite.Update update -> {
+                        if (current == null) {
+                            throw new PreconditionFailedException("No item " + op.key() + " to update");
+                        }
+                        update.ifVersion().ifPresent(v -> check(op.key(), current, new WriteCondition.IfVersion(v)));
+                    }
+                    case TransactionWrite.Delete delete ->
+                            delete.ifVersion().ifPresent(v -> check(op.key(), current, new WriteCondition.IfVersion(v)));
+                    case TransactionWrite.Check c -> check(op.key(), current, new WriteCondition.IfVersion(c.version()));
+                }
+            }
+            Map<Key, Version> versions = new LinkedHashMap<>();
+            for (TransactionWrite op : operations) {
+                switch (op) {
+                    case TransactionWrite.Put put -> versions.put(op.key(),
+                            put(op.key(), put.document(), WriteCondition.NONE, put.expiresAt()));
+                    case TransactionWrite.Update update -> versions.put(op.key(),
+                            update(op.key(), update.update(), Optional.empty(), update.expiresAt()).version());
+                    case TransactionWrite.Delete delete -> delete(op.key(), Optional.empty());
+                    case TransactionWrite.Check ignored -> { }
+                }
+            }
+            return versions;
+        }
     }
 
     /** A scan: fine for tests and local development. Page tokens are offsets. */
