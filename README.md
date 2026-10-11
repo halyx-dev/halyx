@@ -28,8 +28,9 @@ in Vault. Each cloud is registered as a named provider and used through the same
 | [Messaging](#messaging) | `Publisher`, `Subscription` | Amazon SNS, Amazon SQS | Azure Service Bus | Google Cloud Pub/Sub | in-memory |
 | [SQL databases](#sql-databases) | `Database` (a JDBC `DataSource`) | Amazon RDS, Aurora | Azure Database for PostgreSQL and MySQL, Azure SQL | Cloud SQL | any PostgreSQL, MySQL or SQL Server |
 
-Every service has a Spring Boot integration: beans from `cirrus.*` properties, health, metrics and
-tracing ([Spring Boot](#spring-boot)), on Boot 3.5 and 4.
+Every service has a [Spring Boot](#spring-boot) integration on Boot 3.5 and 4: beans from `cirrus.*`
+properties, health checks, and Micrometer metrics and observations (for SQL, Spring Boot's own JDBC health
+and Hikari metrics), with trace context carried through messages.
 
 ## Storage
 
