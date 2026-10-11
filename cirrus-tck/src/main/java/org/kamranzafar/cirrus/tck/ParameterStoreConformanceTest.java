@@ -17,6 +17,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -50,6 +51,30 @@ public abstract class ParameterStoreConformanceTest {
         test.getTestMethod().map(m -> knownEnvironmentGaps().get(m.getName()))
                 .ifPresent(reason -> assumeTrue(false, "Known environment gap: " + reason));
         prefix = "tck-" + UUID.randomUUID().toString().substring(0, 8);
+    }
+
+    /**
+     * How long a write may take to show in listings ({@code getAll}, and so {@code watch}). Zero for most
+     * backends; AWS Secrets Manager documents its listing as eventually consistent.
+     */
+    protected Duration listingLag() {
+        return Duration.ZERO;
+    }
+
+    /** {@code getAll(prefix)} once it lists exactly {@code expected}, waiting up to {@link #listingLag()}. */
+    protected Map<String, Parameter> listed(ParameterStore store, String prefix, String... expected) {
+        long deadline = System.nanoTime() + listingLag().toNanos();
+        Map<String, Parameter> found = store.getAll(prefix);
+        while (!found.keySet().equals(Set.of(expected)) && System.nanoTime() < deadline) {
+            try {
+                Thread.sleep(1_000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+            found = store.getAll(prefix);
+        }
+        return found;
     }
 
     @AfterEach
@@ -109,10 +134,11 @@ public abstract class ParameterStoreConformanceTest {
         store().put("db/pool/size", "8");
         store().put("cache/ttl", "60");
 
-        Map<String, Parameter> db = store().getAll("db");
+        Map<String, Parameter> db = listed(store(), "db", "db/url", "db/pool/size");
         assertThat(db).containsOnlyKeys("db/url", "db/pool/size");
         assertThat(db.get("db/pool/size").value()).isEqualTo("8");
-        assertThat(store().getAll("")).containsOnlyKeys("db/url", "db/pool/size", "cache/ttl");
+        assertThat(listed(store(), "", "db/url", "db/pool/size", "cache/ttl"))
+                .containsOnlyKeys("db/url", "db/pool/size", "cache/ttl");
     }
 
     @Test
@@ -120,6 +146,7 @@ public abstract class ParameterStoreConformanceTest {
         store().put("db/url", "u");
         store().put("dbx/url", "other");
 
+        listed(store(), "", "db/url", "dbx/url");
         assertThat(store().getAll("db")).containsOnlyKeys("db/url");
     }
 
@@ -238,7 +265,7 @@ public abstract class ParameterStoreConformanceTest {
             nativeStore.put(nativeName(), "native-value");
 
             assertThat(nativeStore.require(nativeName())).isEqualTo("native-value");
-            assertThat(nativeStore.getAll("")).containsOnlyKeys(nativeName());
+            assertThat(listed(nativeStore, "", nativeName())).containsOnlyKeys(nativeName());
             ParameterStore unprefixed = context().parameterStore(config().nativeNames(true).build());
             assertThat(unprefixed.require(nativePrefix + nativeName())).isEqualTo("native-value");
         } finally {
@@ -252,6 +279,7 @@ public abstract class ParameterStoreConformanceTest {
     @Test
     void watchReportsAddedUpdatedAndRemovedValues() throws Exception {
         store().put("watched/a", "1");
+        listed(store(), "watched", "watched/a");
         BlockingQueue<ParameterChanges> events = new LinkedBlockingQueue<>();
         try (AutoCloseable watch = store().watch("watched", Duration.ofMillis(200), events::add)) {
             store().put("watched/b", "2");
@@ -268,8 +296,8 @@ public abstract class ParameterStoreConformanceTest {
         assertThat(store().statistics().changesDetected()).isZero(); // counted on the watching instance
     }
 
-    private static ParameterChanges poll(BlockingQueue<ParameterChanges> events) throws InterruptedException {
-        ParameterChanges changes = events.poll(15, TimeUnit.SECONDS);
+    private ParameterChanges poll(BlockingQueue<ParameterChanges> events) throws InterruptedException {
+        ParameterChanges changes = events.poll(15 + listingLag().toSeconds(), TimeUnit.SECONDS);
         assertThat(changes).as("change notification").isNotNull();
         return changes;
     }
@@ -278,6 +306,7 @@ public abstract class ParameterStoreConformanceTest {
     void watchedChangesInvalidateTheCache() throws Exception {
         ParameterStore cached = cachingStore(Duration.ofMinutes(5));
         store().put("cfg/flag", "off");
+        listed(store(), "cfg", "cfg/flag");
         assertThat(cached.require("cfg/flag")).isEqualTo("off");
         BlockingQueue<ParameterChanges> events = new LinkedBlockingQueue<>();
         try (AutoCloseable watch = cached.watch("cfg", Duration.ofMillis(200), events::add)) {

@@ -23,6 +23,7 @@ import software.amazon.awssdk.services.sns.SnsClient;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.QueueAttributeName;
 
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -137,6 +138,12 @@ class RealAwsIT {
         @Override
         protected ParameterStoreConfig.Builder config() {
             return ParameterStoreConfig.secrets();
+        }
+
+        /** AWS documents ListSecrets as eventually consistent. */
+        @Override
+        protected Duration listingLag() {
+            return Duration.ofMinutes(2);
         }
     }
 

@@ -417,6 +417,12 @@ try (AutoCloseable watch = secrets.watch("db", Duration.ofMinutes(1), changes ->
         changes.updated().forEach((name, p) -> pool.rotateCredentials(p.fields())))) { ... }
 ```
 
+On AWS Secrets Manager, `getAll` (and so `watch` and config reloads) is eventually consistent: AWS lists
+secrets with a short delay, so a secret written moments ago may not appear yet. Reads by name are
+immediate. A deleted secret's name is reusable once AWS finishes the delete, which takes a few seconds;
+a write in that window waits for it (up to 30s). The IAM policy needs `secretsmanager:BatchGetSecretValue`
+and `ListSecrets` for `getAll`, plus `GetSecretValue`, `PutSecretValue`, `CreateSecret` and `DeleteSecret`.
+
 Names are portable: segments of letters, digits and single dashes separated by `/`
 (`orders/db/password`). Each backend stores them in its own naming scheme: SSM uses a leading `/`,
 Key Vault `--`, Secret Manager `__`, and Vault, App Configuration and Secrets Manager use the name as

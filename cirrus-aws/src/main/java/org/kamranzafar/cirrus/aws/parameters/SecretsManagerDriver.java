@@ -11,7 +11,11 @@ import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
 import software.amazon.awssdk.services.secretsmanager.model.FilterNameStringType;
 import software.amazon.awssdk.services.secretsmanager.model.GetSecretValueResponse;
 import software.amazon.awssdk.services.secretsmanager.model.ResourceNotFoundException;
+import software.amazon.awssdk.services.secretsmanager.model.SecretsManagerException;
+import software.amazon.awssdk.services.secretsmanager.model.ResourceExistsException;
+import software.amazon.awssdk.services.secretsmanager.model.InvalidRequestException;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -73,14 +77,32 @@ public final class SecretsManagerDriver extends AbstractParameterDriver {
         return found;
     }
 
+    /**
+     * Even a forced delete finishes asynchronously: for a few seconds the name is "marked for deletion" and
+     * can be neither written nor created. A write then waits for the delete to finish, up to this long.
+     */
+    private static final Duration PENDING_DELETION_WAIT = Duration.ofSeconds(30);
+
     @Override
     public Parameter put(String name, String value) {
-        try {
-            var response = secrets.putSecretValue(b -> b.secretId(name).secretString(value));
-            return new Parameter(name, value, response.versionId(), null);
-        } catch (ResourceNotFoundException e) {
-            var response = secrets.createSecret(b -> b.name(name).secretString(value));
-            return new Parameter(name, value, response.versionId(), null);
+        long deadline = System.nanoTime() + PENDING_DELETION_WAIT.toNanos();
+        long backoff = 250;
+        while (true) {
+            try {
+                try {
+                    var response = secrets.putSecretValue(b -> b.secretId(name).secretString(value));
+                    return new Parameter(name, value, response.versionId(), null);
+                } catch (ResourceNotFoundException e) {
+                    var response = secrets.createSecret(b -> b.name(name).secretString(value));
+                    return new Parameter(name, value, response.versionId(), null);
+                }
+            } catch (InvalidRequestException | ResourceExistsException e) {
+                if (!pendingDeletion(e) || System.nanoTime() > deadline) {
+                    throw e;
+                }
+                sleep(backoff);
+                backoff = Math.min(backoff * 2, 2_000);
+            }
         }
     }
 
@@ -90,6 +112,26 @@ public final class SecretsManagerDriver extends AbstractParameterDriver {
             secrets.deleteSecret(b -> b.secretId(name).forceDeleteWithoutRecovery(true));
         } catch (ResourceNotFoundException ignored) {
             // already gone
+        } catch (InvalidRequestException e) {
+            if (!pendingDeletion(e)) {
+                throw e;
+            }
+            // already being deleted
+        }
+    }
+
+    /** Secrets Manager says so in the message only: "...because it was marked for deletion" / "scheduled for deletion". */
+    private static boolean pendingDeletion(SecretsManagerException e) {
+        String message = e.awsErrorDetails() == null ? e.getMessage() : e.awsErrorDetails().errorMessage();
+        return message != null && (message.contains("marked for deletion") || message.contains("scheduled for deletion"));
+    }
+
+    private static void sleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while waiting for a secret's deletion to finish", e);
         }
     }
 
