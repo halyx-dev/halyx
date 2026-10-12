@@ -24,14 +24,16 @@
 #    run's resource group) and writes its credentials to ~/.azure/halyx-test.env, readable only by you. The
 #    secret is never printed.
 # 3. Gives it Role Based Access Control Administrator on the subscription, with a condition that lets it
-#    assign and remove only the four data-plane roles the tests use. It can't grant itself anything else.
+#    assign and remove only the five data-plane roles the tests use. It can't grant itself anything else.
+#    Rerunning updates the condition when the list of roles has changed.
 set -euo pipefail
 
 SUB="${1:-$(az account show --query id -o tsv)}"
 CREDS="${AZURE_CREDENTIALS_FILE:-$HOME/.azure/halyx-test.env}"
 
 echo "== Registering resource providers on $SUB"
-for ns in Microsoft.Storage Microsoft.ServiceBus Microsoft.DocumentDB Microsoft.KeyVault Microsoft.AppConfiguration; do
+for ns in Microsoft.Storage Microsoft.ServiceBus Microsoft.DocumentDB Microsoft.KeyVault Microsoft.AppConfiguration \
+    Microsoft.EventHub; do
   az provider register --subscription "$SUB" --namespace "$ns" --only-show-errors >/dev/null && echo "  $ns"
 done
 
@@ -58,16 +60,22 @@ else
       --only-show-errors >/dev/null
 fi
 
-# Storage Blob Data Contributor, Azure Service Bus Data Owner, Key Vault Secrets Officer, App Configuration Data Owner
-ROLES="ba92f5b4-2d11-453d-a403-e96b0029c9fe, 090c5cfd-751d-490a-894a-3ce6f1109419, b86a8fe4-44ce-4948-aee5-eccb2c155cd7, 5ae67dd6-50cb-40e7-96ff-dc2bfa4b606b"
+# Storage Blob Data Contributor, Azure Service Bus Data Owner, Key Vault Secrets Officer, App Configuration Data Owner,
+# Azure Event Hubs Data Owner (tier 4: the stream kit creates and deletes event hubs)
+ROLES="ba92f5b4-2d11-453d-a403-e96b0029c9fe, 090c5cfd-751d-490a-894a-3ce6f1109419, b86a8fe4-44ce-4948-aee5-eccb2c155cd7, 5ae67dd6-50cb-40e7-96ff-dc2bfa4b606b, f526a384-b230-433a-b45c-95f59c4a2dec"
 CONDITION="((!(ActionMatches{'Microsoft.Authorization/roleAssignments/write'})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {$ROLES})) AND ((!(ActionMatches{'Microsoft.Authorization/roleAssignments/delete'})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {$ROLES}))"
 
 echo "== Allowing it to assign only the tests' data-plane roles"
 APP_ID=$(sed -n 's/^AZURE_CLIENT_ID=//p' "$CREDS")
-if [[ "$(az role assignment list --assignee "$APP_ID" --scope "/subscriptions/$SUB" \
-    --role "Role Based Access Control Administrator" --query 'length(@)' -o tsv)" != 0 ]]; then
-  echo "  already in place"
-  exit 0
+EXISTING=$(az role assignment list --assignee "$APP_ID" --scope "/subscriptions/$SUB" \
+    --role "Role Based Access Control Administrator" --query '[0].[id, condition]' -o tsv)
+if [[ -n "$EXISTING" ]]; then
+  if [[ "$(cut -f2- <<<"$EXISTING")" == "$CONDITION" ]]; then
+    echo "  already in place"
+    exit 0
+  fi
+  echo "  replacing the condition with the current list of roles"
+  az role assignment delete --ids "$(cut -f1 <<<"$EXISTING")" --only-show-errors
 fi
 for _ in 1 2 3 4 5 6; do   # a new service principal takes a moment to appear for role assignments
   az role assignment create --assignee "$APP_ID" --role "Role Based Access Control Administrator" \

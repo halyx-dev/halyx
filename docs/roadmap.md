@@ -42,16 +42,23 @@ Publish the first release to Maven Central:
 - [ ] continuous integration
 - [ ] API compatibility checks with japicmp, from the release after 0.1.0
 
-### Managed Kafka
+### Streams (managed Kafka)
 
-Kafka clients that log in with the cloud's identity, the same way caches and SQL databases do:
+`StreamProducer` and `StreamConsumer` on Kafka clusters, logging in with the cloud's identity the way caches and
+SQL databases do. See [Streams](api/streams.md).
 
-- [ ] Amazon MSK, with IAM login
-- [ ] Azure Event Hubs through its Kafka endpoint, with Entra ID login
-- [ ] Google Cloud Managed Service for Apache Kafka, with Google IAM login
-- [ ] configured producer, consumer and admin clients, with the native Kafka clients available through `unwrap`
-- [ ] Spring Boot: properties, auto-configuration, health and Spring for Apache Kafka integration
-- [ ] conformance kit, emulator tests and real-cloud tests
+- [x] Amazon MSK, with IAM login
+- [x] Azure Event Hubs through its Kafka endpoint, with Entra ID login
+- [x] Google Cloud Managed Service for Apache Kafka, with Google IAM login
+- [x] keys and order per partition, consumer groups, listeners with retries and dead letters, manual commits
+- [x] idempotent and transactional producers as capabilities, claim checks, and Kafka's clients through `unwrap`
+- [x] Spring Boot: properties, beans, `@HalyxListener`, health, metrics and tracing
+- [x] conformance kit, on the in-memory provider and on Apache Kafka through every provider
+- [x] real-cloud run on Event Hubs with Entra ID: [24/25, 1 skipped](cloud-testing/azure.md#tier-4-latest-result)
+- [ ] real-cloud runs on MSK and Managed Kafka with IAM, from a test runner inside each cloud's VPC (both are
+  private only), including MSK Serverless transactions
+- [ ] Event Hubs: whether it supports idempotent producers, and Kafka 4 clients
+- [ ] Spring for Apache Kafka (`KafkaTemplate`, `@KafkaListener`) with Halyx' cloud login, if there's demand
 
 ### Event services
 

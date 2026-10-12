@@ -21,6 +21,7 @@
 #   AZURE_LOCATION=australiaeast IT_TEST='RealAzureIT$Cosmos' scripts/azure-real-cloud.sh   # one suite only
 #   TIER=2 scripts/azure-real-cloud.sh     # Azure Database for PostgreSQL and Azure SQL with Entra ID login
 #   TIER=3 scripts/azure-real-cloud.sh     # Azure Managed Redis with Entra ID
+#   TIER=4 scripts/azure-real-cloud.sh     # Event Hubs (Kafka endpoint) with Entra ID
 #
 # Terraform and the tests act as the test service principal, whose credentials are read from
 # AZURE_CREDENTIALS_FILE (default ~/.azure/halyx-test.env, outside the repository):
@@ -41,7 +42,10 @@
 # both, reachable only from this machine's address. RealAzureSqlIT logs in with Entra tokens.
 # Tier 3: Azure Managed Redis with access keys off; the principal gets the "default" access policy.
 # RealAzureCacheIT runs the cache kit with Entra tokens over TLS on the public endpoint.
-# Tiers 2 and 3 register their resource providers first, as the principal.
+# Tier 4: three Standard Event Hubs namespaces with shared access keys off; the principal is their Data Owner.
+# RealAzureStreamIT runs the stream kit on its Kafka endpoint with Entra tokens, creating and deleting event
+# hubs as it goes.
+# Tiers 2, 3 and 4 register their resource providers first, as the principal.
 set -uo pipefail
 
 CREDS="${AZURE_CREDENTIALS_FILE:-$HOME/.azure/halyx-test.env}"
@@ -138,6 +142,7 @@ log "Subscription $AZURE_SUBSCRIPTION_ID, location $LOCATION, acting as principa
 case "$TIER" in
   2) log "Registering resource providers"; register Microsoft.DBforPostgreSQL Microsoft.Sql ;;
   3) log "Registering resource providers"; register Microsoft.Cache ;;
+  4) log "Registering resource providers"; register Microsoft.EventHub ;;
 esac
 log "terraform apply"
 terraform -chdir="$TF_DIR" init -input=false >/dev/null || exit 1
@@ -161,6 +166,16 @@ if [[ "$TIER" == 3 ]]; then
       -Dhalyx.real.azure.cache=true -Dhalyx.real.azure.run="$RUN" \
       -Dhalyx.real.azure.cache.host="$(terraform -chdir="$TF_DIR" output -raw cache_host)" \
       -Dhalyx.real.azure.cache.port="$(terraform -chdir="$TF_DIR" output -raw cache_port)"
+  exit $?
+fi
+
+if [[ "$TIER" == 4 ]]; then
+  log "Waiting for the Data Owner role to take effect"
+  sleep 90
+  log "Running the stream kit against real Event Hubs"
+  mvn -o verify -pl halyx-azure -Dit.test="${IT_TEST:-RealAzureStreamIT}" -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+      -Dhalyx.real.azure.streams=true -Dhalyx.real.azure.run="$RUN" \
+      -Dhalyx.real.azure.streams.namespaces="$(terraform -chdir="$TF_DIR" output -raw eventhubs_namespaces)"
   exit $?
 fi
 

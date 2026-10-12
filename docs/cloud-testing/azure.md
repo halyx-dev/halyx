@@ -16,6 +16,7 @@ the `halyx-test` service principal. Every run creates its own throwaway resource
 | [1](#tier-1-latest-result) | Blob Storage, Cosmos DB, Service Bus, Key Vault, App Configuration (Entra ID only) | **156/158** passed, 2 skipped (expected) |
 | [2](#tier-2-latest-result) | Azure Database for PostgreSQL and Azure SQL with Entra ID login | **11/11** |
 | [3](#tier-3-latest-result) | Azure Managed Redis with Entra ID (access keys off) | **52/52** |
+| [4](#tier-4-latest-result) | Event Hubs through its Kafka endpoint, with Entra ID (shared access keys off) | **24/25** passed, 1 skipped (expected) |
 
 <details open markdown="block">
   <summary>Contents</summary>
@@ -371,6 +372,39 @@ principal's object id, which Halyx reads from the token's `oid` claim.
 | `unauthenticatedConnectionIsRejected` | passed |
 | `forgedTokenIsRejected`: an unsigned token is refused | passed |
 
+## Tier 4: latest result
+
+```bash
+TIER=4 scripts/azure-real-cloud.sh
+```
+
+The script registers `Microsoft.EventHub`, then Terraform (`infra/azure/tier4`) creates three **Event Hubs**
+namespaces (Standard, one throughput unit) with shared access keys off, so only Entra ID works, and makes the
+principal their Azure Event Hubs Data Owner. `RealAzureStreamIT` runs the stream kit on the namespaces' Kafka
+endpoints (port 9093), logging in with Entra ID tokens through SASL `OAUTHBEARER`. It creates each test's
+topics (event hubs) through Kafka's admin API, logged in the same way, and deletes older ones as it goes.
+Before each creation it logs how many topics the namespace lists.
+
+Three namespaces, because a Standard namespace refused new event hubs with `PolicyViolationException` after
+about twenty had been created in a run, even with only one or two alive (see the run history). The test
+moves to the next namespace before one has created twelve.
+
+| | |
+|---|---|
+| Date | 2026-10-12, from 08:09 UTC (a 90s wait for the role, then tests 3m 34s) |
+| Run id | `r2610121909d4c7` |
+| Result | **BUILD SUCCESS**: 24 passed, 0 failed, 1 skipped |
+| Teardown | resource group destroyed; check: **nothing left** |
+
+| Test | Result |
+|---|---|
+| Stream conformance kit, with Entra ID tokens over TLS | **24/25 passed**, 1 skipped (213.8s) |
+| `largeValuesTravelThroughAClaimCheck` | skipped: tier 4 creates no blob store |
+| `idempotentProducersNeedTheCapability`, `transactionalSendAllIsVisibleToReadCommittedConsumers` | passed: Halyx declares neither capability on Event Hubs, and refuses both with `UnsupportedFeatureException` |
+
+Topics per namespace in the passing run: 11, 11 and 4, with one listed before each creation, so deletes do
+take effect.
+
 ## Run history
 
 | Run id | Scope | Result | Teardown | Notes |
@@ -381,6 +415,11 @@ principal's object id, which Halyx reads from the token's `oid` claim.
 | `r26101122061ed2` | tier 2 | not run | clean | Creating the PostgreSQL flexible server failed with `InternalServerError` (no detail) on Azure's side; the subscription isn't restricted (`OfferRestricted` is disabled, Burstable available). Retried unchanged. |
 | `r2610112224c642` | tier 3 | **52/52** | clean | Latest tier 3 result, above, on the first run. |
 | `r26101122362e30` | tier 2 | **11/11** | clean | Latest tier 2 result, above. The same configuration succeeded on retry. |
+| `r2610121824c199` | tier 4 | not run | clean | Terraform couldn't assign Azure Event Hubs Data Owner: the principal's role-assignment condition allowed only tier 1's four roles. `azure-setup-test-principal.sh` now allows it, and updates the condition on rerun. |
+| `r26101218310076` | tier 4 | 18 passed, 2 failed, 4 errors, 1 skipped | clean (the check printed `STILL PRESENT` for a stray newline; checked by hand, and the scripts now ignore whitespace) | Records with the same key arrived out of order: `[7, 10, …, 58, 1, 4]`. The last four topic creations failed with `PolicyViolationException`. `latestStartSkipsEarlierRecords` raced the consumer's first fetch. |
+| `r26101218441879` | tier 4 | 21 passed, 1 failed, 2 errors, 1 skipped | clean | Order fixed. A transactional producer failed in Event Hubs' `FindCoordinator` instead of with `UnsupportedFeatureException`. Topic creation still refused after about twenty, with two alive. |
+| `r26101219005a2c` | tier 4 | 22 passed, 2 errors, 1 skipped | clean | Three namespaces; nothing refused, and one topic listed before each creation. The test allowed only eight topics per namespace, two short of the kit's 26. |
+| `r2610121909d4c7` | tier 4 | **24/25, 1 skipped** | clean | Latest tier 4 result, above. |
 
 ## What real Azure found
 
@@ -394,13 +433,23 @@ The emulators (Floci-az and Microsoft's Service Bus emulator) missed all of thes
 | Azure SQL's Entra-only servers refuse every SQL login, and an Entra admin can be a service principal, whose session runs as `<application id>@<tenant id>` | Nothing to change: `SqlAuth.iam()` sends the token as `accessToken`, with no username |
 | Key Vault deletes and recoveries are long-running operations, and the driver waited for them (about 2–5s per call) | Removed: `delete` starts the soft delete and returns. Writing a name that is soft-deleted, or still being deleted or recovered, throws the retryable `UnavailableException`, and starts recovery if the name was soft-deleted. Applications retry; the kit does so through `deleteLag()` |
 
+Event Hubs' Kafka endpoint found these:
+
+| Finding | Fix |
+|---|---|
+| Records with the same key arrived out of order. Halyx turns idempotence off on Event Hubs, where it isn't confirmed, and Kafka's producer then allows five requests in flight per connection: a batch retried after an error lands behind later ones | Without idempotence, the Kafka driver keeps one request in flight per connection, unless the application sets `kafka.max.in.flight.requests.per.connection` itself |
+| A transactional producer on Event Hubs Standard failed in `FindCoordinator` (no transactions), before Halyx could refuse it: the driver started the transaction when the producer was created, ahead of the capability check | Transactional producers start on first use, so `StreamProducerConfig.transactional(true)` without `TRANSACTIONS` fails with `UnsupportedFeatureException` |
+| A Standard namespace refused new event hubs with `PolicyViolationException` after about twenty had been created, whether two or four were alive. Deleted event hubs no longer appear in the namespace's topic list. The limit isn't documented, so this is an observation from two runs | Test only: topics are spread over three namespaces. Applications don't create topics through Halyx |
+| A consumer starting at the latest offset fixes its position on its first fetch, which on Event Hubs came after its partitions were assigned, so a record sent right after assignment could be skipped | Test only: the kit sends until a record arrives. This is how Kafka behaves everywhere, and the API guide says where a new group starts |
+
 ## IAM
 
 | Who | Role | Scope | Why |
 |---|---|---|---|
 | `halyx-test` service principal | Contributor | subscription | create and delete each run's resource group and its resources |
-| | Role Based Access Control Administrator, with a condition | subscription | assign and remove only Storage Blob Data Contributor, Azure Service Bus Data Owner, Key Vault Secrets Officer and App Configuration Data Owner |
+| | Role Based Access Control Administrator, with a condition | subscription | assign and remove only Storage Blob Data Contributor, Azure Service Bus Data Owner, Key Vault Secrets Officer, App Configuration Data Owner and Azure Event Hubs Data Owner |
 | | Storage Blob Data Contributor, Azure Service Bus Data Owner, Key Vault Secrets Officer, App Configuration Data Owner | each run's resources (Terraform) | the data planes the tests use |
+| | Azure Event Hubs Data Owner (tier 4) | each run's Event Hubs namespaces (Terraform) | sending, receiving, and creating and deleting event hubs through the Kafka endpoint |
 | | Cosmos DB Built-in Data Contributor (Cosmos RBAC) | each run's Cosmos account (Terraform) | Cosmos' own data-plane roles |
 | | Entra admin (tier 2) | each run's PostgreSQL server and Azure SQL server (Terraform) | the database logins under test |
 | | `default` access policy (tier 3) | each run's Managed Redis cache (Terraform) | the cache's data plane |
