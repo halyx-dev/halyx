@@ -1,7 +1,7 @@
 ---
 title: Home
 nav_order: 1
-description: "Halyx Multi-Cloud SDK: one Java API for storage, NoSQL, messaging, SQL, caches, parameters and secrets on AWS, Azure and Google Cloud."
+description: "Halyx Multi-Cloud SDK: one Java API for storage, NoSQL, messaging, streams, SQL, caches, parameters and secrets on AWS, Azure and Google Cloud."
 permalink: /
 ---
 
@@ -9,7 +9,7 @@ permalink: /
 {: .fs-9 }
 
 One Java API for AWS, Azure and Google Cloud. Halyx gives Java 21 microservices one consistent way to use cloud services (object storage, NoSQL,
-messaging, SQL, caches, parameters and secrets) on AWS, Azure and Google Cloud. The services keep their
+messaging, streams, SQL, caches, parameters and secrets) on AWS, Azure and Google Cloud. The services keep their
 own SDKs and strengths; your code stops depending on them.
 {: .fs-6 .fw-300 }
 
@@ -47,6 +47,7 @@ checks that for every provider, against emulators on every build and
 | [Object storage](api/storage.md) | `BlobStore` | Amazon S3 | Azure Blob Storage | Cloud Storage | in-memory |
 | [NoSQL documents](api/nosql.md) | `DocumentStore` | DynamoDB | Cosmos DB for NoSQL | Firestore | in-memory |
 | [Messaging](api/messaging.md) | `Publisher`, `Subscription` | SNS, SQS | Service Bus | Pub/Sub | in-memory |
+| [Streams](api/streams.md) | `StreamProducer`, `StreamConsumer` | MSK | Event Hubs (Kafka endpoint) | Managed Service for Apache Kafka | any Kafka cluster, in-memory |
 | [SQL databases](api/sql.md) | `Database` (a JDBC `DataSource`) | RDS, Aurora | Azure Database for PostgreSQL and MySQL, Azure SQL | Cloud SQL | any PostgreSQL, MySQL or SQL Server |
 | [Caches](api/caches.md) | `Cache` | ElastiCache | Azure Cache for Redis, Azure Managed Redis | Memorystore | any Redis or Valkey server, in-memory |
 | [Parameters and secrets](api/parameters.md) | `ParameterStore` | SSM Parameter Store, Secrets Manager | App Configuration, Key Vault | Parameter Manager, Secret Manager | HashiCorp Vault, in-memory |
@@ -66,7 +67,7 @@ No lowest common denominator
   `unwrap` hands you the native SDK client for anything provider-specific.
 
 Passwordless by default
-: Databases and caches log in with the cloud's identity (AWS IAM, Microsoft Entra ID, Google IAM), with
+: Databases, caches and streams log in with the cloud's identity (AWS IAM, Microsoft Entra ID, Google IAM), with
   tokens refreshed before they expire.
 
 Production behaviour built in

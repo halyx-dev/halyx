@@ -26,12 +26,16 @@ import org.kamranzafar.halyx.parameters.ParameterStoreConfig;
 import org.kamranzafar.halyx.sql.Database;
 import org.kamranzafar.halyx.sql.SqlAuth;
 import org.kamranzafar.halyx.storage.BlobStore;
+import org.kamranzafar.halyx.stream.StreamConfig;
+import org.kamranzafar.halyx.stream.StreamConsumer;
+import org.kamranzafar.halyx.stream.StreamProducer;
 
 import javax.sql.DataSource;
 
 /**
  * Factory behind the beans declared under {@code halyx.blob-stores}, {@code halyx.caches},
- * {@code halyx.parameter-stores} and {@code halyx.databases}.
+ * {@code halyx.parameter-stores}, {@code halyx.databases}, {@code halyx.document-stores}, {@code halyx.topics},
+ * {@code halyx.subscriptions}, {@code halyx.stream-producers} and {@code halyx.stream-consumers}.
  */
 public final class HalyxBlobStores {
 
@@ -74,6 +78,30 @@ public final class HalyxBlobStores {
                                                    HalyxProperties.SubscriptionProperties subscription, BlobStore claims) {
         return halyx.provider(provider).subscription(
                 subscription.toSubscriptionConfig(name, subscription.claimCheck().toClaimCheck(claims)));
+    }
+
+    public StreamProducer streamProducer(String provider, String name, HalyxProperties.StreamProducerProperties producer,
+                                         StreamConfig cluster) {
+        return halyx.provider(provider).streamProducer(producer.toProducerConfig(name, cluster, null));
+    }
+
+    public StreamProducer streamProducerWithClaimCheck(String provider, String name,
+                                                       HalyxProperties.StreamProducerProperties producer,
+                                                       StreamConfig cluster, BlobStore claims) {
+        return halyx.provider(provider).streamProducer(
+                producer.toProducerConfig(name, cluster, producer.claimCheck().toClaimCheck(claims)));
+    }
+
+    public StreamConsumer streamConsumer(String provider, String name, HalyxProperties.StreamConsumerProperties consumer,
+                                         StreamConfig cluster) {
+        return halyx.provider(provider).streamConsumer(consumer.toConsumerConfig(name, cluster, null));
+    }
+
+    public StreamConsumer streamConsumerWithClaimCheck(String provider, String name,
+                                                       HalyxProperties.StreamConsumerProperties consumer,
+                                                       StreamConfig cluster, BlobStore claims) {
+        return halyx.provider(provider).streamConsumer(
+                consumer.toConsumerConfig(name, cluster, consumer.claimCheck().toClaimCheck(claims)));
     }
 
     /** A pooled database with a fixed password or cloud IAM login. The pool closes with Halyx. */

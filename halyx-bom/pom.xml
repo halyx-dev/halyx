@@ -65,6 +65,11 @@
             </dependency>
             <dependency>
                 <groupId>org.kamranzafar.halyx</groupId>
+                <artifactId>halyx-kafka</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.kamranzafar.halyx</groupId>
                 <artifactId>halyx-aws</artifactId>
                 <version>${project.version}</version>
             </dependency>

@@ -60,6 +60,15 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
+            <!--
+              halyx-parent manages kafka-clients directly, which beats any import; a Boot 4 application gets the
+              Kafka 4 clients its BOM manages, so test with those.
+            -->
+            <dependency>
+                <groupId>org.apache.kafka</groupId>
+                <artifactId>kafka-clients</artifactId>
+                <version>${kafka4.version}</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 
@@ -154,6 +163,11 @@
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>testcontainers-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-kafka</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>

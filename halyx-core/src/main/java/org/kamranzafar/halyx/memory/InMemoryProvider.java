@@ -30,6 +30,10 @@ import org.kamranzafar.halyx.parameters.spi.ParameterDriver;
 import org.kamranzafar.halyx.spi.CloudProvider;
 import org.kamranzafar.halyx.spi.ProviderConnection;
 import org.kamranzafar.halyx.storage.spi.BlobStoreDriver;
+import org.kamranzafar.halyx.stream.StreamConsumerConfig;
+import org.kamranzafar.halyx.stream.StreamProducerConfig;
+import org.kamranzafar.halyx.stream.spi.ConsumerDriver;
+import org.kamranzafar.halyx.stream.spi.ProducerDriver;
 
 import java.util.List;
 import java.util.Map;
@@ -39,8 +43,8 @@ import java.util.concurrent.ConcurrentSkipListMap;
 
 /**
  * The {@code "memory"} provider: a Service Stub that keeps everything in the JVM heap. Use it for unit
- * tests and local development, with {@code ProviderConfig.of("memory")}. Buckets and caches are created
- * on first use (any {@code redis://} endpoint works), and each connection has its own isolated data.
+ * tests and local development, with {@code ProviderConfig.of("memory")}. Buckets, caches and stream topics
+ * are created on first use (any {@code redis://} endpoint works), and each connection has its own isolated data.
  */
 public final class InMemoryProvider implements CloudProvider {
 
@@ -64,6 +68,7 @@ public final class InMemoryProvider implements CloudProvider {
         private final Map<String, CacheDriver> caches = new ConcurrentHashMap<>();
         private final Map<String, ConcurrentSkipListMap<String, List<Parameter>>> parameters = new ConcurrentHashMap<>();
         private final InMemoryBroker broker = new InMemoryBroker();
+        private final InMemoryStreams streams = new InMemoryStreams();
         private final Map<String, InMemoryDocumentStoreDriver.Table> tables = new ConcurrentHashMap<>();
 
         @Override
@@ -95,6 +100,16 @@ public final class InMemoryProvider implements CloudProvider {
         }
 
         @Override
+        public ProducerDriver streamProducer(StreamProducerConfig config) {
+            return streams.producer(config);
+        }
+
+        @Override
+        public ConsumerDriver streamConsumer(StreamConsumerConfig config) {
+            return streams.consumer(config);
+        }
+
+        @Override
         public DocumentStoreDriver documentStore(TableConfig config) {
             return new InMemoryDocumentStoreDriver(config,
                     tables.computeIfAbsent(config.name(), t -> new InMemoryDocumentStoreDriver.Table()));
@@ -104,6 +119,7 @@ public final class InMemoryProvider implements CloudProvider {
         public void close() {
             tables.clear();
             broker.clear();
+            streams.clear();
             buckets.clear();
             caches.clear();
             parameters.clear();

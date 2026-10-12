@@ -39,6 +39,12 @@ import org.kamranzafar.halyx.sql.Database;
 import org.kamranzafar.halyx.sql.SqlConfig;
 import org.kamranzafar.halyx.storage.BlobStore;
 import org.kamranzafar.halyx.storage.DefaultBlobStore;
+import org.kamranzafar.halyx.stream.DefaultStreamConsumer;
+import org.kamranzafar.halyx.stream.DefaultStreamProducer;
+import org.kamranzafar.halyx.stream.StreamConsumer;
+import org.kamranzafar.halyx.stream.StreamConsumerConfig;
+import org.kamranzafar.halyx.stream.StreamProducer;
+import org.kamranzafar.halyx.stream.StreamProducerConfig;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -123,6 +129,22 @@ public final class CloudContext implements AutoCloseable {
 
     public Subscription subscription(String name) {
         return subscription(SubscriptionConfig.of(name));
+    }
+
+    /**
+     * A producer for an existing stream topic: Amazon MSK, Azure Event Hubs or Google Cloud Managed Service for
+     * Apache Kafka. Thread-safe and cheap to keep: create one per topic and share it.
+     */
+    public StreamProducer streamProducer(StreamProducerConfig config) {
+        return new DefaultStreamProducer(connection().streamProducer(config), config, interceptors);
+    }
+
+    /**
+     * A consumer group member on an existing stream topic: read with {@code poll} or run {@code listen}. Each call
+     * creates a new member; close it to leave the group.
+     */
+    public StreamConsumer streamConsumer(StreamConsumerConfig config) {
+        return new DefaultStreamConsumer(connection().streamConsumer(config), config, interceptors);
     }
 
     /**

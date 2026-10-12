@@ -1,7 +1,7 @@
 ---
 title: SQL databases
 parent: API guide
-nav_order: 4
+nav_order: 5
 ---
 
 # SQL databases: `Database`

@@ -24,7 +24,7 @@
 </p>
 
 **Halyx Multi-Cloud SDK** is a cloud-agnostic Java API that gives microservices one consistent way to use Cloud Native services like Storage, SQL, NoSQL,
-Caches, Messaging, and Parameters and Secrets across **AWS**, **Azure** and **GCP**.
+Caches, Messaging, Streams (managed Kafka), and Parameters and Secrets across **AWS**, **Azure** and **GCP**.
 
 With Halyx you can build **portable multi-cloud microservices and applications**. A single microservice or application can work with
 services on several clouds at once, such as files on S3, a cache on Azure, events on Pub/Sub and secrets
@@ -54,7 +54,7 @@ Halyx was created to make that code portable too, without giving up what each cl
   on S3, publish to Pub/Sub and cache in Azure, with one error model and one set of tests.
 - **No lowest common denominator.** Differences are declared as capabilities, and `unwrap` hands you the
   native SDK client for anything provider-specific.
-- **Passwordless and production-ready.** Databases and caches log in with AWS IAM, Microsoft Entra ID or
+- **Passwordless and production-ready.** Databases, caches and streams log in with AWS IAM, Microsoft Entra ID or
   Google IAM. Parallel transfers, batching, checksums, presigned URLs, message listeners, fail-open
   caches and Micrometer observability are built in.
 
@@ -82,6 +82,7 @@ type, region and resource names. So the same build can:
 | Object storage | `BlobStore` | Amazon S3 | Azure Blob Storage | Cloud Storage | in-memory |
 | NoSQL documents | `DocumentStore` | DynamoDB | Cosmos DB for NoSQL | Firestore | in-memory |
 | Messaging | `Publisher`, `Subscription` | SNS, SQS | Service Bus | Pub/Sub | in-memory |
+| Streams | `StreamProducer`, `StreamConsumer` | MSK | Event Hubs (Kafka endpoint) | Managed Service for Apache Kafka | any Kafka cluster, in-memory |
 | SQL databases | `Database` (JDBC `DataSource`) | RDS, Aurora | Azure Database for PostgreSQL and MySQL, Azure SQL | Cloud SQL | any PostgreSQL, MySQL, SQL Server |
 | Caches | `Cache` | ElastiCache | Azure Cache for Redis, Azure Managed Redis | Memorystore | any Redis or Valkey, in-memory |
 | Parameters and secrets | `ParameterStore` | SSM Parameter Store, Secrets Manager | App Configuration, Key Vault | Parameter Manager, Secret Manager | HashiCorp Vault, in-memory |
@@ -188,7 +189,7 @@ to your build, ideally through the `halyx-bom`. See [Getting started](https://ka
 | | |
 |---|---|
 | [Getting started](https://kamranzafar.github.io/halyx/getting-started.html) | dependencies, your first calls, several clouds at once, testing |
-| [API guide](https://kamranzafar.github.io/halyx/api/) | every service with examples: [storage](https://kamranzafar.github.io/halyx/api/storage.html), [NoSQL](https://kamranzafar.github.io/halyx/api/nosql.html), [messaging](https://kamranzafar.github.io/halyx/api/messaging.html), [SQL](https://kamranzafar.github.io/halyx/api/sql.html), [caches](https://kamranzafar.github.io/halyx/api/caches.html), [parameters and secrets](https://kamranzafar.github.io/halyx/api/parameters.html) |
+| [API guide](https://kamranzafar.github.io/halyx/api/) | every service with examples: [storage](https://kamranzafar.github.io/halyx/api/storage.html), [NoSQL](https://kamranzafar.github.io/halyx/api/nosql.html), [messaging](https://kamranzafar.github.io/halyx/api/messaging.html), [streams](https://kamranzafar.github.io/halyx/api/streams.html), [SQL](https://kamranzafar.github.io/halyx/api/sql.html), [caches](https://kamranzafar.github.io/halyx/api/caches.html), [parameters and secrets](https://kamranzafar.github.io/halyx/api/parameters.html) |
 | [Errors and retries](https://kamranzafar.github.io/halyx/api/errors.html) | the portable error model, retries, throttling and interceptors |
 | [Capabilities and native clients](https://kamranzafar.github.io/halyx/api/capabilities-and-unwrap.html) | provider differences, and `unwrap` for the native SDK clients |
 | [Provider configuration](https://kamranzafar.github.io/halyx/providers.html) | credentials, regions, endpoints and every provider setting |

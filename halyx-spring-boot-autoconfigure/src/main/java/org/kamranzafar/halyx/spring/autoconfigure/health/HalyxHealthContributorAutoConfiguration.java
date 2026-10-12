@@ -23,6 +23,8 @@ import org.kamranzafar.halyx.spring.messaging.HalyxListenerRegistrar;
 import org.kamranzafar.halyx.spring.autoconfigure.HalyxAutoConfiguration;
 import org.kamranzafar.halyx.spring.autoconfigure.HalyxResourcesCondition;
 import org.kamranzafar.halyx.storage.BlobStore;
+import org.kamranzafar.halyx.stream.StreamConsumer;
+import org.kamranzafar.halyx.stream.StreamProducer;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -55,12 +57,18 @@ public class HalyxHealthContributorAutoConfiguration {
                                                       Map<String, ParameterStore> parameterStores,
                                                       Map<String, Subscription> subscriptions,
                                                       Map<String, DocumentStore> documentStores,
+                                                      Map<String, StreamProducer> streamProducers,
+                                                      Map<String, StreamConsumer> streamConsumers,
                                                       ObjectProvider<HalyxListenerRegistrar> listeners) {
         Map<String, HealthContributor> contributors = new TreeMap<>();
         blobStores.forEach((name, store) -> contributors.put(name, new BlobStoreHealthIndicator(store)));
         caches.forEach((name, cache) -> contributors.put(name, new CacheHealthIndicator(cache)));
         parameterStores.forEach((name, store) -> contributors.put(name, new ParameterStoreHealthIndicator(store)));
         documentStores.forEach((name, store) -> contributors.put(name, new DocumentStoreHealthIndicator(store)));
+        streamProducers.forEach((name, producer) -> contributors.put(name, new StreamProducerHealthIndicator(producer)));
+        if (!streamConsumers.isEmpty()) {
+            listeners.ifAvailable(registrar -> contributors.put("streams", new StreamListenersHealthIndicator(registrar)));
+        }
         if (!subscriptions.isEmpty()) {
             listeners.ifAvailable(registrar -> contributors.put("messaging", new MessageConsumersHealthIndicator(registrar)));
         }

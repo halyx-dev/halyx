@@ -23,6 +23,8 @@ import org.kamranzafar.halyx.spring.messaging.HalyxListenerRegistrar;
 import org.kamranzafar.halyx.spring.autoconfigure.HalyxAutoConfiguration;
 import org.kamranzafar.halyx.spring.autoconfigure.HalyxResourcesCondition;
 import org.kamranzafar.halyx.storage.BlobStore;
+import org.kamranzafar.halyx.stream.StreamConsumer;
+import org.kamranzafar.halyx.stream.StreamProducer;
 import org.springframework.boot.actuate.autoconfigure.health.ConditionalOnEnabledHealthIndicator;
 import org.springframework.boot.actuate.health.CompositeHealthContributor;
 import org.springframework.boot.actuate.health.HealthContributor;
@@ -55,12 +57,18 @@ public class HalyxActuatorHealthContributorAutoConfiguration {
                                                       Map<String, ParameterStore> parameterStores,
                                                       Map<String, Subscription> subscriptions,
                                                       Map<String, DocumentStore> documentStores,
+                                                      Map<String, StreamProducer> streamProducers,
+                                                      Map<String, StreamConsumer> streamConsumers,
                                                       ObjectProvider<HalyxListenerRegistrar> listeners) {
         Map<String, HealthContributor> contributors = new TreeMap<>();
         blobStores.forEach((name, store) -> contributors.put(name, new ActuatorBlobStoreHealthIndicator(store)));
         caches.forEach((name, cache) -> contributors.put(name, new ActuatorCacheHealthIndicator(cache)));
         parameterStores.forEach((name, store) -> contributors.put(name, new ActuatorParameterStoreHealthIndicator(store)));
         documentStores.forEach((name, store) -> contributors.put(name, new ActuatorDocumentStoreHealthIndicator(store)));
+        streamProducers.forEach((name, producer) -> contributors.put(name, new ActuatorStreamProducerHealthIndicator(producer)));
+        if (!streamConsumers.isEmpty()) {
+            listeners.ifAvailable(registrar -> contributors.put("streams", new ActuatorStreamListenersHealthIndicator(registrar)));
+        }
         if (!subscriptions.isEmpty()) {
             listeners.ifAvailable(registrar -> contributors.put("messaging", new ActuatorMessageConsumersHealthIndicator(registrar)));
         }

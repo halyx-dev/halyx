@@ -78,6 +78,11 @@
             <groupId>org.kamranzafar.halyx</groupId>
             <artifactId>halyx-sql</artifactId>
         </dependency>
+        <!-- Streams: the shared Kafka driver, for Managed Service for Apache Kafka with Google IAM tokens -->
+        <dependency>
+            <groupId>org.kamranzafar.halyx</groupId>
+            <artifactId>halyx-kafka</artifactId>
+        </dependency>
         <!-- Tests: TCK against the Floci emulator in Docker (run with mvn verify) -->
         <dependency>
             <groupId>org.kamranzafar.halyx</groupId>
@@ -98,6 +103,12 @@
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>testcontainers-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- No emulator has Managed Kafka: the stream TCK runs through this provider against Apache Kafka -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-kafka</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>

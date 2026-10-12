@@ -26,14 +26,15 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.kamranzafar.halyx.spring.autoconfigure.config.HalyxConfigReloader;
 import org.kamranzafar.halyx.spring.messaging.HalyxListenerRegistrar;
 import org.kamranzafar.halyx.spring.messaging.MessageListenerDecorator;
+import org.kamranzafar.halyx.spring.stream.RecordListenerDecorator;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.context.annotation.Import;
 
 /**
- * Creates the {@link Halyx} bean from {@code halyx.providers}, and a {@code BlobStore} bean for
- * each {@code halyx.blob-stores} entry.
+ * Creates the {@link Halyx} bean from {@code halyx.providers}, and a bean for each configured blob store,
+ * cache, parameter store, database, document store, topic, subscription and stream producer and consumer.
  *
  * <p>Interceptors are applied in this order, outermost first: observations, then {@link Interceptor}
  * beans by {@code @Order}, then retries (so each retry attempt is not observed separately).
@@ -74,8 +75,9 @@ public class HalyxAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     public static HalyxListenerRegistrar halyxListenerRegistrar(ObjectProvider<HalyxProperties> properties,
-                                                                  ObjectProvider<MessageListenerDecorator> decorators) {
-        return new HalyxListenerRegistrar(properties, decorators);
+                                                                  ObjectProvider<MessageListenerDecorator> decorators,
+                                                                  ObjectProvider<RecordListenerDecorator> recordDecorators) {
+        return new HalyxListenerRegistrar(properties, decorators, recordDecorators);
     }
 
     @Bean(BlobStoreBeanRegistrar.FACTORY_BEAN)

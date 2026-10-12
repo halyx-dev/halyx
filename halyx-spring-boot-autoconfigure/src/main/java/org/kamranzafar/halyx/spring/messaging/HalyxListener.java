@@ -22,14 +22,20 @@ import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
 /**
- * Runs the annotated method for every message on a {@code halyx.subscriptions.<name>} subscription:
+ * Runs the annotated method for every message on a {@code halyx.subscriptions.<name>} subscription, or every
+ * record on a {@code halyx.stream-consumers.<name>} stream consumer:
  *
  * <pre>{@code
  * @HalyxListener("orders")
  * void onOrder(ReceivedMessage message) { ... }   // or (String body), or (byte[] body)
+ *
+ * @HalyxListener("order-events")
+ * void onEvent(ReceivedRecord record) { ... }     // or (String value), or (byte[] value)
  * }</pre>
  *
- * Returning normally acks the message; throwing nacks it for redelivery with backoff. Consumers start once
+ * For a subscription, returning normally acks the message and throwing nacks it for redelivery with backoff.
+ * For a stream consumer, returning normally commits the record and throwing retries it with backoff, holding
+ * back the rest of its partition. Consumers start once
  * the application is ready and stop, letting running handlers finish, before it shuts down. Delivery is at
  * least once: make the method idempotent.
  */
@@ -38,9 +44,12 @@ import java.lang.annotation.Target;
 @Documented
 public @interface HalyxListener {
 
-    /** The bean name of the subscription, a key under {@code halyx.subscriptions}. */
+    /** The bean name of the subscription or stream consumer: a key under {@code halyx.subscriptions} or {@code halyx.stream-consumers}. */
     String value();
 
-    /** Messages handled at once; overrides {@code halyx.subscriptions.<name>.listener.concurrency} when positive. */
+    /**
+     * Messages handled at once; overrides {@code halyx.subscriptions.<name>.listener.concurrency} when positive.
+     * Not used for stream consumers, which handle each partition in order.
+     */
     int concurrency() default -1;
 }

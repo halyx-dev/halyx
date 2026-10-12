@@ -139,6 +139,37 @@ Listeners start once the application is ready, and stop first on shutdown, letti
 finish. Each consumer reports metrics and appears under the `messaging` health entry. Wrap every
 listener, for example for MDC or tenancy, with a `MessageListenerDecorator` bean.
 
+## Streams
+
+```yaml
+halyx:
+  stream-clusters:
+    events:
+      provider: orders               # optional when only one provider is configured
+      bootstrap-servers: boot-abc123.c2.kafka-serverless.eu-west-2.amazonaws.com:9098
+      auth: { type: iam }            # none, password (mechanism, username, password) or iam
+      properties: { kafka.linger.ms: 5 }
+  stream-producers:
+    order-events:                    # StreamProducer bean name
+      topic: orders                  # defaults to the key
+      idempotent: true
+    order-events-dlt:
+      topic: orders-dlt
+  stream-consumers:
+    billing:                         # StreamConsumer bean name, used by @HalyxListener("billing")
+      topic: orders
+      group: billing                 # defaults to the key
+      start-position: earliest
+      listener: { max-attempts: 5, dead-letter: order-events-dlt, max-backoff: 1m }
+```
+
+`cluster` may be omitted on producers and consumers when only one stream cluster is configured.
+`@HalyxListener("<stream consumer bean>")` methods take a `String` value, a `byte[]` value or the whole
+`ReceivedRecord`. Returning commits the record; throwing retries it with backoff, holding back the rest of its
+partition, until `max-attempts` sends it to the `dead-letter` producer. Stream consumers leave their group when
+the application stops. Each listener reports metrics and appears under the `streams` health entry, and each
+producer has its own health indicator. Wrap every stream listener with a `RecordListenerDecorator` bean.
+
 ## SQL databases
 
 ```yaml
@@ -242,11 +273,12 @@ spring:
 | Feature | Details |
 |---|---|
 | Observations | With Micrometer, every operation records a `halyx.operation` observation (a timer and a span) tagged with `halyx.service`, `halyx.operation`, `halyx.provider` and `error`. Turn off with `halyx.observations.enabled=false`. |
-| Health | A `halyx` health contributor with one indicator per blob store (lists one item), cache (runs an authenticated command), parameter store (an authenticated read), document store, and the `messaging` consumers. Turn off with `management.health.halyx.enabled=false`. |
+| Health | A `halyx` health contributor with one indicator per blob store (lists one item), cache (runs an authenticated command), parameter store (an authenticated read), document store and stream producer (reads the topic's partitions), plus the `messaging` consumers and `streams` listeners. Turn off with `management.health.halyx.enabled=false`. |
 | Cache metrics | Micrometer's standard `cache.gets{result=hit\|miss}`, `cache.puts` and `cache.evictions`, plus `cache.loads{result}` and `cache.fail.open`, tagged `cache=<name>`, for `Cache` beans and `CacheManager` caches. |
 | Messaging metrics | `halyx.messaging.messages{subscription, listener, result}`, `halyx.messaging.in.flight` and `halyx.messaging.receive.errors`. |
+| Stream metrics | `halyx.stream.records{consumer, listener, result=received\|handled\|failed\|dead-lettered}`, `halyx.stream.poll.errors`, `halyx.stream.in.flight` and `halyx.stream.assigned.partitions`. |
 | Parameter metrics | `halyx.parameters.reads{store, source=cache\|backend}`, `halyx.parameters.changes{store}` and `halyx.parameters.watch.failures{store}`. |
-| Tracing | With Micrometer Tracing, publishers add the current trace context to message attributes, and each listener invocation runs in a consumer span that continues the trace. |
+| Tracing | With Micrometer Tracing, publishers and stream producers add the current trace context to message attributes and record headers, and each listener invocation runs in a consumer span that continues the trace. |
 
 ## Customising
 

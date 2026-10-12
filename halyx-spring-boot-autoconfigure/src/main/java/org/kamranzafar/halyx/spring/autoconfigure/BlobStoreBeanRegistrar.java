@@ -21,6 +21,10 @@ import org.kamranzafar.halyx.nosql.DocumentStore;
 import org.kamranzafar.halyx.messaging.Subscription;
 import org.kamranzafar.halyx.parameters.ParameterStore;
 import org.kamranzafar.halyx.storage.BlobStore;
+import org.kamranzafar.halyx.stream.StreamConfig;
+import org.kamranzafar.halyx.stream.StreamConsumer;
+import org.kamranzafar.halyx.stream.StreamProducer;
+import org.springframework.beans.factory.support.AbstractBeanDefinition;
 import org.springframework.beans.factory.config.RuntimeBeanReference;
 import org.springframework.beans.factory.support.BeanDefinitionRegistry;
 import org.springframework.beans.factory.support.RootBeanDefinition;
@@ -39,7 +43,8 @@ import java.util.Set;
 /**
  * Registers one {@link BlobStore} bean per {@code halyx.blob-stores.<name>} entry, one
  * {@code Cache<String>} bean per {@code halyx.caches.<name>} entry and one {@code DataSource} bean per
- * {@code halyx.databases.<name>} entry, each named {@code <name>}, so
+ * {@code halyx.databases.<name>} entry, each named {@code <name>}, and likewise for document stores, topics,
+ * subscriptions and stream producers and consumers, so
  * they can be injected by type or with {@code @Qualifier("<name>")}. Configuration mistakes fail at
  * startup with the offending property named.
  */
@@ -145,6 +150,24 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
                 .forEach((name, subscription) -> registry.registerBeanDefinition(name, messagingBean(Subscription.class,
                         "halyx.subscriptions." + name, name, subscription.provider(), subscription,
                         subscription.claimCheck(), "subscription", providers, stores.keySet())));
+        Map<String, HalyxProperties.StreamClusterProperties> clusters = binder
+                .bind("halyx.stream-clusters", Bindable.mapOf(String.class, HalyxProperties.StreamClusterProperties.class))
+                .orElse(Map.of());
+        binder.bind("halyx.stream-producers", Bindable.mapOf(String.class, HalyxProperties.StreamProducerProperties.class))
+                .orElse(Map.of())
+                .forEach((name, producer) -> registry.registerBeanDefinition(name, streamBean(StreamProducer.class,
+                        "halyx.stream-producers." + name, name, producer.cluster(), producer, producer.claimCheck(),
+                        "streamProducer", clusters, providers, stores.keySet())));
+        binder.bind("halyx.stream-consumers", Bindable.mapOf(String.class, HalyxProperties.StreamConsumerProperties.class))
+                .orElse(Map.of())
+                .forEach((name, consumer) -> {
+                    RootBeanDefinition definition = streamBean(StreamConsumer.class, "halyx.stream-consumers." + name,
+                            name, consumer.cluster(), consumer, consumer.claimCheck(), "streamConsumer", clusters,
+                            providers, stores.keySet());
+                    // Closing leaves the consumer group, handing its partitions to the other members.
+                    definition.setDestroyMethodName(AbstractBeanDefinition.INFER_METHOD);
+                    registry.registerBeanDefinition(name, definition);
+                });
         stores.forEach((name, store) -> {
             String provider = resolveProvider("halyx.blob-stores." + name, store.provider(), providers);
             String bucket = store.bucket() == null || store.bucket().isBlank() ? name : store.bucket();
@@ -184,6 +207,54 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
         definition.setTargetType(type);
         definition.setDescription("Halyx " + factoryMethod + " " + resolved + "/" + name);
         return definition;
+    }
+
+    /** A StreamProducer or StreamConsumer bean on its cluster; with a claim check, its blob store bean is injected too. */
+    private static RootBeanDefinition streamBean(Class<?> type, String property, String name, String cluster,
+                                                 Object properties, HalyxProperties.ClaimCheckProperties claimCheck,
+                                                 String factoryMethod,
+                                                 Map<String, HalyxProperties.StreamClusterProperties> clusters,
+                                                 Map<String, HalyxProperties.Provider> providers, Set<String> blobStores) {
+        String clusterName = resolveCluster(property, cluster, clusters);
+        HalyxProperties.StreamClusterProperties clusterProperties = clusters.get(clusterName);
+        String provider = resolveProvider("halyx.stream-clusters." + clusterName, clusterProperties.provider(), providers);
+        StreamConfig streamConfig = clusterProperties.toStreamConfig(clusterName);
+        RootBeanDefinition definition = new RootBeanDefinition(type);
+        definition.setFactoryBeanName(FACTORY_BEAN);
+        var args = definition.getConstructorArgumentValues();
+        args.addIndexedArgumentValue(0, provider);
+        args.addIndexedArgumentValue(1, name);
+        args.addIndexedArgumentValue(2, properties);
+        args.addIndexedArgumentValue(3, streamConfig);
+        if (claimCheck != null) {
+            if (claimCheck.blobStore() == null || !blobStores.contains(claimCheck.blobStore())) {
+                throw new IllegalStateException(property + ".claim-check.blob-store must name one of halyx.blob-stores "
+                        + blobStores);
+            }
+            definition.setFactoryMethodName(factoryMethod + "WithClaimCheck");
+            args.addIndexedArgumentValue(4, new RuntimeBeanReference(claimCheck.blobStore()));
+        } else {
+            definition.setFactoryMethodName(factoryMethod);
+        }
+        definition.setTargetType(type);
+        definition.setDescription("Halyx " + factoryMethod + " " + provider + "/" + clusterName + "/" + name);
+        return definition;
+    }
+
+    static String resolveCluster(String property, String cluster,
+                                 Map<String, HalyxProperties.StreamClusterProperties> clusters) {
+        if (cluster == null) {
+            if (clusters.size() == 1) {
+                return clusters.keySet().iterator().next();
+            }
+            throw new IllegalStateException(property + ".cluster is required when " + clusters.size()
+                    + " stream clusters are configured " + clusters.keySet());
+        }
+        if (!clusters.containsKey(cluster)) {
+            throw new IllegalStateException(property + ".cluster refers to unknown stream cluster '" + cluster
+                    + "'. Configured clusters: " + clusters.keySet());
+        }
+        return cluster;
     }
 
     static String resolveProvider(String property, String provider,

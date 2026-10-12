@@ -29,6 +29,10 @@ import org.kamranzafar.halyx.parameters.spi.ParameterDriver;
 import org.kamranzafar.halyx.sql.Database;
 import org.kamranzafar.halyx.sql.SqlConfig;
 import org.kamranzafar.halyx.storage.spi.BlobStoreDriver;
+import org.kamranzafar.halyx.stream.StreamConsumerConfig;
+import org.kamranzafar.halyx.stream.StreamProducerConfig;
+import org.kamranzafar.halyx.stream.spi.ConsumerDriver;
+import org.kamranzafar.halyx.stream.spi.ProducerDriver;
 
 /**
  * A live connection to one provider account and region: the Abstract Factory for the family of
@@ -70,6 +74,16 @@ public interface ProviderConnection extends AutoCloseable {
     /** A driver consuming from {@code config.name()}. */
     default SubscriptionDriver subscription(SubscriptionConfig config) {
         throw new UnsupportedFeatureException("Messaging is not supported by this provider");
+    }
+
+    /** A driver sending to the stream topic {@code config.topic()} on {@code config.cluster()}. */
+    default ProducerDriver streamProducer(StreamProducerConfig config) {
+        throw new UnsupportedFeatureException("Streams are not supported by this provider");
+    }
+
+    /** A consumer group member reading the stream topic {@code config.topic()} on {@code config.cluster()}. */
+    default ConsumerDriver streamConsumer(StreamConsumerConfig config) {
+        throw new UnsupportedFeatureException("Streams are not supported by this provider");
     }
 
     /** A driver for the document table {@code config.name()}. */

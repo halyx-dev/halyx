@@ -76,6 +76,30 @@ class HalyxHealthTest {
                 });
     }
 
+    static class RecordListener {
+        @org.kamranzafar.halyx.spring.messaging.HalyxListener("payments")
+        void on(String value) {
+        }
+    }
+
+    @Test
+    void streamProducersAndListenersHaveIndicators() {
+        runner.withPropertyValues("halyx.providers.local.type=memory",
+                        "halyx.stream-clusters.events.bootstrap-servers=memory:9092",
+                        "halyx.stream-producers.payments-out.topic=payments",
+                        "halyx.stream-consumers.payments.start-position=earliest")
+                .withBean(RecordListener.class, RecordListener::new)
+                .run(context -> {
+                    var composite = context.getBean("halyxHealthContributor", CompositeHealthContributor.class);
+                    var producer = ((HealthIndicator) composite.getContributor("payments-out")).health();
+                    assertThat(producer.getStatus()).isEqualTo(Status.UP);
+                    assertThat(producer.getDetails()).containsEntry("topic", "payments").containsEntry("partitions", 3);
+                    var streams = ((HealthIndicator) composite.getContributor("streams")).health();
+                    assertThat(streams.getStatus()).isEqualTo(Status.UP);
+                    assertThat(streams.getDetails().keySet()).singleElement().asString().startsWith("payments#");
+                });
+    }
+
     @Test
     void documentStoresHaveIndicators() {
         runner.withPropertyValues("halyx.providers.local.type=memory", "halyx.document-stores.orders.sort-key=sk")

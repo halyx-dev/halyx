@@ -21,6 +21,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 import org.kamranzafar.halyx.cache.Cache;
 import org.kamranzafar.halyx.messaging.ConsumerStatistics;
+import org.kamranzafar.halyx.stream.ListenerStatistics;
 import org.kamranzafar.halyx.parameters.ParameterStore;
 import org.kamranzafar.halyx.spring.messaging.HalyxListenerRegistrar;
 import org.kamranzafar.halyx.spring.autoconfigure.HalyxAutoConfiguration;
@@ -39,7 +40,8 @@ import java.util.function.ToDoubleFunction;
 
 /**
  * Binds every {@code Cache} bean and every cache of the {@link HalyxCacheManager} to the
- * application's {@link MeterRegistry}, tagged {@code cache=<name>}, and parameter store read counters.
+ * application's {@link MeterRegistry}, tagged {@code cache=<name>}, plus parameter store, messaging listener and
+ * stream listener counters.
  */
 @AutoConfiguration(after = {HalyxAutoConfiguration.class, HalyxCacheManagerAutoConfiguration.class}, afterName = {
         "org.springframework.boot.actuate.autoconfigure.metrics.CompositeMeterRegistryAutoConfiguration", // Boot 3
@@ -92,6 +94,39 @@ public class HalyxCacheMetricsAutoConfiguration {
             Gauge.builder("halyx.messaging.in.flight", registrar, r -> stats(r, key).map(s -> (double) s.inFlight()).orElse(0.0))
                     .tag("subscription", subscription).tag("listener", listener).register(registry);
         }));
+    }
+
+    /**
+     * {@code halyx.stream.records{consumer, listener, result=received|handled|failed|dead-lettered}},
+     * {@code halyx.stream.poll.errors}, and the {@code halyx.stream.in.flight} and
+     * {@code halyx.stream.assigned.partitions} gauges for every {@code @HalyxListener} stream listener.
+     */
+    @Bean
+    public SmartInitializingSingleton halyxStreamMetricsBinder(MeterRegistry registry,
+                                                                 ObjectProvider<HalyxListenerRegistrar> listeners) {
+        return () -> listeners.ifAvailable(registrar -> registrar.streamKeys().forEach(key -> {
+            String consumer = key.substring(0, key.indexOf('#'));
+            String listener = key.substring(key.indexOf('#') + 1);
+            Map<String, ToDoubleFunction<ListenerStatistics>> counters = Map.of(
+                    "received", ListenerStatistics::received, "handled", ListenerStatistics::handled,
+                    "failed", ListenerStatistics::failed, "dead-lettered", ListenerStatistics::deadLettered);
+            counters.forEach((result, value) -> FunctionCounter.builder("halyx.stream.records", registrar,
+                            r -> streamStats(r, key).map(value::applyAsDouble).orElse(0.0))
+                    .tag("consumer", consumer).tag("listener", listener).tag("result", result)
+                    .register(registry));
+            FunctionCounter.builder("halyx.stream.poll.errors", registrar,
+                            r -> streamStats(r, key).map(s -> (double) s.pollErrors()).orElse(0.0))
+                    .tag("consumer", consumer).tag("listener", listener).register(registry);
+            Gauge.builder("halyx.stream.in.flight", registrar, r -> streamStats(r, key).map(s -> (double) s.inFlight()).orElse(0.0))
+                    .tag("consumer", consumer).tag("listener", listener).register(registry);
+            Gauge.builder("halyx.stream.assigned.partitions", registrar,
+                            r -> streamStats(r, key).map(s -> (double) s.assignedPartitions()).orElse(0.0))
+                    .tag("consumer", consumer).tag("listener", listener).register(registry);
+        }));
+    }
+
+    private static Optional<ListenerStatistics> streamStats(HalyxListenerRegistrar registrar, String key) {
+        return Optional.ofNullable(registrar.streamListeners().get(key)).map(l -> l.statistics());
     }
 
     private static Optional<ConsumerStatistics> stats(HalyxListenerRegistrar registrar, String key) {

@@ -24,6 +24,12 @@ public final class AzureProperties {
      */
     public static final String STORAGE_ACCOUNT = "azure.storage.account";
 
+    /**
+     * Stream cluster property: the Entra ID scope of Event Hubs tokens, when it isn't the namespace of the first
+     * bootstrap server ({@code https://<namespace>.servicebus.windows.net/.default}).
+     */
+    public static final String EVENT_HUBS_SCOPE = "azure.event-hubs.scope";
+
     /** Cosmos DB account endpoint, {@code https://<account>.documents.azure.com:443/}. */
     public static final String COSMOS_ENDPOINT = "azure.cosmos.endpoint";
 

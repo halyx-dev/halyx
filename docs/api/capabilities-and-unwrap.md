@@ -1,7 +1,7 @@
 ---
 title: Capabilities and native clients
 parent: API guide
-nav_order: 8
+nav_order: 9
 ---
 
 # Capabilities and native clients
@@ -53,6 +53,13 @@ provider: GCS can presign only with credentials that can sign.
 | `DELAYED_DELIVERY` | SQS queues | yes | no |
 | `NACK_DELAY` | yes | no (redelivers at once) | yes |
 
+### Streams
+
+| `StreamCapability` | AWS | Azure | Google Cloud |
+|---|---|---|---|
+| `IDEMPOTENCE` | yes | no | yes |
+| `TRANSACTIONS` | yes | no | yes |
+
 ### Parameters and secrets
 
 | `ParameterCapability` | Supported by |
@@ -80,6 +87,8 @@ for one cloud fails clearly on another instead of misbehaving. Prefer the portab
 | `Publisher` | `SnsClient` (`SqsClient` with `aws.target=sqs`) | `ServiceBusSenderClient` | `TopicAdminClient` |
 | `Subscription` | `SqsClient` | `ServiceBusReceiverClient` (`ServiceBusSessionReceiverClient` for session entities) | `SubscriptionAdminClient` |
 | `ParameterStore` | `SsmClient`, `SecretsManagerClient` | `ConfigurationClient`, `SecretClient` | `ParameterManagerClient`, `SecretManagerServiceClient` |
+| `StreamProducer` | Kafka's `Producer` | (same) | (same) |
+| `StreamConsumer` | Kafka's `Consumer`, used only from the polling thread | (same) | (same) |
 | `Cache` | Lettuce `StatefulRedisConnection` / `StatefulRedisClusterConnection`, `RedisClient` / `RedisClusterClient` | (same) | (same) |
 
 HashiCorp Vault parameter stores unwrap to `VaultClient`, Halyx's own client. A `Database` has no

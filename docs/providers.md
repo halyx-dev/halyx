@@ -84,6 +84,7 @@ rather than on the provider.
 | `aws.elasticache.cache-name` | `CacheConfig` | the replication group id or serverless cache name, for IAM login |
 | `aws.elasticache.serverless` | `CacheConfig` | `true` for ElastiCache Serverless |
 | `aws.rds.region` | `SqlConfig` | the database's region, if it differs from the provider's |
+| `aws.msk.region` | `StreamConfig` | the MSK cluster's region, for IAM tokens, if it differs from the provider's |
 
 ## Azure
 
@@ -106,6 +107,7 @@ ProviderConfig.of("azure")
 | `azure.servicebus.sessions` | on topics and subscriptions: `true` for session-enabled entities |
 | `azure.servicebus.max-sessions` | on a subscription: sessions held at once (8) |
 | `azure.servicebus.max-message-bytes` | the largest body: 262144 (standard tier) by default, up to 100 MB on premium |
+| `azure.event-hubs.scope` | on a `StreamConfig`: the Entra ID scope, if not the namespace of the first bootstrap server |
 | `azure.appconfig.connection-string` | on a `ParameterStoreConfig`: a connection string instead of Entra ID |
 | `azure.appconfig.label` | on a `ParameterStoreConfig`: the App Configuration label to use |
 
@@ -125,6 +127,7 @@ ProviderConfig.of("gcp").property(GcpProperties.PROJECT_ID, "acme-prod")
 | `gcp.firestore.items-collection` | on a `TableConfig`: the subcollection name under each partition |
 | `gcp.parametermanager.render` | on a `ParameterStoreConfig`: `true` to resolve Secret Manager references |
 | `gcp.sql.instance` | on a `SqlConfig`: connect through the Cloud SQL Java connector (`project:region:instance`) |
+| `gcp.kafka.principal` | on a `StreamConfig`: the principal's email for Managed Kafka IAM login, when the credentials don't name one |
 
 ## HashiCorp Vault
 

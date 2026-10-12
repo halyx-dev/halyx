@@ -18,6 +18,7 @@ package org.kamranzafar.halyx.aws;
 import org.kamranzafar.halyx.aws.dynamodb.DynamoDocumentStoreDriver;
 import org.kamranzafar.halyx.aws.elasticache.ElastiCacheIamTokens;
 import org.kamranzafar.halyx.aws.messaging.SnsPublisherDriver;
+import org.kamranzafar.halyx.aws.msk.MskIamTokens;
 import org.kamranzafar.halyx.aws.messaging.SqsPublisherDriver;
 import org.kamranzafar.halyx.aws.messaging.SqsSubscriptionDriver;
 import org.kamranzafar.halyx.aws.parameters.SecretsManagerDriver;
@@ -34,6 +35,8 @@ import org.kamranzafar.halyx.config.HttpSettings;
 import org.kamranzafar.halyx.config.ProviderConfig;
 import org.kamranzafar.halyx.error.UnsupportedFeatureException;
 import org.kamranzafar.halyx.jdbc.JdbcDatabases;
+import org.kamranzafar.halyx.kafka.KafkaCredentialsSource;
+import org.kamranzafar.halyx.kafka.KafkaStreamClients;
 import org.kamranzafar.halyx.messaging.SubscriptionConfig;
 import org.kamranzafar.halyx.nosql.TableConfig;
 import org.kamranzafar.halyx.nosql.spi.DocumentStoreDriver;
@@ -47,6 +50,13 @@ import org.kamranzafar.halyx.sql.SqlAuth;
 import org.kamranzafar.halyx.sql.SqlConfig;
 import org.kamranzafar.halyx.sql.SqlEngine;
 import org.kamranzafar.halyx.storage.spi.BlobStoreDriver;
+import org.kamranzafar.halyx.capability.Capabilities;
+import org.kamranzafar.halyx.stream.StreamCapability;
+import org.kamranzafar.halyx.stream.StreamConfig;
+import org.kamranzafar.halyx.stream.StreamConsumerConfig;
+import org.kamranzafar.halyx.stream.StreamProducerConfig;
+import org.kamranzafar.halyx.stream.spi.ConsumerDriver;
+import org.kamranzafar.halyx.stream.spi.ProducerDriver;
 import software.amazon.awssdk.auth.credentials.AnonymousCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
@@ -68,6 +78,7 @@ import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * Owns the AWS SDK clients for one configuration. Clients are created lazily and shared by all buckets,
@@ -84,6 +95,7 @@ final class AwsConnection implements ProviderConnection {
     private S3Client s3;
     private S3Presigner presigner;
     private RedisCaches caches;
+    private KafkaStreamClients streams;
     private SsmClient ssm;
     private SecretsManagerClient secretsManager;
 
@@ -219,6 +231,32 @@ final class AwsConnection implements ProviderConnection {
         return sqs;
     }
 
+    /** An MSK topic: Apache Kafka, so idempotent and transactional producers are available. */
+    private static final Capabilities MSK_CAPABILITIES = Capabilities.of(StreamCapability.values());
+
+    @Override
+    public synchronized ProducerDriver streamProducer(StreamProducerConfig producer) {
+        return streams().producer(producer, mskCredentials(producer.cluster()), MSK_CAPABILITIES, Map.of());
+    }
+
+    @Override
+    public synchronized ConsumerDriver streamConsumer(StreamConsumerConfig consumer) {
+        return streams().consumer(consumer, mskCredentials(consumer.cluster()), MSK_CAPABILITIES, Map.of());
+    }
+
+    private KafkaStreamClients streams() {
+        if (streams == null) {
+            streams = new KafkaStreamClients(AwsProvider.ID);
+        }
+        return streams;
+    }
+
+    /** MSK IAM tokens for the cluster's region, signed with the connection's credentials. */
+    private KafkaCredentialsSource mskCredentials(StreamConfig cluster) {
+        return KafkaStreamClients.credentials(cluster.auth(), () -> new MskIamTokens(
+                cluster.property(AwsProperties.MSK_REGION).orElseGet(() -> region().id()), credentials()));
+    }
+
     /** Password auth, or RDS IAM tokens for PostgreSQL and MySQL (RDS for SQL Server has no IAM login). */
     @Override
     public synchronized Database database(SqlConfig sql) {
@@ -272,6 +310,10 @@ final class AwsConnection implements ProviderConnection {
 
     @Override
     public synchronized void close() {
+        if (streams != null) {
+            streams.close();
+            streams = null;
+        }
         if (databases != null) {
             databases.close();
             databases = null;

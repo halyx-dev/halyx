@@ -43,6 +43,7 @@
         <module>halyx-tck</module>
         <module>halyx-redis</module>
         <module>halyx-sql</module>
+        <module>halyx-kafka</module>
         <module>halyx-aws</module>
         <module>halyx-azure</module>
         <module>halyx-gcp</module>
@@ -79,12 +80,17 @@
         <lettuce.version>6.8.2.RELEASE</lettuce.version>
         <!-- SQL: the pool Spring Boot 3.5 ships (Boot 4 brings 7.x, which is API compatible), and test drivers -->
         <hikaricp.version>6.3.3</hikaricp.version>
+        <!-- Kafka clients: the version Spring Boot 3.5 manages; applications' Boot BOMs choose their own -->
+        <kafka.version>3.9.2</kafka.version>
+        <!-- The Kafka clients Spring Boot 4.1 manages, for the Boot 4 tests -->
+        <kafka4.version>4.2.1</kafka4.version>
         <postgresql.version>42.7.11</postgresql.version>
         <mysql-connector-j.version>9.7.0</mysql-connector-j.version>
         <mssql-jdbc.version>12.10.2.jre11</mssql-jdbc.version>
         <cloud-sql-connector.version>1.30.0</cloud-sql-connector.version>
         <valkey.image>valkey/valkey:9.1.2-alpine</valkey.image>
         <vault.image>hashicorp/vault:2.1.2</vault.image>
+        <kafka.image>apache/kafka:3.9.1</kafka.image>
 
         <!-- Common -->
         <slf4j.version>2.0.20</slf4j.version>
@@ -133,6 +139,11 @@
             </dependency>
             <dependency>
                 <groupId>org.kamranzafar.halyx</groupId>
+                <artifactId>halyx-kafka</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.kamranzafar.halyx</groupId>
                 <artifactId>halyx-aws</artifactId>
                 <version>${project.version}</version>
             </dependency>
@@ -150,6 +161,11 @@
                 <groupId>commons-logging</groupId>
                 <artifactId>commons-logging</artifactId>
                 <version>${commons-logging.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.kafka</groupId>
+                <artifactId>kafka-clients</artifactId>
+                <version>${kafka.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.zaxxer</groupId>
@@ -285,6 +301,7 @@
                             <floci.gcp.image>${floci.gcp.image}</floci.gcp.image>
                             <valkey.image>${valkey.image}</valkey.image>
                             <vault.image>${vault.image}</vault.image>
+                            <kafka.image>${kafka.image}</kafka.image>
                         </systemPropertyVariables>
                     </configuration>
                     <executions>

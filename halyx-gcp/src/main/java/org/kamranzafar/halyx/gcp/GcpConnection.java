@@ -41,6 +41,8 @@ import org.kamranzafar.halyx.config.HttpSettings;
 import org.kamranzafar.halyx.config.ProviderConfig;
 import org.kamranzafar.halyx.error.UnsupportedFeatureException;
 import org.kamranzafar.halyx.jdbc.JdbcDatabases;
+import org.kamranzafar.halyx.kafka.KafkaCredentialsSource;
+import org.kamranzafar.halyx.kafka.KafkaStreamClients;
 import org.kamranzafar.halyx.messaging.SubscriptionConfig;
 import org.kamranzafar.halyx.nosql.TableConfig;
 import org.kamranzafar.halyx.nosql.spi.DocumentStoreDriver;
@@ -56,6 +58,7 @@ import org.kamranzafar.halyx.gcp.parameters.ParameterManagerDriver;
 import org.kamranzafar.halyx.gcp.pubsub.PubSubPublisherDriver;
 import org.kamranzafar.halyx.gcp.pubsub.PubSubSubscriptionDriver;
 import org.kamranzafar.halyx.gcp.parameters.SecretManagerDriver;
+import org.kamranzafar.halyx.gcp.kafka.ManagedKafkaTokens;
 import org.kamranzafar.halyx.gcp.sql.CloudSqlConnector;
 import org.kamranzafar.halyx.gcp.sql.CloudSqlIamTokens;
 import org.kamranzafar.halyx.gcp.storage.GcsBlobStoreDriver;
@@ -71,6 +74,13 @@ import org.kamranzafar.halyx.sql.SqlEngine;
 import org.kamranzafar.halyx.sql.spi.SqlCredentialsSource;
 import org.kamranzafar.halyx.sql.spi.SqlLogin;
 import org.kamranzafar.halyx.storage.spi.BlobStoreDriver;
+import org.kamranzafar.halyx.capability.Capabilities;
+import org.kamranzafar.halyx.stream.StreamCapability;
+import org.kamranzafar.halyx.stream.StreamConfig;
+import org.kamranzafar.halyx.stream.StreamConsumerConfig;
+import org.kamranzafar.halyx.stream.StreamProducerConfig;
+import org.kamranzafar.halyx.stream.spi.ConsumerDriver;
+import org.kamranzafar.halyx.stream.spi.ProducerDriver;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -90,6 +100,7 @@ final class GcpConnection implements ProviderConnection {
     private Firestore firestore;
     private SubscriptionAdminClient subscriptionAdmin;
     private RedisCaches caches;
+    private KafkaStreamClients streams;
     private SecretManagerServiceClient secretManager;
     private final Map<String, ParameterManagerClient> parameterManagers = new HashMap<>();
 
@@ -301,6 +312,37 @@ final class GcpConnection implements ProviderConnection {
         return databases.create(sql, url, credentials, defaults);
     }
 
+    /** A Managed Service for Apache Kafka topic: Apache Kafka, so idempotent and transactional producers are available. */
+    private static final Capabilities MANAGED_KAFKA_CAPABILITIES = Capabilities.of(StreamCapability.values());
+
+    @Override
+    public synchronized ProducerDriver streamProducer(StreamProducerConfig producer) {
+        return streams().producer(producer, managedKafkaCredentials(producer.cluster()), MANAGED_KAFKA_CAPABILITIES, Map.of());
+    }
+
+    @Override
+    public synchronized ConsumerDriver streamConsumer(StreamConsumerConfig consumer) {
+        return streams().consumer(consumer, managedKafkaCredentials(consumer.cluster()), MANAGED_KAFKA_CAPABILITIES, Map.of());
+    }
+
+    private KafkaStreamClients streams() {
+        if (streams == null) {
+            streams = new KafkaStreamClients(GcpProvider.ID);
+        }
+        return streams;
+    }
+
+    /** Google IAM tokens through Application Default Credentials. */
+    private KafkaCredentialsSource managedKafkaCredentials(StreamConfig cluster) {
+        return KafkaStreamClients.credentials(cluster.auth(), () -> {
+            if (!(config.credentials() instanceof Credentials.DefaultChain)) {
+                throw new IllegalArgumentException("Managed Kafka IAM login uses Application Default Credentials; "
+                        + "configure the provider with Credentials.defaultChain()");
+            }
+            return ManagedKafkaTokens.applicationDefault(cluster.property(GcpProperties.KAFKA_PRINCIPAL));
+        });
+    }
+
     private MemorystoreIamTokens iamTokens(CacheAuth.Iam iam) {
         if (!(config.credentials() instanceof Credentials.DefaultChain)) {
             throw new IllegalArgumentException("Memorystore IAM authentication uses Application Default Credentials; "
@@ -311,6 +353,10 @@ final class GcpConnection implements ProviderConnection {
 
     @Override
     public synchronized void close() {
+        if (streams != null) {
+            streams.close();
+            streams = null;
+        }
         if (databases != null) {
             databases.close();
             databases = null;

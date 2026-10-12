@@ -32,6 +32,7 @@ import com.azure.data.appconfiguration.ConfigurationClientBuilder;
 import com.azure.security.keyvault.secrets.SecretClientBuilder;
 import org.kamranzafar.halyx.azure.blob.AzureBlobStoreDriver;
 import org.kamranzafar.halyx.azure.cosmos.CosmosDocumentStoreDriver;
+import org.kamranzafar.halyx.azure.eventhubs.EventHubsEntraTokens;
 import org.kamranzafar.halyx.azure.parameters.AppConfigurationDriver;
 import org.kamranzafar.halyx.azure.parameters.AzureParameterProperties;
 import org.kamranzafar.halyx.azure.parameters.ForceHttpPolicy;
@@ -51,6 +52,8 @@ import org.kamranzafar.halyx.config.Credentials;
 import org.kamranzafar.halyx.config.HttpSettings;
 import org.kamranzafar.halyx.config.ProviderConfig;
 import org.kamranzafar.halyx.jdbc.JdbcDatabases;
+import org.kamranzafar.halyx.kafka.KafkaCredentialsSource;
+import org.kamranzafar.halyx.kafka.KafkaStreamClients;
 import org.kamranzafar.halyx.messaging.SubscriptionConfig;
 import org.kamranzafar.halyx.nosql.TableConfig;
 import org.kamranzafar.halyx.nosql.spi.DocumentStoreDriver;
@@ -63,11 +66,18 @@ import org.kamranzafar.halyx.sql.Database;
 import org.kamranzafar.halyx.sql.SqlAuth;
 import org.kamranzafar.halyx.sql.SqlConfig;
 import org.kamranzafar.halyx.storage.spi.BlobStoreDriver;
+import org.kamranzafar.halyx.capability.Capabilities;
+import org.kamranzafar.halyx.stream.StreamConfig;
+import org.kamranzafar.halyx.stream.StreamConsumerConfig;
+import org.kamranzafar.halyx.stream.StreamProducerConfig;
+import org.kamranzafar.halyx.stream.spi.ConsumerDriver;
+import org.kamranzafar.halyx.stream.spi.ProducerDriver;
 
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -86,6 +96,7 @@ final class AzureConnection implements ProviderConnection {
     private BlobServiceClient blobService;
     private BlobServiceAsyncClient blobAsyncService;
     private RedisCaches caches;
+    private KafkaStreamClients streams;
 
     AzureConnection(ProviderConfig config) {
         this.config = config;
@@ -173,6 +184,55 @@ final class AzureConnection implements ProviderConnection {
         }
         throw new IllegalArgumentException("Key Vault and App Configuration use Entra ID: configure the provider with "
                 + "Credentials.defaultChain(), or use an App Configuration connection string");
+    }
+
+    /**
+     * Event Hubs through its Kafka endpoint. Neither idempotent nor transactional producers are declared: Event
+     * Hubs offers transactions only on its premium and dedicated tiers, and idempotence is unconfirmed.
+     */
+    private static final Capabilities EVENT_HUBS_CAPABILITIES = Capabilities.none();
+
+    /**
+     * Client settings Microsoft recommends for Event Hubs, which closes connections idle for 240 seconds and
+     * accepts requests up to 1 MB; idempotence is off to match the capabilities. Stream properties override them.
+     */
+    static final Map<String, String> EVENT_HUBS_DEFAULTS = Map.of(
+            "connections.max.idle.ms", "180000",
+            "metadata.max.age.ms", "180000",
+            "request.timeout.ms", "60000",
+            "max.request.size", "1046528",
+            "enable.idempotence", "false");
+
+    @Override
+    public synchronized ProducerDriver streamProducer(StreamProducerConfig producer) {
+        return streams().producer(producer, eventHubsCredentials(producer.cluster()), EVENT_HUBS_CAPABILITIES,
+                EVENT_HUBS_DEFAULTS);
+    }
+
+    @Override
+    public synchronized ConsumerDriver streamConsumer(StreamConsumerConfig consumer) {
+        return streams().consumer(consumer, eventHubsCredentials(consumer.cluster()), EVENT_HUBS_CAPABILITIES,
+                EVENT_HUBS_DEFAULTS);
+    }
+
+    private KafkaStreamClients streams() {
+        if (streams == null) {
+            streams = new KafkaStreamClients(AzureProvider.ID);
+        }
+        return streams;
+    }
+
+    /** Entra ID tokens for the namespace, through the default credential chain. */
+    private KafkaCredentialsSource eventHubsCredentials(StreamConfig cluster) {
+        return KafkaStreamClients.credentials(cluster.auth(), () -> {
+            if (!(config.credentials() instanceof Credentials.DefaultChain)) {
+                throw new IllegalArgumentException("Entra ID login to Event Hubs uses the default Azure credential "
+                        + "chain; configure the provider with Credentials.defaultChain()");
+            }
+            String scope = cluster.property(AzureProperties.EVENT_HUBS_SCOPE)
+                    .orElseGet(() -> EventHubsEntraTokens.scope(cluster.bootstrapServerList().getFirst()));
+            return new EventHubsEntraTokens(new DefaultAzureCredentialBuilder().build(), scope);
+        });
     }
 
     private EntraIdRedisTokens entraTokens(CacheAuth.Iam iam) {
@@ -301,6 +361,10 @@ final class AzureConnection implements ProviderConnection {
 
     @Override
     public synchronized void close() {
+        if (streams != null) {
+            streams.close();
+            streams = null;
+        }
         if (databases != null) {
             databases.close();
             databases = null;

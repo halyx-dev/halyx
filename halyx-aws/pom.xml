@@ -59,6 +59,11 @@
             <groupId>org.kamranzafar.halyx</groupId>
             <artifactId>halyx-sql</artifactId>
         </dependency>
+        <!-- Streams: the shared Kafka driver; MSK IAM tokens are signed with http-auth-aws -->
+        <dependency>
+            <groupId>org.kamranzafar.halyx</groupId>
+            <artifactId>halyx-kafka</artifactId>
+        </dependency>
         <!-- Parameters and secrets -->
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
@@ -102,6 +107,12 @@
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>testcontainers-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- No emulator has MSK: the stream TCK runs through this provider against Apache Kafka -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-kafka</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>

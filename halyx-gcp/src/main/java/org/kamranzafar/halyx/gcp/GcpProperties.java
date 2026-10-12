@@ -30,6 +30,12 @@ public final class GcpProperties {
      */
     public static final String SQL_INSTANCE = "gcp.sql.instance";
 
+    /**
+     * Stream cluster property: the email of the principal Managed Kafka tokens are for, when the credentials don't
+     * name one (a gcloud user login). Service accounts are detected.
+     */
+    public static final String KAFKA_PRINCIPAL = "gcp.kafka.principal";
+
     private GcpProperties() {
     }
 }

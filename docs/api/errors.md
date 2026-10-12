@@ -1,7 +1,7 @@
 ---
 title: Errors and retries
 parent: API guide
-nav_order: 7
+nav_order: 8
 ---
 
 # Errors and retries

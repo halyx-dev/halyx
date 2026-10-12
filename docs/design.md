@@ -33,7 +33,8 @@ every provider:
 ```
 
 The same split repeats for every service: `DocumentStore` and `DocumentStoreDriver`, `Publisher` and
-`PublisherDriver`, `Cache` and `CacheDriver`, `ParameterStore` and `ParameterDriver`. Providers are
+`PublisherDriver`, `StreamProducer` and `ProducerDriver`, `Cache` and `CacheDriver`, `ParameterStore` and
+`ParameterDriver`. Providers are
 discovered with `ServiceLoader`, so `halyx-core` has no cloud SDK dependency, and the build enforces
 that.
 
@@ -73,6 +74,7 @@ that.
 | `halyx-tck` | the conformance test kits every provider must pass |
 | `halyx-redis` | the shared Redis and Valkey cache driver (Lettuce), used by every provider |
 | `halyx-sql` | the shared HikariCP pool with per-connection credentials (passwords, cloud IAM tokens) |
+| `halyx-kafka` | the shared Kafka stream driver, with password and cloud IAM login (SASL `OAUTHBEARER`), used by every provider |
 | `halyx-aws` | AWS SDK v2: S3, DynamoDB, SNS, SQS, SSM Parameter Store, Secrets Manager, ElastiCache and RDS IAM login |
 | `halyx-azure` | Azure SDK: Blob Storage, Cosmos DB, Service Bus, Key Vault, App Configuration, Entra ID login for caches and databases |
 | `halyx-gcp` | Google Cloud: Cloud Storage, Firestore, Pub/Sub, Secret Manager, Parameter Manager, Memorystore and Cloud SQL IAM login |
@@ -109,6 +111,7 @@ either portable or explicitly declared as a capability:
 | Blob store | 75 | round trips, streams, parallel transfers, listing and pagination, conditional writes and deletes, batch delete, copy, metadata, checksums, tiers, presigned URLs and multipart |
 | Document store | 23 | every value type, versions and conditions, partial updates with concurrent increments, batches beyond provider limits, sort-key queries both ways with paging, secondary indexes, transactions with rollback, keys with `/ ? # % \`, expiry |
 | Messaging | 15 | round trips, binary bodies, ack and nack, lease expiry and extension, batches, listener retries and concurrency, claim checks, ordering, deduplication, delays |
+| Streams | 25 | keys, headers, partitions and offsets, order per key, committed positions, uncommitted records read again, groups sharing partitions, start positions, listener retries holding only their partition, dead letters, commits on close, claim checks, idempotence and transactions |
 | Cache | 49 | basic and bulk operations, cache-aside, atomic operations, counters, locks, namespaces, expiry (fail-open has its own test against an unreachable server) |
 | Parameter store | 22 | CRUD, versions, prefixes, caching, JSON fields, native names, watching |
 

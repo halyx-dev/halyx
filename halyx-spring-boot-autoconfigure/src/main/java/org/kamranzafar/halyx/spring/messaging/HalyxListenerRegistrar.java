@@ -20,6 +20,13 @@ import org.kamranzafar.halyx.messaging.MessageConsumer;
 import org.kamranzafar.halyx.messaging.MessageListener;
 import org.kamranzafar.halyx.messaging.ReceivedMessage;
 import org.kamranzafar.halyx.messaging.Subscription;
+import org.kamranzafar.halyx.spring.stream.RecordListenerDecorator;
+import org.kamranzafar.halyx.stream.ListenerOptions;
+import org.kamranzafar.halyx.stream.ReceivedRecord;
+import org.kamranzafar.halyx.stream.RecordListener;
+import org.kamranzafar.halyx.stream.StreamConsumer;
+import org.kamranzafar.halyx.stream.StreamListener;
+import org.kamranzafar.halyx.stream.StreamProducer;
 import org.kamranzafar.halyx.spring.autoconfigure.HalyxProperties;
 import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.BeansException;
@@ -53,16 +60,20 @@ public class HalyxListenerRegistrar implements BeanPostProcessor, SmartLifecycle
 
     private final ObjectProvider<HalyxProperties> properties;
     private final ObjectProvider<MessageListenerDecorator> decorators;
+    private final ObjectProvider<RecordListenerDecorator> recordDecorators;
     private final List<Endpoint> endpoints = Collections.synchronizedList(new ArrayList<>());
     private final Map<String, MessageConsumer> consumers = Collections.synchronizedMap(new LinkedHashMap<>());
+    private final Map<String, StreamListener> streamListeners = Collections.synchronizedMap(new LinkedHashMap<>());
     private BeanFactory beanFactory;
     private volatile boolean running;
 
     /** Resolved lazily at start, so this post-processor doesn't create those beans early. */
     public HalyxListenerRegistrar(ObjectProvider<HalyxProperties> properties,
-                                   ObjectProvider<MessageListenerDecorator> decorators) {
+                                   ObjectProvider<MessageListenerDecorator> decorators,
+                                   ObjectProvider<RecordListenerDecorator> recordDecorators) {
         this.properties = Objects.requireNonNull(properties, "properties");
         this.decorators = Objects.requireNonNull(decorators, "decorators");
+        this.recordDecorators = Objects.requireNonNull(recordDecorators, "recordDecorators");
     }
 
     @Override
@@ -79,7 +90,7 @@ public class HalyxListenerRegistrar implements BeanPostProcessor, SmartLifecycle
         methods.forEach((method, annotation) -> {
             if (method.getParameterCount() != 1 || !supported(method.getParameterTypes()[0])) {
                 throw new IllegalStateException("@HalyxListener method " + type.getName() + "." + method.getName()
-                        + " must take one parameter: ReceivedMessage, String or byte[]");
+                        + " must take one parameter: ReceivedMessage or ReceivedRecord, String or byte[]");
             }
             Method invocable = AopUtils.selectInvocableMethod(method, bean.getClass());
             ReflectionUtils.makeAccessible(invocable);
@@ -90,20 +101,30 @@ public class HalyxListenerRegistrar implements BeanPostProcessor, SmartLifecycle
     }
 
     private static boolean supported(Class<?> parameter) {
-        return parameter == ReceivedMessage.class || parameter == String.class || parameter == byte[].class;
+        return parameter == ReceivedMessage.class || parameter == ReceivedRecord.class || parameter == String.class
+                || parameter == byte[].class;
     }
 
     @Override
     public void start() {
         synchronized (endpoints) {
             for (Endpoint endpoint : endpoints) {
+                if (isStream(endpoint)) {
+                    startStream(endpoint);
+                    continue;
+                }
+                if (endpoint.method().getParameterTypes()[0] == ReceivedRecord.class) {
+                    throw new IllegalStateException("@HalyxListener(\"" + endpoint.subscription() + "\") on "
+                            + endpoint.method() + " takes a ReceivedRecord but refers to no stream consumer; configure "
+                            + "halyx.stream-consumers." + endpoint.subscription());
+                }
                 Subscription subscription;
                 try {
                     subscription = beanFactory.getBean(endpoint.subscription(), Subscription.class);
                 } catch (NoSuchBeanDefinitionException e) {
                     throw new IllegalStateException("@HalyxListener(\"" + endpoint.subscription() + "\") on "
-                            + endpoint.method() + " refers to no subscription; configure halyx.subscriptions."
-                            + endpoint.subscription(), e);
+                            + endpoint.method() + " refers to no subscription or stream consumer; configure halyx.subscriptions."
+                            + endpoint.subscription() + " or halyx.stream-consumers." + endpoint.subscription(), e);
                 }
                 HalyxProperties bound = properties.getIfAvailable();
                 var config = bound == null ? null : bound.subscriptions().get(endpoint.subscription());
@@ -121,10 +142,48 @@ public class HalyxListenerRegistrar implements BeanPostProcessor, SmartLifecycle
         running = true;
     }
 
+    private void startStream(Endpoint endpoint) {
+        String name = endpoint.subscription();
+        if (endpoint.method().getParameterTypes()[0] == ReceivedMessage.class) {
+            throw new IllegalStateException("@HalyxListener(\"" + name + "\") on " + endpoint.method()
+                    + " refers to a stream consumer, whose methods take a ReceivedRecord, String or byte[]");
+        }
+        StreamConsumer consumer = beanFactory.getBean(name, StreamConsumer.class);
+        HalyxProperties bound = properties.getIfAvailable();
+        var config = bound == null ? null : bound.streamConsumers().get(name);
+        ListenerOptions options = ListenerOptions.DEFAULTS;
+        if (config != null) {
+            String deadLetter = config.listener().deadLetter();
+            StreamProducer deadLetterProducer = null;
+            if (deadLetter != null) {
+                if (!beanFactory.containsBean(deadLetter) || !beanFactory.isTypeMatch(deadLetter, StreamProducer.class)) {
+                    throw new IllegalStateException("halyx.stream-consumers." + name + ".listener.dead-letter must name "
+                            + "one of halyx.stream-producers, not '" + deadLetter + "'");
+                }
+                deadLetterProducer = beanFactory.getBean(deadLetter, StreamProducer.class);
+            }
+            options = config.listener().toListenerOptions(deadLetterProducer);
+        }
+        RecordListener listener = record -> invoke(endpoint, record);
+        for (RecordListenerDecorator decorator : recordDecorators.orderedStream().toList()) {
+            listener = decorator.decorate(name, listener);
+        }
+        streamListeners.put(endpoint.key(), consumer.listen(listener, options));
+    }
+
     private static void invoke(Endpoint endpoint, ReceivedMessage message) throws Exception {
         Class<?> parameter = endpoint.method().getParameterTypes()[0];
-        Object argument = parameter == String.class ? message.bodyAsString()
-                : parameter == byte[].class ? message.body() : message;
+        invoke(endpoint, parameter == String.class ? message.bodyAsString()
+                : parameter == byte[].class ? message.body() : message);
+    }
+
+    private static void invoke(Endpoint endpoint, ReceivedRecord record) throws Exception {
+        Class<?> parameter = endpoint.method().getParameterTypes()[0];
+        invoke(endpoint, parameter == String.class ? record.valueAsString()
+                : parameter == byte[].class ? record.value() : record);
+    }
+
+    private static void invoke(Endpoint endpoint, Object argument) throws Exception {
         try {
             endpoint.method().invoke(endpoint.bean(), argument);
         } catch (InvocationTargetException e) {
@@ -138,15 +197,25 @@ public class HalyxListenerRegistrar implements BeanPostProcessor, SmartLifecycle
     @Override
     public void stop() {
         running = false;
-        List<MessageConsumer> toClose;
+        List<AutoCloseable> toClose = new ArrayList<>();
         synchronized (consumers) {
-            toClose = new ArrayList<>(consumers.values());
+            toClose.addAll(consumers.values());
             consumers.clear();
+        }
+        synchronized (streamListeners) {
+            toClose.addAll(streamListeners.values());
+            streamListeners.clear();
         }
         // Close in parallel: each waits for its own running handlers.
         List<Thread> closing = new ArrayList<>();
-        for (MessageConsumer consumer : toClose) {
-            closing.add(Thread.ofVirtual().start(consumer::close));
+        for (AutoCloseable consumer : toClose) {
+            closing.add(Thread.ofVirtual().start(() -> {
+                try {
+                    consumer.close();
+                } catch (Exception e) {
+                    // closing anyway
+                }
+            }));
         }
         for (Thread thread : closing) {
             try {
@@ -176,10 +245,29 @@ public class HalyxListenerRegistrar implements BeanPostProcessor, SmartLifecycle
         }
     }
 
-    /** The subscriptions that have listeners, known once every bean has been created. */
+    /** Running stream listeners by {@code <consumer>#<bean>.<method>}. */
+    public Map<String, StreamListener> streamListeners() {
+        synchronized (streamListeners) {
+            return Map.copyOf(streamListeners);
+        }
+    }
+
+    /** The subscription listeners, by {@code <subscription>#<bean>.<method>}, known once every bean has been created. */
     public List<String> subscriptionKeys() {
         synchronized (endpoints) {
-            return endpoints.stream().map(Endpoint::key).toList();
+            return endpoints.stream().filter(e -> !isStream(e)).map(Endpoint::key).toList();
         }
+    }
+
+    /** The stream listeners, by {@code <consumer>#<bean>.<method>}, known once every bean has been created. */
+    public List<String> streamKeys() {
+        synchronized (endpoints) {
+            return endpoints.stream().filter(this::isStream).map(Endpoint::key).toList();
+        }
+    }
+
+    private boolean isStream(Endpoint endpoint) {
+        return beanFactory.containsBean(endpoint.subscription())
+                && beanFactory.isTypeMatch(endpoint.subscription(), StreamConsumer.class);
     }
 }

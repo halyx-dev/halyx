@@ -32,6 +32,14 @@ import org.kamranzafar.halyx.sql.SqlAuth;
 import org.kamranzafar.halyx.sql.SqlConfig;
 import org.kamranzafar.halyx.sql.SqlEngine;
 import org.kamranzafar.halyx.storage.BlobStore;
+import org.kamranzafar.halyx.stream.ListenerOptions;
+import org.kamranzafar.halyx.stream.SaslMechanism;
+import org.kamranzafar.halyx.stream.StartPosition;
+import org.kamranzafar.halyx.stream.StreamAuth;
+import org.kamranzafar.halyx.stream.StreamConfig;
+import org.kamranzafar.halyx.stream.StreamConsumerConfig;
+import org.kamranzafar.halyx.stream.StreamProducer;
+import org.kamranzafar.halyx.stream.StreamProducerConfig;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
@@ -74,6 +82,10 @@ import java.util.Map;
  * @param topics      {@code Publisher} beans to create, keyed by bean name
  * @param subscriptions {@code Subscription} beans to create, keyed by bean name; also what
  *                    {@code @HalyxListener} refers to
+ * @param streamClusters stream clusters (MSK, Event Hubs, Managed Kafka) that producers and consumers use
+ * @param streamProducers {@code StreamProducer} beans to create, keyed by bean name
+ * @param streamConsumers {@code StreamConsumer} beans to create, keyed by bean name; {@code @HalyxListener}
+ *                    can refer to them too
  * @param retry       provider-neutral retries on top of the SDKs' own
  * @param observations Micrometer observations of every operation
  */
@@ -84,6 +96,9 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
                                 Map<String, DatabaseProperties> databases,
                                 Map<String, DocumentStoreProperties> documentStores,
                                 Map<String, TopicProperties> topics, Map<String, SubscriptionProperties> subscriptions,
+                                Map<String, StreamClusterProperties> streamClusters,
+                                Map<String, StreamProducerProperties> streamProducers,
+                                Map<String, StreamConsumerProperties> streamConsumers,
                                 @DefaultValue Retry retry, @DefaultValue Observations observations) {
 
     public HalyxProperties {
@@ -95,6 +110,9 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
         documentStores = ordered(documentStores);
         topics = ordered(topics);
         subscriptions = ordered(subscriptions);
+        streamClusters = ordered(streamClusters);
+        streamProducers = ordered(streamProducers);
+        streamConsumers = ordered(streamConsumers);
     }
 
     private static <V> Map<String, V> ordered(Map<String, V> map) {
@@ -364,6 +382,145 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
                     initialBackoff == null ? d.initialBackoff() : initialBackoff,
                     maxBackoff == null ? d.maxBackoff() : maxBackoff,
                     extendLease == null ? d.extendLease() : extendLease,
+                    shutdownTimeout == null ? d.shutdownTimeout() : shutdownTimeout);
+        }
+    }
+
+    /**
+     * A stream cluster: Amazon MSK, Azure Event Hubs (its Kafka endpoint) or Google Cloud Managed Service for
+     * Apache Kafka.
+     *
+     * @param provider         the provider name; may be omitted when exactly one provider is configured
+     * @param bootstrapServers comma-separated {@code host:port} pairs
+     * @param auth             how clients log in
+     * @param properties       provider settings, such as {@code aws.msk.region}, or Kafka client settings
+     *                         prefixed with {@code kafka.}
+     */
+    public record StreamClusterProperties(String provider, String bootstrapServers,
+                                          @DefaultValue StreamAuthProperties auth, Map<String, String> properties) {
+
+        public StreamClusterProperties {
+            properties = ordered(properties);
+        }
+
+        StreamConfig toStreamConfig(String key) {
+            String prefix = "halyx.stream-clusters." + key;
+            if (bootstrapServers == null || bootstrapServers.isBlank()) {
+                throw new IllegalStateException(prefix + ".bootstrap-servers is required");
+            }
+            StreamConfig.Builder config = StreamConfig.builder(bootstrapServers).auth(auth.toStreamAuth(prefix + ".auth"));
+            properties.forEach(config::property);
+            return config.build();
+        }
+    }
+
+    /**
+     * @param type      {@code none}, {@code password} or {@code iam} (MSK IAM, Entra ID, Google IAM tokens)
+     * @param mechanism for {@code password}: {@code plain}, {@code scram-sha-256} or {@code scram-sha-512}
+     * @param username  for {@code password}; {@code $ConnectionString} for an Event Hubs connection string
+     * @param password  for {@code password}
+     */
+    public record StreamAuthProperties(@DefaultValue("none") Type type, SaslMechanism mechanism, String username,
+                                       String password) {
+
+        public enum Type { NONE, PASSWORD, IAM }
+
+        StreamAuth toStreamAuth(String prefix) {
+            return switch (type) {
+                case NONE -> StreamAuth.none();
+                case IAM -> StreamAuth.iam();
+                case PASSWORD -> {
+                    if (mechanism == null || username == null || password == null) {
+                        throw new IllegalStateException(prefix + ".mechanism, .username and .password are required "
+                                + "for password auth");
+                    }
+                    yield StreamAuth.password(mechanism, username, password);
+                }
+            };
+        }
+    }
+
+    /**
+     * A stream topic to send to, registered as a {@code StreamProducer} bean named after its key.
+     *
+     * @param cluster       one of the {@code halyx.stream-clusters}; may be omitted when exactly one is configured
+     * @param topic         the topic; defaults to the key
+     * @param claimCheck    send large values through a blob store
+     * @param idempotent    have the broker drop resent duplicates; needs the {@code IDEMPOTENCE} capability
+     * @param transactional make {@code sendAll} all or nothing; needs the {@code TRANSACTIONS} capability
+     * @param properties    provider settings, or Kafka producer settings prefixed with {@code kafka.}
+     */
+    public record StreamProducerProperties(String cluster, String topic, ClaimCheckProperties claimCheck,
+                                           @DefaultValue("false") boolean idempotent,
+                                           @DefaultValue("false") boolean transactional, Map<String, String> properties) {
+
+        public StreamProducerProperties {
+            properties = ordered(properties);
+        }
+
+        StreamProducerConfig toProducerConfig(String key, StreamConfig resolvedCluster, ClaimCheck resolvedClaimCheck) {
+            StreamProducerConfig.Builder config = StreamProducerConfig.builder(resolvedCluster,
+                    topic == null || topic.isBlank() ? key : topic).idempotent(idempotent).transactional(transactional);
+            if (resolvedClaimCheck != null) {
+                config.claimCheck(resolvedClaimCheck);
+            }
+            properties.forEach(config::property);
+            return config.build();
+        }
+    }
+
+    /**
+     * A consumer group member on a stream topic, registered as a {@code StreamConsumer} bean named after its key.
+     *
+     * @param cluster        one of the {@code halyx.stream-clusters}; may be omitted when exactly one is configured
+     * @param topic          the topic; defaults to the key
+     * @param group          the consumer group; defaults to the key
+     * @param startPosition  {@code earliest} or {@code latest} (default), where a new group starts
+     * @param readCommitted  hide records of aborted and open transactions
+     * @param claimCheck     resolve values sent through a blob store; must match the producer's
+     * @param listener       how {@code @HalyxListener} methods on this consumer are run
+     * @param properties     provider settings, or Kafka consumer settings prefixed with {@code kafka.}
+     */
+    public record StreamConsumerProperties(String cluster, String topic, String group,
+                                           @DefaultValue("latest") StartPosition startPosition,
+                                           @DefaultValue("false") boolean readCommitted, ClaimCheckProperties claimCheck,
+                                           @DefaultValue StreamListenerProperties listener,
+                                           Map<String, String> properties) {
+
+        public StreamConsumerProperties {
+            properties = ordered(properties);
+        }
+
+        StreamConsumerConfig toConsumerConfig(String key, StreamConfig resolvedCluster, ClaimCheck resolvedClaimCheck) {
+            StreamConsumerConfig.Builder config = StreamConsumerConfig.builder(resolvedCluster,
+                            topic == null || topic.isBlank() ? key : topic, group == null || group.isBlank() ? key : group)
+                    .startPosition(startPosition).readCommitted(readCommitted);
+            if (resolvedClaimCheck != null) {
+                config.claimCheck(resolvedClaimCheck);
+            }
+            properties.forEach(config::property);
+            return config.build();
+        }
+    }
+
+    /**
+     * See {@code ListenerOptions}; unset values keep its defaults.
+     *
+     * @param deadLetter bean name of one of the {@code halyx.stream-producers}, where records go after
+     *                   {@code max-attempts}
+     */
+    public record StreamListenerProperties(Duration pollWait, Integer maxBufferedRecords, Duration initialBackoff,
+                                           Duration maxBackoff, Integer maxAttempts, String deadLetter,
+                                           Duration commitInterval, Duration shutdownTimeout) {
+
+        public ListenerOptions toListenerOptions(StreamProducer resolvedDeadLetter) {
+            ListenerOptions d = ListenerOptions.DEFAULTS;
+            return new ListenerOptions(pollWait == null ? d.pollWait() : pollWait,
+                    maxBufferedRecords == null ? d.maxBufferedRecords() : maxBufferedRecords,
+                    initialBackoff == null ? d.initialBackoff() : initialBackoff,
+                    maxBackoff == null ? d.maxBackoff() : maxBackoff,
+                    maxAttempts == null ? d.maxAttempts() : maxAttempts, resolvedDeadLetter,
+                    commitInterval == null ? d.commitInterval() : commitInterval,
                     shutdownTimeout == null ? d.shutdownTimeout() : shutdownTimeout);
         }
     }

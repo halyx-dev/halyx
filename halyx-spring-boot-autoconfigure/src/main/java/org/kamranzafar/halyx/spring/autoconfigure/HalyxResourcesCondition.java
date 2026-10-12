@@ -20,10 +20,12 @@ import org.kamranzafar.halyx.messaging.Subscription;
 import org.kamranzafar.halyx.nosql.DocumentStore;
 import org.kamranzafar.halyx.parameters.ParameterStore;
 import org.kamranzafar.halyx.storage.BlobStore;
+import org.kamranzafar.halyx.stream.StreamConsumer;
+import org.kamranzafar.halyx.stream.StreamProducer;
 import org.springframework.boot.autoconfigure.condition.AnyNestedCondition;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 
-/** Matches when the context has at least one {@link BlobStore}, {@link Cache} or {@link ParameterStore} bean. */
+/** Matches when the context has at least one Halyx service bean, such as a {@link BlobStore} or {@link Cache}. */
 public class HalyxResourcesCondition extends AnyNestedCondition {
 
     public HalyxResourcesCondition() {
@@ -48,5 +50,13 @@ public class HalyxResourcesCondition extends AnyNestedCondition {
 
     @ConditionalOnBean(DocumentStore.class)
     static class HasDocumentStore {
+    }
+
+    @ConditionalOnBean(StreamProducer.class)
+    static class HasStreamProducer {
+    }
+
+    @ConditionalOnBean(StreamConsumer.class)
+    static class HasStreamConsumer {
     }
 }
