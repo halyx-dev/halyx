@@ -34,7 +34,7 @@ nav_order: 8
 Publish the first release to Maven Central:
 
 - [x] Apache-2.0 license, with headers on every source file
-- [x] the `org.kamranzafar.cirrus` group id
+- [x] the `org.kamranzafar.halyx` group id
 - [x] a full build and test pass, on emulators and on real clouds
 - [ ] project metadata: URL, SCM and developers
 - [ ] source and javadoc jars, signing, and the Central publishing plugin
@@ -51,7 +51,7 @@ Publish the first release to Maven Central:
 
 Planned, and prioritised by demand:
 
-- **Spring Data repositories over document stores** (`cirrus-spring-data`): CRUD by composite id
+- **Spring Data repositories over document stores** (`halyx-spring-data`): CRUD by composite id
   (`@PartitionKey`, `@SortKey`), `@Version` optimistic locking, derived queries on the partition key, sort
   range and declared indexes, and keyset scrolling (`Window` and `ScrollPosition`). Not planned: table
   scans, general `@Transactional` and reactive repositories.

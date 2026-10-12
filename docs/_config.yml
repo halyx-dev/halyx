@@ -14,14 +14,14 @@
 # limitations under the License.
 #
 
-# GitHub Pages site for Cirrus: Settings → Pages → "Deploy from a branch", folder /docs.
-# Published at https://kamranzafar.github.io/cirrus
+# GitHub Pages site for Halyx: Settings → Pages → "Deploy from a branch", folder /docs.
+# Published at https://kamranzafar.github.io/halyx
 
-title: Cirrus
-description: One Java API for storage, NoSQL, messaging, SQL, caches, parameters and secrets on AWS, Azure and Google Cloud.
+title: Halyx Multi-Cloud SDK
+description: Halyx Multi-Cloud SDK, one Java API for storage, NoSQL, messaging, SQL, caches, parameters and secrets on AWS, Azure and Google Cloud.
 lang: en-US
 url: "https://kamranzafar.github.io"
-baseurl: "/cirrus"
+baseurl: "/halyx"
 
 remote_theme: just-the-docs/just-the-docs@v0.12.0
 plugins:
@@ -45,7 +45,7 @@ search:
 
 aux_links:
   "GitHub":
-    - "https://github.com/kamranzafar/cirrus"
+    - "https://github.com/kamranzafar/halyx"
 aux_links_new_tab: true
 
 heading_anchors: true
@@ -68,7 +68,7 @@ callouts:
     color: red
 
 footer_content: >-
-  Copyright 2026 Kamran Zafar. Cirrus is distributed under the
+  Copyright 2026 Kamran Zafar. Halyx is distributed under the
   <a href="https://www.apache.org/licenses/LICENSE-2.0">Apache License 2.0</a>.
 
 exclude:

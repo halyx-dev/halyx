@@ -7,8 +7,8 @@ nav_order: 3
 # Microsoft Azure: real-cloud results
 {: .no_toc }
 
-Results of running the Cirrus conformance kits against real Microsoft Azure services in `australiaeast` (Sydney), acting as
-the `cirrus-test` service principal. Every run creates its own throwaway resources and deletes them afterwards. See
+Results of running the Halyx conformance kits against real Microsoft Azure services in `australiaeast` (Sydney), acting as
+the `halyx-test` service principal. Every run creates its own throwaway resources and deletes them afterwards. See
 [Cloud testing](index.md) for how the runs work.
 
 | Tier | Services | Latest result |
@@ -32,8 +32,8 @@ scripts/azure-real-cloud.sh                # AZURE_LOCATION=australiaeast by def
 IT_TEST='RealAzureIT$Cosmos' scripts/azure-real-cloud.sh     # one suite only
 ```
 
-**Identity.** Terraform and the tests act as a dedicated `cirrus-test` service principal. Its
-credentials live in `~/.azure/cirrus-test.env`, outside the repository and readable only by its owner.
+**Identity.** Terraform and the tests act as a dedicated `halyx-test` service principal. Its
+credentials live in `~/.azure/halyx-test.env`, outside the repository and readable only by its owner.
 The setup script:
 - registers the resource providers
 - creates the principal with Contributor on the subscription
@@ -44,7 +44,7 @@ The tests reach every service through `DefaultAzureCredential`'s environment-var
 application would.
 
 **Provision.** Terraform (`infra/azure/tier1`) creates a resource group of the run's own, tagged
-`cirrus-test=<run id>`, with:
+`halyx-test=<run id>`, with:
 - a StorageV2 account
 - a Standard Service Bus namespace
 - a serverless Cosmos DB account with the `items` and `items-sorted` containers
@@ -71,7 +71,7 @@ resources, and deleted vaults and stores; a failed listing is reported as `CHECK
 | Result | **BUILD SUCCESS**: 156 passed, 0 failed, 2 skipped (expected) |
 | Teardown | resource group destroyed, Key Vault and App Configuration store purged; check: **nothing left** |
 
-| Service | Cirrus API | Tests | Passed | Skipped | Time |
+| Service | Halyx API | Tests | Passed | Skipped | Time |
 |---|---|---|---|---|---|
 | Blob Storage | `BlobStore` | 75 | 74 | 1 | 201.5s |
 | Cosmos DB | `DocumentStore` | 23 | 23 | 0 | 26.8s |
@@ -303,7 +303,7 @@ TIER=2 scripts/azure-real-cloud.sh
 The script first registers `Microsoft.DBforPostgreSQL` and `Microsoft.Sql`, as the service principal
 through the REST API. Terraform (`infra/azure/tier2`) then creates:
 - **PostgreSQL:** a flexible server (16, `B_Standard_B1ms`) with Entra and password auth. The service
-  principal is its Entra admin (role `cirrus-test`), and a password admin `cirrus_admin` gets a password
+  principal is its Entra admin (role `halyx-test`), and a password admin `halyx_admin` gets a password
   generated for the run and passed through the environment only.
 - **Azure SQL:** a Basic database on a server that allows **Entra ID only**, with the service principal as
   its admin. SQL logins are refused.
@@ -327,9 +327,9 @@ which only a directory admin can grant. Left out by choice for now.
 | `loginLatency`: runs first; a warm Entra login must take under 3s | passed (6.0s) | passed (2.0s) |
 | `entraLoginRunsQueriesOverTls`: the server reports the session encrypted (`pg_stat_ssl` / `sys.dm_exec_connections.encrypt_option`) | passed (1.0s) | passed (0.9s) |
 | `replacedConnectionsLogInAgainWithTokens` | passed (5.2s) | passed (4.5s) |
-| `entraLoginIsThePrincipalsRole`: `current_user` is `cirrus-test` | passed (9.4s) | — |
+| `entraLoginIsThePrincipalsRole`: `current_user` is `halyx-test` | passed (9.4s) | — |
 | `passwordLoginRunsQueriesOverTls`: the password admin, over TLS | passed (2.5s) | — |
-| `tokenDoesNotLogInARoleThatIsNotAnEntraPrincipal`: a token for `cirrus_admin` is refused | passed (6.8s) | — |
+| `tokenDoesNotLogInARoleThatIsNotAnEntraPrincipal`: a token for `halyx_admin` is refused | passed (6.8s) | — |
 | `wrongPasswordDoesNotLogIn` | passed (3.4s) | — |
 | `sqlPasswordLoginIsRefusedOnAnEntraOnlyServer` | — | passed (2.5s) |
 
@@ -355,7 +355,7 @@ Redis** cache (`Balanced_B0`, no high availability) with:
 
 The service principal gets the cache's `default` access policy. This subscription doesn't offer classic
 Azure Cache for Redis in Australia East, and Managed Redis is its successor. The username is the
-principal's object id, which Cirrus reads from the token's `oid` claim.
+principal's object id, which Halyx reads from the token's `oid` claim.
 
 | | |
 |---|---|
@@ -390,7 +390,7 @@ The emulators (Floci-az and Microsoft's Service Bus emulator) missed all of thes
 |---|---|
 | Real Cosmos returns no document from a write unless asked (`contentResponseOnWriteEnabled` is off in the Java SDK), so `update` failed after the patch had already applied | Patch asks for the document back |
 | Cosmos ids can't contain `/ \ ? #`, and the gateway URL-decodes ids in point reads, so the driver's `%` escapes were undone (`order%232` was looked up as `order#2`) | Ids are escaped with `~` (`~23`), and `%` itself is escaped too. Ids written by earlier versions with `%` escapes would need migrating; there's no release yet |
-| Azure metadata names must be C# identifiers; `schema-version` is a 400 `InvalidMetadata`. Cirrus documented "letters, digits and '-'" as portable | The portable form is now lower-case letters, digits and `_`, starting with a letter. The Azure driver rejects other names with a clear `InvalidArgumentException` before sending anything |
+| Azure metadata names must be C# identifiers; `schema-version` is a 400 `InvalidMetadata`. Halyx documented "letters, digits and '-'" as portable | The portable form is now lower-case letters, digits and `_`, starting with a letter. The Azure driver rejects other names with a clear `InvalidArgumentException` before sending anything |
 | Azure SQL's Entra-only servers refuse every SQL login, and an Entra admin can be a service principal, whose session runs as `<application id>@<tenant id>` | Nothing to change: `SqlAuth.iam()` sends the token as `accessToken`, with no username |
 | Key Vault deletes and recoveries are long-running operations, and the driver waited for them (about 2–5s per call) | Removed: `delete` starts the soft delete and returns. Writing a name that is soft-deleted, or still being deleted or recovered, throws the retryable `UnavailableException`, and starts recovery if the name was soft-deleted. Applications retry; the kit does so through `deleteLag()` |
 
@@ -398,7 +398,7 @@ The emulators (Floci-az and Microsoft's Service Bus emulator) missed all of thes
 
 | Who | Role | Scope | Why |
 |---|---|---|---|
-| `cirrus-test` service principal | Contributor | subscription | create and delete each run's resource group and its resources |
+| `halyx-test` service principal | Contributor | subscription | create and delete each run's resource group and its resources |
 | | Role Based Access Control Administrator, with a condition | subscription | assign and remove only Storage Blob Data Contributor, Azure Service Bus Data Owner, Key Vault Secrets Officer and App Configuration Data Owner |
 | | Storage Blob Data Contributor, Azure Service Bus Data Owner, Key Vault Secrets Officer, App Configuration Data Owner | each run's resources (Terraform) | the data planes the tests use |
 | | Cosmos DB Built-in Data Contributor (Cosmos RBAC) | each run's Cosmos account (Terraform) | Cosmos' own data-plane roles |

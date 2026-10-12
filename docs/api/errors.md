@@ -85,10 +85,10 @@ String describe(CloudException e) {
 ## Retries
 
 The cloud SDKs already retry transient errors such as network failures, 5xx responses and throttling.
-On top of that, Cirrus offers an opt-in, provider-neutral `RetryInterceptor`:
+On top of that, Halyx offers an opt-in, provider-neutral `RetryInterceptor`:
 
 ```java
-Cirrus cirrus = Cirrus.builder()
+Halyx halyx = Halyx.builder()
         .register("aws", ProviderConfig.of("aws").region("eu-west-2"))
         .interceptor(new RetryInterceptor(new RetryPolicy(
                 4,                          // attempts, including the first
@@ -111,7 +111,7 @@ AWS clients use the SDK's **adaptive** retry mode by default (`aws.retry-mode`: 
 applies per provider connection; choose `standard` if a throttled bucket mustn't slow calls to others.
 
 {: .note }
-Cirrus doesn't hide eventual consistency or asynchronous deletes behind waits. When a backend isn't ready
+Halyx doesn't hide eventual consistency or asynchronous deletes behind waits. When a backend isn't ready
 yet, as with a Key Vault or Secrets Manager name that's still being deleted, the call fails fast with
 the retryable `UnavailableException`, and your code, or your `RetryInterceptor`, chooses how to wait.
 
@@ -137,7 +137,7 @@ class SlowCallLogger implements Interceptor {
     }
 }
 
-Cirrus cirrus = Cirrus.builder()
+Halyx halyx = Halyx.builder()
         .register("aws", ProviderConfig.of("aws"))
         .interceptor(new SlowCallLogger())
         .interceptor(new RetryInterceptor(RetryPolicy.defaults()))

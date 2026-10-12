@@ -23,7 +23,7 @@
 #   TIER=3 scripts/aws-real-cloud.sh                                  # ElastiCache for Valkey with IAM auth
 #
 # Tier 1 (the default):
-# 1. Terraform creates an S3 bucket and two DynamoDB tables named after a fresh run id (tagged cirrus-test=<id>).
+# 1. Terraform creates an S3 bucket and two DynamoDB tables named after a fresh run id (tagged halyx-test=<id>).
 # 2. RealAwsIT runs the blob, document store, messaging and parameter kits; it creates SNS topics and SQS queues
 #    named after the run, and parameters and secrets under tck-<random> names, and deletes them as it goes.
 # 3. Always, even if tests fail or the script is interrupted: sweep anything of this run the tests left behind,
@@ -57,11 +57,11 @@ fi
 if [[ "$TIER" == 2 ]]; then
   # RDS master passwords can't contain / @ " or spaces; keep it alphanumeric.
   export TF_VAR_master_password="$(openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | head -c 32)"
-  export CIRRUS_RDS_MASTER_PASSWORD="$TF_VAR_master_password"
+  export HALYX_RDS_MASTER_PASSWORD="$TF_VAR_master_password"
 fi
 if [[ "$TIER" == 3 ]]; then
-  WORK="$(mktemp -d -t "cirrus-$RUN")"   # run key, known_hosts, SSH control socket, JVM hosts file
-  ssh-keygen -q -t ed25519 -N "" -C "cirrus-$RUN" -f "$WORK/key"
+  WORK="$(mktemp -d -t "halyx-$RUN")"   # run key, known_hosts, SSH control socket, JVM hosts file
+  ssh-keygen -q -t ed25519 -N "" -C "halyx-$RUN" -f "$WORK/key"
   export TF_VAR_default_user_password="$(openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | head -c 32)"
   TF_VARS+=(-var "ssh_public_key=$(cat "$WORK/key.pub")")
   LOCAL_PORT=16379
@@ -73,10 +73,10 @@ log() { printf '\n== %s\n' "$*"; }
 
 sweep() {
   log "Sweeping resources of run $RUN created by the tests"
-  for arn in $(aws sns list-topics --query "Topics[?contains(TopicArn, ':cirrus-$RUN-')].TopicArn" --output text); do
+  for arn in $(aws sns list-topics --query "Topics[?contains(TopicArn, ':halyx-$RUN-')].TopicArn" --output text); do
     echo "  deleting topic $arn"; aws sns delete-topic --topic-arn "$arn"
   done
-  for url in $(aws sqs list-queues --queue-name-prefix "cirrus-$RUN-" --query 'QueueUrls' --output text 2>/dev/null | tr '\t' '\n' | grep -v None); do
+  for url in $(aws sqs list-queues --queue-name-prefix "halyx-$RUN-" --query 'QueueUrls' --output text 2>/dev/null | tr '\t' '\n' | grep -v None); do
     echo "  deleting queue $url"; aws sqs delete-queue --queue-url "$url"
   done
   # Parameters and secrets the parameter kit created during this run (names start with tck-).
@@ -110,39 +110,39 @@ teardown() {
   local left
   # The tagging index keeps terminated instances and their deleted volumes for a while; those two are checked
   # directly below instead.
-  left=$(aws resourcegroupstaggingapi get-resources --tag-filters "Key=cirrus-test,Values=$RUN" \
+  left=$(aws resourcegroupstaggingapi get-resources --tag-filters "Key=halyx-test,Values=$RUN" \
       --query 'ResourceTagMappingList[].ResourceARN' --output text | tr '\t' '\n' | grep -v -E ':(instance|volume)/')
-  left+=$(aws sns list-topics --query "Topics[?contains(TopicArn, ':cirrus-$RUN-')].TopicArn" --output text)
-  left+=$(aws sqs list-queues --queue-name-prefix "cirrus-$RUN-" --query 'QueueUrls' --output text 2>/dev/null | grep -v None)
+  left+=$(aws sns list-topics --query "Topics[?contains(TopicArn, ':halyx-$RUN-')].TopicArn" --output text)
+  left+=$(aws sqs list-queues --queue-name-prefix "halyx-$RUN-" --query 'QueueUrls' --output text 2>/dev/null | grep -v None)
   if [[ "$TIER" == 2 ]]; then
     for db in pg mysql; do
-      left+=$(aws rds describe-db-instances --db-instance-identifier "cirrus-$RUN-$db" \
-          --query 'DBInstances[].DBInstanceStatus' --output text 2>/dev/null | sed "s/^/ db cirrus-$RUN-$db:/")
+      left+=$(aws rds describe-db-instances --db-instance-identifier "halyx-$RUN-$db" \
+          --query 'DBInstances[].DBInstanceStatus' --output text 2>/dev/null | sed "s/^/ db halyx-$RUN-$db:/")
     done
-    left+=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=cirrus-$RUN-db" \
+    left+=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=halyx-$RUN-db" \
         --query 'SecurityGroups[].GroupId' --output text)
-    left+=$(aws rds describe-db-subnet-groups --db-subnet-group-name "cirrus-$RUN" \
+    left+=$(aws rds describe-db-subnet-groups --db-subnet-group-name "halyx-$RUN" \
         --query 'DBSubnetGroups[].DBSubnetGroupName' --output text 2>/dev/null)
   fi
   if [[ "$TIER" == 3 ]]; then
-    left+=$(aws elasticache describe-replication-groups --replication-group-id "cirrus-$RUN" \
-        --query 'ReplicationGroups[].Status' --output text 2>/dev/null | sed "s/^/ replication group cirrus-$RUN:/")
-    left+=$(aws elasticache describe-users --query "Users[?starts_with(UserId, 'cirrus-$RUN-')].UserId" --output text)
-    left+=$(aws elasticache describe-user-groups --query "UserGroups[?UserGroupId=='cirrus-$RUN'].UserGroupId" --output text)
-    left+=$(aws elasticache describe-cache-subnet-groups --cache-subnet-group-name "cirrus-$RUN" \
+    left+=$(aws elasticache describe-replication-groups --replication-group-id "halyx-$RUN" \
+        --query 'ReplicationGroups[].Status' --output text 2>/dev/null | sed "s/^/ replication group halyx-$RUN:/")
+    left+=$(aws elasticache describe-users --query "Users[?starts_with(UserId, 'halyx-$RUN-')].UserId" --output text)
+    left+=$(aws elasticache describe-user-groups --query "UserGroups[?UserGroupId=='halyx-$RUN'].UserGroupId" --output text)
+    left+=$(aws elasticache describe-cache-subnet-groups --cache-subnet-group-name "halyx-$RUN" \
         --query 'CacheSubnetGroups[].CacheSubnetGroupName' --output text 2>/dev/null)
-    left+=$(aws ec2 describe-instances --filters "Name=tag:cirrus-test,Values=$RUN" \
+    left+=$(aws ec2 describe-instances --filters "Name=tag:halyx-test,Values=$RUN" \
         "Name=instance-state-name,Values=pending,running,stopping,stopped,shutting-down" \
         --query 'Reservations[].Instances[].InstanceId' --output text)
-    left+=$(aws ec2 describe-volumes --filters "Name=tag:cirrus-test,Values=$RUN" --query 'Volumes[].VolumeId' --output text)
-    left+=$(aws ec2 describe-key-pairs --filters "Name=key-name,Values=cirrus-$RUN" --query 'KeyPairs[].KeyName' --output text)
-    left+=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=cirrus-$RUN-bastion,cirrus-$RUN-cache" \
+    left+=$(aws ec2 describe-volumes --filters "Name=tag:halyx-test,Values=$RUN" --query 'Volumes[].VolumeId' --output text)
+    left+=$(aws ec2 describe-key-pairs --filters "Name=key-name,Values=halyx-$RUN" --query 'KeyPairs[].KeyName' --output text)
+    left+=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=halyx-$RUN-bastion,halyx-$RUN-cache" \
         --query 'SecurityGroups[].GroupId' --output text)
   fi
-  left+=$(aws s3api head-bucket --bucket "cirrus-$RUN-blobs" 2>/dev/null && echo " bucket cirrus-$RUN-blobs")
+  left+=$(aws s3api head-bucket --bucket "halyx-$RUN-blobs" 2>/dev/null && echo " bucket halyx-$RUN-blobs")
   for table in items items-sorted; do
-    left+=$(aws dynamodb describe-table --table-name "cirrus-$RUN-$table" --query 'Table.TableStatus' --output text 2>/dev/null \
-        | grep -v DELETING | sed "s/^/ table cirrus-$RUN-$table:/")
+    left+=$(aws dynamodb describe-table --table-name "halyx-$RUN-$table" --query 'Table.TableStatus' --output text 2>/dev/null \
+        | grep -v DELETING | sed "s/^/ table halyx-$RUN-$table:/")
   done
   if [[ -z "${left// /}" ]]; then
     echo "  nothing left"
@@ -162,11 +162,11 @@ terraform apply -auto-approve -input=false "${TF_VARS[@]}" || exit 1
 cd "$ROOT"
 if [[ "$TIER" == 2 ]]; then
   log "Running the RDS tests against real AWS"
-  mvn -o verify -pl cirrus-aws -Dit.test="${IT_TEST:-RealAwsSqlIT}" -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
-      -Dcirrus.real.aws.sql=true -Dcirrus.real.aws.run="$RUN" \
-      -Dcirrus.real.aws.sql.postgres-host="$(terraform -chdir="$TF_DIR" output -raw postgres_host)" \
-      -Dcirrus.real.aws.sql.mysql-host="$(terraform -chdir="$TF_DIR" output -raw mysql_host)" \
-      -Dcirrus.real.aws.sql.master-user="$(terraform -chdir="$TF_DIR" output -raw master_user)"
+  mvn -o verify -pl halyx-aws -Dit.test="${IT_TEST:-RealAwsSqlIT}" -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+      -Dhalyx.real.aws.sql=true -Dhalyx.real.aws.run="$RUN" \
+      -Dhalyx.real.aws.sql.postgres-host="$(terraform -chdir="$TF_DIR" output -raw postgres_host)" \
+      -Dhalyx.real.aws.sql.mysql-host="$(terraform -chdir="$TF_DIR" output -raw mysql_host)" \
+      -Dhalyx.real.aws.sql.master-user="$(terraform -chdir="$TF_DIR" output -raw master_user)"
   exit $?
 fi
 if [[ "$TIER" == 3 ]]; then
@@ -182,13 +182,13 @@ if [[ "$TIER" == 3 ]]; then
   # The test JVM resolves only the cache's name, to the tunnel; it needs no other lookups.
   echo "127.0.0.1 $CACHE_HOST" > "$WORK/hosts"
   log "Running the ElastiCache tests against real AWS"
-  mvn -o verify -pl cirrus-aws -Dit.test="${IT_TEST:-RealAwsCacheIT}" -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+  mvn -o verify -pl halyx-aws -Dit.test="${IT_TEST:-RealAwsCacheIT}" -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
       -DargLine="-Djdk.net.hosts.file=$WORK/hosts" \
-      -Dcirrus.real.aws.cache=true -Dcirrus.real.aws.run="$RUN" \
-      -Dcirrus.real.aws.cache.host="$CACHE_HOST" -Dcirrus.real.aws.cache.port="$LOCAL_PORT" \
-      -Dcirrus.real.aws.cache.name="$(terraform -chdir="$TF_DIR" output -raw cache_name)" \
-      -Dcirrus.real.aws.cache.app-user="$(terraform -chdir="$TF_DIR" output -raw app_user)" \
-      -Dcirrus.real.aws.cache.denied-user="$(terraform -chdir="$TF_DIR" output -raw denied_user)"
+      -Dhalyx.real.aws.cache=true -Dhalyx.real.aws.run="$RUN" \
+      -Dhalyx.real.aws.cache.host="$CACHE_HOST" -Dhalyx.real.aws.cache.port="$LOCAL_PORT" \
+      -Dhalyx.real.aws.cache.name="$(terraform -chdir="$TF_DIR" output -raw cache_name)" \
+      -Dhalyx.real.aws.cache.app-user="$(terraform -chdir="$TF_DIR" output -raw app_user)" \
+      -Dhalyx.real.aws.cache.denied-user="$(terraform -chdir="$TF_DIR" output -raw denied_user)"
   exit $?
 fi
 BUCKET=$(terraform -chdir="$TF_DIR" output -raw bucket)
@@ -196,6 +196,6 @@ ITEMS=$(terraform -chdir="$TF_DIR" output -raw items_table)
 ITEMS_SORTED=$(terraform -chdir="$TF_DIR" output -raw items_sorted_table)
 
 log "Running the conformance kits against real AWS"
-mvn -o verify -pl cirrus-aws -Dit.test="${IT_TEST:-RealAwsIT}" -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
-    -Dcirrus.real.aws=true -Dcirrus.real.aws.run="$RUN" -Dcirrus.real.aws.bucket="$BUCKET" \
-    -Dcirrus.real.aws.items-table="$ITEMS" -Dcirrus.real.aws.items-sorted-table="$ITEMS_SORTED"
+mvn -o verify -pl halyx-aws -Dit.test="${IT_TEST:-RealAwsIT}" -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+    -Dhalyx.real.aws=true -Dhalyx.real.aws.run="$RUN" -Dhalyx.real.aws.bucket="$BUCKET" \
+    -Dhalyx.real.aws.items-table="$ITEMS" -Dhalyx.real.aws.items-sorted-table="$ITEMS_SORTED"

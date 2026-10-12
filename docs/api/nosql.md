@@ -23,12 +23,12 @@ portable `Document`.
 A `TableConfig` names the table (DynamoDB table, Cosmos container or Firestore collection) and its keys:
 
 ```java
-DocumentStore orders = cirrus.provider("aws").documentStore(TableConfig.builder("orders")
+DocumentStore orders = halyx.provider("aws").documentStore(TableConfig.builder("orders")
         .sortKey("sk")                                   // omit for tables keyed by partition only
         .index("by-status", "status", "placedAt")        // a secondary index: partition and sort attribute
         .build());
 
-DocumentStore customers = cirrus.provider("gcp").documentStore(TableConfig.of("customers"));
+DocumentStore customers = halyx.provider("gcp").documentStore(TableConfig.of("customers"));
 ```
 
 The key attributes are called `pk` and `sk` by default (`partitionKey(...)` and `sortKey(...)` rename
@@ -186,16 +186,16 @@ returns the new versions of the written items.
 | | DynamoDB | Cosmos DB (NoSQL API) | Firestore (native mode) |
 |---|---|---|---|
 | Table | table with string `pk` (and `sk`) keys | container partitioned on `/pk` | collection; sorted items in `<table>/<pk>/<table>/<sk>` |
-| Version | `cirrus_version` attribute | ETag | update time |
-| Expiry | `cirrus_expires` (epoch seconds): enable TTL on it | `ttl` (container default TTL must be on, for example -1) | `cirrus_expires` Timestamp: add a TTL policy |
-| Query | key condition on `sk` | SQL within the partition, `ORDER BY sk` | ordered on the `cirrus_sort` field |
+| Version | `halyx_version` attribute | ETag | update time |
+| Expiry | `halyx_expires` (epoch seconds): enable TTL on it | `ttl` (container default TTL must be on, for example -1) | `halyx_expires` Timestamp: add a TTL policy |
+| Query | key condition on `sk` | SQL within the partition, `ORDER BY sk` | ordered on the `halyx_sort` field |
 | Transaction | `TransactWriteItems` | transactional batch | read-check-write transaction |
 | Index | a global secondary index of that name (eventually consistent) | a cross-partition query (default indexing) | a collection-group query: add a composite index on the index fields |
 | Decimals | exact | exact (stored as a string wrapper) | stored as doubles |
 | Item size | 400 KB | 2 MB | about 1 MiB |
 | Reads | strongly consistent | the account's consistency level | strongly consistent |
 
-On Cosmos DB, item ids can't contain `/ \ ? #`; Cirrus escapes them (with `~`), so any key string works.
+On Cosmos DB, item ids can't contain `/ \ ? #`; Halyx escapes them (with `~`), so any key string works.
 Keys with those characters are covered by the conformance kit on every provider.
 
 ## Native clients

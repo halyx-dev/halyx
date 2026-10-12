@@ -56,7 +56,7 @@ provider "aws" {
   region = var.region
   default_tags {
     tags = {
-      cirrus-test = var.run_id
+      halyx-test = var.run_id
     }
   }
 }
@@ -79,8 +79,8 @@ data "aws_ssm_parameter" "al2023_arm64" {
 # --- bastion -------------------------------------------------------------------------------------------
 
 resource "aws_security_group" "bastion" {
-  name        = "cirrus-${var.run_id}-bastion"
-  description = "Cirrus real-cloud tests: SSH from the test machine only"
+  name        = "halyx-${var.run_id}-bastion"
+  description = "Halyx real-cloud tests: SSH from the test machine only"
   vpc_id      = data.aws_vpc.default.id
 
   ingress {
@@ -100,7 +100,7 @@ resource "aws_security_group" "bastion" {
 }
 
 resource "aws_key_pair" "bastion" {
-  key_name   = "cirrus-${var.run_id}"
+  key_name   = "halyx-${var.run_id}"
   public_key = var.ssh_public_key
 }
 
@@ -117,15 +117,15 @@ resource "aws_instance" "bastion" {
   }
 
   tags = {
-    Name = "cirrus-${var.run_id}-bastion"
+    Name = "halyx-${var.run_id}-bastion"
   }
 }
 
 # --- cache ---------------------------------------------------------------------------------------------
 
 resource "aws_security_group" "cache" {
-  name        = "cirrus-${var.run_id}-cache"
-  description = "Cirrus real-cloud tests: Valkey from the bastion only"
+  name        = "halyx-${var.run_id}-cache"
+  description = "Halyx real-cloud tests: Valkey from the bastion only"
   vpc_id      = data.aws_vpc.default.id
 
   ingress {
@@ -138,14 +138,14 @@ resource "aws_security_group" "cache" {
 }
 
 resource "aws_elasticache_subnet_group" "cache" {
-  name       = "cirrus-${var.run_id}"
+  name       = "halyx-${var.run_id}"
   subnet_ids = data.aws_subnets.default.ids
 }
 
 # Every user group must contain a user named "default"; this one is switched off. Valkey users can't be
 # password-free, so it gets a random password that nothing uses.
 resource "aws_elasticache_user" "default" {
-  user_id       = "cirrus-${var.run_id}-default"
+  user_id       = "halyx-${var.run_id}-default"
   user_name     = "default"
   engine        = "valkey"
   access_string = "off -@all"
@@ -157,8 +157,8 @@ resource "aws_elasticache_user" "default" {
 
 # IAM users: user_id must equal user_name. The test identity may connect as "app" but not as "denied".
 resource "aws_elasticache_user" "app" {
-  user_id       = "cirrus-${var.run_id}-app"
-  user_name     = "cirrus-${var.run_id}-app"
+  user_id       = "halyx-${var.run_id}-app"
+  user_name     = "halyx-${var.run_id}-app"
   engine        = "valkey"
   access_string = "on ~* +@all"
   authentication_mode {
@@ -167,8 +167,8 @@ resource "aws_elasticache_user" "app" {
 }
 
 resource "aws_elasticache_user" "denied" {
-  user_id       = "cirrus-${var.run_id}-denied"
-  user_name     = "cirrus-${var.run_id}-denied"
+  user_id       = "halyx-${var.run_id}-denied"
+  user_name     = "halyx-${var.run_id}-denied"
   engine        = "valkey"
   access_string = "on ~* +@all"
   authentication_mode {
@@ -177,7 +177,7 @@ resource "aws_elasticache_user" "denied" {
 }
 
 resource "aws_elasticache_user_group" "cache" {
-  user_group_id = "cirrus-${var.run_id}"
+  user_group_id = "halyx-${var.run_id}"
   engine        = "valkey"
   user_ids = [
     aws_elasticache_user.default.user_id,
@@ -187,8 +187,8 @@ resource "aws_elasticache_user_group" "cache" {
 }
 
 resource "aws_elasticache_replication_group" "cache" {
-  replication_group_id       = "cirrus-${var.run_id}"
-  description                = "Cirrus real-cloud tests"
+  replication_group_id       = "halyx-${var.run_id}"
+  description                = "Halyx real-cloud tests"
   engine                     = "valkey"
   engine_version             = "8.0"
   node_type                  = "cache.t4g.micro"

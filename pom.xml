@@ -21,13 +21,13 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>org.kamranzafar.cirrus</groupId>
-    <artifactId>cirrus-parent</artifactId>
+    <groupId>org.kamranzafar.halyx</groupId>
+    <artifactId>halyx-parent</artifactId>
     <version>0.1.0-SNAPSHOT</version>
     <packaging>pom</packaging>
 
-    <name>Cirrus :: Parent</name>
-    <description>Cloud-agnostic Java API for storage, NoSQL, messaging, SQL, caches, parameters and secrets across AWS, Azure and GCP.</description>
+    <name>Halyx Multi-Cloud SDK :: Parent</name>
+    <description>Halyx Multi-Cloud SDK for Java: one cloud-agnostic API for storage, NoSQL, messaging, SQL, caches, parameters and secrets on AWS, Azure and Google Cloud.</description>
 
     <licenses>
         <license>
@@ -38,19 +38,19 @@
     </licenses>
 
     <modules>
-        <module>cirrus-bom</module>
-        <module>cirrus-core</module>
-        <module>cirrus-tck</module>
-        <module>cirrus-redis</module>
-        <module>cirrus-sql</module>
-        <module>cirrus-aws</module>
-        <module>cirrus-azure</module>
-        <module>cirrus-gcp</module>
-        <module>cirrus-vault</module>
-        <module>cirrus-spring-boot-autoconfigure</module>
-        <module>cirrus-spring-boot-starter</module>
-        <module>cirrus-spring-boot4-tests</module>
-        <module>cirrus-benchmarks</module>
+        <module>halyx-bom</module>
+        <module>halyx-core</module>
+        <module>halyx-tck</module>
+        <module>halyx-redis</module>
+        <module>halyx-sql</module>
+        <module>halyx-aws</module>
+        <module>halyx-azure</module>
+        <module>halyx-gcp</module>
+        <module>halyx-vault</module>
+        <module>halyx-spring-boot-autoconfigure</module>
+        <module>halyx-spring-boot-starter</module>
+        <module>halyx-spring-boot4-tests</module>
+        <module>halyx-benchmarks</module>
     </modules>
 
     <properties>
@@ -110,30 +110,30 @@
 
     <dependencyManagement>
         <dependencies>
-            <!-- Cirrus modules -->
+            <!-- Halyx modules -->
             <dependency>
-                <groupId>org.kamranzafar.cirrus</groupId>
-                <artifactId>cirrus-core</artifactId>
+                <groupId>org.kamranzafar.halyx</groupId>
+                <artifactId>halyx-core</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>org.kamranzafar.cirrus</groupId>
-                <artifactId>cirrus-tck</artifactId>
+                <groupId>org.kamranzafar.halyx</groupId>
+                <artifactId>halyx-tck</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>org.kamranzafar.cirrus</groupId>
-                <artifactId>cirrus-redis</artifactId>
+                <groupId>org.kamranzafar.halyx</groupId>
+                <artifactId>halyx-redis</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>org.kamranzafar.cirrus</groupId>
-                <artifactId>cirrus-sql</artifactId>
+                <groupId>org.kamranzafar.halyx</groupId>
+                <artifactId>halyx-sql</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>org.kamranzafar.cirrus</groupId>
-                <artifactId>cirrus-aws</artifactId>
+                <groupId>org.kamranzafar.halyx</groupId>
+                <artifactId>halyx-aws</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
@@ -187,13 +187,13 @@
                 <version>${lettuce.version}</version>
             </dependency>
             <dependency>
-                <groupId>org.kamranzafar.cirrus</groupId>
-                <artifactId>cirrus-spring-boot-autoconfigure</artifactId>
+                <groupId>org.kamranzafar.halyx</groupId>
+                <artifactId>halyx-spring-boot-autoconfigure</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>org.kamranzafar.cirrus</groupId>
-                <artifactId>cirrus-vault</artifactId>
+                <groupId>org.kamranzafar.halyx</groupId>
+                <artifactId>halyx-vault</artifactId>
                 <version>${project.version}</version>
             </dependency>
 
@@ -316,7 +316,7 @@
 
         <plugins>
             <!-- Every source file carries the Apache-2.0 header. One run from the root covers the whole tree
-                 (cirrus-bom included); `mvn license:format` adds missing headers, and the build fails without them. -->
+                 (halyx-bom included); `mvn license:format` adds missing headers, and the build fails without them. -->
             <plugin>
                 <groupId>com.mycila</groupId>
                 <artifactId>license-maven-plugin</artifactId>

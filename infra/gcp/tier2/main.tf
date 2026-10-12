@@ -67,7 +67,7 @@ provider "google" {
   project = var.project
   region  = var.region
   default_labels = {
-    cirrus-test = var.run_id
+    halyx-test = var.run_id
   }
 }
 
@@ -90,7 +90,7 @@ locals {
 
 resource "google_sql_database_instance" "db" {
   for_each            = local.engines
-  name                = "cirrus-${var.run_id}-${each.key}"
+  name                = "halyx-${var.run_id}-${each.key}"
   database_version    = each.value.version
   region              = var.region
   deletion_protection = false
@@ -102,7 +102,7 @@ resource "google_sql_database_instance" "db" {
     disk_size         = 10
     disk_autoresize   = false
     user_labels = {
-      cirrus-test = var.run_id
+      halyx-test = var.run_id
     }
 
     database_flags {
@@ -133,7 +133,7 @@ resource "google_sql_database" "app" {
 
 resource "google_sql_user" "admin" {
   for_each = local.engines
-  name     = "cirrus_admin"
+  name     = "halyx_admin"
   instance = google_sql_database_instance.db[each.key].name
   password = var.admin_password
 }
@@ -147,7 +147,7 @@ resource "google_sql_user" "iam" {
 
 resource "google_sql_user" "password_only" {
   for_each = local.engines
-  name     = "cirrus_password_only"
+  name     = "halyx_password_only"
   instance = google_sql_database_instance.db[each.key].name
   password = var.password_only_password
 }
@@ -169,5 +169,5 @@ output "mysql_instance" {
 }
 
 output "admin_user" {
-  value = "cirrus_admin"
+  value = "halyx_admin"
 }

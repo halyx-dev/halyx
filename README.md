@@ -3,43 +3,44 @@
      .--.           .--.           .--.     
   .-(    ).      .-(    ).      .-(    ).   
  (___.__)__)    (___.__)__)    (___.__)__)  
- ██████╗██╗██████╗ ██████╗ ██╗   ██╗███████╗
-██╔════╝██║██╔══██╗██╔══██╗██║   ██║██╔════╝
-██║     ██║██████╔╝██████╔╝██║   ██║███████╗
-██║     ██║██╔══██╗██╔══██╗██║   ██║╚════██║
-╚██████╗██║██║  ██║██║  ██║╚██████╔╝███████║
- ╚═════╝╚═╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝
+  ██╗  ██╗ █████╗ ██╗     ██╗   ██╗██╗  ██╗
+  ██║  ██║██╔══██╗██║     ╚██╗ ██╔╝╚██╗██╔╝
+  ███████║███████║██║      ╚████╔╝  ╚███╔╝ 
+  ██╔══██║██╔══██║██║       ╚██╔╝   ██╔██╗ 
+  ██║  ██║██║  ██║███████╗   ██║   ██╔╝ ██╗
+  ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝   ╚═╝   ╚═╝  ╚═╝
                                             
-     Cirrus: one Java API for AWS · Azure · GCP     
+           Halyx Multi-Cloud SDK           
+     one Java API for AWS · Azure · GCP     
 </pre>
 </div>
 
 <p align="center">
-  <a href="https://kamranzafar.github.io/cirrus/"><img alt="Documentation" src="https://img.shields.io/badge/docs-kamranzafar.github.io%2Fcirrus-0a7bbb"></a>
+  <a href="https://kamranzafar.github.io/halyx/"><img alt="Documentation" src="https://img.shields.io/badge/docs-kamranzafar.github.io%2Fhalyx-0a7bbb"></a>
   <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
   <img alt="Java 21+" src="https://img.shields.io/badge/java-21%2B-orange">
   <img alt="Spring Boot 3.5 and 4" src="https://img.shields.io/badge/spring%20boot-3.5%20%7C%204-6db33f">
   <img alt="AWS, Azure, Google Cloud" src="https://img.shields.io/badge/clouds-AWS%20%7C%20Azure%20%7C%20Google%20Cloud-informational">
 </p>
 
-**Cirrus** is a cloud-agnostic Java API that gives microservices one consistent way to use Cloud Native services like Storage, SQL, NoSQL,
+**Halyx Multi-Cloud SDK** is a cloud-agnostic Java API that gives microservices one consistent way to use Cloud Native services like Storage, SQL, NoSQL,
 Caches, Messaging, and Parameters and Secrets across **AWS**, **Azure** and **GCP**.
 
-With Cirrus you can build **multi-cloud microservices and applications**. A single microservice or application can work with
+With Halyx you can build **portable multi-cloud microservices and applications**. A single microservice or application can work with
 services on several clouds at once, such as files on S3, a cache on Azure, events on Pub/Sub and secrets
 in Vault. Each cloud is registered as a named provider and used through the same API.
 
-**[Documentation](https://kamranzafar.github.io/cirrus/)** · [Getting started](https://kamranzafar.github.io/cirrus/getting-started.html) · [API guide](https://kamranzafar.github.io/cirrus/api/) ·
-[Spring Boot](https://kamranzafar.github.io/cirrus/spring-boot.html) · [Cloud testing](https://kamranzafar.github.io/cirrus/cloud-testing/) · [Roadmap](https://kamranzafar.github.io/cirrus/roadmap.html)
+**[Documentation](https://kamranzafar.github.io/halyx/)** · [Getting started](https://kamranzafar.github.io/halyx/getting-started.html) · [API guide](https://kamranzafar.github.io/halyx/api/) ·
+[Spring Boot](https://kamranzafar.github.io/halyx/spring-boot.html) · [Cloud testing](https://kamranzafar.github.io/halyx/cloud-testing/) · [Roadmap](https://kamranzafar.github.io/halyx/roadmap.html)
 
-## Why Cirrus
+## Why Halyx
 
 Most "cloud-agnostic" microservices aren't portable. The business logic may be portable, but the code around it is
 written against one cloud's SDK: `S3Client` here, `ServiceBusSenderClient` there, each with its own types,
 error codes, retry rules and consistency quirks. Moving a service to another cloud, or running it on two,
 means rewriting and retesting all of that.
 
-Cirrus was created to make that code portable too, without giving up what each cloud does well:
+Halyx was created to make that code portable too, without giving up what each cloud does well:
 
 - **One API per service, the same on every cloud.** A `BlobStore` is a `BlobStore` on S3, Azure Blob
   Storage and Cloud Storage.
@@ -48,7 +49,7 @@ Cirrus was created to make that code portable too, without giving up what each c
 - **The same behaviour, not just the same signatures.** Conditional writes, versions, ordering, expiry,
   retries and errors such as `NotFoundException` mean the same everywhere. Shared conformance kits check
   every provider against emulators on every build and
-  [against the real clouds](https://kamranzafar.github.io/cirrus/cloud-testing/).
+  [against the real clouds](https://kamranzafar.github.io/halyx/cloud-testing/).
 - **Several clouds in one service.** Each cloud is a named provider, so one microservice can store files
   on S3, publish to Pub/Sub and cache in Azure, with one error model and one set of tests.
 - **No lowest common denominator.** Differences are declared as capabilities, and `unwrap` hands you the
@@ -68,7 +69,7 @@ Cirrus was created to make that code portable too, without giving up what each c
             AWS                    Azure                Google Cloud       (+ HashiCorp Vault, in-memory)
 ```
 
-Your code depends on the Cirrus API. Which cloud serves each resource is **configuration**: the provider
+Your code depends on the Halyx API. Which cloud serves each resource is **configuration**: the provider
 type, region and resource names. So the same build can:
 
 - run on AWS in one region and on Azure in another, for data residency or customer requirements
@@ -76,7 +77,7 @@ type, region and resource names. So the same build can:
 - fail over, or exit a cloud, with a plan that is realistic rather than theoretical
 - run unit tests against the in-memory provider and integration tests against emulators
 
-| Service | Cirrus API | AWS | Azure | Google Cloud | Also |
+| Service | Halyx API | AWS | Azure | Google Cloud | Also |
 |---|---|---|---|---|---|
 | Object storage | `BlobStore` | Amazon S3 | Azure Blob Storage | Cloud Storage | in-memory |
 | NoSQL documents | `DocumentStore` | DynamoDB | Cosmos DB for NoSQL | Firestore | in-memory |
@@ -91,19 +92,19 @@ Add the starter and the provider modules you need:
 
 ```xml
 <dependency>
-  <groupId>org.kamranzafar.cirrus</groupId>
-  <artifactId>cirrus-spring-boot-starter</artifactId>
+  <groupId>org.kamranzafar.halyx</groupId>
+  <artifactId>halyx-spring-boot-starter</artifactId>
 </dependency>
 <dependency>
-  <groupId>org.kamranzafar.cirrus</groupId>
-  <artifactId>cirrus-aws</artifactId>
+  <groupId>org.kamranzafar.halyx</groupId>
+  <artifactId>halyx-aws</artifactId>
 </dependency>
 ```
 
 Describe your resources in `application.yml`:
 
 ```yaml
-cirrus:
+halyx:
   providers:
     cloud: { type: aws, region: eu-west-2 }       # or azure, gcp
   blob-stores:
@@ -141,7 +142,7 @@ class InvoiceService {
 
 @Component
 class Billing {
-    @CirrusListener("billing")
+    @HalyxListener("billing")
     void onOrder(String json) {       // return = ack, throw = retry with backoff
         bill(json);
     }
@@ -150,23 +151,23 @@ class Billing {
 
 The `orders` database is a regular `DataSource` bean, so JPA, `JdbcTemplate` and Flyway use it unchanged.
 
-To run the same service on Azure, change the provider to `type: azure`, add `cirrus-azure`, and point
+To run the same service on Azure, change the provider to `type: azure`, add `halyx-azure`, and point
 the resources at Azure Blob Storage, Service Bus and Azure Database. The Java code doesn't change.
 
 You also get health checks, Micrometer metrics and tracing, `@Cacheable` support, and
-`spring.config.import=cirrus:<store>` for parameters and secrets. See the
-[Spring Boot guide](https://kamranzafar.github.io/cirrus/spring-boot.html).
+`spring.config.import=halyx:<store>` for parameters and secrets. See the
+[Spring Boot guide](https://kamranzafar.github.io/halyx/spring-boot.html).
 
 ## Using it without Spring
 
 ```java
-try (Cirrus cirrus = Cirrus.builder()
+try (Halyx halyx = Halyx.builder()
         .register("aws", ProviderConfig.of("aws").region("eu-west-2"))
         .register("gcp", ProviderConfig.of("gcp").property(GcpProperties.PROJECT_ID, "acme-prod"))
         .build()) {
 
-    BlobStore invoices = cirrus.provider("aws").blobStore("acme-invoices");   // Amazon S3
-    Publisher events = cirrus.provider("gcp").publisher("order-events");     // Google Cloud Pub/Sub
+    BlobStore invoices = halyx.provider("aws").blobStore("acme-invoices");   // Amazon S3
+    Publisher events = halyx.provider("gcp").publisher("order-events");     // Google Cloud Pub/Sub
 
     invoices.put(BlobKey.of("2026/42.pdf"), BlobContent.ofFile(pdf));
     events.publish(OutgoingMessage.builder(json).attribute("type", "invoiced").build());
@@ -179,24 +180,24 @@ try (Cirrus cirrus = Cirrus.builder()
 }
 ```
 
-Add `cirrus-core` plus the provider modules (`cirrus-aws`, `cirrus-azure`, `cirrus-gcp`, `cirrus-vault`)
-to your build, ideally through the `cirrus-bom`. See [Getting started](https://kamranzafar.github.io/cirrus/getting-started.html).
+Add `halyx-core` plus the provider modules (`halyx-aws`, `halyx-azure`, `halyx-gcp`, `halyx-vault`)
+to your build, ideally through the `halyx-bom`. See [Getting started](https://kamranzafar.github.io/halyx/getting-started.html).
 
 ## Documentation
 
 | | |
 |---|---|
-| [Getting started](https://kamranzafar.github.io/cirrus/getting-started.html) | dependencies, your first calls, several clouds at once, testing |
-| [API guide](https://kamranzafar.github.io/cirrus/api/) | every service with examples: [storage](https://kamranzafar.github.io/cirrus/api/storage.html), [NoSQL](https://kamranzafar.github.io/cirrus/api/nosql.html), [messaging](https://kamranzafar.github.io/cirrus/api/messaging.html), [SQL](https://kamranzafar.github.io/cirrus/api/sql.html), [caches](https://kamranzafar.github.io/cirrus/api/caches.html), [parameters and secrets](https://kamranzafar.github.io/cirrus/api/parameters.html) |
-| [Errors and retries](https://kamranzafar.github.io/cirrus/api/errors.html) | the portable error model, retries, throttling and interceptors |
-| [Capabilities and native clients](https://kamranzafar.github.io/cirrus/api/capabilities-and-unwrap.html) | provider differences, and `unwrap` for the native SDK clients |
-| [Provider configuration](https://kamranzafar.github.io/cirrus/providers.html) | credentials, regions, endpoints and every provider setting |
-| [Spring Boot](https://kamranzafar.github.io/cirrus/spring-boot.html) | the starter, properties, listeners, health, metrics and configuration import |
-| [Design, build and test](https://kamranzafar.github.io/cirrus/design.html) | architecture, building, the conformance kits and benchmarks |
-| [Cloud testing](https://kamranzafar.github.io/cirrus/cloud-testing/) | results on real [AWS](https://kamranzafar.github.io/cirrus/cloud-testing/aws.html), [Google Cloud](https://kamranzafar.github.io/cirrus/cloud-testing/gcp.html) and [Azure](https://kamranzafar.github.io/cirrus/cloud-testing/azure.html) |
-| [Roadmap](https://kamranzafar.github.io/cirrus/roadmap.html) | what's done and what's next |
+| [Getting started](https://kamranzafar.github.io/halyx/getting-started.html) | dependencies, your first calls, several clouds at once, testing |
+| [API guide](https://kamranzafar.github.io/halyx/api/) | every service with examples: [storage](https://kamranzafar.github.io/halyx/api/storage.html), [NoSQL](https://kamranzafar.github.io/halyx/api/nosql.html), [messaging](https://kamranzafar.github.io/halyx/api/messaging.html), [SQL](https://kamranzafar.github.io/halyx/api/sql.html), [caches](https://kamranzafar.github.io/halyx/api/caches.html), [parameters and secrets](https://kamranzafar.github.io/halyx/api/parameters.html) |
+| [Errors and retries](https://kamranzafar.github.io/halyx/api/errors.html) | the portable error model, retries, throttling and interceptors |
+| [Capabilities and native clients](https://kamranzafar.github.io/halyx/api/capabilities-and-unwrap.html) | provider differences, and `unwrap` for the native SDK clients |
+| [Provider configuration](https://kamranzafar.github.io/halyx/providers.html) | credentials, regions, endpoints and every provider setting |
+| [Spring Boot](https://kamranzafar.github.io/halyx/spring-boot.html) | the starter, properties, listeners, health, metrics and configuration import |
+| [Design, build and test](https://kamranzafar.github.io/halyx/design.html) | architecture, building, the conformance kits and benchmarks |
+| [Cloud testing](https://kamranzafar.github.io/halyx/cloud-testing/) | results on real [AWS](https://kamranzafar.github.io/halyx/cloud-testing/aws.html), [Google Cloud](https://kamranzafar.github.io/halyx/cloud-testing/gcp.html) and [Azure](https://kamranzafar.github.io/halyx/cloud-testing/azure.html) |
+| [Roadmap](https://kamranzafar.github.io/halyx/roadmap.html) | what's done and what's next |
 
-The documentation is published at **[kamranzafar.github.io/cirrus](https://kamranzafar.github.io/cirrus/)**, built from the `docs/` folder.
+The documentation is published at **[kamranzafar.github.io/halyx](https://kamranzafar.github.io/halyx/)**, built from the `docs/` folder.
 
 ## Building
 
@@ -204,8 +205,8 @@ The documentation is published at **[kamranzafar.github.io/cirrus](https://kamra
 mvn verify      # unit tests and every conformance kit against emulators (needs Docker)
 ```
 
-Java 21+ and Maven 3.9+. See [Design, build and test](https://kamranzafar.github.io/cirrus/design.html#build).
+Java 21+ and Maven 3.9+. See [Design, build and test](https://kamranzafar.github.io/halyx/design.html#build).
 
 ## License
 
-Cirrus is licensed under the [Apache License 2.0](LICENSE).
+Halyx is licensed under the [Apache License 2.0](LICENSE).

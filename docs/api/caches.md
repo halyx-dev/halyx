@@ -22,7 +22,7 @@ differs between clouds.
 ## Configuring a cache
 
 ```java
-Cache<String> sessions = cirrus.provider("aws").cache(
+Cache<String> sessions = halyx.provider("aws").cache(
         CacheConfig.builder(URI.create("rediss://master.sessions.abc123.euw2.cache.amazonaws.com:6379"))
                 .namespace("sessions")                      // keys become sessions:<key>
                 .defaultTtl(Duration.ofMinutes(30))
@@ -130,7 +130,7 @@ seconds (`redis.command-timeout`).
 
 ## Implementation
 
-The shared `cirrus-redis` module uses Lettuce 6.8, which stays on Netty 4.1 like the AWS and Azure SDKs.
+The shared `halyx-redis` module uses Lettuce 6.8, which stays on Netty 4.1 like the AWS and Azure SDKs.
 It runs standalone or in cluster mode, with one connection per endpoint and credentials.
 
 Not included yet: endpoint discovery by cache name (you configure the endpoint URI), stampede protection

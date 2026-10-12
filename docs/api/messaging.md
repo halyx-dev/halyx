@@ -24,12 +24,12 @@ provider, so make handlers idempotent.
 | `Subscription` | SQS queue subscribed to the topic (raw delivery or SNS envelope, both handled) | Service Bus queue, or `<topic>/subscriptions/<name>` | Pub/Sub pull subscription |
 
 Topics, subscriptions and dead-letter settings are infrastructure: create them with your usual tooling.
-Cirrus never creates them.
+Halyx never creates them.
 
 ## Publishing
 
 ```java
-Publisher orders = cirrus.provider("aws").publisher("orders");        // SNS topic name or ARN
+Publisher orders = halyx.provider("aws").publisher("orders");        // SNS topic name or ARN
 
 orders.publish("{\"id\":42}");                                         // body only
 PublishResult result = orders.publish(OutgoingMessage.builder(json)
@@ -49,7 +49,7 @@ pairs, delivered alongside the body.
 `listen` runs a consumer that pulls messages and hands each one to your handler:
 
 ```java
-Subscription billing = cirrus.provider("aws").subscription("orders-billing");   // the SQS queue
+Subscription billing = halyx.provider("aws").subscription("orders-billing");   // the SQS queue
 
 MessageConsumer consumer = billing.listen(message -> {
     bill(message.bodyAsString(), message.attribute("tenant").orElse("default"));
@@ -122,7 +122,7 @@ Bodies over a threshold go through a `BlobStore`, and the message carries only t
 the same `ClaimCheck`:
 
 ```java
-var claims = new ClaimCheck(cirrus.provider("aws").blobStore("message-bodies"), 200 * 1024, "orders/");
+var claims = new ClaimCheck(halyx.provider("aws").blobStore("message-bodies"), 200 * 1024, "orders/");
 
 Publisher orders = aws.publisher(TopicConfig.builder("orders").claimCheck(claims).build());
 Subscription billing = aws.subscription(SubscriptionConfig.builder("orders-billing").claimCheck(claims).build());
@@ -133,8 +133,8 @@ bucket lifecycle rule.
 
 ## Provider notes
 
-- **SNS and SQS:** binary bodies travel base64-encoded, and messages carry at most 10 attributes. Cirrus's
-  own attributes (`cirrus-encoding`, `cirrus-claim-check`, and trace headers) count towards that limit.
+- **SNS and SQS:** binary bodies travel base64-encoded, and messages carry at most 10 attributes. Halyx's
+  own attributes (`halyx-encoding`, `halyx-claim-check`, and trace headers) count towards that limit.
 - **Pub/Sub:** a batch with mixed ordering keys is sent as one request per key, as Pub/Sub requires.
 - **Service Bus:** messages published without an ordering key to a session entity each get their own
   session.

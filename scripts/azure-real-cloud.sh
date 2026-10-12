@@ -23,13 +23,13 @@
 #   TIER=3 scripts/azure-real-cloud.sh     # Azure Managed Redis with Entra ID
 #
 # Terraform and the tests act as the test service principal, whose credentials are read from
-# AZURE_CREDENTIALS_FILE (default ~/.azure/cirrus-test.env, outside the repository):
+# AZURE_CREDENTIALS_FILE (default ~/.azure/halyx-test.env, outside the repository):
 #   AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID
 # The az CLI (your own login) is used only to check that nothing is left.
 #
 # 1. Terraform creates a resource group of the run's own with a storage account, a Service Bus namespace, a
 #    serverless Cosmos DB account, a Key Vault and an App Configuration store, all Entra ID only, and gives the
-#    principal data-plane roles on them (tagged cirrus-test=<run id>).
+#    principal data-plane roles on them (tagged halyx-test=<run id>).
 # 2. RealAzureIT runs the blob, document store, messaging and parameter kits; it creates Service Bus topics,
 #    subscriptions and queues named after the run.
 # 3. Always, even if tests fail or the script is interrupted: terraform destroy (the resource group with
@@ -44,7 +44,7 @@
 # Tiers 2 and 3 register their resource providers first, as the principal.
 set -uo pipefail
 
-CREDS="${AZURE_CREDENTIALS_FILE:-$HOME/.azure/cirrus-test.env}"
+CREDS="${AZURE_CREDENTIALS_FILE:-$HOME/.azure/halyx-test.env}"
 [[ -r "$CREDS" ]] || { echo "No service principal credentials at $CREDS"; exit 1; }
 set -a; source "$CREDS"; set +a
 for v in AZURE_CLIENT_ID AZURE_CLIENT_SECRET AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID; do
@@ -92,7 +92,7 @@ if [[ "$TIER" == 2 ]]; then
   [[ "$CLIENT_IP" =~ ^[0-9.]+$ ]] || { echo "Could not find this machine's public IPv4 address"; exit 1; }
   TF_VARS+=(-var "client_ip=$CLIENT_IP")
   export TF_VAR_pg_admin_password="$(openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | head -c 30)Aa1"
-  export CIRRUS_AZURE_PG_ADMIN_PASSWORD="$TF_VAR_pg_admin_password"
+  export HALYX_AZURE_PG_ADMIN_PASSWORD="$TF_VAR_pg_admin_password"
 fi
 
 # Runs a listing for the final check: its output, or a CHECK FAILED marker if the listing itself failed,
@@ -119,11 +119,11 @@ teardown() {
   fi
   log "Checking nothing of run $RUN remains"
   local left=""
-  left+=$(check "resource groups" az_ group list --query "[?name=='cirrus-$RUN'].name" -o tsv)
-  left+=$(check "tagged resources" az_ resource list --tag "cirrus-test=$RUN" --query '[].id' -o tsv)
-  left+=$(check "deleted key vaults" az_ keyvault list-deleted --query "[?name=='cirrus-$RUN'].name" -o tsv)
+  left+=$(check "resource groups" az_ group list --query "[?name=='halyx-$RUN'].name" -o tsv)
+  left+=$(check "tagged resources" az_ resource list --tag "halyx-test=$RUN" --query '[].id' -o tsv)
+  left+=$(check "deleted key vaults" az_ keyvault list-deleted --query "[?name=='halyx-$RUN'].name" -o tsv)
   left+=$(check "deleted app configuration stores" az_ appconfig list-deleted \
-      --query "[?name=='cirrus-$RUN'].name" -o tsv)
+      --query "[?name=='halyx-$RUN'].name" -o tsv)
   if [[ -z "${left// /}" ]]; then
     echo "  nothing left"
   else
@@ -146,21 +146,21 @@ cd "$ROOT"
 
 if [[ "$TIER" == 2 ]]; then
   log "Running the Azure Database tests against real Azure"
-  mvn -o verify -pl cirrus-azure -Dit.test="${IT_TEST:-RealAzureSqlIT}" -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
-      -Dcirrus.real.azure.sql=true -Dcirrus.real.azure.run="$RUN" \
-      -Dcirrus.real.azure.sql.principal-name="$(terraform -chdir="$TF_DIR" output -raw principal_name)" \
-      -Dcirrus.real.azure.sql.postgres-host="$(terraform -chdir="$TF_DIR" output -raw postgres_host)" \
-      -Dcirrus.real.azure.sql.sql-host="$(terraform -chdir="$TF_DIR" output -raw sql_host)"
+  mvn -o verify -pl halyx-azure -Dit.test="${IT_TEST:-RealAzureSqlIT}" -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+      -Dhalyx.real.azure.sql=true -Dhalyx.real.azure.run="$RUN" \
+      -Dhalyx.real.azure.sql.principal-name="$(terraform -chdir="$TF_DIR" output -raw principal_name)" \
+      -Dhalyx.real.azure.sql.postgres-host="$(terraform -chdir="$TF_DIR" output -raw postgres_host)" \
+      -Dhalyx.real.azure.sql.sql-host="$(terraform -chdir="$TF_DIR" output -raw sql_host)"
   exit $?
 fi
 if [[ "$TIER" == 3 ]]; then
   log "Waiting for the access policy assignment to take effect"
   sleep 60
   log "Running the Azure Managed Redis tests against real Azure"
-  mvn -o verify -pl cirrus-azure -Dit.test="${IT_TEST:-RealAzureCacheIT}" -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
-      -Dcirrus.real.azure.cache=true -Dcirrus.real.azure.run="$RUN" \
-      -Dcirrus.real.azure.cache.host="$(terraform -chdir="$TF_DIR" output -raw cache_host)" \
-      -Dcirrus.real.azure.cache.port="$(terraform -chdir="$TF_DIR" output -raw cache_port)"
+  mvn -o verify -pl halyx-azure -Dit.test="${IT_TEST:-RealAzureCacheIT}" -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+      -Dhalyx.real.azure.cache=true -Dhalyx.real.azure.run="$RUN" \
+      -Dhalyx.real.azure.cache.host="$(terraform -chdir="$TF_DIR" output -raw cache_host)" \
+      -Dhalyx.real.azure.cache.port="$(terraform -chdir="$TF_DIR" output -raw cache_port)"
   exit $?
 fi
 
@@ -178,10 +178,10 @@ done
 sleep 30 # the other services' assignments were made at the same time; give them a little longer
 
 log "Running the conformance kits against real Azure"
-mvn -o verify -pl cirrus-azure -Dit.test="${IT_TEST:-RealAzureIT}" -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
-    -Dcirrus.real.azure=true -Dcirrus.real.azure.run="$RUN" \
-    -Dcirrus.real.azure.storage-account="$STORAGE" -Dcirrus.real.azure.container="$CONTAINER" \
-    -Dcirrus.real.azure.servicebus-namespace="$(terraform -chdir="$TF_DIR" output -raw servicebus_namespace)" \
-    -Dcirrus.real.azure.cosmos-endpoint="$(terraform -chdir="$TF_DIR" output -raw cosmos_endpoint)" \
-    -Dcirrus.real.azure.key-vault-url="$(terraform -chdir="$TF_DIR" output -raw key_vault_url)" \
-    -Dcirrus.real.azure.appconfig-endpoint="$(terraform -chdir="$TF_DIR" output -raw appconfig_endpoint)"
+mvn -o verify -pl halyx-azure -Dit.test="${IT_TEST:-RealAzureIT}" -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+    -Dhalyx.real.azure=true -Dhalyx.real.azure.run="$RUN" \
+    -Dhalyx.real.azure.storage-account="$STORAGE" -Dhalyx.real.azure.container="$CONTAINER" \
+    -Dhalyx.real.azure.servicebus-namespace="$(terraform -chdir="$TF_DIR" output -raw servicebus_namespace)" \
+    -Dhalyx.real.azure.cosmos-endpoint="$(terraform -chdir="$TF_DIR" output -raw cosmos_endpoint)" \
+    -Dhalyx.real.azure.key-vault-url="$(terraform -chdir="$TF_DIR" output -raw key_vault_url)" \
+    -Dhalyx.real.azure.appconfig-endpoint="$(terraform -chdir="$TF_DIR" output -raw appconfig_endpoint)"

@@ -56,7 +56,7 @@ provider "google" {
   project = var.project
   region  = var.region
   default_labels = {
-    cirrus-test = var.run_id
+    halyx-test = var.run_id
   }
 }
 
@@ -65,12 +65,12 @@ locals {
 }
 
 resource "google_compute_network" "vpc" {
-  name                    = "cirrus-${var.run_id}"
+  name                    = "halyx-${var.run_id}"
   auto_create_subnetworks = false
 }
 
 resource "google_compute_subnetwork" "subnet" {
-  name          = "cirrus-${var.run_id}"
+  name          = "halyx-${var.run_id}"
   network       = google_compute_network.vpc.id
   region        = var.region
   ip_cidr_range = "10.80.0.0/24"
@@ -78,7 +78,7 @@ resource "google_compute_subnetwork" "subnet" {
 
 # Memorystore creates its Private Service Connect endpoints in the VPC under this policy.
 resource "google_network_connectivity_service_connection_policy" "memorystore" {
-  name          = "cirrus-${var.run_id}"
+  name          = "halyx-${var.run_id}"
   location      = var.region
   service_class = "gcp-memorystore"
   network       = google_compute_network.vpc.id
@@ -88,7 +88,7 @@ resource "google_network_connectivity_service_connection_policy" "memorystore" {
 }
 
 resource "google_memorystore_instance" "cache" {
-  instance_id                 = "cirrus-${var.run_id}"
+  instance_id                 = "halyx-${var.run_id}"
   location                    = var.region
   mode                        = "CLUSTER_DISABLED" # one endpoint, no redirects to node IPs the tunnel can't reach
   shard_count                 = 1
@@ -115,11 +115,11 @@ resource "google_memorystore_instance" "cache" {
 # --- bastion -------------------------------------------------------------------------------------------
 
 resource "google_compute_firewall" "ssh" {
-  name          = "cirrus-${var.run_id}-ssh"
+  name          = "halyx-${var.run_id}-ssh"
   network       = google_compute_network.vpc.id
   direction     = "INGRESS"
   source_ranges = [var.client_cidr]
-  target_tags   = ["cirrus-bastion"]
+  target_tags   = ["halyx-bastion"]
   allow {
     protocol = "tcp"
     ports    = ["22"]
@@ -127,10 +127,10 @@ resource "google_compute_firewall" "ssh" {
 }
 
 resource "google_compute_instance" "bastion" {
-  name         = "cirrus-${var.run_id}-bastion"
+  name         = "halyx-${var.run_id}-bastion"
   zone         = local.zone
   machine_type = "e2-micro"
-  tags         = ["cirrus-bastion"]
+  tags         = ["halyx-bastion"]
 
   boot_disk {
     initialize_params {
@@ -146,7 +146,7 @@ resource "google_compute_instance" "bastion" {
 
   # No service account: the bastion only forwards a port.
   metadata = {
-    ssh-keys               = "cirrus:${var.ssh_public_key}"
+    ssh-keys               = "halyx:${var.ssh_public_key}"
     block-project-ssh-keys = "true"
     enable-oslogin         = "FALSE"
   }

@@ -18,7 +18,7 @@ in-memory store for tests. A `BlobStore` is one bucket or container.
 </details>
 
 ```java
-BlobStore store = cirrus.provider("aws").blobStore("acme-invoices");
+BlobStore store = halyx.provider("aws").blobStore("acme-invoices");
 ```
 
 ## Basics
@@ -98,7 +98,7 @@ store.delete(key, DeleteOptions.ifMatch(v1.etag()));   // fails if the blob chan
 
 ## Large and streamed uploads
 
-`write` streams a blob of any size, in parts. You write to an `OutputStream`; Cirrus splits it into parts
+`write` streams a blob of any size, in parts. You write to an `OutputStream`; Halyx splits it into parts
 and uploads them in parallel:
 
 ```java
@@ -112,7 +112,7 @@ store.write(BlobKey.of("exports/orders.csv.gz"), out -> {
 - Parts are 8 MiB by default (`partSize`). Up to `uploadConcurrency` parts upload at once (4 by default,
   at most 32), on virtual threads.
 - Writing blocks while every slot is busy, so memory stays at about `(uploadConcurrency + 1) × partSize`
-  whatever the blob size. Part buffers come from a JVM-wide pool (at most `cirrus.buffer-pool.max-bytes`
+  whatever the blob size. Part buffers come from a JVM-wide pool (at most `halyx.buffer-pool.max-bytes`
   idle, 256 MiB by default) instead of being allocated per part.
 - The blob is committed only if the callback returns normally. If it throws, the upload is aborted and
   any existing blob is left untouched. The first failed part aborts the whole upload.
@@ -140,7 +140,7 @@ try (Blob blob = store.get(key, options)) {
 try (Blob header = store.get(key, GetOptions.builder().range(ByteRange.of(0, 1024)).build())) { ... }
 ```
 
-- With `parallelism` above 1, Cirrus looks the blob up once, then fetches byte ranges concurrently on
+- With `parallelism` above 1, Halyx looks the blob up once, then fetches byte ranges concurrently on
   virtual threads, all pinned to that version (ETag or generation), and hands them to you in order.
   Memory stays at about `parallelism × partSize`, using pooled buffers.
 - A blob that changes mid-download fails with `PreconditionFailedException` instead of mixing
@@ -183,7 +183,7 @@ result.isComplete();
 
 `deleteAll` splits the keys into each provider's batch limit: S3 `DeleteObjects` (1,000), Azure Blob
 Batch (256) and GCS JSON batch (100). Up to 4 batches are in flight at once. Where an endpoint doesn't
-implement batching, Cirrus falls back to single deletes, 16 at a time.
+implement batching, Halyx falls back to single deletes, 16 at a time.
 
 ## Metadata and headers
 
@@ -209,9 +209,9 @@ store.put(key, BlobContent.ofFile(path), PutOptions.builder().validateChecksum()
 try (Blob blob = store.get(key, GetOptions.builder().validateChecksum().build())) { ... }
 ```
 
-Cirrus computes only the algorithm each provider checks and stores: **CRC32C** on S3 and GCS
+Halyx computes only the algorithm each provider checks and stores: **CRC32C** on S3 and GCS
 (hardware-accelerated in the JDK), and **MD5** on Azure. The provider verifies it before committing.
-Cirrus then compares the checksums the provider reports for the stored blob. A mismatch throws
+Halyx then compares the checksums the provider reports for the stored blob. A mismatch throws
 `DataIntegrityException`, and the corrupt blob is deleted if it is still the version just written.
 Downloads, including parallel ones, are verified at the end of the stream against the strongest stored
 checksum (`BlobMetadata.checksums()`).
@@ -289,7 +289,7 @@ store.abortPresignedUpload(upload);
 - Browsers can read the `ETag` response header only if the bucket's CORS rules expose it (S3
   `ExposeHeaders: ETag`, GCS `responseHeader: ["ETag"]`).
 - Headers, metadata and tier from the options apply to the finished blob. Conditional writes and
-  checksum validation are rejected, because Cirrus never sees the bytes.
+  checksum validation are rejected, because Halyx never sees the bytes.
 - The `uploadId` is opaque. On Azure it encodes the blob's headers and metadata, so keep it
   server-side or treat it as untrusted input.
 - Abandoned uploads cost storage until cleaned up: add a lifecycle rule that aborts incomplete multipart

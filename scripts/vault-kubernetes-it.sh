@@ -16,16 +16,16 @@
 #
 
 # Runs VaultKubernetesLoginIT against Vault on a local minikube cluster:
-#   1. starts (or reuses) the minikube profile "cirrus"
+#   1. starts (or reuses) the minikube profile "halyx"
 #   2. deploys Vault in dev mode with permission to review service account tokens
-#   3. enables Kubernetes auth with a role bound to the "cirrus-app" service account
+#   3. enables Kubernetes auth with a role bound to the "halyx-app" service account
 #   4. port-forwards Vault, issues a real service account token, and runs the test
 # Usage: scripts/vault-kubernetes-it.sh [--delete]   (--delete removes the profile afterwards)
 set -euo pipefail
 
-PROFILE=cirrus
+PROFILE=halyx
 CTX=(--context "$PROFILE")
-NS=cirrus-vault
+NS=halyx-vault
 LOCAL_PORT=18200
 WORK=$(mktemp -d)
 trap 'kill "${PF_PID:-0}" 2>/dev/null || true; rm -rf "$WORK"' EXIT
@@ -46,13 +46,13 @@ metadata: { name: vault, namespace: $NS }
 # Vault calls the TokenReview API to validate the JWTs clients log in with.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
-metadata: { name: cirrus-vault-token-review }
+metadata: { name: halyx-vault-token-review }
 roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: system:auth-delegator }
 subjects: [ { kind: ServiceAccount, name: vault, namespace: $NS } ]
 ---
 apiVersion: v1
 kind: ServiceAccount
-metadata: { name: cirrus-app, namespace: $NS }
+metadata: { name: halyx-app, namespace: $NS }
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -78,25 +78,25 @@ vault() { kubectl "${CTX[@]}" -n "$NS" exec -i deploy/vault -- env VAULT_ADDR=ht
 vault auth enable kubernetes 2>/dev/null || true
 # In a pod, Vault uses its own service account token and the cluster CA to call TokenReview.
 vault write auth/kubernetes/config kubernetes_host=https://kubernetes.default.svc
-vault policy write cirrus-app - <<'HCL'
+vault policy write halyx-app - <<'HCL'
 path "secret/*" { capabilities = ["create", "read", "update", "delete", "list"] }
 HCL
-vault write auth/kubernetes/role/cirrus-app \
-  bound_service_account_names=cirrus-app bound_service_account_namespaces="$NS" \
-  policies=cirrus-app ttl=10m
+vault write auth/kubernetes/role/halyx-app \
+  bound_service_account_names=halyx-app bound_service_account_namespaces="$NS" \
+  policies=halyx-app ttl=10m
 
 kubectl "${CTX[@]}" -n "$NS" port-forward deploy/vault "$LOCAL_PORT:8200" >/dev/null 2>&1 &
 PF_PID=$!
 for _ in $(seq 1 30); do curl -sf "http://127.0.0.1:$LOCAL_PORT/v1/sys/health" >/dev/null && break; sleep 1; done
 
 # A real, short-lived service account token, exactly what a pod gets projected.
-kubectl "${CTX[@]}" -n "$NS" create token cirrus-app --duration=10m > "$WORK/token"
+kubectl "${CTX[@]}" -n "$NS" create token halyx-app --duration=10m > "$WORK/token"
 
 cd "$(dirname "$0")/.."
-CIRRUS_VAULT_K8S_ADDR="http://127.0.0.1:$LOCAL_PORT" \
-CIRRUS_VAULT_K8S_ROLE=cirrus-app \
-CIRRUS_VAULT_K8S_JWT="$WORK/token" \
-  mvn -q verify -pl cirrus-vault -Dit.test=VaultKubernetesLoginIT -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false
+HALYX_VAULT_K8S_ADDR="http://127.0.0.1:$LOCAL_PORT" \
+HALYX_VAULT_K8S_ROLE=halyx-app \
+HALYX_VAULT_K8S_JWT="$WORK/token" \
+  mvn -q verify -pl halyx-vault -Dit.test=VaultKubernetesLoginIT -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false
 
 if [[ "${1:-}" == "--delete" ]]; then
   minikube delete -p "$PROFILE"

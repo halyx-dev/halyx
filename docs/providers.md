@@ -25,10 +25,10 @@ ProviderConfig aws = ProviderConfig.of("aws")              // aws | azure | gcp 
         .credentials(Credentials.defaultChain())          // the default
         .property("http.max-connections", "256");         // provider settings, below
 
-Cirrus cirrus = Cirrus.builder().register("orders", aws).build();
+Halyx halyx = Halyx.builder().register("orders", aws).build();
 ```
 
-In Spring Boot, the same settings live under `cirrus.providers.<name>`; see
+In Spring Boot, the same settings live under `halyx.providers.<name>`; see
 [Spring Boot](spring-boot.md#providers).
 
 ## Credentials
@@ -62,7 +62,7 @@ and Azure its default Netty client. Cloud Storage uses an Apache transport inste
 Secret Manager, Parameter Manager) multiplex over HTTP/2 and aren't affected.
 
 Upload part buffers come from a JVM-wide pool. Set the most it keeps idle with the system property
-`cirrus.buffer-pool.max-bytes` (256 MiB by default).
+`halyx.buffer-pool.max-bytes` (256 MiB by default).
 
 ## AWS
 
@@ -78,7 +78,7 @@ rather than on the provider.
 | `aws.retry-mode` | provider | SDK retry mode: `adaptive` (default), `standard` or `legacy` |
 | `aws.s3.path-style` | provider | `true` for path-style addressing (emulators, S3-compatible stores) |
 | `aws.s3.multipart-threshold` | provider | bytes above which a known-length `put` uses parallel multipart (64 MiB) |
-| `aws.dynamodb.ttl-attribute` | `TableConfig` | the expiry attribute (`cirrus_expires` by default) |
+| `aws.dynamodb.ttl-attribute` | `TableConfig` | the expiry attribute (`halyx_expires` by default) |
 | `aws.target` | `TopicConfig` | `sqs` to publish straight to an SQS queue instead of SNS |
 | `aws.ssm.secure` | `ParameterStoreConfig` | `true` to write `SecureString` parameters |
 | `aws.elasticache.cache-name` | `CacheConfig` | the replication group id or serverless cache name, for IAM login |

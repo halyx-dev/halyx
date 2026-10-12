@@ -22,19 +22,19 @@ implements. The API does validation, capability checks, interceptors and error t
 every provider:
 
 ```
- application ──► BlobStore (API)                                        cirrus-core
+ application ──► BlobStore (API)                                        halyx-core
                    │ DefaultBlobStore: validation → capability check →
                    │ interceptor chain → driver call → error translation
                    ▼
                  BlobStoreDriver (SPI)
        ┌───────────┼──────────────────┬──────────────────┐
   S3BlobStoreDriver  AzureBlobStoreDriver  GcsBlobStoreDriver  InMemoryBlobStoreDriver
-   cirrus-aws          cirrus-azure          cirrus-gcp          cirrus-core
+   halyx-aws          halyx-azure          halyx-gcp          halyx-core
 ```
 
 The same split repeats for every service: `DocumentStore` and `DocumentStoreDriver`, `Publisher` and
 `PublisherDriver`, `Cache` and `CacheDriver`, `ParameterStore` and `ParameterDriver`. Providers are
-discovered with `ServiceLoader`, so `cirrus-core` has no cloud SDK dependency, and the build enforces
+discovered with `ServiceLoader`, so `halyx-core` has no cloud SDK dependency, and the build enforces
 that.
 
 ### Patterns
@@ -44,7 +44,7 @@ that.
 | Bridge | each API (`BlobStore`, `DefaultBlobStore`) and its SPI (`BlobStoreDriver`) |
 | Plugin, Separated Interface | `CloudProvider` in core, discovered from provider jars through `ServiceLoader` |
 | Abstract Factory | `ProviderConnection` creates the family of drivers for one account and region |
-| Registry, Facade | `Cirrus` holds the named `CloudContext`s |
+| Registry, Facade | `Halyx` holds the named `CloudContext`s |
 | Gateway, Adapter | each driver wraps a native SDK client |
 | Template Method | `AbstractBlobStoreDriver` and friends (translation fallback, `unwrap`) |
 | Chain of Responsibility | `Interceptor` and `InterceptorChain` (`RetryInterceptor` included) |
@@ -58,9 +58,9 @@ that.
   writes, versions and expiry mean the same on every provider, and the conformance kits check it.
 - **Declare differences instead of hiding them.** Optional features are capabilities. Asking for a
   missing one fails rather than being ignored, and `unwrap` reaches the native client.
-- **No hidden waits.** Cirrus doesn't block your call to paper over eventual consistency or
+- **No hidden waits.** Halyx doesn't block your call to paper over eventual consistency or
   asynchronous deletes. It fails fast with a retryable error, and you choose how to retry.
-- **Infrastructure is yours.** Cirrus never creates buckets, tables, topics or databases.
+- **Infrastructure is yours.** Halyx never creates buckets, tables, topics or databases.
 - **Fit the platform.** Java 21 virtual threads for parallel transfers and listeners, pooled buffers for
   part uploads, shared HTTP clients per provider connection, and SDK-native retry modes.
 
@@ -68,26 +68,26 @@ that.
 
 | Module | Purpose |
 |---|---|
-| `cirrus-bom` | Import to align Cirrus versions |
-| `cirrus-core` | portable API, provider SPI, error model, interceptors, in-memory provider. No cloud SDKs (enforced) |
-| `cirrus-tck` | the conformance test kits every provider must pass |
-| `cirrus-redis` | the shared Redis and Valkey cache driver (Lettuce), used by every provider |
-| `cirrus-sql` | the shared HikariCP pool with per-connection credentials (passwords, cloud IAM tokens) |
-| `cirrus-aws` | AWS SDK v2: S3, DynamoDB, SNS, SQS, SSM Parameter Store, Secrets Manager, ElastiCache and RDS IAM login |
-| `cirrus-azure` | Azure SDK: Blob Storage, Cosmos DB, Service Bus, Key Vault, App Configuration, Entra ID login for caches and databases |
-| `cirrus-gcp` | Google Cloud: Cloud Storage, Firestore, Pub/Sub, Secret Manager, Parameter Manager, Memorystore and Cloud SQL IAM login |
-| `cirrus-vault` | HashiCorp Vault KV v2 parameters and secrets |
-| `cirrus-spring-boot-autoconfigure` | Spring Boot auto-configuration, properties, health and observations |
-| `cirrus-spring-boot-starter` | the dependency Spring Boot applications add |
-| `cirrus-spring-boot4-tests` | the shared Spring tests run on Boot 4 (not published) |
-| `cirrus-benchmarks` | JMH benchmarks and a load-test harness (not published) |
+| `halyx-bom` | Import to align Halyx versions |
+| `halyx-core` | portable API, provider SPI, error model, interceptors, in-memory provider. No cloud SDKs (enforced) |
+| `halyx-tck` | the conformance test kits every provider must pass |
+| `halyx-redis` | the shared Redis and Valkey cache driver (Lettuce), used by every provider |
+| `halyx-sql` | the shared HikariCP pool with per-connection credentials (passwords, cloud IAM tokens) |
+| `halyx-aws` | AWS SDK v2: S3, DynamoDB, SNS, SQS, SSM Parameter Store, Secrets Manager, ElastiCache and RDS IAM login |
+| `halyx-azure` | Azure SDK: Blob Storage, Cosmos DB, Service Bus, Key Vault, App Configuration, Entra ID login for caches and databases |
+| `halyx-gcp` | Google Cloud: Cloud Storage, Firestore, Pub/Sub, Secret Manager, Parameter Manager, Memorystore and Cloud SQL IAM login |
+| `halyx-vault` | HashiCorp Vault KV v2 parameters and secrets |
+| `halyx-spring-boot-autoconfigure` | Spring Boot auto-configuration, properties, health and observations |
+| `halyx-spring-boot-starter` | the dependency Spring Boot applications add |
+| `halyx-spring-boot4-tests` | the shared Spring tests run on Boot 4 (not published) |
+| `halyx-benchmarks` | JMH benchmarks and a load-test harness (not published) |
 
 ## Build
 
 ```bash
 mvn verify          # unit tests and every conformance kit against emulators (needs Docker)
 mvn test            # unit tests and the kits on the in-memory provider only
-mvn -pl cirrus-aws -am verify -Dit.test='S3BlobStoreConformanceIT'   # one suite
+mvn -pl halyx-aws -am verify -Dit.test='S3BlobStoreConformanceIT'   # one suite
 ```
 
 Requirements: Java 21 or later, Maven 3.9 or later, and Docker for the integration tests. They're skipped
@@ -101,7 +101,7 @@ Every source file carries the Apache-2.0 license header, and the build checks it
 
 ### Conformance kits
 
-`cirrus-tck` holds one conformance kit per service. Every provider runs the same kit, so a behaviour is
+`halyx-tck` holds one conformance kit per service. Every provider runs the same kit, so a behaviour is
 either portable or explicitly declared as a capability:
 
 | Kit | Tests | What it covers |
@@ -140,24 +140,24 @@ Pub/Sub ordering keys. See [Cloud testing](cloud-testing/index.md) for how the r
 
 ### Spring
 
-The Spring tests cover beans from properties, `@CirrusListener` with retries, claim checks, configuration
+The Spring tests cover beans from properties, `@HalyxListener` with retries, claim checks, configuration
 import with live reload, health and metrics. They run on Spring Boot 3.5, and the same shared tests run
 again on Boot 4.1.
 
 ## Benchmarks
 
 ```bash
-mvn -pl cirrus-benchmarks -am package -DskipTests
-java -jar cirrus-benchmarks/target/benchmarks.jar                      # all JMH benchmarks
-java -jar cirrus-benchmarks/target/benchmarks.jar TransferBenchmark -p latencyMillis=50
+mvn -pl halyx-benchmarks -am package -DskipTests
+java -jar halyx-benchmarks/target/benchmarks.jar                      # all JMH benchmarks
+java -jar halyx-benchmarks/target/benchmarks.jar TransferBenchmark -p latencyMillis=50
 ```
 
-The JMH benchmarks measure Cirrus itself, so they need no cloud account. `TransferBenchmark` and
+The JMH benchmarks measure Halyx itself, so they need no cloud account. `TransferBenchmark` and
 `BulkBenchmark` run against a simulated network: every request pays a round-trip latency, and each
 connection is capped at a bandwidth. That shows what the parallel engines gain, independently of your
 network. One short run on a laptop, at 20 ms latency and 100 MB/s per connection:
 
-| Benchmark | Sequential | Cirrus | Speed-up |
+| Benchmark | Sequential | Halyx | Speed-up |
 |---|---|---|---|
 | 64 MiB download, 8 MiB ranges | 1,004 ms | 310 ms (parallelism 4), 219 ms (8) | 3.2x, 4.6x |
 | 64 MiB upload, 8 MiB parts | 1,125 ms | 445 ms (concurrency 4), 228 ms (8) | 2.5x, 4.9x |
@@ -175,13 +175,13 @@ Emulators don't behave like cloud storage under load, so tune against a real buc
 uses each cloud's default credentials and deletes its objects afterwards:
 
 ```bash
-java -cp cirrus-benchmarks/target/benchmarks.jar \
+java -cp halyx-benchmarks/target/benchmarks.jar \
   -Dprovider=aws -Dbucket=my-bench-bucket -Dregion=eu-west-1 \
   -Dconcurrency=64 -Dduration=60s -Dsize=1MiB -Dmix=put:20,get:70,head:10 \
-  -Dcirrus.http.max-connections=256 \
-  org.kamranzafar.cirrus.benchmarks.LoadTest
+  -Dhalyx.http.max-connections=256 \
+  org.kamranzafar.halyx.benchmarks.LoadTest
 ```
 
 It prints count, operations per second, MB/s, p50, p90, p99 and maximum latency, and errors, for each
-operation. Any `cirrus.*` property goes to the provider, for example `-Dcirrus.aws.retry-mode=standard`.
+operation. Any `halyx.*` property goes to the provider, for example `-Dhalyx.aws.retry-mode=standard`.
 Use `-Dparallelism=8` for parallel ranged gets, and `-Dendpoint=...` for S3-compatible stores.

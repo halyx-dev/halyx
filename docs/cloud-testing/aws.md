@@ -7,8 +7,8 @@ nav_order: 1
 # Amazon Web Services: real-cloud results
 {: .no_toc }
 
-Results of running the Cirrus conformance kits against real Amazon Web Services services in `ap-southeast-2` (Sydney), acting as
-the `cirrus_test` IAM user. Every run creates its own throwaway resources and deletes them afterwards. See
+Results of running the Halyx conformance kits against real Amazon Web Services services in `ap-southeast-2` (Sydney), acting as
+the `halyx_test` IAM user. Every run creates its own throwaway resources and deletes them afterwards. See
 [Cloud testing](index.md) for how the runs work.
 
 | Tier | Services | Latest result |
@@ -33,11 +33,11 @@ IT_TEST='RealAwsIT$SecretsManager' AWS_PROFILE=default AWS_REGION=ap-southeast-2
 ```
 
 1. **Provision.** Terraform (`infra/aws/tier1`) creates one S3 bucket and two DynamoDB tables. Their names
-   include a fresh run id (`r<yyMMddHHmm><hex>`), and everything is tagged `cirrus-test=<run id>`.
-2. **Test.** `RealAwsIT` runs the conformance kits, and is enabled only by `-Dcirrus.real.aws=true`.
+   include a fresh run id (`r<yyMMddHHmm><hex>`), and everything is tagged `halyx-test=<run id>`.
+2. **Test.** `RealAwsIT` runs the conformance kits, and is enabled only by `-Dhalyx.real.aws=true`.
    The tests create SNS topics, SQS queues, SSM parameters and secrets themselves, then delete them.
 3. **Tear down.** This runs on exit, failure or Ctrl-C. A sweep deletes anything the tests left behind:
-   - SNS topics and SQS queues named `cirrus-<run>-*`
+   - SNS topics and SQS queues named `halyx-<run>-*`
    - SSM parameters and secrets under `tck-*` created since the run started
      (secrets are deleted without recovery)
 
@@ -57,7 +57,7 @@ Credentials come from the named AWS profile and never from the repository.
 | Result | **BUILD SUCCESS**: 170 passed, 0 failed, 2 skipped (expected) |
 | Teardown | 11 leftover secrets swept, stack destroyed, check: **nothing left** |
 
-| Service | Cirrus API | Tests | Passed | Skipped | Time |
+| Service | Halyx API | Tests | Passed | Skipped | Time |
 |---|---|---|---|---|---|
 | S3 | `BlobStore` | 75 | 74 | 1 | 205.3s |
 | DynamoDB | `DocumentStore` | 23 | 23 | 0 | 10.1s |
@@ -309,8 +309,8 @@ Terraform (`infra/aws/tier2`) creates RDS for PostgreSQL 17 and RDS for MySQL 8.
   holds it, and teardown deletes the state once destroy succeeds.
 
 `RealAwsSqlIT` signs in as the master user and creates two database users:
-- `cirrus_iam`, enabled for IAM (`GRANT rds_iam` on PostgreSQL, `AWSAuthenticationPlugin` on MySQL)
-- `cirrus_password_only`, which is not
+- `halyx_iam`, enabled for IAM (`GRANT rds_iam` on PostgreSQL, `AWSAuthenticationPlugin` on MySQL)
+- `halyx_password_only`, which is not
 
 | | |
 |---|---|
@@ -324,9 +324,9 @@ Terraform (`infra/aws/tier2`) creates RDS for PostgreSQL 17 and RDS for MySQL 8.
 |---|---|---|
 | `loginLatency`: runs first and times each login (see below); a warm token login must take under 3s | passed | passed |
 | `passwordLoginRunsQueriesOverTls`: master password login, and the session is encrypted | passed (1.2s) | passed (1.2s) |
-| `iamTokenLoginRunsQueriesOverTls`: `SqlAuth.iam("cirrus_iam")` runs queries as `cirrus_iam` over TLS, and the pool reports healthy | passed (9.4s) | passed (10.2s) |
+| `iamTokenLoginRunsQueriesOverTls`: `SqlAuth.iam("halyx_iam")` runs queries as `halyx_iam` over TLS, and the pool reports healthy | passed (9.4s) | passed (10.2s) |
 | `replacedConnectionsLogInAgainWithTokens`: three rounds of filling the pool, then evicting it, with every new connection signing in by token | passed (9.7s) | passed (8.9s) |
-| `tokenDoesNotLogInAUserNotEnabledForIam`: a token for `cirrus_password_only` is rejected, and the pool reports unhealthy | passed (2.6s) | passed (2.5s) |
+| `tokenDoesNotLogInAUserNotEnabledForIam`: a token for `halyx_password_only` is rejected, and the pool reports unhealthy | passed (2.6s) | passed (2.5s) |
 | `wrongPasswordDoesNotLogIn` | passed (1.4s) | passed (1.6s) |
 
 TLS is checked on the server side: `pg_stat_ssl` for the session on PostgreSQL, and `Ssl_version` on
@@ -337,19 +337,19 @@ first-login cost described below.
 ### Login latency
 
 Run `r26101115149618` timed every login on newly created instances, in order. It measured plain JDBC with
-no Cirrus code in the path, and then a Cirrus IAM pool:
+no Halyx code in the path, and then a Halyx IAM pool:
 
 | Login | PostgreSQL | MySQL |
 |---|---|---|
 | plain JDBC, password (×3) | 327–369 ms | 344–368 ms |
 | plain JDBC, **first** token on the instance | **6,120 ms** | **5,202 ms** |
 | plain JDBC, later tokens (×4) | 650–945 ms | 791–1,078 ms |
-| Cirrus pool, new token connections (×3) | 569–1,327 ms | 518–1,196 ms |
+| Halyx pool, new token connections (×3) | 569–1,327 ms | 518–1,196 ms |
 | token signing, client side | 1 ms (122 ms on first use, when credentials resolve) | 0–3 ms |
 
 Findings:
 
-- **Cirrus adds no measurable cost.** Signing is local and takes about 1ms, and the token is cached per
+- **Halyx adds no measurable cost.** Signing is local and takes about 1ms, and the token is cached per
   pool. Pool connections cost the same as plain JDBC with a token.
 - **The cost is on the server.** RDS checks each token as the connection logs in. That adds about
   0.3–0.7s per new connection over a password login. The first token login a new instance sees takes
@@ -372,8 +372,8 @@ Terraform (`infra/aws/tier3`) creates the following in the default VPC:
 - **Users:** a user group with the required `default` user, switched off. Valkey users can't be
   password-free, so it gets a random password for each run that nothing uses. There are also two IAM
   users:
-  - `cirrus-<run>-app`, which the caller's policy may connect as
-  - `cirrus-<run>-denied`, which it may not
+  - `halyx-<run>-app`, which the caller's policy may connect as
+  - `halyx-<run>-denied`, which it may not
 - **Bastion:** a `t4g.micro` instance. The cache accepts connections only from the bastion. The bastion
   accepts SSH only from the test machine's `/32`, with a key pair generated for each run.
 
@@ -393,7 +393,7 @@ hosts files (see the findings below).
 
 | Test | Result | Time |
 |---|---|---|
-| Cache conformance kit, logged in as `cirrus-<run>-app` with IAM tokens over verified TLS | **49/49 passed** | 13.5s |
+| Cache conformance kit, logged in as `halyx-<run>-app` with IAM tokens over verified TLS | **49/49 passed** | 13.5s |
 | `iamUserReadsAndWritesOverVerifiedTls` | passed | 0.90s |
 | `unauthenticatedConnectionIsRejected` | passed | 0.20s |
 | `tokenSignedForAnotherCacheIsRejected`: a token signed for another replication group id | passed | 2.83s |
@@ -403,10 +403,10 @@ This is the first time ElastiCache IAM authentication has been verified end to e
 attach IAM users to a replication group, so until now tokens had only been checked against a SigV4
 validator.
 
-**The open failure.** `cirrus-<run>-denied` is a real IAM-enabled user. The test signs the token for that
+**The open failure.** `halyx-<run>-denied` is a real IAM-enabled user. The test signs the token for that
 user and opens its own connection, because connections are keyed by user. ElastiCache accepted it, so the
 caller's effective IAM permissions include `elasticache:Connect` on that user. The intended policy, below,
-grants it only for `user:cirrus-*-app`. The policy actually attached to `cirrus_test` still needs checking
+grants it only for `user:halyx-*-app`. The policy actually attached to `halyx_test` still needs checking
 for a broader grant. The test stays strict, since a policy that's too broad is exactly what it should
 catch.
 
@@ -495,7 +495,7 @@ Emulators missed all of these:
 | Finding | Fix |
 |---|---|
 | A 400 `AccessDeniedException` (and other auth error codes) was mapped by status to `InvalidArgument` | `AwsErrors` checks auth error codes before status codes, so they map to `AccessDenied` |
-| A deleted secret's name can't be reused until AWS finishes the delete ("marked for deletion"; 18s measured) | The write fails with the retryable `UnavailableException`; `delete` treats an in-progress delete as done. Cirrus doesn't wait, so callers retry. The TCK allows for this with `deleteLag()` |
+| A deleted secret's name can't be reused until AWS finishes the delete ("marked for deletion"; 18s measured) | The write fails with the retryable `UnavailableException`; `delete` treats an in-progress delete as done. Halyx doesn't wait, so callers retry. The TCK allows for this with `deleteLag()` |
 | Reading a secret whose delete is still in progress throws | `get` returns empty |
 | `GetSecretValue` can return a secret for a moment after its delete is accepted | Documented as eventual. The TCK allows for it with `deleteLag()`. The API doesn't wait |
 | `ListSecrets` lags behind writes | Documented as eventual. The Secrets Manager TCK allows a listing lag (`listingLag()`) |
@@ -505,7 +505,7 @@ Emulators missed all of these:
 
 ## IAM for tier 1
 
-The `cirrus_test` user needs the following. Secrets are limited to the `tck-*` names the kits use.
+The `halyx_test` user needs the following. Secrets are limited to the `tck-*` names the kits use.
 
 ```json
 {
@@ -558,7 +558,7 @@ In addition to tier 1:
       ],
       "Resource": "*"
     },
-    { "Effect": "Allow", "Action": "rds-db:connect", "Resource": "arn:aws:rds-db:<region>:<account>:dbuser:*/cirrus_iam" },
+    { "Effect": "Allow", "Action": "rds-db:connect", "Resource": "arn:aws:rds-db:<region>:<account>:dbuser:*/halyx_iam" },
     {
       "Effect": "Allow",
       "Action": "iam:CreateServiceLinkedRole",
@@ -569,8 +569,8 @@ In addition to tier 1:
 }
 ```
 
-`rds-db:connect` is what the tests exercise. It is granted for `cirrus_iam` only, so the token for
-`cirrus_password_only` is refused. `iam:CreateServiceLinkedRole` is needed only the first time an account
+`rds-db:connect` is what the tests exercise. It is granted for `halyx_iam` only, so the token for
+`halyx_password_only` is refused. `iam:CreateServiceLinkedRole` is needed only the first time an account
 uses RDS.
 
 ## IAM for tier 3
@@ -608,8 +608,8 @@ tiers 1 and 2 had used most of it. The EC2 security-group permissions come from 
       "Effect": "Allow",
       "Action": "elasticache:Connect",
       "Resource": [
-        "arn:aws:elasticache:<region>:<account>:replicationgroup:cirrus-*",
-        "arn:aws:elasticache:<region>:<account>:user:cirrus-*-app"
+        "arn:aws:elasticache:<region>:<account>:replicationgroup:halyx-*",
+        "arn:aws:elasticache:<region>:<account>:user:halyx-*-app"
       ]
     },
     {

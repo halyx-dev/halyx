@@ -50,7 +50,7 @@ provider "aws" {
   region = var.region
   default_tags {
     tags = {
-      cirrus-test = var.run_id
+      halyx-test = var.run_id
     }
   }
 }
@@ -67,13 +67,13 @@ data "aws_subnets" "default" {
 }
 
 resource "aws_db_subnet_group" "db" {
-  name       = "cirrus-${var.run_id}"
+  name       = "halyx-${var.run_id}"
   subnet_ids = data.aws_subnets.default.ids
 }
 
 resource "aws_security_group" "db" {
-  name        = "cirrus-${var.run_id}-db"
-  description = "Cirrus real-cloud tests: database access from the test machine only"
+  name        = "halyx-${var.run_id}-db"
+  description = "Halyx real-cloud tests: database access from the test machine only"
   vpc_id      = data.aws_vpc.default.id
 
   ingress {
@@ -106,7 +106,7 @@ locals {
     allocated_storage                   = 20
     storage_type                        = "gp3"
     db_name                             = "app"
-    username                            = "cirrus_admin"
+    username                            = "halyx_admin"
     publicly_accessible                 = true
     iam_database_authentication_enabled = true
     backup_retention_period             = 0
@@ -118,7 +118,7 @@ locals {
 }
 
 resource "aws_db_instance" "postgres" {
-  identifier                          = "cirrus-${var.run_id}-pg"
+  identifier                          = "halyx-${var.run_id}-pg"
   engine                              = "postgres"
   engine_version                      = "17"
   instance_class                      = local.common.instance_class
@@ -139,7 +139,7 @@ resource "aws_db_instance" "postgres" {
 }
 
 resource "aws_db_instance" "mysql" {
-  identifier                          = "cirrus-${var.run_id}-mysql"
+  identifier                          = "halyx-${var.run_id}-mysql"
   engine                              = "mysql"
   engine_version                      = "8.4"
   instance_class                      = local.common.instance_class

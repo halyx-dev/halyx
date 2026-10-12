@@ -22,7 +22,7 @@ MySQL or SQL Server.
 ## A pool with IAM login
 
 ```java
-Database orders = cirrus.provider("aws").database(SqlConfig.builder(SqlEngine.POSTGRESQL)
+Database orders = halyx.provider("aws").database(SqlConfig.builder(SqlEngine.POSTGRESQL)
         .host("orders.cluster-abc.eu-west-1.rds.amazonaws.com")
         .database("orders")
         .auth(SqlAuth.iam("orders_app"))
@@ -34,7 +34,7 @@ boolean ok = orders.isHealthy(2);               // borrows a connection and chec
 ```
 
 `database(config)` opens a new pool on every call, so create the `Database` once and keep it. Closing it,
-or closing `Cirrus`, closes the pool. The pool starts on first use, so the application can start while
+or closing `Halyx`, closes the pool. The pool starts on first use, so the application can start while
 the database is unreachable.
 
 `PoolSettings(maxSize, minIdle, connectionTimeout, idleTimeout, maxLifetime)` sizes the pool. Without
@@ -64,10 +64,10 @@ PostgreSQL lets every user connect.
 effect as connections are replaced (`maxLifetime`, 30 minutes by default) without a restart:
 
 ```java
-ParameterStore secrets = cirrus.provider("aws").parameterStore(
+ParameterStore secrets = halyx.provider("aws").parameterStore(
         ParameterStoreConfig.secrets().cacheTtl(Duration.ofMinutes(5)).build());
 
-Database reporting = cirrus.provider("aws").database(SqlConfig.builder(SqlEngine.MYSQL)
+Database reporting = halyx.provider("aws").database(SqlConfig.builder(SqlEngine.MYSQL)
         .host("reporting.abc.eu-west-1.rds.amazonaws.com")
         .database("reporting")
         .auth(SqlAuth.password("app", () -> secrets.require("reporting/db", "password")))
@@ -83,7 +83,7 @@ IAM authentication.
 connector handles TLS and IAM itself and needs no authorized networks:
 
 ```java
-Database db = cirrus.provider("gcp").database(SqlConfig.builder(SqlEngine.POSTGRESQL)
+Database db = halyx.provider("gcp").database(SqlConfig.builder(SqlEngine.POSTGRESQL)
         .property(GcpProperties.SQL_INSTANCE, "acme-prod:europe-west2:orders")
         .database("orders")
         .auth(SqlAuth.iam())
@@ -119,6 +119,6 @@ measurements are in [Cloud testing](../cloud-testing/index.md).
 
 ## Spring Boot
 
-Every `cirrus.databases.<name>` entry becomes a `DataSource` bean, covered by Spring Boot's JDBC health
+Every `halyx.databases.<name>` entry becomes a `DataSource` bean, covered by Spring Boot's JDBC health
 check and Hikari metrics. Spring Data JPA and JDBC, `JdbcTemplate`, Flyway and Liquibase use the primary
-Cirrus `DataSource` unchanged. See [Spring Boot](../spring-boot.md#sql-databases).
+Halyx `DataSource` unchanged. See [Spring Boot](../spring-boot.md#sql-databases).

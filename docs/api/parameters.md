@@ -24,7 +24,7 @@ One API for configuration values and secrets on every cloud and on HashiCorp Vau
 ## Reading and writing
 
 ```java
-ParameterStore secrets = cirrus.provider("aws").parameterStore(
+ParameterStore secrets = halyx.provider("aws").parameterStore(
         ParameterStoreConfig.secrets().prefix("orders-svc").cacheTtl(Duration.ofMinutes(5)).build());
 
 String password = secrets.require("db/password");          // Secrets Manager secret "orders-svc/db/password"
@@ -33,7 +33,7 @@ Map<String, Parameter> db = secrets.getAll("db");           // everything at or 
 secrets.put("api/key", newKey);                            // creates, or adds a new version
 secrets.delete("api/key");                                  // idempotent
 
-ParameterStore config = cirrus.provider("aws").parameterStore(ParameterStoreConfig.parameters().build());
+ParameterStore config = halyx.provider("aws").parameterStore(ParameterStoreConfig.parameters().build());
 Optional<Integer> poolSize = config.get("db/pool/size", Integer::valueOf);
 ```
 
@@ -103,7 +103,7 @@ One daemon thread serves all watchers. A detected change also refreshes the stor
 the watch saw. Failed polls are logged and retried. `statistics()` counts cache hits, backend reads,
 detected changes and watch failures.
 
-In Spring Boot, `spring.config.import=cirrus:<store>` loads a store into the `Environment` and can reload
+In Spring Boot, `spring.config.import=halyx:<store>` loads a store into the `Environment` and can reload
 it. See [Spring Boot](../spring-boot.md#configuration-import).
 
 ## Native names
@@ -115,7 +115,7 @@ no separator translation; the prefix is then a literal string prefix. Use it for
 ## Backend behaviour
 
 {: .note }
-Some backends are **eventually consistent** or delete **asynchronously**. Cirrus never waits on your
+Some backends are **eventually consistent** or delete **asynchronously**. Halyx never waits on your
 behalf: it returns or throws at once, and conflicts are the retryable `UnavailableException`.
 
 - **AWS Secrets Manager:** `getAll` (and so `watch` and config reloads) is eventually consistent, so a
@@ -124,12 +124,12 @@ behalf: it returns or throws at once, and conflicts are the retryable `Unavailab
   and writing its name throws the retryable `UnavailableException`. Deletes skip the recovery window. The
   IAM policy needs `secretsmanager:ListSecrets` for `getAll`, plus `GetSecretValue`, `PutSecretValue`,
   `CreateSecret` and `DeleteSecret`. Granting `BatchGetSecretValue` on `"*"` lets `getAll` read 20 secrets
-  per call; without it Cirrus reads them one at a time and logs a warning.
+  per call; without it Halyx reads them one at a time and logs a warning.
 - **Azure Key Vault:** deletes are soft deletes that finish asynchronously, and `delete` doesn't wait.
   Writing a name that is soft-deleted, or still being deleted or recovered, throws the retryable
   `UnavailableException`. If the name was soft-deleted, the write also starts its recovery, so a retry
   stores the new value without needing the purge permission.
-- **Google Parameter Manager:** there's no "latest" alias and the caller names each version. Cirrus writes
+- **Google Parameter Manager:** there's no "latest" alias and the caller names each version. Halyx writes
   version ids that sort by creation time and reads the newest enabled version, which is also correct for
   versions written by other tools. A read lists versions and then fetches one, so give these stores a
   `cacheTtl`. Deletes remove all versions, then the parameter.
@@ -138,7 +138,7 @@ behalf: it returns or throws at once, and conflicts are the retryable `Unavailab
 
 ## HashiCorp Vault
 
-The `cirrus-vault` module supports:
+The `halyx-vault` module supports:
 - token auth, or `VAULT_TOKEN` from the environment
 - a token file (a Vault Agent sink), read again whenever Vault rejects the token
 - AppRole, Kubernetes, GCP and Azure login
@@ -159,4 +159,4 @@ dependencies that could clash with the cloud SDKs. See
 | Key Vault | `SecretClient` |
 | Secret Manager | `SecretManagerServiceClient` |
 | Parameter Manager | `ParameterManagerClient` |
-| HashiCorp Vault | `VaultClient` (Cirrus's own client) |
+| HashiCorp Vault | `VaultClient` (Halyx's own client) |

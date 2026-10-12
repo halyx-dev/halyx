@@ -20,15 +20,15 @@
 #   scripts/azure-setup-test-principal.sh [subscription-id]
 #
 # 1. Registers the resource providers tier 1 uses.
-# 2. Creates the service principal cirrus-test with Contributor on the subscription (to create and delete each
-#    run's resource group) and writes its credentials to ~/.azure/cirrus-test.env, readable only by you. The
+# 2. Creates the service principal halyx-test with Contributor on the subscription (to create and delete each
+#    run's resource group) and writes its credentials to ~/.azure/halyx-test.env, readable only by you. The
 #    secret is never printed.
 # 3. Gives it Role Based Access Control Administrator on the subscription, with a condition that lets it
 #    assign and remove only the four data-plane roles the tests use. It can't grant itself anything else.
 set -euo pipefail
 
 SUB="${1:-$(az account show --query id -o tsv)}"
-CREDS="${AZURE_CREDENTIALS_FILE:-$HOME/.azure/cirrus-test.env}"
+CREDS="${AZURE_CREDENTIALS_FILE:-$HOME/.azure/halyx-test.env}"
 
 echo "== Registering resource providers on $SUB"
 for ns in Microsoft.Storage Microsoft.ServiceBus Microsoft.DocumentDB Microsoft.KeyVault Microsoft.AppConfiguration; do
@@ -45,14 +45,14 @@ save() {
       "$id" "$secret" "$tenant" "$SUB" > "$CREDS"
   echo "  appId $id; credentials saved to $CREDS"
 }
-APP_ID=$(az ad sp list --display-name cirrus-test --query '[0].appId' -o tsv --only-show-errors)
+APP_ID=$(az ad sp list --display-name halyx-test --query '[0].appId' -o tsv --only-show-errors)
 if [[ -z "$APP_ID" ]]; then
-  echo "== Creating service principal cirrus-test"
-  az ad sp create-for-rbac --name cirrus-test --role Contributor --scopes "/subscriptions/$SUB" --only-show-errors \
+  echo "== Creating service principal halyx-test"
+  az ad sp create-for-rbac --name halyx-test --role Contributor --scopes "/subscriptions/$SUB" --only-show-errors \
       --query '[appId, password, tenant]' -o tsv | save
 else
   # Rerunning: replace its secret (the old one stops working) rather than create a second principal.
-  echo "== cirrus-test exists ($APP_ID): issuing a new secret"
+  echo "== halyx-test exists ($APP_ID): issuing a new secret"
   az ad sp credential reset --id "$APP_ID" --only-show-errors --query '[appId, password, tenant]' -o tsv | save
   az role assignment create --assignee "$APP_ID" --role Contributor --scope "/subscriptions/$SUB" \
       --only-show-errors >/dev/null

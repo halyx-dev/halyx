@@ -7,7 +7,7 @@ nav_order: 8
 # Capabilities and native clients
 {: .no_toc }
 
-Cirrus doesn't reduce every cloud to the lowest common denominator. Where providers differ, the
+Halyx doesn't reduce every cloud to the lowest common denominator. Where providers differ, the
 differences are **declared** as capabilities, and anything provider-specific is one `unwrap` away.
 
 <details open markdown="block">
@@ -28,7 +28,7 @@ if (store.capabilities().supports(StorageCapability.PRESIGNED_URL)) {
 }
 return proxyDownload(key);
 
-Publisher events = cirrus.provider("gcp").publisher("orders");
+Publisher events = halyx.provider("gcp").publisher("orders");
 events.capabilities().require(MessagingCapability.DEDUPLICATION, events.provider());   // fails on Pub/Sub
 ```
 
@@ -82,7 +82,7 @@ for one cloud fails clearly on another instead of misbehaving. Prefer the portab
 | `ParameterStore` | `SsmClient`, `SecretsManagerClient` | `ConfigurationClient`, `SecretClient` | `ParameterManagerClient`, `SecretManagerServiceClient` |
 | `Cache` | Lettuce `StatefulRedisConnection` / `StatefulRedisClusterConnection`, `RedisClient` / `RedisClusterClient` | (same) | (same) |
 
-HashiCorp Vault parameter stores unwrap to `VaultClient`, Cirrus's own client. A `Database` has no
+HashiCorp Vault parameter stores unwrap to `VaultClient`, Halyx's own client. A `Database` has no
 `unwrap`: its `dataSource()` is the HikariCP pool, which JDBC's own `DataSource.unwrap(HikariDataSource.class)`
 reaches.
 
@@ -93,5 +93,5 @@ Good uses:
 - data structures beyond strings on Redis
 - provider features not in the portable API yet, such as S3 Object Lock or Cosmos DB change feed
 
-If you find yourself unwrapping for something common, it may belong in Cirrus; see the
+If you find yourself unwrapping for something common, it may belong in Halyx; see the
 [roadmap](../roadmap.md).

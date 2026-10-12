@@ -7,8 +7,8 @@ nav_order: 2
 # Google Cloud: real-cloud results
 {: .no_toc }
 
-Results of running the Cirrus conformance kits against real Google Cloud services in `australia-southeast1` (Sydney), acting as
-the `cirrus-test` service account, impersonated through Application Default Credentials. Every run creates its own throwaway resources and deletes them afterwards. See
+Results of running the Halyx conformance kits against real Google Cloud services in `australia-southeast1` (Sydney), acting as
+the `halyx-test` service account, impersonated through Application Default Credentials. Every run creates its own throwaway resources and deletes them afterwards. See
 [Cloud testing](index.md) for how the runs work.
 
 | Tier | Services | Latest result |
@@ -31,14 +31,14 @@ GCP_PROJECT=<project> GCP_REGION=australia-southeast1 scripts/gcp-real-cloud.sh
 IT_TEST='RealGcpIT$Firestore' scripts/gcp-real-cloud.sh     # one suite only
 ```
 
-**Identity.** Terraform and the tests act as a dedicated `cirrus-test` service account, through
+**Identity.** Terraform and the tests act as a dedicated `halyx-test` service account, through
 Application Default Credentials that impersonate it:
 
 ```bash
-gcloud auth application-default login --impersonate-service-account=cirrus-test@<project>.iam.gserviceaccount.com
+gcloud auth application-default login --impersonate-service-account=halyx-test@<project>.iam.gserviceaccount.com
 ```
 
-**Provision.** Terraform (`infra/gcp/tier1`) creates the following, labelled `cirrus-test=<run id>`:
+**Provision.** Terraform (`infra/gcp/tier1`) creates the following, labelled `halyx-test=<run id>`:
 - a Cloud Storage bucket, which also holds the messaging kit's claim-check payloads
 - a Firestore database of the run's own, so the project's `(default)` database is never touched
 - the composite indexes the document store's index queries need: `status` with `placedAt` ascending and
@@ -58,7 +58,7 @@ lists every kind of resource. A listing that fails is reported as `CHECK FAILED`
 | Result | **BUILD SUCCESS**: 176 passed, 0 failed, 3 skipped (expected) |
 | Teardown | bucket and Firestore database destroyed; check: **nothing left** |
 
-| Service | Cirrus API | Tests | Passed | Skipped | Time |
+| Service | Halyx API | Tests | Passed | Skipped | Time |
 |---|---|---|---|---|---|
 | Cloud Storage | `BlobStore` | 75 | 74 | 1 | 183.8s |
 | Firestore | `DocumentStore` | 23 | 23 | 0 | 47.4s |
@@ -320,10 +320,10 @@ Terraform (`infra/gcp/tier2`) creates Cloud SQL for PostgreSQL 17 and for MySQL 
   authorized network
 
 Each instance has three users:
-- `cirrus_admin`, a built-in user with a password generated for the run
-- the test service account as an IAM user: `cirrus-test@<project>.iam` on PostgreSQL and `cirrus-test`
+- `halyx_admin`, a built-in user with a password generated for the run
+- the test service account as an IAM user: `halyx-test@<project>.iam` on PostgreSQL and `halyx-test`
   on MySQL
-- `cirrus_password_only`, a built-in user that an IAM token must not log in
+- `halyx_password_only`, a built-in user that an IAM token must not log in
 
 On MySQL the test then grants the IAM user `SELECT` on the `app` database, as the admin. IAM users start
 with no privileges there; see the findings below.
@@ -345,7 +345,7 @@ with no privileges there; see the findings below.
 | `connectorIamLogin`: `gcp.sql.instance` through the Cloud SQL Java connector, no host or authorized network | passed (0.9s) | passed (4.1s) |
 | `connectorPasswordLogin` | passed (1.1s) | passed (1.4s) |
 | `replacedConnectionsLogInAgainWithTokens`: three rounds of filling the pool, then evicting it | passed (6.8s) | passed (13.9s) |
-| `tokenDoesNotLogInAUserNotEnabledForIam`: a token for `cirrus_password_only` is rejected | passed (3.1s) | passed (2.9s) |
+| `tokenDoesNotLogInAUserNotEnabledForIam`: a token for `halyx_password_only` is rejected | passed (3.1s) | passed (2.9s) |
 | `wrongPasswordDoesNotLogIn` | passed (1.3s) | passed (2.0s) |
 
 ### Login latency
@@ -361,7 +361,7 @@ Times per new connection, in the order they ran, on newly created instances:
 - **PostgreSQL:** a token login costs about 140 ms more than a password login. There's no slow first
   login like RDS's 5–6s.
 - **MySQL on `db-f1-micro`:** slow for *every* login, passwords included. The shared-core instance is the
-  bottleneck, not IAM or Cirrus, and a larger tier would bring it close to PostgreSQL. Its warm token
+  bottleneck, not IAM or Halyx, and a larger tier would bring it close to PostgreSQL. Its warm token
   logins (up to 2.3s) are near the test's 3s limit, so that limit could become flaky on this tier.
 - **The connector** costs the same as a direct connection once warm.
 
@@ -488,7 +488,7 @@ The emulators (Floci-gcp, and Google's Pub/Sub and Firestore emulators) missed a
 | Pub/Sub rejects a publish request whose messages have different ordering keys (`FAILED_PRECONDITION: ... all messages must have no ordering key or they must all have the same ordering key`) | The publisher sends one request per ordering key, keeping each key's messages in order, and returns ids in the caller's order |
 | `updateMetadata` with a stale ETag patched the *old* generation, which no longer exists in an unversioned bucket, so GCS answered 404 instead of 412 | Patch the live object with an `ifGenerationMatch` precondition, which GCS answers with 412 |
 | `gcloud parametermanager` sends regional locations to the global endpoint and gets `PERMISSION_DENIED` | The test script uses the regional endpoint (`parametermanager.<region>.rep.googleapis.com`). The Java client was already correct |
-| Cloud SQL for MySQL IAM users have no privileges, so a connection naming a database is refused (`Access denied for user 'cirrus-test'@'%' to database 'app'`). PostgreSQL grants `CONNECT` to everyone | Documented in the README; the test grants `SELECT` as the admin, as an application's setup would |
+| Cloud SQL for MySQL IAM users have no privileges, so a connection naming a database is refused (`Access denied for user 'halyx-test'@'%' to database 'app'`). PostgreSQL grants `CONNECT` to everyone | Documented in the README; the test grants `SELECT` as the admin, as an application's setup would |
 | Memorystore's server certificate comes from a private, per-instance CA and names the private endpoint, so through a tunnel or proxy the name never matches | New `redis.verify-peer=ca` checks the chain against the CA (`redis.ca-certificate`) without the name. Full checks stay the default |
 | Firestore collection-group queries need indexes the emulator doesn't ask for | Terraform creates them; the driver's documentation already lists them |
 
@@ -496,7 +496,7 @@ The emulators (Floci-gcp, and Google's Pub/Sub and Firestore emulators) missed a
 
 | Who | Role | Why |
 |---|---|---|
-| `cirrus-test` service account | `roles/storage.admin` | create and destroy the bucket; read and write objects |
+| `halyx-test` service account | `roles/storage.admin` | create and destroy the bucket; read and write objects |
 | | `roles/datastore.owner` | create and destroy the Firestore database and its indexes |
 | | `roles/pubsub.admin` | create and delete topics and subscriptions; publish and pull |
 | | `roles/secretmanager.admin` | secrets |
@@ -507,7 +507,7 @@ The emulators (Floci-gcp, and Google's Pub/Sub and Firestore emulators) missed a
 | | `roles/memorystore.dbConnectionUser` (tier 3) | IAM login to the instance (`memorystore.instances.connect`), the role an application gets |
 | | `roles/networkconnectivity.consumerNetworkAdmin` (tier 3) | the service-connection policy for Memorystore's private endpoint |
 | | `roles/cloudsql.admin` (tier 2) | create instances and database users. It also includes what an application needs: `cloudsql.instances.login` for IAM database login (`roles/cloudsql.instanceUser`) and `cloudsql.instances.connect` for the connector (`roles/cloudsql.client`) |
-| the person running the tests | `roles/iam.serviceAccountTokenCreator` on `cirrus-test` | impersonate it. Project Owner doesn't include this |
+| the person running the tests | `roles/iam.serviceAccountTokenCreator` on `halyx-test` | impersonate it. Project Owner doesn't include this |
 
 The project also needs these APIs enabled: the IAM Service Account Credentials API
 (`iamcredentials.googleapis.com`) for impersonation, and the Cloud SQL Admin API

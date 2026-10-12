@@ -44,7 +44,7 @@ variable "client_ip" {
 variable "principal_name" {
   description = "Display name of the test service principal: its PostgreSQL role name"
   type        = string
-  default     = "cirrus-test"
+  default     = "halyx-test"
 }
 
 variable "pg_admin_password" {
@@ -66,8 +66,8 @@ provider "azurerm" {
 data "azurerm_client_config" "current" {}
 
 locals {
-  name = "cirrus-${var.run_id}"
-  tags = { cirrus-test = var.run_id }
+  name = "halyx-${var.run_id}"
+  tags = { halyx-test = var.run_id }
   me   = data.azurerm_client_config.current
 }
 
@@ -88,7 +88,7 @@ resource "azurerm_postgresql_flexible_server" "pg" {
   storage_mb                    = 32768
   backup_retention_days         = 7
   public_network_access_enabled = true
-  administrator_login           = "cirrus_admin"
+  administrator_login           = "halyx_admin"
   administrator_password        = var.pg_admin_password
   authentication {
     active_directory_auth_enabled = true

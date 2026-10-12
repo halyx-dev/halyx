@@ -56,8 +56,8 @@ provider "azurerm" {
 data "azurerm_client_config" "current" {}
 
 locals {
-  name = "cirrus-${var.run_id}"
-  tags = { cirrus-test = var.run_id }
+  name = "halyx-${var.run_id}"
+  tags = { halyx-test = var.run_id }
   me   = data.azurerm_client_config.current.object_id
 }
 
@@ -70,7 +70,7 @@ resource "azurerm_resource_group" "run" {
 # --- Blob Storage --------------------------------------------------------------------------------------
 
 resource "azurerm_storage_account" "blobs" {
-  name                            = replace("cirrus${var.run_id}", "-", "") # 3-24 lowercase letters and digits
+  name                            = replace("halyx${var.run_id}", "-", "") # 3-24 lowercase letters and digits
   resource_group_name             = azurerm_resource_group.run.name
   location                        = var.location
   account_tier                    = "Standard"
@@ -83,7 +83,7 @@ resource "azurerm_storage_account" "blobs" {
 }
 
 resource "azurerm_storage_container" "tck" {
-  name               = "cirrus-tck"
+  name               = "halyx-tck"
   storage_account_id = azurerm_storage_account.blobs.id
 }
 
@@ -132,8 +132,8 @@ resource "azurerm_cosmosdb_account" "docs" {
   tags = local.tags
 }
 
-resource "azurerm_cosmosdb_sql_database" "cirrus" {
-  name                = "cirrus"
+resource "azurerm_cosmosdb_sql_database" "halyx" {
+  name                = "halyx"
   resource_group_name = azurerm_resource_group.run.name
   account_name        = azurerm_cosmosdb_account.docs.name
 }
@@ -143,7 +143,7 @@ resource "azurerm_cosmosdb_sql_container" "tables" {
   name                = each.key
   resource_group_name = azurerm_resource_group.run.name
   account_name        = azurerm_cosmosdb_account.docs.name
-  database_name       = azurerm_cosmosdb_sql_database.cirrus.name
+  database_name       = azurerm_cosmosdb_sql_database.halyx.name
   partition_key_paths = ["/pk"]
   default_ttl         = -1 # TTL on, per item
 }

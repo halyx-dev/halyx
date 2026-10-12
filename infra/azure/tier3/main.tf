@@ -48,8 +48,8 @@ provider "azurerm" {
 data "azurerm_client_config" "current" {}
 
 locals {
-  name = "cirrus-${var.run_id}"
-  tags = { cirrus-test = var.run_id }
+  name = "halyx-${var.run_id}"
+  tags = { halyx-test = var.run_id }
 }
 
 resource "azurerm_resource_group" "run" {

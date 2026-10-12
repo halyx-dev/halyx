@@ -8,7 +8,7 @@ permalink: /cloud-testing/
 # Testing on real clouds
 {: .no_toc }
 
-Every Cirrus driver passes its conformance kit against emulators on every build (see
+Every Halyx driver passes its conformance kit against emulators on every build (see
 [Design, build and test](../design.md#testing)). Emulators are fast and free, but they don't model
 everything that matters in production: IAM and Entra ID logins, eventual consistency, asynchronous
 deletes, throttling, private certificate authorities, or exactly how a service rejects a request. The
@@ -68,7 +68,7 @@ IT_TEST='RealAwsIT$SecretsManager' scripts/aws-real-cloud.sh     # a single suit
 ```
 
 1. **Provision.** Terraform in `infra/<cloud>/tier<n>/` creates the run's resources. Every name includes
-   a fresh run id (`r<yyMMddHHmm><hex>`), and everything is tagged or labelled `cirrus-test=<run id>`.
+   a fresh run id (`r<yyMMddHHmm><hex>`), and everything is tagged or labelled `halyx-test=<run id>`.
    Passwords and SSH keys, where a tier needs them, are generated for the run and passed through the
    environment only.
 2. **Test.** A `Real…IT` test class (`RealAwsIT`, `RealGcpSqlIT`, `RealAzureCacheIT` and so on) runs the
@@ -92,9 +92,9 @@ the tiers need:
 
 | Cloud | Identity | Where its credentials live |
 |---|---|---|
-| AWS | IAM user `cirrus_test` | a named AWS CLI profile |
-| GCP | service account `cirrus-test`, impersonated | your `gcloud` Application Default Credentials |
-| Azure | service principal `cirrus-test` | `~/.azure/cirrus-test.env`, created by `scripts/azure-setup-test-principal.sh` |
+| AWS | IAM user `halyx_test` | a named AWS CLI profile |
+| GCP | service account `halyx-test`, impersonated | your `gcloud` Application Default Credentials |
+| Azure | service principal `halyx-test` | `~/.azure/halyx-test.env`, created by `scripts/azure-setup-test-principal.sh` |
 
 The exact policies and roles are on each provider's page. Credentials never enter the repository.
 

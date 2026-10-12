@@ -1,14 +1,14 @@
 ---
 title: Home
 nav_order: 1
-description: "Cirrus is one Java API for storage, NoSQL, messaging, SQL, caches, parameters and secrets on AWS, Azure and Google Cloud."
+description: "Halyx Multi-Cloud SDK: one Java API for storage, NoSQL, messaging, SQL, caches, parameters and secrets on AWS, Azure and Google Cloud."
 permalink: /
 ---
 
-# One Java API for AWS, Azure and Google Cloud
+# Halyx Multi-Cloud SDK
 {: .fs-9 }
 
-Cirrus gives Java 21 microservices one consistent way to use cloud services (object storage, NoSQL,
+One Java API for AWS, Azure and Google Cloud. Halyx gives Java 21 microservices one consistent way to use cloud services (object storage, NoSQL,
 messaging, SQL, caches, parameters and secrets) on AWS, Azure and Google Cloud. The services keep their
 own SDKs and strengths; your code stops depending on them.
 {: .fs-6 .fw-300 }
@@ -22,13 +22,13 @@ own SDKs and strengths; your code stops depending on them.
 ## Write it once, run it on any cloud
 
 ```java
-try (Cirrus cirrus = Cirrus.builder()
+try (Halyx halyx = Halyx.builder()
         .register("aws", ProviderConfig.of("aws").region("eu-west-2"))
         .register("gcp", ProviderConfig.of("gcp").property(GcpProperties.PROJECT_ID, "acme-prod"))
         .build()) {
 
-    BlobStore invoices = cirrus.provider("aws").blobStore("acme-invoices");     // Amazon S3
-    Publisher events = cirrus.provider("gcp").publisher("order-events");       // Google Cloud Pub/Sub
+    BlobStore invoices = halyx.provider("aws").blobStore("acme-invoices");     // Amazon S3
+    Publisher events = halyx.provider("gcp").publisher("order-events");       // Google Cloud Pub/Sub
 
     invoices.put(BlobKey.of("2026/42.pdf"), BlobContent.ofFile(pdf));
     events.publish(OutgoingMessage.builder(json).attribute("type", "invoiced").build());
@@ -42,7 +42,7 @@ checks that for every provider, against emulators on every build and
 
 ## Services
 
-| Service | Cirrus API | AWS | Azure | Google Cloud | Also |
+| Service | Halyx API | AWS | Azure | Google Cloud | Also |
 |---|---|---|---|---|---|
 | [Object storage](api/storage.md) | `BlobStore` | Amazon S3 | Azure Blob Storage | Cloud Storage | in-memory |
 | [NoSQL documents](api/nosql.md) | `DocumentStore` | DynamoDB | Cosmos DB for NoSQL | Firestore | in-memory |
@@ -58,7 +58,7 @@ Portable code
   configuration.
 
 Several clouds in one service
-: Each cloud is a named provider in one `Cirrus` object, so one microservice can read from S3, publish
+: Each cloud is a named provider in one `Halyx` object, so one microservice can read from S3, publish
   to Pub/Sub and cache in Azure without a second SDK or a second set of error handling.
 
 No lowest common denominator
@@ -74,7 +74,7 @@ Production behaviour built in
   fail-open caches, and observability through Micrometer.
 
 Spring Boot ready
-: A starter for Boot 3.5 and 4: beans from `cirrus.*` properties, `@CirrusListener`, health checks,
+: A starter for Boot 3.5 and 4: beans from `halyx.*` properties, `@HalyxListener`, health checks,
   metrics, tracing and `spring.config.import` for parameters and secrets.
 
 ## Where to go next
@@ -83,6 +83,6 @@ Spring Boot ready
 - [API guide](api/index.md): every service, with examples, error handling and native-client access.
 - [Provider configuration](providers.md): credentials, regions, endpoints and every provider setting.
 - [Spring Boot](spring-boot.md): the starter, its properties, beans and integrations.
-- [Design, build and test](design.md): how Cirrus is built, tested and benchmarked.
+- [Design, build and test](design.md): how Halyx is built, tested and benchmarked.
 - [Cloud testing](cloud-testing/index.md): results of the conformance kits on real AWS, Azure and Google Cloud.
 - [Roadmap](roadmap.md): what's done and what's next.

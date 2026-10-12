@@ -8,7 +8,7 @@ permalink: /api/
 # API guide
 {: .no_toc }
 
-Every Cirrus service follows the same shape: you register providers once, ask a provider for a service,
+Every Halyx service follows the same shape: you register providers once, ask a provider for a service,
 and use that service's interface whichever cloud is behind it.
 
 <details open markdown="block">
@@ -21,7 +21,7 @@ and use that service's interface whichever cloud is behind it.
 ## The object model
 
 ```
-Cirrus                                   one per application
+Halyx                                   one per application
  ├── provider("orders")  → CloudContext   AWS, eu-west-2
  │     ├── blobStore("acme-invoices")      → BlobStore        (Amazon S3)
  │     ├── documentStore(TableConfig)       → DocumentStore    (DynamoDB)
@@ -36,20 +36,20 @@ Cirrus                                   one per application
 
 | Type | Role |
 |---|---|
-| `Cirrus` | The registry of named providers. Build it once, share it, and close it on shutdown. |
+| `Halyx` | The registry of named providers. Build it once, share it, and close it on shutdown. |
 | `ProviderConfig` | Which cloud (`aws`, `azure`, `gcp`, `vault`, `memory`), plus region, endpoint, credentials and provider properties. See [Provider configuration](../providers.md). |
 | `CloudContext` | One provider connection: an account and region with its credentials. It hands out services, which share its HTTP clients and connection pools. |
 | Service interfaces | `BlobStore`, `DocumentStore`, `Publisher` and `Subscription`, `Database`, `Cache<V>`, `ParameterStore`. |
 
 ```java
-Cirrus cirrus = Cirrus.builder()
+Halyx halyx = Halyx.builder()
         .register("orders", ProviderConfig.of("aws").region("eu-west-2"))
         .register("analytics", ProviderConfig.of("gcp").property(GcpProperties.PROJECT_ID, "acme-prod"))
         .interceptor(new RetryInterceptor(RetryPolicy.defaults()))   // optional, applies to every service
         .build();
 
-CloudContext orders = cirrus.provider("orders");
-cirrus.names();   // [orders, analytics]
+CloudContext orders = halyx.provider("orders");
+halyx.names();   // [orders, analytics]
 ```
 
 ## Services
@@ -72,7 +72,7 @@ cirrus.names();   // [orders, analytics]
 small values are records, such as `BlobKey`, `Key`, `ETag` and `Version`.
 
 **Synchronous, thread-safe, virtual-thread friendly.** Every call blocks until it completes, and every
-service object is thread-safe. Calls are cheap to make from virtual threads, and Cirrus itself uses
+service object is thread-safe. Calls are cheap to make from virtual threads, and Halyx itself uses
 virtual threads for parallel transfers and message listeners.
 
 **One error model.** Failures are unchecked `CloudException` subtypes, such as `NotFoundException`,
@@ -83,12 +83,12 @@ virtual threads for parallel transfers and message listeners.
 asking for a missing one fails rather than being ignored. See
 [Capabilities and native clients](capabilities-and-unwrap.md).
 
-**Infrastructure stays yours.** Cirrus uses buckets, tables, topics, queues, caches and databases; it
+**Infrastructure stays yours.** Halyx uses buckets, tables, topics, queues, caches and databases; it
 doesn't create them. Create them with Terraform, Bicep, CloudFormation or your usual tooling.
 
 ## Lifecycle
 
-`Cirrus` implements `AutoCloseable`. Closing it closes every provider connection, SDK client, cache
+`Halyx` implements `AutoCloseable`. Closing it closes every provider connection, SDK client, cache
 connection and database pool it opened.
 
 Create each service once and keep it, typically in a field or as an injected bean, rather than fetching
@@ -102,5 +102,5 @@ it per request:
   receivers.
 - Caches share one connection per endpoint and credentials, whichever instance you use.
 
-In Spring Boot, the starter builds the `Cirrus` bean and one bean per configured service, and closes
+In Spring Boot, the starter builds the `Halyx` bean and one bean per configured service, and closes
 them with the application context. See [Spring Boot](../spring-boot.md).

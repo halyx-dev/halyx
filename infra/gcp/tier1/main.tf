@@ -45,12 +45,12 @@ provider "google" {
   project = var.project
   region  = var.region
   default_labels = {
-    cirrus-test = var.run_id
+    halyx-test = var.run_id
   }
 }
 
 resource "google_storage_bucket" "blobs" {
-  name                        = "cirrus-${var.run_id}-blobs"
+  name                        = "halyx-${var.run_id}-blobs"
   location                    = upper(var.region)
   force_destroy               = true
   uniform_bucket_level_access = true
@@ -58,7 +58,7 @@ resource "google_storage_bucket" "blobs" {
 }
 
 resource "google_firestore_database" "items" {
-  name                    = "cirrus-${var.run_id}"
+  name                    = "halyx-${var.run_id}"
   location_id             = var.region
   type                    = "FIRESTORE_NATIVE"
   deletion_policy         = "DELETE"
