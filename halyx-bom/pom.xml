@@ -30,8 +30,8 @@
     <version>0.1.0-SNAPSHOT</version>
     <packaging>pom</packaging>
 
-    <name>Halyx Multi-Cloud SDK :: BOM</name>
-    <description>Halyx Multi-Cloud SDK for Java: bill of materials that aligns the versions of every Halyx module.</description>
+    <name>Halyx :: BOM</name>
+    <description>Halyx, the multi-cloud Java library: bill of materials that aligns the versions of every Halyx module.</description>
 
     <licenses>
         <license>

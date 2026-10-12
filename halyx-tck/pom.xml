@@ -28,8 +28,8 @@
     </parent>
 
     <artifactId>halyx-tck</artifactId>
-    <name>Halyx Multi-Cloud SDK :: TCK</name>
-    <description>Halyx Multi-Cloud SDK for Java: the conformance test kits every Halyx provider must pass.</description>
+    <name>Halyx :: TCK</name>
+    <description>Halyx, the multi-cloud Java library: the conformance test kits every Halyx provider must pass.</description>
 
     <dependencies>
         <dependency>

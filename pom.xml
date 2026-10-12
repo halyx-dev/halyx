@@ -26,8 +26,8 @@
     <version>0.1.0-SNAPSHOT</version>
     <packaging>pom</packaging>
 
-    <name>Halyx Multi-Cloud SDK :: Parent</name>
-    <description>Halyx Multi-Cloud SDK for Java: one cloud-agnostic API for storage, NoSQL, messaging, SQL, caches, parameters and secrets on AWS, Azure and Google Cloud.</description>
+    <name>Halyx :: Parent</name>
+    <description>Halyx: one Java API for storage, NoSQL, messaging, streams, SQL, caches and secrets on AWS, Azure and Google Cloud — a portable library over the clouds' own SDKs.</description>
 
     <licenses>
         <license>

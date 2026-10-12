@@ -1,11 +1,11 @@
 ---
 title: Home
 nav_order: 1
-description: "Halyx Multi-Cloud SDK: one Java API for storage, NoSQL, messaging, streams, SQL, caches, parameters and secrets on AWS, Azure and Google Cloud."
+description: "Halyx: one Java API for storage, NoSQL, messaging, streams, SQL, caches and secrets on AWS, Azure and Google Cloud — a portable library over the clouds' own SDKs."
 permalink: /
 ---
 
-# Halyx Multi-Cloud SDK
+# Halyx
 {: .fs-9 }
 
 One Java API for AWS, Azure and Google Cloud. Halyx gives Java 21 microservices one consistent way to use cloud services (object storage, NoSQL,

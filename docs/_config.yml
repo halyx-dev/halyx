@@ -17,8 +17,8 @@
 # GitHub Pages site for Halyx: Settings → Pages → "Deploy from a branch", folder /docs.
 # Published at https://kamranzafar.github.io/halyx
 
-title: Halyx Multi-Cloud SDK
-description: Halyx Multi-Cloud SDK, one Java API for storage, NoSQL, messaging, SQL, caches, parameters and secrets on AWS, Azure and Google Cloud.
+title: Halyx
+description: "Halyx: one Java API for storage, NoSQL, messaging, streams, SQL, caches and secrets on AWS, Azure and Google Cloud — a portable library over the clouds' own SDKs."
 lang: en-US
 url: "https://kamranzafar.github.io"
 baseurl: "/halyx"

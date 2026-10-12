@@ -28,8 +28,8 @@
     </parent>
 
     <artifactId>halyx-core</artifactId>
-    <name>Halyx Multi-Cloud SDK :: Core</name>
-    <description>Halyx Multi-Cloud SDK for Java: the portable API, provider SPI, error model, interceptors and the in-memory provider.</description>
+    <name>Halyx :: Core</name>
+    <description>Halyx, the multi-cloud Java library: the portable API, provider SPI, error model, interceptors and the in-memory provider.</description>
 
     <dependencies>
         <dependency>

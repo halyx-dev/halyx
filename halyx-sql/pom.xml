@@ -33,8 +33,8 @@
       application's dependency.
     -->
     <artifactId>halyx-sql</artifactId>
-    <name>Halyx Multi-Cloud SDK :: SQL</name>
-    <description>Halyx Multi-Cloud SDK for Java: pooled JDBC DataSources (HikariCP) with password, cloud IAM and Entra ID login.</description>
+    <name>Halyx :: SQL</name>
+    <description>Halyx, the multi-cloud Java library: pooled JDBC DataSources (HikariCP) with password, cloud IAM and Entra ID login.</description>
 
     <dependencies>
         <dependency>

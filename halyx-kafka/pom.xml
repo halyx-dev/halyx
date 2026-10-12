@@ -32,8 +32,8 @@
       or with tokens from a provider's KafkaCredentialsSource (SASL OAUTHBEARER).
     -->
     <artifactId>halyx-kafka</artifactId>
-    <name>Halyx Multi-Cloud SDK :: Kafka</name>
-    <description>Halyx Multi-Cloud SDK for Java: the Kafka stream driver shared by the AWS, Azure and Google Cloud providers, for Amazon MSK, Azure Event Hubs and Google Cloud Managed Service for Apache Kafka.</description>
+    <name>Halyx :: Kafka</name>
+    <description>Halyx, the multi-cloud Java library: the Kafka stream driver shared by the AWS, Azure and Google Cloud providers, for Amazon MSK, Azure Event Hubs and Google Cloud Managed Service for Apache Kafka.</description>
 
     <dependencies>
         <dependency>

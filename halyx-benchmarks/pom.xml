@@ -33,7 +33,7 @@
       `mvn -pl halyx-benchmarks -am package -DskipTests`, then run target/benchmarks.jar.
     -->
     <artifactId>halyx-benchmarks</artifactId>
-    <name>Halyx Multi-Cloud SDK :: Benchmarks</name>
+    <name>Halyx :: Benchmarks</name>
 
     <properties>
         <maven.install.skip>true</maven.install.skip>

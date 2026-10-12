@@ -28,8 +28,8 @@
     </parent>
 
     <artifactId>halyx-spring-boot-autoconfigure</artifactId>
-    <name>Halyx Multi-Cloud SDK :: Spring Boot Auto-configuration</name>
-    <description>Halyx Multi-Cloud SDK for Java: Spring Boot auto-configuration (properties, beans, health checks and observations) for Spring Boot 3.5 and 4.</description>
+    <name>Halyx :: Spring Boot Auto-configuration</name>
+    <description>Halyx, the multi-cloud Java library: Spring Boot auto-configuration (properties, beans, health checks and observations) for Spring Boot 3.5 and 4.</description>
 
     <dependencyManagement>
         <dependencies>

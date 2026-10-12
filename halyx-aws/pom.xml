@@ -28,8 +28,8 @@
     </parent>
 
     <artifactId>halyx-aws</artifactId>
-    <name>Halyx Multi-Cloud SDK :: AWS</name>
-    <description>Halyx Multi-Cloud SDK for Java: the AWS provider (S3, DynamoDB, SNS, SQS, SSM Parameter Store, Secrets Manager, ElastiCache and RDS IAM login).</description>
+    <name>Halyx :: AWS</name>
+    <description>Halyx, the multi-cloud Java library: the AWS provider (S3, DynamoDB, SNS, SQS, SSM Parameter Store, Secrets Manager, ElastiCache and RDS IAM login).</description>
 
     <dependencies>
         <dependency>

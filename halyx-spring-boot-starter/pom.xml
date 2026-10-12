@@ -33,8 +33,8 @@
       it, for example halyx-aws, halyx-azure or halyx-gcp.
     -->
     <artifactId>halyx-spring-boot-starter</artifactId>
-    <name>Halyx Multi-Cloud SDK :: Spring Boot Starter</name>
-    <description>Halyx Multi-Cloud SDK for Java: the Spring Boot starter.</description>
+    <name>Halyx :: Spring Boot Starter</name>
+    <description>Halyx, the multi-cloud Java library: the Spring Boot starter.</description>
 
     <dependencyManagement>
         <dependencies>

@@ -32,7 +32,7 @@
       (built against Boot 3.5) on Spring Boot 4, plus the Boot 4 health tests.
     -->
     <artifactId>halyx-spring-boot4-tests</artifactId>
-    <name>Halyx Multi-Cloud SDK :: Spring Boot 4 compatibility tests</name>
+    <name>Halyx :: Spring Boot 4 compatibility tests</name>
 
     <properties>
         <maven.install.skip>true</maven.install.skip>

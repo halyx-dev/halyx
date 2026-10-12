@@ -28,8 +28,8 @@
     </parent>
 
     <artifactId>halyx-azure</artifactId>
-    <name>Halyx Multi-Cloud SDK :: Azure</name>
-    <description>Halyx Multi-Cloud SDK for Java: the Azure provider (Blob Storage, Cosmos DB, Service Bus, Key Vault, App Configuration, and Entra ID login for caches and databases).</description>
+    <name>Halyx :: Azure</name>
+    <description>Halyx, the multi-cloud Java library: the Azure provider (Blob Storage, Cosmos DB, Service Bus, Key Vault, App Configuration, and Entra ID login for caches and databases).</description>
 
     <dependencies>
         <dependency>
