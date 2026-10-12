@@ -42,6 +42,28 @@ Publish the first release to Maven Central:
 - [ ] continuous integration
 - [ ] API compatibility checks with japicmp, from the release after 0.1.0
 
+### Managed Kafka
+
+Kafka clients that log in with the cloud's identity, the same way caches and SQL databases do:
+
+- [ ] Amazon MSK, with IAM login
+- [ ] Azure Event Hubs through its Kafka endpoint, with Entra ID login
+- [ ] Google Cloud Managed Service for Apache Kafka, with Google IAM login
+- [ ] configured producer, consumer and admin clients, with the native Kafka clients available through `unwrap`
+- [ ] Spring Boot: properties, auto-configuration, health and Spring for Apache Kafka integration
+- [ ] conformance kit, emulator tests and real-cloud tests
+
+### Event services
+
+One API to publish events to the clouds' event routers, and to receive them:
+
+- [ ] Amazon EventBridge event buses
+- [ ] Azure Event Grid topics and namespaces
+- [ ] Google Cloud Eventarc
+- [ ] CloudEvents as the portable event format
+- [ ] Spring Boot: properties, auto-configuration and health
+- [ ] conformance kit, emulator tests and real-cloud tests
+
 ### Real-cloud test follow-ups
 
 - [ ] AWS tier 3: check the ElastiCache `Connect` permission scoping in the test IAM policy
@@ -70,6 +92,5 @@ These were considered and dropped, because they work already or don't earn their
 | cache endpoint discovery through cloud APIs | you configure the endpoint; discovery adds permissions and failure modes |
 | push notifications for parameter changes | polling `watch` and configuration reload cover it |
 | SSM and Secret Manager labels | rarely needed; `unwrap` covers them |
-| EventBridge and Event Grid | event routing, rather than messaging |
 | GCS parallel composite uploads, the AWS CRT client, an async API | the parallel transfer engines already cover large objects |
 | RDS Proxy support | nothing to add: point `host` at the proxy endpoint, with IAM login if it requires it |
