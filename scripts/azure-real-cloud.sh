@@ -128,7 +128,7 @@ teardown() {
   left+=$(check "deleted key vaults" az_ keyvault list-deleted --query "[?name=='halyx-$RUN'].name" -o tsv)
   left+=$(check "deleted app configuration stores" az_ appconfig list-deleted \
       --query "[?name=='halyx-$RUN'].name" -o tsv)
-  if [[ -z "${left// /}" ]]; then
+  if [[ -z "${left//[[:space:]]/}" ]]; then
     echo "  nothing left"
   else
     echo "  STILL PRESENT:"

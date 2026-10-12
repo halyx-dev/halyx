@@ -169,7 +169,7 @@ teardown() {
     left+=$(check "parameters in $location" pm "$location" parameters list \
         --filter="name~/parameters/tck- AND createTime>=$START" --format='value(name)')
   done
-  if [[ -z "${left// /}" ]]; then
+  if [[ -z "${left//[[:space:]]/}" ]]; then
     echo "  nothing left"
   else
     echo "  STILL PRESENT:"

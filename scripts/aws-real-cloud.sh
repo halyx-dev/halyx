@@ -144,7 +144,7 @@ teardown() {
     left+=$(aws dynamodb describe-table --table-name "halyx-$RUN-$table" --query 'Table.TableStatus' --output text 2>/dev/null \
         | grep -v DELETING | sed "s/^/ table halyx-$RUN-$table:/")
   done
-  if [[ -z "${left// /}" ]]; then
+  if [[ -z "${left//[[:space:]]/}" ]]; then
     echo "  nothing left"
   else
     echo "  STILL PRESENT (the tagging index can lag a few minutes; check again before deleting by hand):"
