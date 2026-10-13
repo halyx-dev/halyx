@@ -23,7 +23,7 @@
   <img alt="AWS, Azure, Google Cloud" src="https://img.shields.io/badge/clouds-AWS%20%7C%20Azure%20%7C%20Google%20Cloud-informational">
 </p>
 
-**Halyx** is a Java API library that gives microservices one consistent way to use Cloud Native services like Storage, SQL, NoSQL,
+**Halyx** is a Java API that gives microservices one consistent way to use Cloud Native services like Storage, SQL, NoSQL,
 Caches, Messaging, Streams (managed Kafka), and Parameters and Secrets across **AWS**, **Azure** and **GCP**.
 
 With Halyx you can build **portable multi-cloud microservices and applications**. A single microservice or application can work with
