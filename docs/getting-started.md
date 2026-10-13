@@ -28,7 +28,7 @@ need:
 <dependencyManagement>
   <dependencies>
     <dependency>
-      <groupId>org.kamranzafar.halyx</groupId>
+      <groupId>dev.halyx</groupId>
       <artifactId>halyx-bom</artifactId>
       <version>0.1.0</version>
       <type>pom</type>
@@ -39,11 +39,11 @@ need:
 
 <dependencies>
   <dependency>
-    <groupId>org.kamranzafar.halyx</groupId>
+    <groupId>dev.halyx</groupId>
     <artifactId>halyx-core</artifactId>
   </dependency>
   <dependency>
-    <groupId>org.kamranzafar.halyx</groupId>
+    <groupId>dev.halyx</groupId>
     <artifactId>halyx-aws</artifactId>      <!-- and/or halyx-azure, halyx-gcp, halyx-vault -->
   </dependency>
 </dependencies>

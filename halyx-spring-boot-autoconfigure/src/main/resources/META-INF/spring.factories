@@ -15,6 +15,6 @@
 #
 
 org.springframework.boot.context.config.ConfigDataLocationResolver=\
-org.kamranzafar.halyx.spring.autoconfigure.config.HalyxConfigDataLocationResolver
+dev.halyx.spring.autoconfigure.config.HalyxConfigDataLocationResolver
 org.springframework.boot.context.config.ConfigDataLoader=\
-org.kamranzafar.halyx.spring.autoconfigure.config.HalyxConfigDataLoader
+dev.halyx.spring.autoconfigure.config.HalyxConfigDataLoader

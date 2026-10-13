@@ -23,11 +23,11 @@ Add the starter plus the provider modules you use:
 
 ```xml
 <dependency>
-  <groupId>org.kamranzafar.halyx</groupId>
+  <groupId>dev.halyx</groupId>
   <artifactId>halyx-spring-boot-starter</artifactId>
 </dependency>
 <dependency>
-  <groupId>org.kamranzafar.halyx</groupId>
+  <groupId>dev.halyx</groupId>
   <artifactId>halyx-aws</artifactId>
 </dependency>
 ```

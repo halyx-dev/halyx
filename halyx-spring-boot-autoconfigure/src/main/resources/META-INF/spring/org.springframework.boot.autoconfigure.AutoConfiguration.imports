@@ -14,10 +14,10 @@
 # limitations under the License.
 #
 
-org.kamranzafar.halyx.spring.autoconfigure.HalyxAutoConfiguration
-org.kamranzafar.halyx.spring.autoconfigure.observation.HalyxObservationAutoConfiguration
-org.kamranzafar.halyx.spring.autoconfigure.actuate.HalyxActuatorHealthContributorAutoConfiguration
-org.kamranzafar.halyx.spring.autoconfigure.health.HalyxHealthContributorAutoConfiguration
-org.kamranzafar.halyx.spring.autoconfigure.cache.HalyxCacheManagerAutoConfiguration
-org.kamranzafar.halyx.spring.autoconfigure.metrics.HalyxCacheMetricsAutoConfiguration
-org.kamranzafar.halyx.spring.autoconfigure.observation.HalyxMessagingTracingAutoConfiguration
+dev.halyx.spring.autoconfigure.HalyxAutoConfiguration
+dev.halyx.spring.autoconfigure.observation.HalyxObservationAutoConfiguration
+dev.halyx.spring.autoconfigure.actuate.HalyxActuatorHealthContributorAutoConfiguration
+dev.halyx.spring.autoconfigure.health.HalyxHealthContributorAutoConfiguration
+dev.halyx.spring.autoconfigure.cache.HalyxCacheManagerAutoConfiguration
+dev.halyx.spring.autoconfigure.metrics.HalyxCacheMetricsAutoConfiguration
+dev.halyx.spring.autoconfigure.observation.HalyxMessagingTracingAutoConfiguration

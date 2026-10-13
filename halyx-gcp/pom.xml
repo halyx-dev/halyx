@@ -22,7 +22,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>org.kamranzafar.halyx</groupId>
+        <groupId>dev.halyx</groupId>
         <artifactId>halyx-parent</artifactId>
         <version>0.1.0-SNAPSHOT</version>
     </parent>
@@ -33,7 +33,7 @@
 
     <dependencies>
         <dependency>
-            <groupId>org.kamranzafar.halyx</groupId>
+            <groupId>dev.halyx</groupId>
             <artifactId>halyx-core</artifactId>
         </dependency>
         <dependency>
@@ -71,21 +71,21 @@
         </dependency>
         <!-- Caches: shared Redis driver, with IAM access tokens for Memorystore -->
         <dependency>
-            <groupId>org.kamranzafar.halyx</groupId>
+            <groupId>dev.halyx</groupId>
             <artifactId>halyx-redis</artifactId>
         </dependency>
         <dependency>
-            <groupId>org.kamranzafar.halyx</groupId>
+            <groupId>dev.halyx</groupId>
             <artifactId>halyx-sql</artifactId>
         </dependency>
         <!-- Streams: the shared Kafka driver, for Managed Service for Apache Kafka with Google IAM tokens -->
         <dependency>
-            <groupId>org.kamranzafar.halyx</groupId>
+            <groupId>dev.halyx</groupId>
             <artifactId>halyx-kafka</artifactId>
         </dependency>
         <!-- Tests: TCK against the Floci emulator in Docker (run with mvn verify) -->
         <dependency>
-            <groupId>org.kamranzafar.halyx</groupId>
+            <groupId>dev.halyx</groupId>
             <artifactId>halyx-tck</artifactId>
             <scope>test</scope>
         </dependency>

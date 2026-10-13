@@ -182,7 +182,7 @@ java -cp halyx-benchmarks/target/benchmarks.jar \
   -Dprovider=aws -Dbucket=my-bench-bucket -Dregion=eu-west-1 \
   -Dconcurrency=64 -Dduration=60s -Dsize=1MiB -Dmix=put:20,get:70,head:10 \
   -Dhalyx.http.max-connections=256 \
-  org.kamranzafar.halyx.benchmarks.LoadTest
+  dev.halyx.benchmarks.LoadTest
 ```
 
 It prints count, operations per second, MB/s, p50, p90, p99 and maximum latency, and errors, for each

@@ -21,7 +21,7 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>org.kamranzafar.halyx</groupId>
+    <groupId>dev.halyx</groupId>
     <artifactId>halyx-parent</artifactId>
     <version>0.1.0-SNAPSHOT</version>
     <packaging>pom</packaging>
@@ -118,32 +118,32 @@
         <dependencies>
             <!-- Halyx modules -->
             <dependency>
-                <groupId>org.kamranzafar.halyx</groupId>
+                <groupId>dev.halyx</groupId>
                 <artifactId>halyx-core</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>org.kamranzafar.halyx</groupId>
+                <groupId>dev.halyx</groupId>
                 <artifactId>halyx-tck</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>org.kamranzafar.halyx</groupId>
+                <groupId>dev.halyx</groupId>
                 <artifactId>halyx-redis</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>org.kamranzafar.halyx</groupId>
+                <groupId>dev.halyx</groupId>
                 <artifactId>halyx-sql</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>org.kamranzafar.halyx</groupId>
+                <groupId>dev.halyx</groupId>
                 <artifactId>halyx-kafka</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>org.kamranzafar.halyx</groupId>
+                <groupId>dev.halyx</groupId>
                 <artifactId>halyx-aws</artifactId>
                 <version>${project.version}</version>
             </dependency>
@@ -203,12 +203,12 @@
                 <version>${lettuce.version}</version>
             </dependency>
             <dependency>
-                <groupId>org.kamranzafar.halyx</groupId>
+                <groupId>dev.halyx</groupId>
                 <artifactId>halyx-spring-boot-autoconfigure</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>org.kamranzafar.halyx</groupId>
+                <groupId>dev.halyx</groupId>
                 <artifactId>halyx-vault</artifactId>
                 <version>${project.version}</version>
             </dependency>

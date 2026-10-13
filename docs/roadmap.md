@@ -34,7 +34,7 @@ nav_order: 8
 Publish the first release to Maven Central:
 
 - [x] Apache-2.0 license, with headers on every source file
-- [x] the `org.kamranzafar.halyx` group id
+- [x] the `dev.halyx` group id
 - [x] a full build and test pass, on emulators and on real clouds
 - [ ] project metadata: URL, SCM and developers
 - [ ] source and javadoc jars, signing, and the Central publishing plugin
