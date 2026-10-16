@@ -167,7 +167,13 @@ public abstract class ParameterStoreConformanceTest {
     @AfterEach
     void cleanUp() {
         ParameterStore store = newStore(config().prefix(prefix).build());
-        store.getAll("").keySet().forEach(store::delete);
+        store.getAll("").keySet().forEach(name -> {
+            try {
+                store.delete(name);
+            } catch (IllegalArgumentException e) {
+                // a native name, deleted by its own test, that a lagging listing still shows
+            }
+        });
     }
 
     protected ParameterStore store() {
