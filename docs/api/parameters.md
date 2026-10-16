@@ -99,8 +99,10 @@ try (AutoCloseable watch = secrets.watch("db", Duration.ofMinutes(1), changes ->
 }
 ```
 
-One daemon thread serves all watchers. A detected change also refreshes the store's cache with the values
-the watch saw. Failed polls are logged and retried. `statistics()` counts cache hits, backend reads,
+One daemon thread serves all watchers. Each change a listing shows is confirmed with a read by name before
+it's reported, since some listings briefly lag or go back and forth after a write: a change is reported once,
+when the read agrees, and never undone by a stale listing. A detected change also refreshes the store's cache
+with the values the watch saw. Failed polls are logged and retried. `statistics()` counts cache hits, backend reads,
 detected changes and watch failures.
 
 In Spring Boot, `spring.config.import=halyx:<store>` loads a store into the `Environment` and can reload
@@ -118,6 +120,9 @@ no separator translation; the prefix is then a literal string prefix. Use it for
 Some backends are **eventually consistent** or delete **asynchronously**. Halyx never waits on your
 behalf: it returns or throws at once, and conflicts are the retryable `UnavailableException`.
 
+- **AWS Systems Manager Parameter Store:** `getAll` (`GetParametersByPath`) can return an older view for a
+  second or two after a write, including one older than a listing just before it; reads by name are current.
+  `watch` confirms changes by name, so it isn't affected.
 - **AWS Secrets Manager:** `getAll` (and so `watch` and config reloads) is eventually consistent, so a
   secret written moments ago may not be listed yet. A read by name can briefly lag a write. Deletes
   finish asynchronously (up to about 20 seconds measured): until then a deleted secret may still be read,

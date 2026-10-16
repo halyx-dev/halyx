@@ -154,9 +154,9 @@ no stored keys, and then spread across clouds:
 ### Real-cloud test follow-ups
 
 - [ ] AWS tier 3: check the ElastiCache `Connect` permission scoping in the test IAM policy
-- [ ] AWS SSM: `watchReportsAddedUpdatedAndRemovedValues` has failed in 2 tier 1 runs on 2026-10-16 and 17, with a
-  change notification that didn't hold the expected update. Find out whether `GetParametersByPath` can briefly
-  list stale or missing values, which a watch would report as spurious changes
+- [x] AWS SSM: `watch` reported spurious changes. `GetParametersByPath` goes back and forth between replicas
+  for a second or two after a write, while `GetParameter` stays current; a watch now confirms each change a
+  listing shows with a read by name
 - [ ] Azure Database for MySQL with Entra ID, which needs a directory-level grant for the server's identity
 
 ## On demand

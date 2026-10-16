@@ -149,19 +149,16 @@ public final class DefaultParameterStore implements ParameterStore {
             throw new IllegalArgumentException("Watch interval must be positive");
         }
         String full = prefix.isEmpty() ? config.prefix() : full(prefix);
-        Map<String, Parameter> baseline = new LinkedHashMap<>(poll(full));
+        Map<String, Parameter> reported = new LinkedHashMap<>(poll(full));
         ScheduledFuture<?> task = WATCHERS.scheduleWithFixedDelay(() -> {
-            Map<String, Parameter> current;
+            ParameterChanges changes;
             try {
-                current = poll(full);
+                changes = confirmedChanges(reported, poll(full));
             } catch (RuntimeException e) {
                 statistics.watchFailed();
                 LOG.warn("Watching {} store '{}' failed; retrying in {}", provider, full, interval, e);
                 return;
             }
-            ParameterChanges changes = diff(baseline, current);
-            baseline.clear();
-            baseline.putAll(current);
             if (!changes.isEmpty()) {
                 cache.clear();
                 remember(changes);
@@ -174,6 +171,54 @@ public final class DefaultParameterStore implements ParameterStore {
             }
         }, interval.toMillis(), interval.toMillis(), TimeUnit.MILLISECONDS);
         return () -> task.cancel(false);
+    }
+
+    /**
+     * The changes since what the watch last reported, applied to {@code reported}. A listing may come from a
+     * replica that lags the writes (SSM's GetParametersByPath goes back and forth for a second or two), so
+     * each name it disagrees on is read directly before it counts: a stale listing reports nothing, and a
+     * change shows once the read agrees. A read older than what was reported is ignored.
+     */
+    private ParameterChanges confirmedChanges(Map<String, Parameter> reported, Map<String, Parameter> listed) {
+        Set<String> disputed = new LinkedHashSet<>();
+        listed.forEach((name, p) -> {
+            Parameter old = reported.get(name);
+            if (old == null || differs(old, p)) {
+                disputed.add(name);
+            }
+        });
+        reported.keySet().stream().filter(name -> !listed.containsKey(name)).forEach(disputed::add);
+
+        Map<String, Parameter> added = new LinkedHashMap<>();
+        Map<String, Parameter> updated = new LinkedHashMap<>();
+        Set<String> removed = new LinkedHashSet<>();
+        for (String name : disputed) {
+            String fullName = fullOf(name);
+            statistics.backendRead();
+            Optional<Parameter> current = execute("watch", fullName, () -> driver.get(fullName)).map(p -> p.rename(name));
+            Parameter old = reported.get(name);
+            if (current.isEmpty()) {
+                if (old != null) {
+                    removed.add(name);
+                    reported.remove(name);
+                }
+            } else if (old == null) {
+                added.put(name, current.get());
+                reported.put(name, current.get());
+            } else if (differs(old, current.get()) && !olderThan(current.get(), old)) {
+                updated.put(name, current.get());
+                reported.put(name, current.get());
+            }
+        }
+        return new ParameterChanges(added, updated, removed);
+    }
+
+    private static boolean differs(Parameter a, Parameter b) {
+        return !a.version().equals(b.version()) || !a.value().equals(b.value());
+    }
+
+    private static boolean olderThan(Parameter p, Parameter than) {
+        return p.lastModified() != null && than.lastModified() != null && p.lastModified().isBefore(than.lastModified());
     }
 
     /**
@@ -196,22 +241,6 @@ public final class DefaultParameterStore implements ParameterStore {
         Map<String, Parameter> relative = new LinkedHashMap<>();
         execute("watch", full, () -> driver.list(full)).forEach((name, p) -> relative.put(relative(name), p.rename(relative(name))));
         return relative;
-    }
-
-    private static ParameterChanges diff(Map<String, Parameter> before, Map<String, Parameter> after) {
-        Map<String, Parameter> added = new LinkedHashMap<>();
-        Map<String, Parameter> updated = new LinkedHashMap<>();
-        Set<String> removed = new LinkedHashSet<>(before.keySet());
-        after.forEach((name, p) -> {
-            removed.remove(name);
-            Parameter old = before.get(name);
-            if (old == null) {
-                added.put(name, p);
-            } else if (!old.version().equals(p.version()) || !old.value().equals(p.value())) {
-                updated.put(name, p);
-            }
-        });
-        return new ParameterChanges(added, updated, removed);
     }
 
     @Override
@@ -240,6 +269,14 @@ public final class DefaultParameterStore implements ParameterStore {
             return fullName.substring(Math.min(config.prefix().length(), fullName.length()));
         }
         return fullName.substring(config.prefix().length() + 1);
+    }
+
+    /** The backend name of a relative name taken from a listing; the inverse of {@link #relative}. */
+    private String fullOf(String relativeName) {
+        if (config.nativeNames() || config.prefix().isEmpty()) {
+            return config.prefix() + relativeName;
+        }
+        return config.prefix() + "/" + relativeName;
     }
 
     @SuppressWarnings("unchecked")
