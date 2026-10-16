@@ -67,6 +67,10 @@
         </dependency>
         <dependency>
             <groupId>com.google.cloud</groupId>
+            <artifactId>google-cloud-eventarc-publishing</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.google.cloud</groupId>
             <artifactId>google-cloud-parametermanager</artifactId>
         </dependency>
         <!-- Caches: shared Redis driver, with IAM access tokens for Memorystore -->

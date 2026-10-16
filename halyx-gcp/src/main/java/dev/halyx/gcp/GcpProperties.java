@@ -36,6 +36,12 @@ public final class GcpProperties {
      */
     public static final String KAFKA_PRINCIPAL = "gcp.kafka.principal";
 
+    /**
+     * Event bus property: the Eventarc Advanced message bus's location, such as {@code australia-southeast1}, when
+     * the bus is named by its id rather than {@code projects/<p>/locations/<l>/messageBuses/<id>}.
+     */
+    public static final String EVENTARC_LOCATION = "gcp.eventarc.location";
+
     private GcpProperties() {
     }
 }

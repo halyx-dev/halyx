@@ -16,6 +16,11 @@
 package dev.halyx.gcp;
 
 import com.google.api.gax.core.NoCredentialsProvider;
+import com.google.cloud.eventarc.publishing.v1.PublisherClient;
+import com.google.cloud.eventarc.publishing.v1.PublisherSettings;
+import dev.halyx.events.EventBusConfig;
+import dev.halyx.events.spi.EventPublisherDriver;
+import dev.halyx.gcp.eventarc.EventarcPublisherDriver;
 import com.google.api.gax.grpc.GrpcTransportChannel;
 import com.google.api.gax.rpc.ClientSettings;
 import com.google.api.gax.rpc.FixedTransportChannelProvider;
@@ -101,6 +106,7 @@ final class GcpConnection implements ProviderConnection {
     private Firestore firestore;
     private SubscriptionAdminClient subscriptionAdmin;
     private RedisCaches caches;
+    private PublisherClient eventarc;
     private KafkaStreamClients streams;
     private SecretManagerServiceClient secretManager;
     private final Map<String, ParameterManagerClient> parameterManagers = new HashMap<>();
@@ -225,6 +231,35 @@ final class GcpConnection implements ProviderConnection {
             subscriptionAdmin = pubSubClient(SubscriptionAdminSettings.newBuilder(), SubscriptionAdminClient::create);
         }
         return new PubSubSubscriptionDriver(subscriptionAdmin, qualified(subscription.name(), "subscriptions"));
+    }
+
+    @Override
+    public synchronized EventPublisherDriver eventPublisher(EventBusConfig bus) {
+        String name = bus.name();
+        if (!name.startsWith("projects/")) {
+            String project = config.property(GcpProperties.PROJECT_ID).orElseGet(ServiceOptions::getDefaultProjectId);
+            String location = bus.property(GcpProperties.EVENTARC_LOCATION).orElseThrow(() -> new IllegalArgumentException(
+                    "Event bus " + bus.name() + " needs its location: property " + GcpProperties.EVENTARC_LOCATION
+                            + ", or name it projects/<project>/locations/<location>/messageBuses/<id>"));
+            if (project == null) {
+                throw new IllegalArgumentException("Eventarc needs a project: set the '" + GcpProperties.PROJECT_ID + "' property");
+            }
+            name = "projects/" + project + "/locations/" + location + "/messageBuses/" + name;
+        }
+        if (eventarc == null) {
+            // Message buses are published to through the global endpoint, whatever their location; the regional
+            // <location>-eventarcpublishing endpoints serve only Eventarc Standard channels.
+            try {
+                var settings = PublisherSettings.newBuilder();
+                if (config.credentials() instanceof Credentials.Anonymous) {
+                    settings.setCredentialsProvider(NoCredentialsProvider.create());
+                }
+                eventarc = PublisherClient.create(settings.build());
+            } catch (IOException e) {
+                throw new UncheckedIOException("Could not create the Eventarc publishing client", e);
+            }
+        }
+        return new EventarcPublisherDriver(eventarc, name);
     }
 
     private String qualified(String name, String collection) {
@@ -385,6 +420,10 @@ final class GcpConnection implements ProviderConnection {
 
     @Override
     public synchronized void close() {
+        if (eventarc != null) {
+            eventarc.close();
+            eventarc = null;
+        }
         if (streams != null) {
             streams.close();
             streams = null;
