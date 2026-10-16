@@ -553,7 +553,12 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
 
         /** The config with the auth resolved by the caller (a secret-backed password needs its store bean). */
         SqlConfig toSqlConfig(String name, SqlAuth resolvedAuth) {
-            String prefix = "halyx.databases." + name;
+            return toSqlConfig("halyx.databases", name, resolvedAuth);
+        }
+
+        /** The same, for the entry {@code name} of the property group {@code group}, such as {@code halyx.r2dbc-databases}. */
+        SqlConfig toSqlConfig(String group, String name, SqlAuth resolvedAuth) {
+            String prefix = group + "." + name;
             if (engine == null) {
                 throw new IllegalStateException(prefix + ".engine is required (postgresql, mysql or sqlserver)");
             }

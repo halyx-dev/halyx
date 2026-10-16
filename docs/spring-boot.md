@@ -272,6 +272,27 @@ yourself, as in plain Spring Boot. Pool settings live under `halyx.databases.<na
 A password `secret` reference reads the password from a parameter store for every new connection, so
 rotated secrets take effect without a restart.
 
+### R2DBC and Spring Data R2DBC
+
+With `halyx-r2dbc` and an R2DBC driver on the classpath, `halyx.r2dbc-databases` takes the same settings as
+`halyx.databases` and registers a pooled R2DBC `ConnectionFactory` bean for each entry:
+
+```yaml
+halyx:
+  r2dbc-databases:
+    orders:                        # ConnectionFactory bean name
+      engine: postgresql           # postgresql or mysql with iam; sqlserver with a password only
+      host: orders.cluster-abc.eu-west-1.rds.amazonaws.com
+      database: orders
+      auth: { type: iam, username: orders_app }
+      pool: { max-size: 20 }
+```
+
+Boot's own R2DBC auto-configuration backs off, and Spring Data R2DBC repositories, `R2dbcEntityTemplate` and
+`DatabaseClient` use the Halyx pool, on Boot 3.5 and 4. With several, mark one `primary: true`. Each new
+connection logs in as with JDBC: a password looked up every time, or the cloud's IAM token, fetched off the
+event loop. The pool is disposed of with the context.
+
 ## Caches
 
 ```yaml

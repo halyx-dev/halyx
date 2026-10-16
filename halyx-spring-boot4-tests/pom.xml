@@ -70,6 +70,11 @@
                 <artifactId>kafka-clients</artifactId>
                 <version>${kafka4.version}</version>
             </dependency>
+            <dependency>
+                <groupId>org.postgresql</groupId>
+                <artifactId>r2dbc-postgresql</artifactId>
+                <version>${r2dbc-postgresql4.version}</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 
@@ -185,6 +190,22 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-kafka</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- R2DBC, with Boot 4's R2DBC and Spring Data R2DBC auto-configuration -->
+        <dependency>
+            <groupId>dev.halyx</groupId>
+            <artifactId>halyx-r2dbc</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-data-r2dbc</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>r2dbc-postgresql</artifactId>
             <scope>test</scope>
         </dependency>
         <!-- Spring Data repositories, on the Spring Data Boot 4 manages -->

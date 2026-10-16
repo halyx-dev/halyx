@@ -117,6 +117,34 @@ above zero so the pool opens connections in the background, and keep `maxLifetim
 how fast new IAM connections can be opened, so pool rather than connect per request. The full
 measurements are in [Cloud testing](../cloud-testing/index.md).
 
+## Reactive: R2DBC
+
+`halyx-r2dbc` gives reactive code the same logins through R2DBC: a pooled `ConnectionFactory`
+(`r2dbc-pool`) whose new connections log in with a password, looked up each time, or with the cloud's IAM
+token. The token is fetched on a scheduler for blocking work, never on the event loop, and reused until
+shortly before it expires; established connections stay logged in.
+
+```java
+ConnectionPool orders = R2dbcDatabases.connectionFactory(halyx.provider("aws"),
+        SqlConfig.builder(SqlEngine.POSTGRESQL)
+                .host("orders.cluster-abc.eu-west-1.rds.amazonaws.com")
+                .database("orders")
+                .auth(SqlAuth.iam("orders_app"))
+                .build());
+DatabaseClient client = DatabaseClient.create(orders);     // Spring's, or any R2DBC client
+```
+
+| Engine | Driver (your dependency) | IAM login |
+|---|---|---|
+| PostgreSQL | `org.postgresql:r2dbc-postgresql` | RDS IAM, Entra ID, Cloud SQL IAM |
+| MySQL | `io.asyncer:r2dbc-mysql` | RDS IAM, Cloud SQL IAM |
+| SQL Server | `io.r2dbc:r2dbc-mssql` | no: the driver takes passwords only, so use password auth, or JDBC for Entra ID |
+
+The pool's size and timeouts come from the config's `PoolSettings`. Close it with `dispose()`; it doesn't
+close with the Halyx context. R2DBC connects to a host, so on Google Cloud use the instance's IP address, not
+the Cloud SQL connector (`gcp.sql.instance`). Other clients can get the same endpoint and login from
+`CloudContext.sqlEndpoint(config)`.
+
 ## Spring Boot
 
 Every `halyx.databases.<name>` entry becomes a `DataSource` bean, covered by Spring Boot's JDBC health

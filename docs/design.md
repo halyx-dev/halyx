@@ -74,6 +74,7 @@ that.
 | `halyx-tck` | the conformance test kits every provider must pass |
 | `halyx-redis` | the shared Redis and Valkey cache driver (Lettuce), used by every provider |
 | `halyx-sql` | the shared HikariCP pool with per-connection credentials (passwords, cloud IAM tokens) |
+| `halyx-r2dbc` | pooled R2DBC connections with the same password and cloud IAM logins, for reactive code and Spring Data R2DBC |
 | `halyx-kafka` | the shared Kafka stream driver, with password and cloud IAM login (SASL `OAUTHBEARER`), used by every provider |
 | `halyx-aws` | AWS SDK v2: S3, DynamoDB, SNS, SQS, SSM Parameter Store, Secrets Manager, ElastiCache and RDS IAM login |
 | `halyx-azure` | Azure SDK: Blob Storage, Cosmos DB, Service Bus, Key Vault, App Configuration, Entra ID login for caches and databases |

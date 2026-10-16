@@ -35,6 +35,7 @@ import org.springframework.context.annotation.ImportBeanDefinitionRegistrar;
 import org.springframework.core.ResolvableType;
 import org.springframework.core.env.Environment;
 import org.springframework.core.type.AnnotationMetadata;
+import org.springframework.util.ClassUtils;
 
 import javax.sql.DataSource;
 import java.util.Map;
@@ -126,6 +127,9 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
             definition.setDescription("Halyx " + database.engine() + " database " + provider + "/" + database.database());
             registry.registerBeanDefinition(name, definition);
         });
+        if (ClassUtils.isPresent("dev.halyx.r2dbc.R2dbcDatabases", BlobStoreBeanRegistrar.class.getClassLoader())) {
+            R2dbcBeanRegistration.register(binder, registry, providers, parameterStores);
+        }
         binder.bind("halyx.document-stores", Bindable.mapOf(String.class, HalyxProperties.DocumentStoreProperties.class))
                 .orElse(Map.of())
                 .forEach((name, store) -> {

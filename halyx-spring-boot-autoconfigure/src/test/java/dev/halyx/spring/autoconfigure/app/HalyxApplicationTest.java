@@ -25,6 +25,10 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.context.annotation.Import;
 import org.springframework.stereotype.Service;
+import org.springframework.util.ClassUtils;
+
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -40,8 +44,8 @@ class HalyxApplicationTest {
                         "halyx.blob-stores.invoices.bucket=acme-invoices",
                         "halyx.blob-stores.avatars.bucket=acme-avatars",
                         "halyx.caches.sessions.endpoint=redis://localhost:6379",
-                        // JDBC is on the test classpath for the database tests; this app has no database.
-                        "spring.autoconfigure.exclude=" + dataSourceAutoConfiguration())
+                        // JDBC and R2DBC are on the test classpath for the database tests; this app has no database.
+                        "spring.autoconfigure.exclude=" + databaseAutoConfigurations())
                 .run()) {
             InvoiceService service = context.getBean(InvoiceService.class);
 
@@ -68,13 +72,18 @@ class HalyxApplicationTest {
         }
     }
 
-    private static String dataSourceAutoConfiguration() {
-        String boot3 = "org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration";
-        try {
-            Class.forName(boot3);
-            return boot3;
-        } catch (ClassNotFoundException e) {
-            return "org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration";
-        }
+    /** Boot's JDBC and R2DBC auto-configurations, under their Boot 3 or Boot 4 names, whichever are present. */
+    private static String databaseAutoConfigurations() {
+        return Stream.of(
+                        "org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration",
+                        "org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration",
+                        "org.springframework.boot.autoconfigure.r2dbc.R2dbcAutoConfiguration",
+                        "org.springframework.boot.r2dbc.autoconfigure.R2dbcAutoConfiguration",
+                        "org.springframework.boot.autoconfigure.data.r2dbc.R2dbcDataAutoConfiguration",
+                        "org.springframework.boot.data.r2dbc.autoconfigure.DataR2dbcAutoConfiguration",
+                        "org.springframework.boot.autoconfigure.data.r2dbc.R2dbcRepositoriesAutoConfiguration",
+                        "org.springframework.boot.data.r2dbc.autoconfigure.DataR2dbcRepositoriesAutoConfiguration")
+                .filter(name -> ClassUtils.isPresent(name, HalyxApplicationTest.class.getClassLoader()))
+                .collect(Collectors.joining(","));
     }
 }

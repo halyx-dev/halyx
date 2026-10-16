@@ -117,9 +117,13 @@ public final class HalyxBlobStores {
 
     private Database database(String provider, String name, HalyxProperties.DatabaseProperties database,
                               ParameterStore secrets) {
-        String prefix = "halyx.databases." + name + ".auth";
-        var auth = database.auth();
-        SqlAuth resolved = switch (auth.type()) {
+        SqlAuth resolved = resolveAuth("halyx.databases." + name + ".auth", database.auth(), secrets);
+        return halyx.provider(provider).database(database.toSqlConfig(name, resolved));
+    }
+
+    /** The login of a database entry; {@code secrets} is its {@code auth.secret.store} bean, or null without one. */
+    static SqlAuth resolveAuth(String prefix, HalyxProperties.DatabaseAuthProperties auth, ParameterStore secrets) {
+        return switch (auth.type()) {
             case IAM -> auth.username() == null ? SqlAuth.iam() : SqlAuth.iam(auth.username());
             case PASSWORD -> {
                 if (auth.username() == null) {
@@ -140,6 +144,5 @@ public final class HalyxBlobStores {
                 yield SqlAuth.password(auth.username(), auth.password());
             }
         };
-        return halyx.provider(provider).database(database.toSqlConfig(name, resolved));
     }
 }
