@@ -122,12 +122,20 @@ teardown() {
     echo "  TERRAFORM DESTROY FAILED: run it again in $TF_DIR"
   fi
   log "Checking nothing of run $RUN remains"
-  local left=""
-  left+=$(check "resource groups" az_ group list --query "[?name=='halyx-$RUN'].name" -o tsv)
-  left+=$(check "tagged resources" az_ resource list --tag "halyx-test=$RUN" --query '[].id' -o tsv)
-  left+=$(check "deleted key vaults" az_ keyvault list-deleted --query "[?name=='halyx-$RUN'].name" -o tsv)
-  left+=$(check "deleted app configuration stores" az_ appconfig list-deleted \
-      --query "[?name=='halyx-$RUN'].name" -o tsv)
+  local left
+  # Azure's resource index can list resources for a minute or two after their group is deleted; look again
+  # before reporting anything.
+  for attempt in 1 2 3; do
+    left=""
+    left+=$(check "resource groups" az_ group list --query "[?name=='halyx-$RUN'].name" -o tsv)
+    left+=$(check "tagged resources" az_ resource list --tag "halyx-test=$RUN" --query '[].id' -o tsv)
+    left+=$(check "deleted key vaults" az_ keyvault list-deleted --query "[?name=='halyx-$RUN'].name" -o tsv)
+    left+=$(check "deleted app configuration stores" az_ appconfig list-deleted \
+        --query "[?name=='halyx-$RUN'].name" -o tsv)
+    [[ -z "${left//[[:space:]]/}" || $attempt == 3 ]] && break
+    echo "  something is still listed; looking again in 60s"
+    sleep 60
+  done
   if [[ -z "${left//[[:space:]]/}" ]]; then
     echo "  nothing left"
   else
@@ -173,7 +181,9 @@ if [[ "$TIER" == 4 ]]; then
   log "Waiting for the Data Owner role to take effect"
   sleep 90
   log "Running the stream kit against real Event Hubs"
+  # KAFKA_CLIENTS=4.2.1 runs the same tests on another version of Kafka's clients.
   mvn -o verify -pl halyx-azure -Dit.test="${IT_TEST:-RealAzureStreamIT}" -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+      ${KAFKA_CLIENTS:+-Dkafka.version="$KAFKA_CLIENTS"} \
       -Dhalyx.real.azure.streams=true -Dhalyx.real.azure.run="$RUN" \
       -Dhalyx.real.azure.streams.namespaces="$(terraform -chdir="$TF_DIR" output -raw eventhubs_namespaces)"
   exit $?

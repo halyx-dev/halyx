@@ -67,6 +67,7 @@ import dev.halyx.sql.SqlAuth;
 import dev.halyx.sql.SqlConfig;
 import dev.halyx.storage.spi.BlobStoreDriver;
 import dev.halyx.capability.Capabilities;
+import dev.halyx.stream.StreamCapability;
 import dev.halyx.stream.StreamConfig;
 import dev.halyx.stream.StreamConsumerConfig;
 import dev.halyx.stream.StreamProducerConfig;
@@ -187,21 +188,20 @@ final class AzureConnection implements ProviderConnection {
     }
 
     /**
-     * Event Hubs through its Kafka endpoint. Neither idempotent nor transactional producers are declared: Event
-     * Hubs offers transactions only on its premium and dedicated tiers, and idempotence is unconfirmed.
+     * Event Hubs through its Kafka endpoint: idempotent producers, confirmed on a Standard namespace. Transactions
+     * aren't declared: Event Hubs offers them only on its premium and dedicated tiers, as a preview.
      */
-    private static final Capabilities EVENT_HUBS_CAPABILITIES = Capabilities.none();
+    private static final Capabilities EVENT_HUBS_CAPABILITIES = Capabilities.of(StreamCapability.IDEMPOTENCE);
 
     /**
      * Client settings Microsoft recommends for Event Hubs, which closes connections idle for 240 seconds and
-     * accepts requests up to 1 MB; idempotence is off to match the capabilities. Stream properties override them.
+     * accepts requests up to 1 MB. Idempotence keeps Kafka's default (on). Stream properties override them.
      */
     static final Map<String, String> EVENT_HUBS_DEFAULTS = Map.of(
             "connections.max.idle.ms", "180000",
             "metadata.max.age.ms", "180000",
             "request.timeout.ms", "60000",
-            "max.request.size", "1046528",
-            "enable.idempotence", "false");
+            "max.request.size", "1046528");
 
     @Override
     public synchronized ProducerDriver streamProducer(StreamProducerConfig producer) {

@@ -155,12 +155,13 @@ fails rather than being ignored.
 
 | | AWS | Azure | Google Cloud |
 |---|---|---|---|
-| Idempotent producers (`IDEMPOTENCE`) | yes | no | yes |
+| Idempotent producers (`IDEMPOTENCE`) | yes | yes | yes |
 | Transactions (`TRANSACTIONS`) | yes | no | yes |
 | Max record | 1 MB by default (`kafka.max.request.size` and the topic's limit) | 1 MB | 1 MB by default |
 
-Event Hubs offers transactions only on its premium and dedicated tiers, as a preview, and idempotent producers
-aren't confirmed there yet, so Halyx declares neither on Azure.
+Event Hubs offers transactions only on its premium and dedicated tiers, as a preview, so Halyx doesn't declare
+them on Azure. Idempotent producers work on Event Hubs, Standard tier included, and are on by default there, as
+on the other clouds.
 
 Values over a size threshold can go through a blob store with the same `ClaimCheck` as messaging, on both the
 producer and the consumer config. Without one, a value over the limit fails with `InvalidArgumentException`.
