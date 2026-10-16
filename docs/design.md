@@ -75,6 +75,7 @@ that.
 | `halyx-redis` | the shared Redis and Valkey cache driver (Lettuce), used by every provider |
 | `halyx-sql` | the shared HikariCP pool with per-connection credentials (passwords, cloud IAM tokens) |
 | `halyx-r2dbc` | pooled R2DBC connections with the same password and cloud IAM logins, for reactive code and Spring Data R2DBC |
+| `halyx-reactor` | Project Reactor views of every service on the application's scheduler: `Mono` and `Flux`, streams in and out, subscriptions and stream consumers as a `Flux` of deliveries |
 | `halyx-kafka` | the shared Kafka stream driver, with password and cloud IAM login (SASL `OAUTHBEARER`), used by every provider |
 | `halyx-aws` | AWS SDK v2: S3, DynamoDB, SNS, SQS, EventBridge, SSM Parameter Store, Secrets Manager, ElastiCache and RDS IAM login |
 | `halyx-azure` | Azure SDK: Blob Storage, Cosmos DB, Service Bus, Event Grid namespaces, Key Vault, App Configuration, Entra ID login for caches and databases |
@@ -83,6 +84,7 @@ that.
 | `halyx-spring-data-document` | Spring Data repositories over document stores: records as entities, derived queries on keys and indexes, optimistic locking, keyset scrolling |
 | `halyx-spring-boot-autoconfigure` | Spring Boot auto-configuration, properties, health and observations |
 | `halyx-spring-boot-starter` | the dependency Spring Boot applications add |
+| `halyx-reactor-tests` | the conformance kits through `halyx-reactor`'s adapters, on the memory provider and on Kafka and Valkey (not published) |
 | `halyx-spring-boot4-tests` | the shared Spring and Spring Data tests run on Boot 4 (not published) |
 | `halyx-benchmarks` | JMH benchmarks and a load-test harness (not published) |
 
@@ -112,6 +114,7 @@ either portable or explicitly declared as a capability:
 |---|---|---|
 | Blob store | 75 | round trips, streams, parallel transfers, listing and pagination, conditional writes and deletes, batch delete, copy, metadata, checksums, tiers, presigned URLs and multipart |
 | Document repositories | 10 | Spring Data repositories on the document store kit's tables: CRUD with records, `UUID` keys, optimistic locking and taken ids, batched saves, partition queries both ways with sort-key conditions and limits, windows, streams, index queries with and without a sort attribute |
+| Reactive document repositories | 10 | the document repository cases through `ReactiveDocumentRepository`: `Mono` and `Flux` results, saves from a `Publisher`, `Mono<Window>` scrolling, and `Flux` queries that stop early |
 | Document store | 23 | every value type, versions and conditions, partial updates with concurrent increments, batches beyond provider limits, sort-key queries both ways with paging, secondary indexes, transactions with rollback, keys with `/ ? # % \`, expiry |
 | Event bus | 7 | every CloudEvent attribute through the router to its queue, text and binary data, events without data, batches across requests, republished ids, oversized events refused, listeners |
 | Messaging | 15 | round trips, binary bodies, ack and nack, lease expiry and extension, batches, listener retries and concurrency, claim checks, ordering, deduplication, delays |

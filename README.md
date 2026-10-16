@@ -183,7 +183,7 @@ try (Halyx halyx = Halyx.builder()
 ```
 
 Add `halyx-core` plus the provider modules (`halyx-aws`, `halyx-azure`, `halyx-gcp`, `halyx-vault`)
-to your build, ideally through the `halyx-bom`. See [Getting started](https://kamranzafar.github.io/halyx/getting-started.html).
+to your build, ideally through the `halyx-bom`; add `halyx-reactor` for `Mono` and `Flux` views of every service. See [Getting started](https://kamranzafar.github.io/halyx/getting-started.html).
 
 ## Documentation
 

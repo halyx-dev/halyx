@@ -395,6 +395,73 @@ spring:
   `@RefreshScope` beans then follow. Without Spring Cloud, `Environment` reads and event listeners see
   changes, and `@Value` fields keep their startup values.
 
+## Reactive applications
+
+With `halyx-reactor` on the classpath, every service bean from `halyx.*` properties also has a reactive view
+([Reactive and async code](api/reactive.md)): a bean named `<name>Reactive`, qualified `<name>`, so it injects
+as the blocking bean does.
+
+```java
+@RestController
+class InvoiceController {
+    private final ReactiveBlobStore invoices;
+
+    InvoiceController(@Qualifier("invoices") ReactiveBlobStore invoices) {
+        this.invoices = invoices;
+    }
+
+    @GetMapping("/invoices/{name}")
+    Mono<byte[]> invoice(@PathVariable String name) {
+        return invoices.getBytes(BlobKey.of(name));
+    }
+}
+```
+
+A `ReactiveHalyx` bean makes them, and wraps anything else (`reactiveHalyx.wrap(...)`, or `call` and `stream`
+for other blocking work):
+
+```yaml
+halyx:
+  reactor:
+    scheduler: virtual-threads     # default; or bounded-elastic, or the name of a Scheduler bean of yours
+    max-concurrency: 64            # most calls in flight across the reactive beans; 0 (default) for no limit
+    enabled: true                  # false: no reactive beans
+```
+
+The virtual-thread scheduler is disposed of with the context; a `Scheduler` bean of yours stays yours.
+
+**Listeners.** `@HalyxListener` methods may return a `Mono`, any Reactive Streams `Publisher` or a
+`CompletableFuture`. The listener waits for it on its virtual thread, so completing acks the message (or commits
+the record) and failing retries it, exactly as returning and throwing do, within the subscription's
+concurrency.
+
+```java
+@HalyxListener("billing")
+Mono<Void> onOrder(CloudEvent placed) {
+    return invoices.put(BlobKey.of(placed.subject().orElseThrow()), render(placed)).then();
+}
+```
+
+**Repositories.** Interfaces extending `ReactiveDocumentRepository` in the application's packages become
+beans over `halyx.document-stores`, next to blocking `DocumentRepository` ones, with the same derived queries
+returning `Flux` and `Mono`; see [Spring Data repositories](#spring-data-repositories).
+`halyx.document-repositories.enabled=false` turns both off. Without Spring Boot, use
+`@EnableHalyxReactiveRepositories` and declare a `ReactiveHalyx` bean.
+
+```java
+interface Orders extends ReactiveDocumentRepository<Order, Key> {
+    Flux<Order> findByCustomerIdOrderByOrderIdDesc(String customerId);    // read page by page as asked
+    Mono<Order> findFirstByCustomerIdOrderByOrderIdDesc(String customerId);
+    Mono<Boolean> existsByStatus(Status status);
+}
+```
+
+**Tracing.** With Micrometer's `context-propagation` library on the classpath (Micrometer Tracing brings
+it), Halyx's observations join the request's: WebFlux keeps the request's observation in the Reactor
+context, and each reactive call restores it. **Caching**: `@Cacheable` methods returning `Mono` or `Flux` work
+with Halyx caches (see [Spring's `@Cacheable`](#springs-cacheable)). **Health**: Halyx's health contributor
+reports in reactive applications as in servlet ones.
+
 ## Observability
 
 | Feature | Details |

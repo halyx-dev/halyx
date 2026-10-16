@@ -56,6 +56,7 @@ need:
 | `halyx-azure` | Blob Storage, Cosmos DB, Service Bus, Event Grid namespaces, Key Vault, App Configuration, and Entra ID login for caches and databases |
 | `halyx-gcp` | Cloud Storage, Firestore, Pub/Sub, Eventarc Advanced, Secret Manager, Parameter Manager, and IAM login for Memorystore and Cloud SQL |
 | `halyx-vault` | HashiCorp Vault KV v2 parameters and secrets |
+| `halyx-reactor` | `Mono` and `Flux` views of every service, for Reactor, WebFlux and other reactive code (see [Reactive and async code](api/reactive.md)) |
 | `halyx-spring-boot-starter` | Spring Boot auto-configuration (see [Spring Boot](spring-boot.md)) |
 
 Providers are discovered with `ServiceLoader`: a module on the classpath is all it takes. SQL databases

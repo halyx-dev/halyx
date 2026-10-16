@@ -98,21 +98,35 @@ identity, as `Database` does for JDBC, for Spring Data R2DBC and `DatabaseClient
 
 SQL Server stays password-only over R2DBC: its driver takes no access tokens.
 
-### Reactive adapters: `halyx-reactor`
+### Reactive: `halyx-reactor`
 
-Halyx stays blocking, and the application chooses the threads: [Reactive and async code](api/reactive.md)
-shows the patterns, tested on Boot 3.5 and 4. An optional module would package the parts that are easy to get
-wrong, always on a scheduler the application passes in, never one of Halyx's own:
+Project Reactor views of every service, on a scheduler the application chooses, never one of Halyx's own
+([Reactive and async code](api/reactive.md)):
 
-- [x] the guide: single calls on the application's scheduler, fan-out with a limit, paged queries and
-  subscriptions as a `Flux` (acked after processing, nacked when cancelled), context propagation, WebFlux
-- [ ] `HalyxReactor.wrap(service, scheduler)`: `Mono` and `Flux` views of every service on the given scheduler
-- [ ] streaming adapters: subscriptions and stream consumers as a `Flux` with acks or commits after
-  processing and back-pressure through the consumer's concurrency; listings, queries and blob bodies as a `Flux`
-- [ ] reactive Spring Data repositories (`ReactiveCrudRepository`) over document stores
-- [ ] WebFlux tests on Boot 3.5 and 4, and the conformance kits run through the adapters
-- [ ] non-blocking drivers on the clouds' async SDK clients (Azure, AWS, Lettuce first), only where
-  benchmarks show the blocking path on virtual threads is the bottleneck
+- [x] `ReactiveHalyx` and `ReactiveCloudContext`, mirroring `Halyx` and `CloudContext`; `Mono` and `Flux` for
+  every service, the blocking API's errors, a concurrency limit, and the caller's context (MDC, observations)
+  carried to each call
+- [x] streams out: listings and queries page by page as asked, blob bodies as `Flux<ByteBuffer>`, parameter
+  watches; subscriptions, event buses and stream consumers as a `Flux` of deliveries, acked or committed after
+  processing, with back-pressure through the consumer's concurrency and nacks on cancel
+- [x] streams in: publish, send and `putAll` from a `Publisher` in ordered batches, blob uploads from a
+  `Publisher<ByteBuffer>`; `call` and `stream` for other blocking work
+- [x] reactive Spring Data repositories (`ReactiveDocumentRepository`), with Spring Boot and
+  `@EnableHalyxReactiveRepositories`
+- [x] Spring Boot: reactive beans named `<name>Reactive`, `halyx.reactor.*`, `@HalyxListener` returning `Mono`
+  or `CompletableFuture`, reactive `@Cacheable` on Halyx caches; WebFlux, tracing and health tests on Boot 3.5
+  and 4, each on the Reactor its Boot manages
+- [x] the conformance kits through the adapters on the memory provider, the stream and cache kits on Kafka and
+  Valkey, the reactive repository kit on the emulators; RxJava, Mutiny, the JDK's `Flow` and
+  `CompletableFuture` interoperability
+- [x] real-cloud tier 1: the reactive repository kit 10/10 on DynamoDB, Cosmos DB and Firestore, and a WebFlux
+  application over each cloud's bucket, table and event bus 3/3 on Boot 3.5 and 4
+  ([results](cloud-testing/index.md))
+- [x] a benchmark of the adapters' overhead against blocking calls: about 5 µs per call on virtual threads,
+  within the noise of a 5 ms call, so non-blocking drivers aren't needed for throughput
+- [ ] Kotlin coroutines (`suspend` listeners, coroutine repositories), tested
+- [ ] non-blocking drivers on the clouds' async SDK clients: not planned unless a workload shows the blocking
+  path on virtual threads to be the bottleneck
 
 ### Portable Spring Boot microservices
 
@@ -140,6 +154,9 @@ no stored keys, and then spread across clouds:
 ### Real-cloud test follow-ups
 
 - [ ] AWS tier 3: check the ElastiCache `Connect` permission scoping in the test IAM policy
+- [ ] AWS SSM: `watchReportsAddedUpdatedAndRemovedValues` has failed in 2 tier 1 runs on 2026-10-16 and 17, with a
+  change notification that didn't hold the expected update. Find out whether `GetParametersByPath` can briefly
+  list stale or missing values, which a watch would report as spurious changes
 - [ ] Azure Database for MySQL with Entra ID, which needs a directory-level grant for the server's identity
 
 ## On demand

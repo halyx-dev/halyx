@@ -4,13 +4,14 @@ parent: API guide
 nav_order: 11
 ---
 
-# Using Halyx from reactive and async code
+# Reactive and async code: `halyx-reactor`
 {: .no_toc }
 
-Halyx's calls block, and every service object is thread-safe, as with JDBC. Reactive and async applications
-wrap the calls themselves, so the application decides which threads run them, how many run at once, and how
-context such as tracing travels with them. Halyx doesn't hide an executor of its own.
-[R2DBC](sql.md#reactive-r2dbc) is the exception: `halyx-r2dbc` is non-blocking already.
+`halyx-reactor` gives every Halyx service a [Project Reactor](https://projectreactor.io) view: `Mono` and `Flux`
+over the blocking API, running on a scheduler the application chooses. Halyx creates no threads of its own for it.
+Spring Boot applications get the reactive views as beans, reactive Spring Data repositories, and `@HalyxListener`
+methods that return a `Mono`; see [Spring Boot](../spring-boot.md#reactive-applications).
+[R2DBC](sql.md#reactive-r2dbc), in `halyx-r2dbc`, is reactive already.
 
 <details open markdown="block">
   <summary>Contents</summary>
@@ -19,161 +20,200 @@ context such as tracing travels with them. Halyx doesn't hide an executor of its
 {:toc}
 </details>
 
-The examples use [Project Reactor](https://projectreactor.io); the same ideas apply to `CompletableFuture`,
-Kotlin coroutines or Vert.x. Every example is run by `ReactiveUsageTest`, on Spring Boot 3.5 and 4.
+```xml
+<dependency>
+  <groupId>dev.halyx</groupId>
+  <artifactId>halyx-reactor</artifactId>
+</dependency>
+```
 
-## Choose the threads
+It needs Reactor 3.7 or later (Spring Boot 3.5 and 4 manage 3.7 and 3.8). Calls still block underneath, on the
+scheduler's threads: virtual threads make that cheap, but it isn't non-blocking I/O.
 
-Never call Halyx on an event loop: a blocking call there stalls every request sharing the thread. Run calls on
-a scheduler of your own. Virtual threads suit Halyx's blocking calls well:
+## Getting the reactive services
+
+`ReactiveHalyx` mirrors `Halyx`, and `provider(name)` mirrors `CloudContext`:
 
 ```java
-Scheduler halyx = Schedulers.fromExecutorService(Executors.newVirtualThreadPerTaskExecutor(), "halyx");
+Halyx halyx = Halyx.builder().register("orders", ProviderConfig.of("aws").region("eu-west-2")).build();
+
+ReactiveHalyx rx = ReactiveHalyx.withVirtualThreads(halyx);      // one virtual thread per call
+ReactiveBlobStore invoices = rx.provider("orders").blobStore("acme-invoices");
+ReactiveDocumentStore orders = rx.provider("orders").documentStore(TableConfig.builder("orders").sortKey("sk").build());
 ```
 
-Or, on Reactor 3.6 or later and Java 21 or later, put Reactor's `boundedElastic` scheduler on virtual threads:
+Or wrap services you already have: `rx.wrap(blobStore)`, `rx.wrap(subscription)` and so on, for every service.
+Each reactive service's `blocking()` returns the service it wraps.
 
+**Choose the threads.** `ReactiveHalyx.withVirtualThreads(halyx)` makes a virtual-thread scheduler and disposes of
+it on `close()`. To use your own:
+
+```java
+Scheduler calls = ReactiveHalyx.virtualThreadScheduler("halyx");   // or Schedulers.boundedElastic()
+ReactiveHalyx rx = ReactiveHalyx.builder(halyx)
+        .scheduler(calls)              // stays yours: close() leaves it alone
+        .maxConcurrency(64)            // most calls in flight across every service; 0 (default) for no limit
+        .build();
 ```
--Dreactor.schedulers.defaultBoundedElasticOnVirtualThreads=true
+
+Use virtual threads or `Schedulers.boundedElastic()`, never `Schedulers.parallel()`: the scheduler's threads
+block for the length of each call. A separate scheduler, or a concurrency limit, keeps a slow service from
+holding up the rest.
+
+## What it costs
+
+Each call moves to the scheduler and back: about 5 µs on virtual threads and 10 µs on `boundedElastic`, against
+a blocking call, measured with no network at all (`ReactiveBenchmark` in `halyx-benchmarks`). With 5 ms of
+latency per call, one call or a hundred fanned out, the difference is within the noise, as it is for any real
+cloud call. Fanning a hundred calls out through the adapters costs about the same as running them on a
+virtual-thread executor.
+
+## How calls behave
+
+| | |
+|---|---|
+| When | when subscribed, once per subscription: `retry()` and `repeat()` call Halyx again |
+| Where | on the scheduler; Halyx's own retries, interceptors and observations still apply inside the call |
+| Results | a `Mono` per call; an empty `Optional` in the blocking API is an empty `Mono`; `void` is `Mono<Void>` |
+| Errors | the blocking API's `CloudException`s, such as `NotFoundException` and `PreconditionFailedException` |
+| Cancelling | a call that has started runs to completion and its result is dropped, so a cancelled write may still take effect; `timeout()` therefore doesn't free the call's thread, which `maxConcurrency` bounds |
+| Context | with Micrometer's `context-propagation` on the classpath, each call sees the subscriber's context: the Reactor `Context`, then the subscribing thread's thread locals (MDC, the current observation, anything registered with `ContextRegistry`) |
+
+```java
+Mono<byte[]> invoice = invoices.getBytes(BlobKey.of("2026/inv-1.pdf"))
+        .timeout(Duration.ofSeconds(5))
+        .onErrorResume(NotFoundException.class, e -> Mono.empty());
 ```
 
-A scheduler of your own also isolates services from each other: give a slow one its own scheduler, or a
-concurrency limit, so it can't hold up the rest.
+## Reading
 
-## Single calls
+| Service | Single results | Streams |
+|---|---|---|
+| `ReactiveBlobStore` | `getBytes`, `head`, `exists`, `download`, `list`, presigning | `listAll(prefix)` page by page; `getBody(key)` as `Flux<ByteBuffer>` |
+| `ReactiveDocumentStore` | `get`, `getAll`, `query`, `queryIndex` | `queryAll`, `queryIndexAll` page by page |
+| `ReactiveCache<V>` | every operation; `getOrLoad(key, Mono<V> loader)` | |
+| `ReactiveParameterStore` | `get`, `require`, `getAll` | `watch(prefix, interval)` as `Flux<ParameterChanges>` |
+
+Listings and queries read pages as the subscriber asks for items, at most one page ahead of its demand, and
+none after cancellation:
+
+```java
+Flux<Item> recent = orders.queryAll(Query.builder("c-42").descending().build()).take(20);   // reads one or two pages
+```
+
+`getBody` reads the blob in chunks (64 KiB by default) as they are requested, and closes it when the `Flux`
+completes, fails or is cancelled:
+
+```java
+Flux<ByteBuffer> body = invoices.getBody(BlobKey.of("exports/orders.csv"));
+```
+
+## Writing
+
+Every write is a `Mono`: `put`, `update`, `delete`, `publish`, `send`, `put` on caches and parameters.
+Streams of items can go straight in, batched as they arrive:
+
+```java
+Flux<PublishResult> published = rx.provider("orders").publisher("orders")
+        .publishAll(orderEvents.map(OutgoingMessage::of));            // batches of 100, flushed after 50 ms
+
+Flux<Key> written = orders.putAll(rows.map(row -> Map.entry(row.key(), row.document())), 25, Duration.ofMillis(20));
+```
+
+`publishAll`, `sendAll` (stream producers), `publishAll` (event buses) and `putAll` (documents) group items into
+batches of up to the given size, flush a partial batch after the wait, and send one batch at a time, in order, so
+a slow send holds back the source. Each item comes out once its batch is written; a failed batch fails the
+`Flux`, and earlier batches stay written.
+
+Blob bodies upload from a `Publisher<ByteBuffer>` as it produces them, in parts for large bodies. The blob is
+stored only if the body completes:
+
+```java
+Mono<PutResult> uploaded = invoices.put(BlobKey.of("exports/orders.csv"), csvChunks, PutOptions.defaults());
+```
+
+## Consuming messages, events and records
+
+A subscription or stream consumer becomes a `Flux` of deliveries. Each subscriber starts its own consumer,
+which stops when the subscriber goes away.
+
+```java
+ReactiveSubscription billing = rx.provider("orders").subscription("orders-billing");
+
+billing.process(ConsumerOptions.DEFAULTS.withConcurrency(16), message -> bill(message))
+       .subscribe();
+```
+
+- **`process(options, handler)`** runs the handler for each message, up to the consumer's concurrency at once.
+  The handler's publisher completing acks the message, and failing nacks it for redelivery after the
+  consumer's backoff. Its values are emitted once the message is acked, so everything emitted belongs to a
+  message that won't come back.
+- **`deliveries(options)`** hands over each `Delivery` to settle yourself: `ack()` or `nack(cause)`.
+- **`events(options)`** and **`processEvents(...)`** decode [CloudEvents](events.md) from an event bus's queue;
+  a message that holds none is nacked, so retries and dead-lettering apply.
+
+The consumer waits until each delivery is settled, so no more than `concurrency` messages are in flight, and a
+slow pipeline slows delivery rather than buffering messages whose leases run out. Leases are extended while
+deliveries wait. Cancelling the `Flux` nacks what is still unsettled, for prompt redelivery.
+
+Stream consumers work the same way, with `records(options)` and `process(options, handler)`: completing marks
+a record handled, so its offset is committed, and failing retries it after the backoff, holding back the rest of
+its partition until `maxAttempts` sends it to the dead letter. Records of a partition are handled one at a time,
+in order. Cancelling keeps the member in its group, so a new subscriber carries on where it left off;
+`close()` leaves the group and hands its partitions on.
+
+For messages pulled by hand: `receive(max, wait)`, then `ack`, `nack` and `extendLease` as `Mono`s.
+
+## Other blocking work
+
+`call` and `stream` run any blocking code the way the services' calls run: on the scheduler, with the
+subscriber's context and within the concurrency limit.
+
+```java
+Mono<Report> report = rx.call(() -> reports.render(id));                 // a JDBC query, a legacy client, ...
+Flux<Row> rows = rx.stream(() -> jdbcTemplate.queryForStream(sql, mapper)); // pulled as asked, closed at the end
+```
+
+## Other reactive libraries
+
+The reactive services' `Mono` and `Flux` are Reactive Streams publishers, and they take any publisher in.
+
+```java
+Single<byte[]> rxJava = Single.fromPublisher(invoices.getBytes(key));                      // RxJava 3
+Uni<byte[]> mutiny = Uni.createFrom().publisher(JdkFlowAdapter.publisherToFlowPublisher(  // Mutiny 2 speaks Flow
+        invoices.getBytes(key)));
+Flow.Publisher<Item> flow = JdkFlowAdapter.publisherToFlowPublisher(orders.queryAll(query)); // the JDK's Flow
+CompletableFuture<byte[]> future = invoices.getBytes(key).toFuture();
+```
+
+These are tested, with back-pressure through the JDK's `Flow`. Kotlin coroutines (`awaitSingle`, `asFlow` from
+`kotlinx-coroutines-reactor`) work through the same publishers, but aren't tested yet.
+
+## Testing your code
+
+Use the in-memory provider and Reactor's `StepVerifier`:
+
+```java
+Halyx halyx = Halyx.builder().register("orders", ProviderConfig.of("memory")).build();
+ReactiveHalyx rx = ReactiveHalyx.withVirtualThreads(halyx);
+
+StepVerifier.create(rx.provider("orders").blobStore("b").head(BlobKey.of("missing")))
+        .verifyComplete();
+```
+
+Calls run on real threads, so use `StepVerifier`'s waiting, not virtual time, for Halyx calls.
+
+## Without the module
+
+Applications that don't want `halyx-reactor` can wrap calls themselves, on a scheduler of their own:
 
 ```java
 Mono<String> invoice = Mono.fromCallable(() ->
                 new String(invoices.getBytes(BlobKey.of("2026/inv-1.txt")), StandardCharsets.UTF_8))
-        .subscribeOn(halyx);
+        .subscribeOn(scheduler);
 ```
 
-`fromCallable` runs the call only when subscribed, so `retry()` calls Halyx again. Halyx's own
-[retries and interceptors](errors.md) still apply inside the call; avoid retrying the same failures twice.
-
-## Fan-out with a limit
-
-```java
-Flux.range(0, 50)
-    .flatMap(i -> Mono.fromCallable(() -> orders.get(Key.of("o-" + i, "v1")).orElseThrow())
-            .subscribeOn(halyx), 8)          // at most 8 calls at once
-    .collectList();
-```
-
-The `flatMap` concurrency argument bounds calls in flight, which also bounds the load on the cloud service and
-its throttling.
-
-## Paged queries as a `Flux`
-
-```java
-Flux<Item> items = Mono.fromCallable(() -> orders.query(Query.builder("c-1").limit(100).build()))
-        .expand(page -> page.nextPageToken()
-                .map(token -> Mono.fromCallable(() ->
-                        orders.query(Query.builder("c-1").limit(100).pageToken(token).build())))
-                .orElse(Mono.empty()))
-        .subscribeOn(halyx)
-        .flatMapIterable(QueryPage::items);
-```
-
-Each page is fetched only when the previous one has been consumed, so a slow subscriber holds back the reads.
-
-## Subscriptions as a `Flux`
-
-A [listener](messaging.md) that returns normally **acks** its message, and one that throws nacks it for
-redelivery. So a listener that hands its message to a `Flux` must wait until the pipeline has handled it,
-otherwise the message is acked before it has been processed:
-
-```java
-record Delivery(ReceivedMessage message, CompletableFuture<Void> done) {}
-
-static Flux<Delivery> deliveries(Subscription subscription, ConsumerOptions options) {
-    return Flux.create(sink -> {
-        Set<Delivery> pending = ConcurrentHashMap.newKeySet();
-        MessageConsumer consumer = subscription.listen(message -> {
-            Delivery delivery = new Delivery(message, new CompletableFuture<>());
-            pending.add(delivery);
-            try {
-                sink.next(delivery);
-                delivery.done().join();    // returns: acked; throws: nacked and redelivered
-            } finally {
-                pending.remove(delivery);
-            }
-        }, options);
-        sink.onDispose(() -> {
-            // fail what the cancelled pipeline still holds, so it is nacked and redelivered
-            pending.forEach(d -> d.done().completeExceptionally(new CancellationException("pipeline cancelled")));
-            // cancelling can happen inside sink.next, on a listener's thread, and close() waits for
-            // running listeners: close on a thread of its own
-            Thread.startVirtualThread(() -> {
-                try {
-                    consumer.close();
-                } catch (Exception e) {
-                    // already stopping
-                }
-            });
-        });
-    });
-}
-```
-
-The pipeline completes each delivery when it is done with it:
-
-```java
-deliveries(billing, ConsumerOptions.DEFAULTS.withConcurrency(16))
-    .flatMap(d -> Mono.fromCallable(() -> bill(d.message()))
-            .subscribeOn(halyx)
-            .doOnSuccess(result -> d.done().complete(null))
-            .onErrorResume(e -> {
-                d.done().completeExceptionally(e);
-                return Mono.empty();
-            }))
-    .subscribe();
-```
-
-This gives back-pressure for free: each waiting listener is a parked virtual thread, and the consumer stops
-pulling while all `concurrency` listeners are busy, so a slow pipeline slows delivery rather than buffering
-messages. Leases are extended while listeners wait, as for any listener (`extendLease`, on by default).
-
-Two details matter, and both are tested:
-
-- **Cancelling.** When the `Flux` is cancelled, deliveries still in the pipeline are failed, so they are nacked
-  and redelivered rather than acked unprocessed.
-- **Closing.** Reactor can cancel from inside `sink.next`, which runs on a listener's thread, and
-  `MessageConsumer.close()` waits for running listeners. Closing on that thread would wait for itself until
-  the shutdown timeout, so the consumer is closed on a thread of its own.
-
-For [event buses](events.md), decode each delivery with `CloudEvents.decode(d.message())`.
-
-## Context: logging and tracing
-
-Reactor carries context in its `Context`, not in thread-locals, while Halyx's interceptors and observations
-run on the thread that makes the call. With Micrometer's context propagation on the classpath, turn on
-Reactor's automatic propagation so MDC and the current observation reach the Halyx call:
-
-```java
-Hooks.enableAutomaticContextPropagation();
-```
-
-Spring Boot does this when `spring.reactor.context-propagation=auto`.
-
-## In Spring WebFlux
-
-The Halyx beans inject as usual; wrap their calls as above in controllers and services. A controller returns
-the `Mono` (WebFlux accepts a `CompletableFuture` too, for code written that way):
-
-```java
-@GetMapping("/orders/{id}")
-Mono<Order> order(@PathVariable String id) {
-    return Mono.fromCallable(() -> orders.get(Key.of(id)).map(Order::from).orElseThrow())
-            .subscribeOn(halyx);
-}
-```
-
-`@HalyxListener` methods already run on Halyx's virtual threads, off the event loop, so they work unchanged
-in a WebFlux application. For data, Spring Data R2DBC over `halyx.r2dbc-databases` is fully reactive.
-
-## What wrapping doesn't give
-
-Each call still occupies a thread while it waits on the network; on virtual threads that is cheap, but it
-isn't non-blocking I/O. Reactive repositories over document stores, and ready-made adapters taking your
-scheduler, are on the [roadmap](../roadmap.md).
+Listings and subscriptions take more care: a listener that returns acks its message, so it must wait until the
+pipeline has handled it; cancelling must nack what is unsettled; and the consumer must be closed off the
+listener's thread, since Reactor can cancel from within it and closing waits for running listeners.
+`ReactiveUsageTest` in `halyx-spring-boot-autoconfigure` shows each pattern by hand, and `halyx-reactor` packages them.
