@@ -88,6 +88,23 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-failsafe-plugin</artifactId>
+                <executions>
+                    <!-- The broker tests again on a Kafka 4 broker, with the same (Kafka 3.9) clients -->
+                    <execution>
+                        <id>kafka4-broker</id>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                        <configuration>
+                            <systemPropertyVariables>
+                                <kafka.image>${kafka4.image}</kafka.image>
+                            </systemPropertyVariables>
+                            <reportsDirectory>${project.build.directory}/failsafe-reports-kafka4</reportsDirectory>
+                            <summaryFile>${project.build.directory}/failsafe-reports-kafka4/failsafe-summary.xml</summaryFile>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

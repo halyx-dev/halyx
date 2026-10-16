@@ -91,6 +91,8 @@
         <valkey.image>valkey/valkey:9.1.2-alpine</valkey.image>
         <vault.image>hashicorp/vault:2.1.2</vault.image>
         <kafka.image>apache/kafka:3.9.1</kafka.image>
+        <!-- halyx-kafka also runs its broker tests on Kafka 4 -->
+        <kafka4.image>apache/kafka:4.2.1</kafka4.image>
 
         <!-- Common -->
         <slf4j.version>2.0.20</slf4j.version>

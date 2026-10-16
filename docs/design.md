@@ -120,8 +120,8 @@ either portable or explicitly declared as a capability:
 Integration tests (`*IT`) run the kits through Testcontainers against
 [Floci](https://floci.io) (`floci/floci` for AWS, `floci/floci-az` for Azure, `floci/floci-gcp` for
 Google Cloud), Google's Pub/Sub and Firestore emulators, Microsoft's Service Bus emulator, Valkey (plain,
-TLS with a private CA, and a 3-master cluster), HashiCorp Vault, PostgreSQL and MySQL. Image versions are
-pinned in the parent POM.
+TLS with a private CA, and a 3-master cluster), HashiCorp Vault, PostgreSQL, MySQL and Apache Kafka. Image
+versions are pinned in the parent POM. `halyx-kafka` runs its broker tests twice, on Kafka 3.9 and on Kafka 4.
 
 Behaviour an emulator doesn't implement is declared per provider in `knownEnvironmentGaps()`, each case
 confirmed with raw HTTP requests against the emulator. Those tests are reported as skipped with the
