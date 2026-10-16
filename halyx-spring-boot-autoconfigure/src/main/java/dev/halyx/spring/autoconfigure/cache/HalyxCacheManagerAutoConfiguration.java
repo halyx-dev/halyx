@@ -19,6 +19,7 @@ import dev.halyx.Halyx;
 import dev.halyx.cache.Codec;
 import dev.halyx.spring.autoconfigure.HalyxAutoConfiguration;
 import dev.halyx.spring.autoconfigure.HalyxProperties;
+import org.springframework.beans.factory.BeanFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -28,6 +29,8 @@ import org.springframework.cache.CacheManager;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
+
+import java.util.concurrent.Executor;
 
 /**
  * A {@link HalyxCacheManager} for Spring's caching annotations, when {@code halyx.cache-manager.endpoint}
@@ -46,10 +49,13 @@ public class HalyxCacheManagerAutoConfiguration {
 
     static final String CODEC_BEAN = "halyxCacheCodec";
 
+    /** Optional: an {@code Executor} bean of this name runs cache calls for async and reactive {@code @Cacheable}. */
+    public static final String EXECUTOR_BEAN = "halyxCacheExecutor";
+
     @Bean
     @ConditionalOnMissingBean(CacheManager.class)
     public HalyxCacheManager cacheManager(Halyx halyx, HalyxProperties properties,
-                                            ObjectProvider<Codec<Object>> codec) {
+                                            ObjectProvider<Codec<Object>> codec, BeanFactory beans) {
         var manager = properties.cacheManager();
         String provider = manager.provider();
         if (provider == null) {
@@ -63,6 +69,9 @@ public class HalyxCacheManagerAutoConfiguration {
             throw new IllegalStateException("halyx.cache-manager.codec=json needs Jackson (3 on Boot 4, 2 on Boot 3) "
                     + "on the classpath");
         });
+        if (beans.containsBean(EXECUTOR_BEAN)) {
+            return new HalyxCacheManager(halyx, provider, manager, valueCodec, beans.getBean(EXECUTOR_BEAN, Executor.class));
+        }
         return new HalyxCacheManager(halyx, provider, manager, valueCodec);
     }
 

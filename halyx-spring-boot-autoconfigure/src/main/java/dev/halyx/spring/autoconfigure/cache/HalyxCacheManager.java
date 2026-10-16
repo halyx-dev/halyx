@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Executor;
 import java.util.function.BiConsumer;
 
 /**
@@ -38,15 +39,26 @@ public class HalyxCacheManager implements CacheManager {
     private final String provider;
     private final HalyxProperties.CacheManagerProperties properties;
     private final Codec<Object> codec;
+    private final Executor executor;
     private final Map<String, HalyxSpringCache> caches = new ConcurrentHashMap<>();
     private final List<BiConsumer<String, dev.halyx.cache.Cache<?>>> listeners = new CopyOnWriteArrayList<>();
 
     public HalyxCacheManager(Halyx halyx, String provider, HalyxProperties.CacheManagerProperties properties,
                                Codec<Object> codec) {
+        this(halyx, provider, properties, codec, task -> Thread.ofVirtual().name("halyx-cache").start(task));
+    }
+
+    /**
+     * @param executor runs the caches' blocking calls for {@code CompletableFuture} and reactive
+     *                 {@code @Cacheable} methods; see {@link HalyxSpringCache}
+     */
+    public HalyxCacheManager(Halyx halyx, String provider, HalyxProperties.CacheManagerProperties properties,
+                               Codec<Object> codec, Executor executor) {
         this.halyx = halyx;
         this.provider = provider;
         this.properties = properties;
         this.codec = codec;
+        this.executor = executor;
         properties.cacheNames().forEach(this::getCache);
     }
 
@@ -65,7 +77,7 @@ public class HalyxCacheManager implements CacheManager {
     private HalyxSpringCache create(String name) {
         var cache = halyx.provider(provider).cache(properties.toCacheConfig(name), codec);
         listeners.forEach(listener -> listener.accept(name, cache));
-        return new HalyxSpringCache(name, cache, properties.allowNullValues());
+        return new HalyxSpringCache(name, cache, properties.allowNullValues(), executor);
     }
 
     @Override

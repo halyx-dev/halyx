@@ -347,8 +347,14 @@ halyx:
 
 It supports `allEntries` evictions, `sync = true`, per-cache TTLs and cached nulls. The JSON codec stores
 `{"@class", "v"}` and only reads back types from `trusted-packages`, with no unsafe polymorphic typing.
-The JDK codec applies the same allow-list through an `ObjectInputFilter`. Async and reactive
-`@Cacheable` aren't supported.
+The JDK codec applies the same allow-list through an `ObjectInputFilter`.
+
+Methods returning `CompletableFuture`, `Mono` or `Flux` are cached too (Spring 6.1's `Cache.retrieve`), with
+`sync = true` and `@CacheEvict`. The cache's calls to the server run on an executor rather than the caller's
+thread: virtual threads by default, or an `Executor` bean named `halyxCacheExecutor`. Spring writes and
+evicts a reactive method's result from inside its pipeline, so on a Reactor non-blocking thread, such as a
+Netty event loop, the write is handed to that executor and lands just after the method's value is emitted;
+everywhere else writes complete before returning, as before.
 
 ## Parameters and secrets
 
