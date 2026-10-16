@@ -87,6 +87,10 @@
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>sqs</artifactId>
         </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>eventbridge</artifactId>
+        </dependency>
         <!-- Tests: TCK against the Floci emulator in Docker (run with mvn verify) -->
         <dependency>
             <groupId>dev.halyx</groupId>

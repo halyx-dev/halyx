@@ -18,6 +18,7 @@ package dev.halyx.aws;
 import dev.halyx.aws.dynamodb.DynamoDocumentStoreDriver;
 import dev.halyx.aws.elasticache.ElastiCacheIamTokens;
 import dev.halyx.aws.messaging.SnsPublisherDriver;
+import dev.halyx.aws.events.EventBridgePublisherDriver;
 import dev.halyx.aws.msk.MskIamTokens;
 import dev.halyx.aws.messaging.SqsPublisherDriver;
 import dev.halyx.aws.messaging.SqsSubscriptionDriver;
@@ -35,6 +36,8 @@ import dev.halyx.config.HttpSettings;
 import dev.halyx.config.ProviderConfig;
 import dev.halyx.error.UnsupportedFeatureException;
 import dev.halyx.jdbc.JdbcDatabases;
+import dev.halyx.events.EventBusConfig;
+import dev.halyx.events.spi.EventPublisherDriver;
 import dev.halyx.kafka.KafkaCredentialsSource;
 import dev.halyx.kafka.KafkaStreamClients;
 import dev.halyx.messaging.SubscriptionConfig;
@@ -73,6 +76,7 @@ import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
 import software.amazon.awssdk.services.sns.SnsClient;
+import software.amazon.awssdk.services.eventbridge.EventBridgeClient;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.ssm.SsmClient;
 import software.amazon.awssdk.services.s3.S3Configuration;
@@ -93,6 +97,7 @@ final class AwsConnection implements ProviderConnection {
     private SnsClient sns;
     private DynamoDbClient dynamo;
     private SqsClient sqs;
+    private EventBridgeClient eventBridge;
     private S3Client s3;
     private S3Presigner presigner;
     private RedisCaches caches;
@@ -222,6 +227,21 @@ final class AwsConnection implements ProviderConnection {
         return sns;
     }
 
+    @Override
+    public synchronized EventPublisherDriver eventPublisher(EventBusConfig bus) {
+        return new EventBridgePublisherDriver(eventBridge(), bus.name());
+    }
+
+    private EventBridgeClient eventBridge() {
+        if (eventBridge == null) {
+            var builder = EventBridgeClient.builder().region(region()).credentialsProvider(credentials())
+                    .httpClient(http()).overrideConfiguration(overrides());
+            config.endpoint().ifPresent(builder::endpointOverride);
+            eventBridge = builder.build();
+        }
+        return eventBridge;
+    }
+
     private SqsClient sqs() {
         if (sqs == null) {
             var builder = SqsClient.builder().region(region()).credentialsProvider(credentials())
@@ -348,6 +368,10 @@ final class AwsConnection implements ProviderConnection {
         if (sqs != null) {
             sqs.close();
             sqs = null;
+        }
+        if (eventBridge != null) {
+            eventBridge.close();
+            eventBridge = null;
         }
         if (caches != null) {
             caches.close();
