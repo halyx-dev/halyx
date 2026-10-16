@@ -57,6 +57,11 @@ public abstract class ParameterStoreConformanceTest {
     /** The store configuration under test; the TCK sets prefix and cache settings. */
     protected abstract ParameterStoreConfig.Builder config();
 
+    /** The store under test for {@code config}; override to test a wrapper around {@code context()}'s stores. */
+    protected ParameterStore newStore(ParameterStoreConfig config) {
+        return context().parameterStore(config);
+    }
+
     /** Test names to skip in this environment, mapped to the reason. */
     protected Map<String, String> knownEnvironmentGaps() {
         return Map.of();
@@ -161,16 +166,16 @@ public abstract class ParameterStoreConformanceTest {
 
     @AfterEach
     void cleanUp() {
-        ParameterStore store = context().parameterStore(config().prefix(prefix).build());
+        ParameterStore store = newStore(config().prefix(prefix).build());
         store.getAll("").keySet().forEach(store::delete);
     }
 
     protected ParameterStore store() {
-        return context().parameterStore(config().prefix(prefix).build());
+        return newStore(config().prefix(prefix).build());
     }
 
     private ParameterStore cachingStore(Duration ttl) {
-        return context().parameterStore(config().prefix(prefix).cacheTtl(ttl).build());
+        return newStore(config().prefix(prefix).cacheTtl(ttl).build());
     }
 
     @Test
@@ -235,7 +240,7 @@ public abstract class ParameterStoreConformanceTest {
     @Test
     void storesAreIsolatedByPrefix() {
         store().put("shared", "mine");
-        ParameterStore other = context().parameterStore(config().prefix(prefix + "-other").build());
+        ParameterStore other = newStore(config().prefix(prefix + "-other").build());
 
         assertThat(other.get("shared")).isEmpty();
         assertThat(other.getAll("")).isEmpty();
@@ -344,14 +349,14 @@ public abstract class ParameterStoreConformanceTest {
     @Test
     void nativeNamesAreUsedAsTheyAre() {
         String nativePrefix = nativePrefix(prefix);
-        ParameterStore nativeStore = context().parameterStore(config().prefix(nativePrefix).nativeNames(true).build());
+        ParameterStore nativeStore = newStore(config().prefix(nativePrefix).nativeNames(true).build());
         assertThatThrownBy(() -> store().put(nativeName(), "v")).isInstanceOf(IllegalArgumentException.class);
         try {
             nativeStore.put(nativeName(), "native-value");
 
             assertThat(nativeStore.require(nativeName())).isEqualTo("native-value");
             assertThat(listed(nativeStore, "", nativeName())).containsOnlyKeys(nativeName());
-            ParameterStore unprefixed = context().parameterStore(config().nativeNames(true).build());
+            ParameterStore unprefixed = newStore(config().nativeNames(true).build());
             assertThat(unprefixed.require(nativePrefix + nativeName())).isEqualTo("native-value");
         } finally {
             nativeStore.delete(nativeName());

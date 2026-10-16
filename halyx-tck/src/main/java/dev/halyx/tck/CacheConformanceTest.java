@@ -61,6 +61,16 @@ public abstract class CacheConformanceTest {
     /** Endpoint, auth and provider properties of the server under test; the TCK sets the namespace. */
     protected abstract CacheConfig.Builder config();
 
+    /** The cache under test for {@code config}; override to test a wrapper around {@code context()}'s caches. */
+    protected <V> Cache<V> newCache(CacheConfig config, Codec<V> codec) {
+        return context().cache(config, codec);
+    }
+
+    /** The string cache under test for {@code config}; override with {@link #newCache(CacheConfig, Codec)}. */
+    protected Cache<String> newCache(CacheConfig config) {
+        return context().cache(config);
+    }
+
     /** Test names to skip in this environment, mapped to the reason. */
     protected Map<String, String> knownEnvironmentGaps() {
         return Map.of();
@@ -74,11 +84,11 @@ public abstract class CacheConformanceTest {
     }
 
     protected Cache<String> cache() {
-        return context().cache(config().namespace(namespace).build());
+        return newCache(config().namespace(namespace).build());
     }
 
     private Cache<String> cacheWithDefaultTtl(Duration ttl) {
-        return context().cache(config().namespace(namespace).defaultTtl(ttl).build());
+        return newCache(config().namespace(namespace).defaultTtl(ttl).build());
     }
 
     private static void awaitAbsent(Cache<?> cache, String key) throws InterruptedException {
@@ -134,7 +144,7 @@ public abstract class CacheConformanceTest {
         for (int i = 0; i < data.length; i++) {
             data[i] = (byte) i;
         }
-        Cache<byte[]> bytes = context().cache(config().namespace(namespace).build(), Codec.bytes());
+        Cache<byte[]> bytes = newCache(config().namespace(namespace).build(), Codec.bytes());
         bytes.put("binary", data);
 
         assertThat(bytes.get("binary")).hasValueSatisfying(v -> assertThat(v).isEqualTo(data));
@@ -144,7 +154,7 @@ public abstract class CacheConformanceTest {
     void largeValue() {
         byte[] data = new byte[1024 * 1024];
         new Random(1).nextBytes(data);
-        Cache<byte[]> bytes = context().cache(config().namespace(namespace).build(), Codec.bytes());
+        Cache<byte[]> bytes = newCache(config().namespace(namespace).build(), Codec.bytes());
         bytes.put("large", data);
 
         assertThat(bytes.get("large")).hasValueSatisfying(v -> assertThat(v).isEqualTo(data));
@@ -154,7 +164,7 @@ public abstract class CacheConformanceTest {
     void customCodec() {
         Codec<Integer> ints = Codec.of(i -> i.toString().getBytes(StandardCharsets.UTF_8),
                 b -> Integer.parseInt(new String(b, StandardCharsets.UTF_8)));
-        Cache<Integer> numbers = context().cache(config().namespace(namespace).build(), ints);
+        Cache<Integer> numbers = newCache(config().namespace(namespace).build(), ints);
         numbers.put("answer", 42);
 
         assertThat(numbers.get("answer")).hasValue(42);
@@ -162,8 +172,8 @@ public abstract class CacheConformanceTest {
 
     @Test
     void namespacesAreIsolated() {
-        Cache<String> a = context().cache(config().namespace(namespace + "-a").build());
-        Cache<String> b = context().cache(config().namespace(namespace + "-b").build());
+        Cache<String> a = newCache(config().namespace(namespace + "-a").build());
+        Cache<String> b = newCache(config().namespace(namespace + "-b").build());
         a.put("shared-key", "from a");
 
         assertThat(b.get("shared-key")).isEmpty();
@@ -437,7 +447,7 @@ public abstract class CacheConformanceTest {
     @Test
     void clearRemovesOnlyThisNamespace() {
         Cache<String> mine = cache();
-        Cache<String> other = context().cache(config().namespace(namespace + "-other").build());
+        Cache<String> other = newCache(config().namespace(namespace + "-other").build());
         Map<String, String> entries = new LinkedHashMap<>();
         for (int i = 0; i < 1200; i++) {
             entries.put("k" + i, "v");
@@ -453,8 +463,8 @@ public abstract class CacheConformanceTest {
 
     @Test
     void clearMatchesNamespaceLiterally() {
-        Cache<String> globby = context().cache(config().namespace(namespace + "-a*").build());
-        Cache<String> lookalike = context().cache(config().namespace(namespace + "-ab").build());
+        Cache<String> globby = newCache(config().namespace(namespace + "-a*").build());
+        Cache<String> lookalike = newCache(config().namespace(namespace + "-ab").build());
         globby.put("k", "v");
         lookalike.put("k", "v");
 
@@ -464,7 +474,7 @@ public abstract class CacheConformanceTest {
 
     @Test
     void clearWithoutNamespaceIsRefused() {
-        Cache<String> global = context().cache(config().build());
+        Cache<String> global = newCache(config().build());
 
         assertThatThrownBy(global::clear).isInstanceOf(IllegalStateException.class);
     }

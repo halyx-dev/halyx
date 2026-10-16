@@ -79,6 +79,16 @@ public abstract class StreamConformanceTest {
     /** Bootstrap servers, auth and properties of the cluster under test. */
     protected abstract StreamConfig.Builder cluster();
 
+    /** The producer under test for {@code config}; override to test a wrapper around {@code context()}'s producers. */
+    protected StreamProducer newProducer(StreamProducerConfig config) {
+        return context().streamProducer(config);
+    }
+
+    /** The consumer under test for {@code config}; override to test a wrapper around {@code context()}'s consumers. */
+    protected StreamConsumer newConsumer(StreamConsumerConfig config) {
+        return context().streamConsumer(config);
+    }
+
     /** Creates a topic; Halyx never creates topics itself. */
     protected abstract void createTopic(String topic, int partitions);
 
@@ -124,7 +134,7 @@ public abstract class StreamConformanceTest {
     }
 
     private StreamProducer producer(String name, UnaryOperator<StreamProducerConfig.Builder> customize) {
-        return context().streamProducer(customize.apply(StreamProducerConfig.builder(config(), name)).build());
+        return newProducer(customize.apply(StreamProducerConfig.builder(config(), name)).build());
     }
 
     private StreamConsumer consumer(String group) {
@@ -132,7 +142,7 @@ public abstract class StreamConformanceTest {
     }
 
     private StreamConsumer consumer(String group, UnaryOperator<StreamConsumerConfig.Builder> customize) {
-        StreamConsumer consumer = context().streamConsumer(customize.apply(
+        StreamConsumer consumer = newConsumer(customize.apply(
                 StreamConsumerConfig.builder(config(), topic, group)).build());
         consumers.add(consumer);
         return consumer;
@@ -534,7 +544,7 @@ public abstract class StreamConformanceTest {
 
         await("the next record handled", () -> handled.contains("fine"));
         assertThat(listener.statistics().deadLettered()).isEqualTo(1);
-        StreamConsumer deadLetterReader = context().streamConsumer(StreamConsumerConfig
+        StreamConsumer deadLetterReader = newConsumer(StreamConsumerConfig
                 .builder(config(), deadLetterTopic, group()).startPosition(StartPosition.EARLIEST).build());
         consumers.add(deadLetterReader);
         ReceivedRecord letter = pollAtLeast(deadLetterReader, 1).getFirst();
