@@ -27,6 +27,9 @@ import dev.halyx.parameters.DefaultParameterStore;
 import dev.halyx.parameters.ParameterStore;
 import dev.halyx.parameters.ParameterStoreConfig;
 import dev.halyx.interceptor.InterceptorChain;
+import dev.halyx.events.DefaultEventPublisher;
+import dev.halyx.events.EventBusConfig;
+import dev.halyx.events.EventPublisher;
 import dev.halyx.messaging.DefaultPublisher;
 import dev.halyx.messaging.DefaultSubscription;
 import dev.halyx.messaging.Publisher;
@@ -131,6 +134,18 @@ public final class CloudContext implements AutoCloseable {
 
     public Subscription subscription(String name) {
         return subscription(SubscriptionConfig.of(name));
+    }
+
+    /**
+     * A publisher of CloudEvents to an event bus: an EventBridge event bus, an Event Grid namespace topic, or an
+     * Eventarc Advanced message bus. Receive the events from the queue the router delivers them to.
+     */
+    public EventPublisher eventPublisher(EventBusConfig config) {
+        return new DefaultEventPublisher(connection().eventPublisher(config), interceptors);
+    }
+
+    public EventPublisher eventPublisher(String bus) {
+        return eventPublisher(EventBusConfig.of(bus));
     }
 
     /**

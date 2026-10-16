@@ -18,6 +18,8 @@ package dev.halyx.spi;
 import dev.halyx.cache.CacheConfig;
 import dev.halyx.cache.spi.CacheDriver;
 import dev.halyx.error.UnsupportedFeatureException;
+import dev.halyx.events.EventBusConfig;
+import dev.halyx.events.spi.EventPublisherDriver;
 import dev.halyx.messaging.SubscriptionConfig;
 import dev.halyx.messaging.TopicConfig;
 import dev.halyx.messaging.spi.PublisherDriver;
@@ -78,6 +80,11 @@ public interface ProviderConnection extends AutoCloseable {
     /** A driver consuming from {@code config.name()}. */
     default SubscriptionDriver subscription(SubscriptionConfig config) {
         throw new UnsupportedFeatureException("Messaging is not supported by this provider");
+    }
+
+    /** A driver publishing CloudEvents to the event bus {@code config.name()}. */
+    default EventPublisherDriver eventPublisher(EventBusConfig config) {
+        throw new UnsupportedFeatureException("Event buses are not supported by this provider");
     }
 
     /** A driver sending to the stream topic {@code config.topic()} on {@code config.cluster()}. */

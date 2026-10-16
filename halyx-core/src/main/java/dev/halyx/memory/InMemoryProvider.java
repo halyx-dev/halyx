@@ -19,6 +19,8 @@ import dev.halyx.cache.CacheConfig;
 import dev.halyx.cache.spi.CacheDriver;
 import dev.halyx.config.ProviderConfig;
 import dev.halyx.messaging.SubscriptionConfig;
+import dev.halyx.events.EventBusConfig;
+import dev.halyx.events.spi.EventPublisherDriver;
 import dev.halyx.messaging.TopicConfig;
 import dev.halyx.messaging.spi.PublisherDriver;
 import dev.halyx.messaging.spi.SubscriptionDriver;
@@ -97,6 +99,11 @@ public final class InMemoryProvider implements CloudProvider {
         @Override
         public SubscriptionDriver subscription(SubscriptionConfig config) {
             return broker.subscription(config);
+        }
+
+        @Override
+        public EventPublisherDriver eventPublisher(EventBusConfig config) {
+            return new InMemoryEventBus(config.name(), broker.publisher(TopicConfig.of(config.name())));
         }
 
         @Override
