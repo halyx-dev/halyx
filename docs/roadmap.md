@@ -69,14 +69,17 @@ SQL databases do. See [Streams](api/streams.md).
 
 ### Event services
 
-One API to publish events to the clouds' event routers, and to receive them:
+One API to publish events to the clouds' event routers, with CloudEvents as the portable format. Events are
+received through the queue each router delivers to, with Halyx' subscriptions and listeners:
 
-- [ ] Amazon EventBridge event buses
-- [ ] Azure Event Grid topics and namespaces
-- [ ] Google Cloud Eventarc
-- [ ] CloudEvents as the portable event format
-- [ ] Spring Boot: properties, auto-configuration and health
-- [ ] conformance kit, emulator tests and real-cloud tests
+- [x] `CloudEvent` (CloudEvents 1.0) and `EventPublisher` in core, and one decoder for what each router delivers:
+  EventBridge's envelope, CloudEvents JSON, and Pub/Sub's `ce-` attributes
+- [x] Amazon EventBridge: publish to an event bus; a rule routes to SQS
+- [x] Azure Event Grid: publish to a namespace topic, and receive from its pull subscriptions (a new
+  `Subscription` driver, with acks, releases and lock renewal)
+- [x] Google Cloud Eventarc Advanced: publish to a message bus; a pipeline routes to Pub/Sub
+- [x] Spring Boot: `halyx.event-buses`, `EventPublisher` beans, and `@HalyxListener` methods taking a `CloudEvent`
+- [x] conformance kit, on the in-memory provider, the emulators and the real clouds, with Spring Boot 3 and 4
 
 ### R2DBC with cloud IAM login
 

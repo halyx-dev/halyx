@@ -180,13 +180,35 @@ halyx:
       listener: { concurrency: 32, max-backoff: 2m }
 ```
 
-`@HalyxListener("<subscription bean>")` methods take a `String` body, a `byte[]` body or the whole
+`@HalyxListener("<subscription bean>")` methods take a `String` body, a `byte[]` body, a `CloudEvent` or the whole
 `ReceivedMessage`. Returning acks the message; throwing nacks it for redelivery with backoff. Override
 the subscription's concurrency per listener with `@HalyxListener(value = "billing", concurrency = 8)`.
 
 Listeners start once the application is ready, and stop first on shutdown, letting running handlers
 finish. Each consumer reports metrics and appears under the `messaging` health entry. Wrap every
 listener, for example for MDC or tenancy, with a `MessageListenerDecorator` bean.
+
+## Events
+
+```yaml
+halyx:
+  event-buses:
+    order-events:                  # EventPublisher bean name
+      name: orders                 # EventBridge bus, Event Grid namespace topic or Eventarc message bus; defaults to the key
+      properties: { azure.eventgrid.endpoint: "https://acme.australiaeast-1.eventgrid.azure.net" }
+  subscriptions:
+    billing:
+      name: orders-inbox           # the queue the router delivers to
+```
+
+`@HalyxListener` methods on a subscription can take a `CloudEvent`; each message is decoded with
+`CloudEvents.decode`, and one that holds no CloudEvent fails like a throwing handler, so it is retried and in time
+dead-lettered. See [Events](api/events.md).
+
+```java
+@HalyxListener("billing")
+void onOrderEvent(CloudEvent event) { ... }
+```
 
 ## Streams
 

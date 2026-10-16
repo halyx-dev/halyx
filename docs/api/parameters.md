@@ -1,7 +1,7 @@
 ---
 title: Parameters and secrets
 parent: API guide
-nav_order: 7
+nav_order: 8
 ---
 
 # Parameters and secrets: `ParameterStore`

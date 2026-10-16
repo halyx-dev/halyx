@@ -27,6 +27,7 @@ Halyx                                   one per application
  │     ├── documentStore(TableConfig)       → DocumentStore    (DynamoDB)
  │     ├── publisher("orders")              → Publisher        (SNS)
  │     ├── subscription("orders-billing")   → Subscription     (SQS)
+ │     ├── eventPublisher("orders")         → EventPublisher   (EventBridge)
  │     ├── streamProducer(StreamProducerConfig) → StreamProducer (MSK)
  │     ├── streamConsumer(StreamConsumerConfig) → StreamConsumer (MSK)
  │     ├── database(SqlConfig)              → Database         (RDS)
@@ -41,7 +42,7 @@ Halyx                                   one per application
 | `Halyx` | The registry of named providers. Build it once, share it, and close it on shutdown. |
 | `ProviderConfig` | Which cloud (`aws`, `azure`, `gcp`, `vault`, `memory`), plus region, endpoint, credentials and provider properties. See [Provider configuration](../providers.md). |
 | `CloudContext` | One provider connection: an account and region with its credentials. It hands out services, which share its HTTP clients and connection pools. |
-| Service interfaces | `BlobStore`, `DocumentStore`, `Publisher` and `Subscription`, `StreamProducer` and `StreamConsumer`, `Database`, `Cache<V>`, `ParameterStore`. |
+| Service interfaces | `BlobStore`, `DocumentStore`, `Publisher` and `Subscription`, `EventPublisher`, `StreamProducer` and `StreamConsumer`, `Database`, `Cache<V>`, `ParameterStore`. |
 
 ```java
 Halyx halyx = Halyx.builder()
@@ -61,6 +62,7 @@ halyx.names();   // [orders, analytics]
 | [Object storage](storage.md) | `BlobStore` | put, get, streams, parallel transfers, listing, conditional writes, checksums, tiers, presigned URLs |
 | [NoSQL documents](nosql.md) | `DocumentStore` | items by partition and sort key, partial updates, queries, secondary indexes, transactions, expiry |
 | [Messaging](messaging.md) | `Publisher`, `Subscription` | publishing, listeners, manual receive, ordering, deduplication, delays, claim checks |
+| [Events](events.md) | `CloudEvent`, `EventPublisher` | CloudEvents to EventBridge, Event Grid and Eventarc Advanced, and decoding what their rules deliver |
 | [Streams](streams.md) | `StreamProducer`, `StreamConsumer` | Kafka topics on MSK, Event Hubs and Managed Kafka: keys and order, consumer groups, listeners, commits, dead letters, transactions |
 | [SQL databases](sql.md) | `Database` | a pooled JDBC `DataSource` with IAM, Entra ID or password login |
 | [Caches](caches.md) | `Cache<V>` | Redis and Valkey operations, atomic updates, counters, locks, fail-open |

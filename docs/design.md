@@ -76,9 +76,9 @@ that.
 | `halyx-sql` | the shared HikariCP pool with per-connection credentials (passwords, cloud IAM tokens) |
 | `halyx-r2dbc` | pooled R2DBC connections with the same password and cloud IAM logins, for reactive code and Spring Data R2DBC |
 | `halyx-kafka` | the shared Kafka stream driver, with password and cloud IAM login (SASL `OAUTHBEARER`), used by every provider |
-| `halyx-aws` | AWS SDK v2: S3, DynamoDB, SNS, SQS, SSM Parameter Store, Secrets Manager, ElastiCache and RDS IAM login |
-| `halyx-azure` | Azure SDK: Blob Storage, Cosmos DB, Service Bus, Key Vault, App Configuration, Entra ID login for caches and databases |
-| `halyx-gcp` | Google Cloud: Cloud Storage, Firestore, Pub/Sub, Secret Manager, Parameter Manager, Memorystore and Cloud SQL IAM login |
+| `halyx-aws` | AWS SDK v2: S3, DynamoDB, SNS, SQS, EventBridge, SSM Parameter Store, Secrets Manager, ElastiCache and RDS IAM login |
+| `halyx-azure` | Azure SDK: Blob Storage, Cosmos DB, Service Bus, Event Grid namespaces, Key Vault, App Configuration, Entra ID login for caches and databases |
+| `halyx-gcp` | Google Cloud: Cloud Storage, Firestore, Pub/Sub, Eventarc Advanced, Secret Manager, Parameter Manager, Memorystore and Cloud SQL IAM login |
 | `halyx-vault` | HashiCorp Vault KV v2 parameters and secrets |
 | `halyx-spring-data-document` | Spring Data repositories over document stores: records as entities, derived queries on keys and indexes, optimistic locking, keyset scrolling |
 | `halyx-spring-boot-autoconfigure` | Spring Boot auto-configuration, properties, health and observations |
@@ -113,6 +113,7 @@ either portable or explicitly declared as a capability:
 | Blob store | 75 | round trips, streams, parallel transfers, listing and pagination, conditional writes and deletes, batch delete, copy, metadata, checksums, tiers, presigned URLs and multipart |
 | Document repositories | 10 | Spring Data repositories on the document store kit's tables: CRUD with records, `UUID` keys, optimistic locking and taken ids, batched saves, partition queries both ways with sort-key conditions and limits, windows, streams, index queries with and without a sort attribute |
 | Document store | 23 | every value type, versions and conditions, partial updates with concurrent increments, batches beyond provider limits, sort-key queries both ways with paging, secondary indexes, transactions with rollback, keys with `/ ? # % \`, expiry |
+| Event bus | 7 | every CloudEvent attribute through the router to its queue, text and binary data, events without data, batches across requests, republished ids, oversized events refused, listeners |
 | Messaging | 15 | round trips, binary bodies, ack and nack, lease expiry and extension, batches, listener retries and concurrency, claim checks, ordering, deduplication, delays |
 | Streams | 25 | keys, headers, partitions and offsets, order per key, committed positions, uncommitted records read again, groups sharing partitions, start positions, listener retries holding only their partition, dead letters, commits on close, claim checks, idempotence and transactions |
 | Cache | 49 | basic and bulk operations, cache-aside, atomic operations, counters, locks, namespaces, expiry (fail-open has its own test against an unreachable server) |
@@ -125,6 +126,8 @@ Integration tests (`*IT`) run the kits through Testcontainers against
 Google Cloud), Google's Pub/Sub and Firestore emulators, Microsoft's Service Bus emulator, Valkey (plain,
 TLS with a private CA, and a 3-master cluster), HashiCorp Vault, PostgreSQL, MySQL and Apache Kafka. Image
 versions are pinned in the parent POM. `halyx-kafka` runs its broker tests twice, on Kafka 3.9 and on Kafka 4.
+The event bus kit runs on Floci's EventBridge; Event Grid namespaces and Eventarc Advanced have no emulator, so
+their kits run on the real clouds only.
 
 Behaviour an emulator doesn't implement is declared per provider in `knownEnvironmentGaps()`, each case
 confirmed with raw HTTP requests against the emulator. Those tests are reported as skipped with the

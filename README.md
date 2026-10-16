@@ -82,6 +82,7 @@ type, region and resource names. So the same build can:
 | Object storage | `BlobStore` | Amazon S3 | Azure Blob Storage | Cloud Storage | in-memory |
 | NoSQL documents | `DocumentStore` | DynamoDB | Cosmos DB for NoSQL | Firestore | in-memory |
 | Messaging | `Publisher`, `Subscription` | SNS, SQS | Service Bus | Pub/Sub | in-memory |
+| Events | `CloudEvent`, `EventPublisher` | EventBridge | Event Grid namespaces | Eventarc Advanced | in-memory |
 | Streams | `StreamProducer`, `StreamConsumer` | MSK | Event Hubs (Kafka endpoint) | Managed Service for Apache Kafka | any Kafka cluster, in-memory |
 | SQL databases | `Database` (JDBC `DataSource`) | RDS, Aurora | Azure Database for PostgreSQL and MySQL, Azure SQL | Cloud SQL | any PostgreSQL, MySQL, SQL Server |
 | Caches | `Cache` | ElastiCache | Azure Cache for Redis, Azure Managed Redis | Memorystore | any Redis or Valkey, in-memory |

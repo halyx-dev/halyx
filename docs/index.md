@@ -47,6 +47,7 @@ checks that for every provider, against emulators on every build and
 | [Object storage](api/storage.md) | `BlobStore` | Amazon S3 | Azure Blob Storage | Cloud Storage | in-memory |
 | [NoSQL documents](api/nosql.md) | `DocumentStore` | DynamoDB | Cosmos DB for NoSQL | Firestore | in-memory |
 | [Messaging](api/messaging.md) | `Publisher`, `Subscription` | SNS, SQS | Service Bus | Pub/Sub | in-memory |
+| [Events](api/events.md) | `CloudEvent`, `EventPublisher` | EventBridge | Event Grid namespaces | Eventarc Advanced | in-memory |
 | [Streams](api/streams.md) | `StreamProducer`, `StreamConsumer` | MSK | Event Hubs (Kafka endpoint) | Managed Service for Apache Kafka | any Kafka cluster, in-memory |
 | [SQL databases](api/sql.md) | `Database` (a JDBC `DataSource`) | RDS, Aurora | Azure Database for PostgreSQL and MySQL, Azure SQL | Cloud SQL | any PostgreSQL, MySQL or SQL Server |
 | [Caches](api/caches.md) | `Cache` | ElastiCache | Azure Cache for Redis, Azure Managed Redis | Memorystore | any Redis or Valkey server, in-memory |

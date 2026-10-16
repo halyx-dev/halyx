@@ -52,9 +52,9 @@ need:
 | Module | What it adds |
 |---|---|
 | `halyx-core` | The portable API, error model, interceptors and an in-memory provider. No cloud SDKs. |
-| `halyx-aws` | Amazon S3, DynamoDB, SNS, SQS, SSM Parameter Store, Secrets Manager, ElastiCache and RDS IAM login |
-| `halyx-azure` | Blob Storage, Cosmos DB, Service Bus, Key Vault, App Configuration, and Entra ID login for caches and databases |
-| `halyx-gcp` | Cloud Storage, Firestore, Pub/Sub, Secret Manager, Parameter Manager, and IAM login for Memorystore and Cloud SQL |
+| `halyx-aws` | Amazon S3, DynamoDB, SNS, SQS, EventBridge, SSM Parameter Store, Secrets Manager, ElastiCache and RDS IAM login |
+| `halyx-azure` | Blob Storage, Cosmos DB, Service Bus, Event Grid namespaces, Key Vault, App Configuration, and Entra ID login for caches and databases |
+| `halyx-gcp` | Cloud Storage, Firestore, Pub/Sub, Eventarc Advanced, Secret Manager, Parameter Manager, and IAM login for Memorystore and Cloud SQL |
 | `halyx-vault` | HashiCorp Vault KV v2 parameters and secrets |
 | `halyx-spring-boot-starter` | Spring Boot auto-configuration (see [Spring Boot](spring-boot.md)) |
 

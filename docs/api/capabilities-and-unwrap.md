@@ -1,7 +1,7 @@
 ---
 title: Capabilities and native clients
 parent: API guide
-nav_order: 9
+nav_order: 10
 ---
 
 # Capabilities and native clients
