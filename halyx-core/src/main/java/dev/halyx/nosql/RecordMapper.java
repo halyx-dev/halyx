@@ -29,6 +29,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -75,8 +76,19 @@ public final class RecordMapper<T extends Record> {
     }
 
     public Document toDocument(T value) {
+        return toDocument(value, Set.of());
+    }
+
+    /**
+     * The document for {@code value} without the {@code excluded} components, for frameworks that keep some
+     * components elsewhere, such as in the item's key or version.
+     */
+    public Document toDocument(T value, Set<String> excluded) {
         Document.Builder b = Document.builder();
         for (RecordComponent component : components) {
+            if (excluded.contains(component.getName())) {
+                continue;
+            }
             Object field;
             try {
                 var accessor = component.getAccessor();
@@ -94,10 +106,19 @@ public final class RecordMapper<T extends Record> {
     }
 
     public T fromDocument(Document document) {
+        return fromDocument(document, Map.of());
+    }
+
+    /**
+     * A record from {@code document}, with the components named in {@code given} taken as they are instead of
+     * from the document, for frameworks that keep some components elsewhere, such as in the item's version.
+     */
+    public T fromDocument(Document document, Map<String, ?> given) {
         Object[] args = new Object[components.length];
         for (int i = 0; i < components.length; i++) {
             RecordComponent component = components[i];
-            args[i] = decode(component.getGenericType(), document.get(component.getName()), component.getName());
+            args[i] = given.containsKey(component.getName()) ? given.get(component.getName())
+                    : decode(component.getGenericType(), document.get(component.getName()), component.getName());
         }
         try {
             return constructor.newInstance(args);

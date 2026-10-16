@@ -23,6 +23,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -72,5 +73,25 @@ class RecordMapperTest {
     @Test
     void missingPrimitiveFails() {
         assertThatThrownBy(() -> mapper.fromDocument(Document.empty())).hasMessageContaining("cannot be null");
+    }
+
+    record Keyed(String partition, Status status, String note) {
+    }
+
+    @Test
+    void excludedComponentsStayOutOfTheDocument() {
+        Document document = RecordMapper.of(Keyed.class).toDocument(new Keyed("p1", Status.OPEN, "hi"),
+                Set.of("partition"));
+
+        assertThat(document.fieldNames()).containsExactlyInAnyOrder("status", "note");
+    }
+
+    @Test
+    void givenComponentsAreTakenAsTheyAre() {
+        Keyed keyed = RecordMapper.of(Keyed.class).fromDocument(
+                Document.builder().put("partition", "from-document").put("status", "OPEN").build(),
+                Map.of("partition", "given", "note", "also given"));
+
+        assertThat(keyed).isEqualTo(new Keyed("given", Status.OPEN, "also given"));
     }
 }
