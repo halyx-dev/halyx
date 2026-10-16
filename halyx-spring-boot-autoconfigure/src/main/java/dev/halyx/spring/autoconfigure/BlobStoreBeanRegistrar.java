@@ -52,7 +52,7 @@ import java.util.Set;
  */
 class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, EnvironmentAware {
 
-    static final String FACTORY_BEAN = "halyxBlobStores";
+    static final String FACTORY_BEAN = HalyxBlobStores.BEAN_NAME;
 
     private Environment environment;
 

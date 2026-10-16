@@ -189,14 +189,18 @@ public class HalyxListenerRegistrar implements BeanPostProcessor, SmartLifecycle
     }
 
     private static void invoke(Endpoint endpoint, Object argument) throws Exception {
+        Object result;
         try {
-            endpoint.method().invoke(endpoint.bean(), argument);
+            result = endpoint.method().invoke(endpoint.bean(), argument);
         } catch (InvocationTargetException e) {
             if (e.getCause() instanceof Exception cause) {
                 throw cause;
             }
             throw e;
         }
+        // An asynchronous result settles the message or record when it completes: waiting for it here, on the
+        // listener's virtual thread, keeps the consumer's concurrency and backoff in charge.
+        ListenerResults.await(result);
     }
 
     @Override

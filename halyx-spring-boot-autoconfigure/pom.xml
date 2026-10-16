@@ -130,6 +130,12 @@
             <artifactId>halyx-r2dbc</artifactId>
             <optional>true</optional>
         </dependency>
+        <!-- Reactive views of the service beans (HalyxReactorAutoConfiguration) -->
+        <dependency>
+            <groupId>dev.halyx</groupId>
+            <artifactId>halyx-reactor</artifactId>
+            <optional>true</optional>
+        </dependency>
         <!-- Spring Data repositories over document stores (HalyxRepositoriesAutoConfiguration) -->
         <dependency>
             <groupId>dev.halyx</groupId>
@@ -236,6 +242,17 @@
         <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>r2dbc-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- WebFlux endpoints over the reactive beans, tested without a server (WebTestClient on the context) -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-webflux</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>context-propagation</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>

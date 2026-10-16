@@ -40,6 +40,9 @@ import javax.sql.DataSource;
  */
 public final class HalyxBlobStores {
 
+    /** The name of this factory's bean, through which every service bean from {@code halyx.*} properties is made. */
+    public static final String BEAN_NAME = "halyxBlobStores";
+
     private final Halyx halyx;
 
     public HalyxBlobStores(Halyx halyx) {
