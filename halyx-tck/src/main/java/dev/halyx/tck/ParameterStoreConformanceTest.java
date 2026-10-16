@@ -86,6 +86,27 @@ public abstract class ParameterStoreConformanceTest {
         return Duration.ZERO;
     }
 
+    /**
+     * How long a read may return the previous value after a value is replaced. Zero for most backends; Google
+     * Secret Manager guarantees a read only by version number, and its {@code latest} alias is eventually
+     * consistent.
+     */
+    protected Duration overwriteLag() {
+        return Duration.ZERO;
+    }
+
+    /** {@code name}'s value once it reads as {@code expected}, refreshing and rereading for up to {@link #overwriteLag()}. */
+    protected String readAfterOverwrite(ParameterStore store, String name, String expected) {
+        long deadline = System.nanoTime() + overwriteLag().toNanos();
+        String value = store.require(name);
+        while (!value.equals(expected) && System.nanoTime() < deadline) {
+            pause();
+            store.refresh();
+            value = store.require(name);
+        }
+        return value;
+    }
+
     /** Waits up to {@link #deleteLag()} for {@code name} to read as absent. */
     protected boolean gone(ParameterStore store, String name) {
         long deadline = System.nanoTime() + deleteLag().toNanos();
@@ -177,7 +198,7 @@ public abstract class ParameterStoreConformanceTest {
         Parameter v2 = store().put("feature/limit", "20");
 
         assertThat(v2.version()).isNotEqualTo(v1.version());
-        assertThat(store().require("feature/limit")).isEqualTo("20");
+        assertThat(readAfterOverwrite(store(), "feature/limit", "20")).isEqualTo("20");
     }
 
     @Test
@@ -271,7 +292,7 @@ public abstract class ParameterStoreConformanceTest {
         assertThat(cached.require("cached")).as("served from cache").isEqualTo("v1");
 
         cached.refresh();
-        assertThat(cached.require("cached")).isEqualTo("v2");
+        assertThat(readAfterOverwrite(cached, "cached", "v2")).isEqualTo("v2");
     }
 
     @Test
@@ -280,8 +301,11 @@ public abstract class ParameterStoreConformanceTest {
         cached.put("own", "v1");
         cached.require("own");
         cached.put("own", "v2");
+        long reads = cached.statistics().backendReads();
+        cached.require("own");
 
-        assertThat(cached.require("own")).isEqualTo("v2");
+        assertThat(cached.statistics().backendReads()).as("read after the write goes to the backend").isEqualTo(reads + 1);
+        assertThat(readAfterOverwrite(cached, "own", "v2")).isEqualTo("v2");
     }
 
     // --- JSON secrets --------------------------------------------------------------------------
