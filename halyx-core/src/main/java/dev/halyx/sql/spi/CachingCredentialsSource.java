@@ -13,10 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package dev.halyx.jdbc;
+package dev.halyx.sql.spi;
 
-import dev.halyx.sql.spi.SqlCredentialsSource;
-import dev.halyx.sql.spi.SqlLogin;
 
 import java.time.Clock;
 import java.time.Duration;

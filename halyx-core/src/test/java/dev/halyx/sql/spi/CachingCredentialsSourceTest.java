@@ -13,10 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package dev.halyx.jdbc;
+package dev.halyx.sql.spi;
 
 import org.junit.jupiter.api.Test;
-import dev.halyx.sql.spi.SqlLogin;
 
 import java.time.Clock;
 import java.time.Duration;

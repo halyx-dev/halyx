@@ -37,6 +37,7 @@ import dev.halyx.spi.CloudProvider;
 import dev.halyx.spi.ProviderConnection;
 import dev.halyx.sql.Database;
 import dev.halyx.sql.SqlConfig;
+import dev.halyx.sql.SqlEndpoint;
 import dev.halyx.storage.BlobStore;
 import dev.halyx.storage.DefaultBlobStore;
 import dev.halyx.stream.DefaultStreamConsumer;
@@ -146,6 +147,15 @@ public final class CloudContext implements AutoCloseable {
      */
     public StreamConsumer streamConsumer(StreamConsumerConfig config) {
         return new DefaultStreamConsumer(connection().streamConsumer(config), config, interceptors);
+    }
+
+    /**
+     * Where and how this provider connects to a database, for clients other than {@link #database}'s JDBC pool,
+     * such as R2DBC: the host, the login for each new connection (a password, or a cloud IAM token) and whether
+     * TLS is required. Needs a host: the Cloud SQL connector connects its own way.
+     */
+    public SqlEndpoint sqlEndpoint(SqlConfig config) {
+        return connection().sqlEndpoint(config);
     }
 
     /**

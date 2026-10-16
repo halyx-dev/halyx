@@ -28,6 +28,7 @@ import dev.halyx.parameters.ParameterStoreConfig;
 import dev.halyx.parameters.spi.ParameterDriver;
 import dev.halyx.sql.Database;
 import dev.halyx.sql.SqlConfig;
+import dev.halyx.sql.SqlEndpoint;
 import dev.halyx.storage.spi.BlobStoreDriver;
 import dev.halyx.stream.StreamConfig;
 import dev.halyx.stream.StreamConsumerConfig;
@@ -87,6 +88,11 @@ public interface ProviderConnection extends AutoCloseable {
     /** A consumer group member reading the stream topic {@code config.topic()} on {@code config.cluster()}. */
     default ConsumerDriver streamConsumer(StreamConsumerConfig config) {
         throw new UnsupportedFeatureException("Streams are not supported by this provider");
+    }
+
+    /** The endpoint and login for {@code config}, as {@link #database} would connect. */
+    default SqlEndpoint sqlEndpoint(SqlConfig config) {
+        throw new UnsupportedFeatureException("SQL databases are not supported by this provider");
     }
 
     /** Kafka client properties for {@code cluster}, logging in as this provider's stream drivers do. */

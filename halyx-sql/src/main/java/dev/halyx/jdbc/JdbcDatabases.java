@@ -19,6 +19,7 @@ import dev.halyx.sql.Database;
 import dev.halyx.sql.SqlAuth;
 import dev.halyx.sql.SqlConfig;
 import dev.halyx.sql.SqlEngine;
+import dev.halyx.sql.spi.CachingCredentialsSource;
 import dev.halyx.sql.spi.SqlCredentialsSource;
 import dev.halyx.sql.spi.SqlLogin;
 

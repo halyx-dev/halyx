@@ -48,6 +48,7 @@ import dev.halyx.spi.ProviderConnection;
 import dev.halyx.sql.Database;
 import dev.halyx.sql.SqlAuth;
 import dev.halyx.sql.SqlConfig;
+import dev.halyx.sql.SqlEndpoint;
 import dev.halyx.sql.SqlEngine;
 import dev.halyx.storage.spi.BlobStoreDriver;
 import dev.halyx.capability.Capabilities;
@@ -270,20 +271,33 @@ final class AwsConnection implements ProviderConnection {
         }
         return switch (sql.auth()) {
             case SqlAuth.Password ignored -> databases.createWithPassword(sql);
-            case SqlAuth.Iam iam -> {
-                if (sql.engine() == SqlEngine.SQLSERVER) {
-                    throw new UnsupportedFeatureException("RDS IAM authentication supports PostgreSQL and MySQL, "
-                            + "not SQL Server; use password auth", null, AwsProvider.ID, null);
-                }
-                String username = iam.username().orElseThrow(() -> new IllegalArgumentException(
-                        "RDS IAM authentication needs the database user: SqlAuth.iam(\"<user>\")"));
-                String host = sql.host().orElseThrow(() -> new IllegalArgumentException("RDS needs a host"));
-                String region = sql.property(AwsProperties.RDS_REGION).orElseGet(() -> region().id());
-                yield databases.create(sql, sql.jdbcUrl(),
-                        new RdsIamTokens(host, sql.port(), username, region, credentials()),
-                        JdbcDatabases.requireTls(sql.engine()));
-            }
+            case SqlAuth.Iam iam -> databases.create(sql, sql.jdbcUrl(), rdsIamTokens(sql, iam),
+                    JdbcDatabases.requireTls(sql.engine()));
         };
+    }
+
+    @Override
+    public SqlEndpoint sqlEndpoint(SqlConfig sql) {
+        String host = sql.host().orElseThrow(() -> new IllegalArgumentException("RDS needs a host"));
+        return switch (sql.auth()) {
+            case SqlAuth.Password password -> new SqlEndpoint(sql.engine(), host, sql.port(), sql.database(),
+                    JdbcDatabases.passwordSource(password), false);
+            case SqlAuth.Iam iam -> new SqlEndpoint(sql.engine(), host, sql.port(), sql.database(),
+                    rdsIamTokens(sql, iam), true);
+        };
+    }
+
+    /** RDS IAM tokens for the database user, signed for the instance's region. */
+    private RdsIamTokens rdsIamTokens(SqlConfig sql, SqlAuth.Iam iam) {
+        if (sql.engine() == SqlEngine.SQLSERVER) {
+            throw new UnsupportedFeatureException("RDS IAM authentication supports PostgreSQL and MySQL, "
+                    + "not SQL Server; use password auth", null, AwsProvider.ID, null);
+        }
+        String username = iam.username().orElseThrow(() -> new IllegalArgumentException(
+                "RDS IAM authentication needs the database user: SqlAuth.iam(\"<user>\")"));
+        String host = sql.host().orElseThrow(() -> new IllegalArgumentException("RDS needs a host"));
+        String region = sql.property(AwsProperties.RDS_REGION).orElseGet(() -> region().id());
+        return new RdsIamTokens(host, sql.port(), username, region, credentials());
     }
 
     private ClientOverrideConfiguration overrides() {

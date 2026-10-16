@@ -70,6 +70,7 @@ import dev.halyx.spi.ProviderConnection;
 import dev.halyx.sql.Database;
 import dev.halyx.sql.SqlAuth;
 import dev.halyx.sql.SqlConfig;
+import dev.halyx.sql.SqlEndpoint;
 import dev.halyx.sql.SqlEngine;
 import dev.halyx.sql.spi.SqlCredentialsSource;
 import dev.halyx.sql.spi.SqlLogin;
@@ -287,14 +288,7 @@ final class GcpConnection implements ProviderConnection {
         }
         Optional<String> instance = sql.property(GcpProperties.SQL_INSTANCE);
         boolean iam = sql.auth() instanceof SqlAuth.Iam;
-        if (iam && sql.engine() == SqlEngine.SQLSERVER) {
-            throw new UnsupportedFeatureException("Cloud SQL IAM authentication supports PostgreSQL and MySQL, "
-                    + "not SQL Server; use password auth", null, GcpProvider.ID, null);
-        }
-        if (iam && !(config.credentials() instanceof Credentials.DefaultChain)) {
-            throw new IllegalArgumentException("Cloud SQL IAM authentication uses Application Default Credentials; "
-                    + "configure the provider with Credentials.defaultChain()");
-        }
+        checkIam(sql);
         String url = instance.map(i -> CloudSqlConnector.jdbcUrl(sql.engine(), sql.database())).orElseGet(sql::jdbcUrl);
         SqlCredentialsSource credentials = switch (sql.auth()) {
             case SqlAuth.Password password -> JdbcDatabases.passwordSource(password);
@@ -310,6 +304,39 @@ final class GcpConnection implements ProviderConnection {
                 .map(i -> CloudSqlConnector.properties(sql.engine(), i, iam))
                 .orElseGet(() -> iam ? JdbcDatabases.requireTls(sql.engine()) : Map.of());
         return databases.create(sql, url, credentials, defaults);
+    }
+
+    @Override
+    public SqlEndpoint sqlEndpoint(SqlConfig sql) {
+        if (sql.property(GcpProperties.SQL_INSTANCE).isPresent()) {
+            throw new UnsupportedFeatureException("The Cloud SQL connector connects through its own socket factory, "
+                    + "so it has no endpoint to hand out; connect to the instance's IP address instead",
+                    null, GcpProvider.ID, null);
+        }
+        String host = sql.host().orElseThrow(() -> new IllegalArgumentException(
+                "Cloud SQL needs a host, or " + GcpProperties.SQL_INSTANCE + " for the Cloud SQL connector"));
+        checkIam(sql);
+        return switch (sql.auth()) {
+            case SqlAuth.Password password -> new SqlEndpoint(sql.engine(), host, sql.port(), sql.database(),
+                    JdbcDatabases.passwordSource(password), false);
+            case SqlAuth.Iam iam -> new SqlEndpoint(sql.engine(), host, sql.port(), sql.database(),
+                    CloudSqlIamTokens.applicationDefault(sql.engine(), iam.username()), true);
+        };
+    }
+
+    /** Cloud SQL IAM login needs PostgreSQL or MySQL, and Application Default Credentials. */
+    private void checkIam(SqlConfig sql) {
+        if (!(sql.auth() instanceof SqlAuth.Iam)) {
+            return;
+        }
+        if (sql.engine() == SqlEngine.SQLSERVER) {
+            throw new UnsupportedFeatureException("Cloud SQL IAM authentication supports PostgreSQL and MySQL, "
+                    + "not SQL Server; use password auth", null, GcpProvider.ID, null);
+        }
+        if (!(config.credentials() instanceof Credentials.DefaultChain)) {
+            throw new IllegalArgumentException("Cloud SQL IAM authentication uses Application Default Credentials; "
+                    + "configure the provider with Credentials.defaultChain()");
+        }
     }
 
     /** A Managed Service for Apache Kafka topic: Apache Kafka, so idempotent and transactional producers are available. */

@@ -65,6 +65,7 @@ import dev.halyx.spi.ProviderConnection;
 import dev.halyx.sql.Database;
 import dev.halyx.sql.SqlAuth;
 import dev.halyx.sql.SqlConfig;
+import dev.halyx.sql.SqlEndpoint;
 import dev.halyx.storage.spi.BlobStoreDriver;
 import dev.halyx.capability.Capabilities;
 import dev.halyx.stream.StreamCapability;
@@ -352,16 +353,29 @@ final class AzureConnection implements ProviderConnection {
         }
         return switch (sql.auth()) {
             case SqlAuth.Password ignored -> databases.createWithPassword(sql);
-            case SqlAuth.Iam iam -> {
-                if (config.credentials() instanceof Credentials.Static) {
-                    throw new IllegalArgumentException("Entra ID database login needs an identity "
-                            + "(Credentials.defaultChain()), not a storage shared key");
-                }
-                var tokens = new EntraIdSqlTokens(new DefaultAzureCredentialBuilder().build(), sql.engine(),
-                        iam.username().orElse(null));
-                yield databases.create(sql, sql.jdbcUrl(), tokens, JdbcDatabases.requireTls(sql.engine()));
-            }
+            case SqlAuth.Iam iam -> databases.create(sql, sql.jdbcUrl(), entraIdTokens(sql, iam),
+                    JdbcDatabases.requireTls(sql.engine()));
         };
+    }
+
+    @Override
+    public SqlEndpoint sqlEndpoint(SqlConfig sql) {
+        String host = sql.host().orElseThrow(() -> new IllegalArgumentException("Azure databases need a host"));
+        return switch (sql.auth()) {
+            case SqlAuth.Password password -> new SqlEndpoint(sql.engine(), host, sql.port(), sql.database(),
+                    JdbcDatabases.passwordSource(password), false);
+            case SqlAuth.Iam iam -> new SqlEndpoint(sql.engine(), host, sql.port(), sql.database(),
+                    entraIdTokens(sql, iam), true);
+        };
+    }
+
+    /** Entra ID tokens for the database, through the default credential chain. */
+    private EntraIdSqlTokens entraIdTokens(SqlConfig sql, SqlAuth.Iam iam) {
+        if (config.credentials() instanceof Credentials.Static) {
+            throw new IllegalArgumentException("Entra ID database login needs an identity "
+                    + "(Credentials.defaultChain()), not a storage shared key");
+        }
+        return new EntraIdSqlTokens(new DefaultAzureCredentialBuilder().build(), sql.engine(), iam.username().orElse(null));
     }
 
     @Override
