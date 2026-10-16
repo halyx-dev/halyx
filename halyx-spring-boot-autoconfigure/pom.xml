@@ -169,6 +169,17 @@
             <artifactId>halyx-aws</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- the real-cloud Spring stream test (RealSpringStreamIT) on Event Hubs and Managed Kafka -->
+        <dependency>
+            <groupId>dev.halyx</groupId>
+            <artifactId>halyx-azure</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>dev.halyx</groupId>
+            <artifactId>halyx-gcp</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>dev.halyx</groupId>
             <artifactId>halyx-vault</artifactId>

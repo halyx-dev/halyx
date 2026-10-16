@@ -16,7 +16,7 @@ the `halyx-test` service principal. Every run creates its own throwaway resource
 | [1](#tier-1-latest-result) | Blob Storage, Cosmos DB, Service Bus, Key Vault, App Configuration (Entra ID only) | **156/158** passed, 2 skipped (expected) |
 | [2](#tier-2-latest-result) | Azure Database for PostgreSQL and Azure SQL with Entra ID login | **11/11** |
 | [3](#tier-3-latest-result) | Azure Managed Redis with Entra ID (access keys off) | **52/52** |
-| [4](#tier-4-latest-result) | Event Hubs through its Kafka endpoint, with Entra ID (shared access keys off) | **24/25** passed, 1 skipped (expected) |
+| [4](#tier-4-latest-result) | Event Hubs through its Kafka endpoint, with Entra ID (shared access keys off), plus Spring Boot 3 and 4 | **24/25** passed, 1 skipped (expected); Spring **2/2** |
 
 <details open markdown="block">
   <summary>Contents</summary>
@@ -385,22 +385,37 @@ endpoints (port 9093), logging in with Entra ID tokens through SASL `OAUTHBEARER
 topics (event hubs) through Kafka's admin API, logged in the same way, and deletes older ones as it goes.
 Before each creation it logs how many topics the namespace lists.
 
+After the kit, `RealSpringStreamIT` runs on Spring Boot 3.5 and on Spring Boot 4, with the Spring for Apache
+Kafka and Kafka clients each manages, against the namespace the kit used least. In one Spring application it
+sends and receives records through the starter's `StreamProducer` bean and `@HalyxListener`, and through Spring
+for Apache Kafka's `KafkaTemplate` and `@KafkaListener`, which log in through `halyx.spring-kafka.cluster`. It
+creates its two topics with Kafka's admin client, logged in with `kafkaClientProperties`.
+
+`KAFKA_CLIENTS=4.2.1 TIER=4 scripts/azure-real-cloud.sh` runs the same tests on Kafka 4 clients.
+
 Three namespaces, because a Standard namespace refused new event hubs with `PolicyViolationException` after
 about twenty had been created in a run, even with only one or two alive (see the run history). The test
 moves to the next namespace before one has created twelve.
 
 | | |
 |---|---|
-| Date | 2026-10-12, from 08:09 UTC (a 90s wait for the role, then tests 3m 34s) |
-| Run id | `r2610121909d4c7` |
-| Result | **BUILD SUCCESS**: 24 passed, 0 failed, 1 skipped |
+| Date | 2026-10-16, 00:44–00:54 UTC (10 min: a 90s wait for the role, kit 3m 38s, Spring tests 33s) |
+| Run id | `r2610161144379f` |
+| Clients | Kafka 3.9.2 (kit and Boot 3, with Spring for Apache Kafka 3.3.16); Kafka 4.2.1 (Boot 4, with Spring for Apache Kafka 4.1.1) |
+| Result | **all passed**: kit 24 passed, 1 skipped; Spring 2 of 2 |
 | Teardown | resource group destroyed; check: **nothing left** |
 
 | Test | Result |
 |---|---|
-| Stream conformance kit, with Entra ID tokens over TLS | **24/25 passed**, 1 skipped (213.8s) |
+| Stream conformance kit, with Entra ID tokens over TLS | **24/25 passed**, 1 skipped (217.7s) |
 | `largeValuesTravelThroughAClaimCheck` | skipped: tier 4 creates no blob store |
-| `idempotentProducersNeedTheCapability`, `transactionalSendAllIsVisibleToReadCommittedConsumers` | passed: Halyx declares neither capability on Event Hubs, and refuses both with `UnsupportedFeatureException` |
+| `idempotentProducersNeedTheCapability` | passed: Event Hubs accepts idempotent producers, which Halyx now declares and leaves on by default |
+| `recordsWithTheSameKeyStayInOrder`, `handlerSeesEveryRecordOfItsPartitionInOrder` | passed with idempotent producers and Kafka's five requests in flight |
+| `transactionalSendAllIsVisibleToReadCommittedConsumers` | passed: Halyx doesn't declare transactions on Event Hubs Standard, and refuses them with `UnsupportedFeatureException` |
+| `RealSpringStreamIT` on Spring Boot 3.5: starter, `KafkaTemplate` and `@KafkaListener` | **passed** (15.5s) |
+| `RealSpringStreamIT` on Spring Boot 4 | **passed** (17.5s) |
+
+The same kit, with idempotence on, also passed 24/25 on Kafka 4.2.1 clients (`r2610161121e9c0`).
 
 Topics per namespace in the passing run: 11, 11 and 4, with one listed before each creation, so deletes do
 take effect.
@@ -419,7 +434,12 @@ take effect.
 | `r26101218310076` | tier 4 | 18 passed, 2 failed, 4 errors, 1 skipped | clean (the check printed `STILL PRESENT` for a stray newline; checked by hand, and the scripts now ignore whitespace) | Records with the same key arrived out of order: `[7, 10, …, 58, 1, 4]`. The last four topic creations failed with `PolicyViolationException`. `latestStartSkipsEarlierRecords` raced the consumer's first fetch. |
 | `r26101218441879` | tier 4 | 21 passed, 1 failed, 2 errors, 1 skipped | clean | Order fixed. A transactional producer failed in Event Hubs' `FindCoordinator` instead of with `UnsupportedFeatureException`. Topic creation still refused after about twenty, with two alive. |
 | `r26101219005a2c` | tier 4 | 22 passed, 2 errors, 1 skipped | clean | Three namespaces; nothing refused, and one topic listed before each creation. The test allowed only eight topics per namespace, two short of the kit's 26. |
-| `r2610121909d4c7` | tier 4 | **24/25, 1 skipped** | clean | Latest tier 4 result, above. |
+| `r2610121909d4c7` | tier 4 | **24/25, 1 skipped** | clean | Idempotence off on Event Hubs, as Halyx had it until then. |
+| `r2610161043df40` | tier 4, Kafka 3.9 clients, with an idempotence probe | 24/25, 1 skipped; probe passed | clean | The probe sent through Kafka's own producer with idempotence on: Event Hubs accepted it and stored the records in order. |
+| `r261016105299da` | tier 4, Kafka 4.2.1 clients | 24/25, 1 skipped; probe error | clean (checked by hand) | The kit passed on Kafka 4 clients. The probe's own settings were wrong: Kafka 4's `linger.ms` defaults to 5, so its `delivery.timeout.ms` of 60000 was below `linger.ms` + `request.timeout.ms`. The check printed `STILL PRESENT` for two namespaces Azure's resource index still listed after their group was gone; it now looks again for up to two minutes. |
+| `r2610161112d440` | tier 4 with idempotence on, plus Spring Boot 3 and 4 | kit 24/25, 1 skipped; Spring 0/2 | clean | Idempotence declared and on by default; the ordering tests pass with it. Both Spring tests created their topics through `kafkaClientProperties`, then failed on a SpEL expression in the test's `@KafkaListener`. |
+| `r2610161121e9c0` | tier 4, Kafka 4.2.1 clients, idempotence on | **24/25, 1 skipped** | clean | |
+| `r2610161144379f` | tier 4, plus Spring Boot 3 and 4 | **24/25, 1 skipped; Spring 2/2** | clean | Latest tier 4 result, above. |
 
 ## What real Azure found
 
@@ -437,9 +457,10 @@ Event Hubs' Kafka endpoint found these:
 
 | Finding | Fix |
 |---|---|
-| Records with the same key arrived out of order. Halyx turns idempotence off on Event Hubs, where it isn't confirmed, and Kafka's producer then allows five requests in flight per connection: a batch retried after an error lands behind later ones | Without idempotence, the Kafka driver keeps one request in flight per connection, unless the application sets `kafka.max.in.flight.requests.per.connection` itself |
+| Records with the same key arrived out of order. Halyx turned idempotence off on Event Hubs at the time, and Kafka's producer then allows five requests in flight per connection: a batch retried after an error lands behind later ones | Without idempotence, the Kafka driver keeps one request in flight per connection, unless the application sets `kafka.max.in.flight.requests.per.connection` itself |
 | A transactional producer on Event Hubs Standard failed in `FindCoordinator` (no transactions), before Halyx could refuse it: the driver started the transaction when the producer was created, ahead of the capability check | Transactional producers start on first use, so `StreamProducerConfig.transactional(true)` without `TRANSACTIONS` fails with `UnsupportedFeatureException` |
 | A Standard namespace refused new event hubs with `PolicyViolationException` after about twenty had been created, whether two or four were alive. Deleted event hubs no longer appear in the namespace's topic list. The limit isn't documented, so this is an observation from two runs | Test only: topics are spread over three namespaces. Applications don't create topics through Halyx |
+| Halyx turned idempotence off on Event Hubs, where it wasn't confirmed. A Standard namespace accepts Kafka's idempotent producer, and the kit's ordering tests pass with it, on Kafka 3.9 and 4.2 clients | Event Hubs declares `IDEMPOTENCE`, and producers are idempotent by default, as on MSK and Managed Kafka |
 | A consumer starting at the latest offset fixes its position on its first fetch, which on Event Hubs came after its partitions were assigned, so a record sent right after assignment could be skipped | Test only: the kit sends until a record arrives. This is how Kafka behaves everywhere, and the API guide says where a new group starts |
 
 ## IAM

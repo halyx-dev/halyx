@@ -16,6 +16,7 @@ the `halyx-test` service account, impersonated through Application Default Crede
 | [1](#tier-1-latest-result) | Cloud Storage, Firestore, Pub/Sub, Secret Manager, Parameter Manager | **176/179** passed, 3 skipped (expected) |
 | [2](#tier-2-latest-result) | Cloud SQL for PostgreSQL and MySQL with IAM auth, direct and through the Cloud SQL connector | **18/18** |
 | [3](#tier-3-latest-result) | Memorystore for Valkey with IAM auth and TLS (private CA) | **54/54** |
+| [4](#tier-4-latest-result) | Streams on Managed Service for Apache Kafka with Google IAM, from a runner inside the VPC, plus Spring Boot 3 and 4 | **25/25**; Spring **2/2** |
 
 <details open markdown="block">
   <summary>Contents</summary>
@@ -469,6 +470,89 @@ mix up. So there is no "denied user" test. The rejection tests cover a missing a
 
 </details>
 
+## Tier 4: latest result
+
+```bash
+TIER=4 GCP_PROJECT=<project> GCP_REGION=australia-southeast1 scripts/gcp-real-cloud.sh
+```
+
+Terraform (`infra/gcp/tier4`) creates the following, in a VPC and subnet of the run's own:
+- **Cluster:** a Managed Service for Apache Kafka cluster with the smallest capacity, 3 vCPUs and 3 GiB.
+  Its brokers get Private Service Connect addresses in the subnet, and the service adds their DNS names to
+  the VPC. There is no public endpoint.
+- **Runner:** an `e2-small` Ubuntu 24.04 VM that runs as the test service account. A firewall rule allows
+  SSH only from the test machine's `/32`, with a key generated for each run. Its startup script installs
+  Java 21.
+- **Claim checks:** a Cloud Storage bucket, so the claim-check test runs too.
+
+Kafka clients connect to the bootstrap address, then to each broker by the name the cluster advertises, so
+an SSH tunnel to one address, as in tier 3, can't work. The tests run on the runner instead. The script
+builds them on the test machine, copies them with their classpath (`scripts/in-vpc-runner.sh`, 172 jars,
+141 MB), and runs `RealGcpStreamIT` there with the JUnit console launcher. The reports come back into
+`halyx-gcp/target/failsafe-reports`. No credentials leave the test machine: the runner gets tokens from
+its metadata server, as an application on Compute Engine would.
+
+`RealGcpStreamIT` logs in with Google IAM through SASL `OAUTHBEARER`, the token wrapping the service
+account's access token. It creates each test's topics through Kafka's admin API, logged in the same way, and
+deletes older ones as it goes. Then `RealSpringStreamIT` runs on the runner on Spring Boot 3.5 and on Spring
+Boot 4: in one Spring application, the starter's `StreamProducer` bean and `@HalyxListener`, and Spring for
+Apache Kafka's `KafkaTemplate` and `@KafkaListener` logging in through `halyx.spring-kafka.cluster`. The
+script stages the three test modules' jars into one directory on the runner and sends each jar once (313 MB
+in all).
+
+| | |
+|---|---|
+| Date | 2026-10-16, 00:30–01:04 UTC (34 min: cluster created in 12m 9s, tests 2m 25s, the rest staging, copying and teardown) |
+| Run id | `r2610161130d877` |
+| Runner | `e2-small`, OpenJDK 21.0.12.1; Kafka clients 3.9.2 (kit and Boot 3, with Spring for Apache Kafka 3.3.16) and 4.2.1 (Boot 4, with Spring for Apache Kafka 4.1.1) |
+| Result | **all passed**: kit 25 of 25; Spring 2 of 2 |
+| Teardown | cluster, runner, firewall rule, subnet, VPC and bucket destroyed; run key deleted; check: **nothing left** |
+
+| Test | Result |
+|---|---|
+| Stream conformance kit, with Google IAM tokens over TLS | **25/25 passed** (123.2s) |
+| `RealSpringStreamIT` on Spring Boot 3.5: starter, `KafkaTemplate` and `@KafkaListener` | **passed** (11.0s) |
+| `RealSpringStreamIT` on Spring Boot 4 | **passed** (10.9s) |
+| `largeValuesTravelThroughAClaimCheck` | passed: a 2 MiB value through the bucket |
+| `idempotentProducersNeedTheCapability`, `transactionalSendAllIsVisibleToReadCommittedConsumers` | passed: Managed Kafka is Apache Kafka, so Halyx declares both capabilities, and both work |
+
+The first tier 4 run (`r261016095774dd`) was the first time Managed Kafka's IAM login had been checked end to
+end: until then its tokens had only been unit-tested (`ManagedKafkaTokensTest`). It passed first time and found
+nothing to fix.
+
+<details>
+<summary>Stream conformance kit: 25/25 passed in the first run, 125.1s</summary>
+
+| Test | Result | Time (s) |
+|---|---|---|
+| `aFailingPartitionDoesNotHoldBackTheOthers` | passed | 4.33 |
+| `binaryValuesArriveUnchanged` | passed | 4.24 |
+| `closingTheListenerLetsTheRunningHandlerFinish` | passed | 7.28 |
+| `committedPositionIsWhereTheGroupResumes` | passed | 9.10 |
+| `everyGroupReadsEveryRecord` | passed | 7.56 |
+| `exhaustedRecordGoesToTheDeadLetterTopic` | passed | 7.95 |
+| `failedRecordIsRetriedBeforeTheRestOfItsPartition` | passed | 4.25 |
+| `handledRecordsAreCommittedWhenTheListenerStops` | passed | 9.17 |
+| `handlerSeesEveryRecordOfItsPartitionInOrder` | passed | 4.26 |
+| `idempotentProducersNeedTheCapability` | passed | 4.28 |
+| `largeValuesTravelThroughAClaimCheck` | passed | 5.43 |
+| `latestStartSkipsEarlierRecords` | passed | 5.28 |
+| `listenerHandlesEveryRecord` | passed | 4.81 |
+| `membersOfAGroupShareThePartitions` | passed | 7.73 |
+| `oversizedRecordWithoutClaimCheckIsRejected` | passed | 0.59 |
+| `partitionCountMatchesTheTopic` | passed | 0.59 |
+| `pollAndListenCannotBeMixed` | passed | 3.76 |
+| `recordsWithTheSameKeyStayInOrder` | passed | 4.48 |
+| `recordsWithoutKeyArrive` | passed | 4.56 |
+| `reservedHeadersAreRejected` | passed | 0.57 |
+| `sameKeyGoesToOnePartitionWithIncreasingOffsets` | passed | 0.80 |
+| `sendAllReturnsResultsInOrder` | passed | 4.93 |
+| `sentRecordArrivesWithKeyValueAndHeaders` | passed | 4.29 |
+| `transactionalSendAllIsVisibleToReadCommittedConsumers` | passed | 5.40 |
+| `uncommittedRecordsAreReadAgain` | passed | 7.87 |
+
+</details>
+
 ## Run history
 
 | Run id | Scope | Result | Teardown | Notes |
@@ -478,6 +562,8 @@ mix up. So there is no "denied user" test. The rejection tests cover a missing a
 | `r26101118357636` | tier 2 | 13/18 | clean | PostgreSQL 9/9. MySQL's five IAM tests logged in, then were refused the `app` database: IAM users have no privileges until granted. |
 | `r2610111859cad1` | tier 2 | **18/18** | clean | Latest tier 2 result, above. The test now grants the MySQL IAM user `SELECT` on `app`. |
 | `r261011193814e3` | tier 3 | **54/54** | clean | Latest tier 3 result, above, on the first run. Teardown took about 20 min: the VPC can only go once Memorystore's delete has finished. |
+| `r261016095774dd` | tier 4 | **25/25** | clean | The first run. Cluster created in 24m 7s. |
+| `r2610161130d877` | tier 4, plus Spring Boot 3 and 4 | **25/25; Spring 2/2** | clean | Latest tier 4 result, above. |
 
 ## What real GCP found
 
@@ -506,10 +592,14 @@ The emulators (Floci-gcp, and Google's Pub/Sub and Firestore emulators) missed a
 | | `roles/memorystore.admin` (tier 3) | create and delete the instance; read its CA |
 | | `roles/memorystore.dbConnectionUser` (tier 3) | IAM login to the instance (`memorystore.instances.connect`), the role an application gets |
 | | `roles/networkconnectivity.consumerNetworkAdmin` (tier 3) | the service-connection policy for Memorystore's private endpoint |
+| | `roles/managedkafka.admin` (tier 4) | create and delete the cluster |
+| | `roles/managedkafka.client` (tier 4) | IAM login to the cluster (`managedkafka.clusters.connect`), the role an application gets |
+| | `roles/iam.serviceAccountUser` on itself (tier 4) | run the runner VM as the test service account |
 | | `roles/cloudsql.admin` (tier 2) | create instances and database users. It also includes what an application needs: `cloudsql.instances.login` for IAM database login (`roles/cloudsql.instanceUser`) and `cloudsql.instances.connect` for the connector (`roles/cloudsql.client`) |
 | the person running the tests | `roles/iam.serviceAccountTokenCreator` on `halyx-test` | impersonate it. Project Owner doesn't include this |
 
 The project also needs these APIs enabled: the IAM Service Account Credentials API
 (`iamcredentials.googleapis.com`) for impersonation, and the Cloud SQL Admin API
 (`sqladmin.googleapis.com`) for tier 2, and Compute Engine, Memorystore, Network Connectivity and Service
-Consumer Management (`compute`, `memorystore`, `networkconnectivity`, `serviceconsumermanagement`) for tier 3.
+Consumer Management (`compute`, `memorystore`, `networkconnectivity`, `serviceconsumermanagement`) for tier 3,
+and Managed Service for Apache Kafka (`managedkafka`) for tier 4.

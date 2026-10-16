@@ -54,11 +54,17 @@ SQL databases do. See [Streams](api/streams.md).
 - [x] idempotent and transactional producers as capabilities, claim checks, and Kafka's clients through `unwrap`
 - [x] Spring Boot: properties, beans, `@HalyxListener`, health, metrics and tracing
 - [x] conformance kit, on the in-memory provider and on Apache Kafka through every provider
+- [x] the Kafka driver's broker tests on Kafka 4 brokers (4.2.1) as well as 3.9, on every build
 - [x] real-cloud run on Event Hubs with Entra ID: [24/25, 1 skipped](cloud-testing/azure.md#tier-4-latest-result)
-- [ ] real-cloud runs on MSK and Managed Kafka with IAM, from a test runner inside each cloud's VPC (both are
-  private only), including MSK Serverless transactions
-- [ ] Event Hubs: whether it supports idempotent producers, and Kafka 4 clients
-- [ ] Spring for Apache Kafka (`KafkaTemplate`, `@KafkaListener`) with Halyx' cloud login, if there's demand
+- [x] real-cloud run on Managed Service for Apache Kafka with Google IAM, from a runner inside the VPC:
+  [25/25](cloud-testing/gcp.md#tier-4-latest-result)
+- [ ] real-cloud run on MSK Serverless with IAM, including transactions: the script, Terraform and runner are
+  ready, but the test account's AWS Free plan doesn't allow MSK ([AWS tier 4](cloud-testing/aws.md#tier-4-not-run))
+- [x] Event Hubs: idempotent producers confirmed on a Standard namespace, now declared and on by default; Kafka 4
+  clients pass the kit there
+- [x] Spring for Apache Kafka (`KafkaTemplate`, `@KafkaListener`) with Halyx' cloud login
+  (`halyx.spring-kafka.cluster`), on Boot 3 and 4, tested on Event Hubs and Managed Kafka
+- [x] `kafkaClientProperties`: Halyx' connection and login for Kafka's own clients
 
 ### Event services
 

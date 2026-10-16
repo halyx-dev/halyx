@@ -22,6 +22,7 @@
 #   IT_TEST='RealGcpIT$Firestore' scripts/gcp-real-cloud.sh     # one suite only
 #   TIER=2 scripts/gcp-real-cloud.sh                            # Cloud SQL PostgreSQL and MySQL with IAM auth
 #   TIER=3 scripts/gcp-real-cloud.sh                            # Memorystore for Valkey with IAM auth
+#   TIER=4 scripts/gcp-real-cloud.sh                            # streams on Managed Kafka with IAM, plus Spring Boot
 #
 # The tests and Terraform act as the test service account (GCP_IMPERSONATE, default halyx-test@<project>),
 # through Application Default Credentials that impersonate it:
@@ -44,6 +45,13 @@
 # with a key generated for the run. The script fetches the instance's CA, forwards a local port through the
 # bastion, and RealGcpCacheIT checks the certificate chain against that CA (the certificate can't name the
 # tunnel's 127.0.0.1).
+#
+# Tier 4: Terraform creates a VPC of the run's own with a Managed Service for Apache Kafka cluster (3 vCPUs,
+# Google IAM login), a bucket for claim checks and an e2-small runner VM that runs as the test service account
+# and accepts SSH only from this machine. The cluster has no public endpoint and Kafka clients connect to each
+# broker by name, so the tests run on the runner: the script builds them here, copies them with their
+# classpath, and runs RealGcpStreamIT there, then RealSpringStreamIT on Spring Boot 3 and 4 (the starter, and
+# Spring for Apache Kafka through halyx.spring-kafka). Creating and deleting the cluster takes 20-30 minutes each way.
 set -uo pipefail
 
 PROJECT="${GCP_PROJECT:-$(gcloud config get-value project 2>/dev/null)}"
@@ -61,18 +69,21 @@ RUN="r$(date +%y%m%d%H%M)$(openssl rand -hex 2)"
 START="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 TF_VARS=(-var "project=$PROJECT" -var "region=$REGION" -var "run_id=$RUN")
 GCLOUD=(gcloud --project "$PROJECT" --quiet)
-if [[ "$TIER" == 2 || "$TIER" == 3 ]]; then
+if [[ "$TIER" == 2 || "$TIER" == 3 || "$TIER" == 4 ]]; then
   CLIENT_IP=$(dig -4 +short myip.opendns.com A @208.67.222.222 | tail -1)
   [[ "$CLIENT_IP" =~ ^[0-9.]+$ ]] || { echo "Could not find this machine's public IPv4 address"; exit 1; }
   TF_VARS+=(-var "client_cidr=$CLIENT_IP/32")
 fi
-if [[ "$TIER" == 3 ]]; then
-  WORK="$(mktemp -d -t "halyx-$RUN")"   # run key, known_hosts, SSH control socket, the instance's CA
+if [[ "$TIER" == 3 || "$TIER" == 4 ]]; then
+  WORK="$(mktemp -d -t "halyx-$RUN")"   # run key, known_hosts, SSH control socket, the instance's CA, staged tests
   ssh-keygen -q -t ed25519 -N "" -C "halyx-$RUN" -f "$WORK/key"
   TF_VARS+=(-var "ssh_public_key=$(cat "$WORK/key.pub")")
   LOCAL_PORT=16380
   SSH_OPTS=(-i "$WORK/key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new
             -o UserKnownHostsFile="$WORK/known_hosts" -o ConnectTimeout=10 -o BatchMode=yes)
+fi
+if [[ "$TIER" == 4 ]]; then
+  TF_VARS+=(-var "service_account=$IMPERSONATE")
 fi
 if [[ "$TIER" == 2 ]]; then
   TF_VARS+=(-var "iam_service_account=$IMPERSONATE")
@@ -82,6 +93,8 @@ if [[ "$TIER" == 2 ]]; then
 fi
 
 log() { printf '\n== %s\n' "$*"; }
+# shellcheck source=in-vpc-runner.sh
+source "$ROOT/scripts/in-vpc-runner.sh"
 
 # Parameter Manager serves regional locations from regional endpoints; gcloud sends them to the global one
 # (and gets a misleading PERMISSION_DENIED) unless told otherwise.
@@ -142,7 +155,7 @@ teardown() {
   if (cd "$TF_DIR" && terraform destroy -auto-approve -input=false "${TF_VARS[@]}" >/dev/null); then
     echo "  destroyed"
     rm -f "$TF_DIR"/terraform.tfstate "$TF_DIR"/terraform.tfstate.backup # tier 2 state held the run's passwords
-    [[ -n "${WORK:-}" ]] && rm -rf "$WORK"                                  # tier 3's SSH key and CA
+    [[ -n "${WORK:-}" ]] && rm -rf "$WORK"                                  # the SSH key, CA and staged tests
   else
     echo "  TERRAFORM DESTROY FAILED: run it again in $TF_DIR"
   fi
@@ -161,6 +174,15 @@ teardown() {
     left+=$(check firewalls "${GCLOUD[@]}" compute firewall-rules list --filter="name~^halyx-$RUN-" --format='value(name)')
     left+=$(check "connection policies" "${GCLOUD[@]}" network-connectivity service-connection-policies list \
         --region="$REGION" --filter="name~/halyx-$RUN\$" --format='value(name)')
+    left+=$(check subnets "${GCLOUD[@]}" compute networks subnets list --filter="name=halyx-$RUN" --format='value(name)')
+    left+=$(check networks "${GCLOUD[@]}" compute networks list --filter="name=halyx-$RUN" --format='value(name)')
+  fi
+  if [[ "$TIER" == 4 ]]; then
+    left+=$(check "Managed Kafka" "${GCLOUD[@]}" managed-kafka clusters list --location="$REGION" \
+        --filter="name~/halyx-$RUN\$" --format='value(name)')
+    left+=$(check buckets "${GCLOUD[@]}" storage buckets list --filter="name=halyx-$RUN-claims" --format='value(name)')
+    left+=$(check "VM instances" "${GCLOUD[@]}" compute instances list --filter="name~^halyx-$RUN-" --format='value(name)')
+    left+=$(check firewalls "${GCLOUD[@]}" compute firewall-rules list --filter="name~^halyx-$RUN-" --format='value(name)')
     left+=$(check subnets "${GCLOUD[@]}" compute networks subnets list --filter="name=halyx-$RUN" --format='value(name)')
     left+=$(check networks "${GCLOUD[@]}" compute networks list --filter="name=halyx-$RUN" --format='value(name)')
   fi
@@ -185,6 +207,34 @@ terraform -chdir="$TF_DIR" init -input=false >/dev/null || exit 1
 terraform -chdir="$TF_DIR" apply -auto-approve -input=false "${TF_VARS[@]}" || exit 1
 
 cd "$ROOT"
+if [[ "$TIER" == 4 ]]; then
+  RUNNER="halyx@$(terraform -chdir="$TF_DIR" output -raw runner_ip)"
+  SPRING_MODULES=(halyx-spring-boot-autoconfigure halyx-spring-boot4-tests)
+  [[ -n "${IT_TEST:-}" ]] && SPRING_MODULES=()
+  for module in halyx-gcp "${SPRING_MODULES[@]}"; do stage_tests "$module" || exit 1; done
+  log "Waiting for the runner"
+  wait_for_ssh "$RUNNER" || exit 1
+  for _ in $(seq 1 60); do   # the startup script installs Java
+    ssh "${SSH_OPTS[@]}" "$RUNNER" test -f /var/tmp/halyx-ready && break
+    sleep 5
+  done
+  ssh "${SSH_OPTS[@]}" "$RUNNER" java -version 2>&1 | head -1 | sed 's/^/  /'
+  # No credentials leave this machine: the runner gets them from its metadata server, as the test service account.
+  BOOTSTRAP="$(terraform -chdir="$TF_DIR" output -raw bootstrap)"
+  run_remote_tests "$RUNNER" halyx-gcp "dev.halyx.gcp.${IT_TEST:-RealGcpStreamIT}" "GOOGLE_CLOUD_PROJECT=$PROJECT" -- \
+      -Dhalyx.real.gcp.streams=true -Dhalyx.real.gcp.run="$RUN" -Dhalyx.real.gcp.project="$PROJECT" \
+      -Dhalyx.real.gcp.streams.bootstrap="$BOOTSTRAP" \
+      -Dhalyx.real.gcp.streams.claims-bucket="$(terraform -chdir="$TF_DIR" output -raw claims_bucket)"
+  status=$?
+  # Spring Boot 3 and 4, with the Kafka clients each manages.
+  for module in "${SPRING_MODULES[@]}"; do
+    run_remote_tests "$RUNNER" "$module" dev.halyx.spring.stream.RealSpringStreamIT "GOOGLE_CLOUD_PROJECT=$PROJECT" -- \
+        -Dhalyx.real.spring.streams=true -Dhalyx.real.spring.provider=gcp \
+        -Dhalyx.real.spring.provider-properties="gcp.project-id=$PROJECT" \
+        -Dhalyx.real.spring.bootstrap="$BOOTSTRAP" || status=1
+  done
+  exit $status
+fi
 if [[ "$TIER" == 3 ]]; then
   BASTION=$(terraform -chdir="$TF_DIR" output -raw bastion_ip)
   CACHE_IP=$(terraform -chdir="$TF_DIR" output -raw cache_ip)

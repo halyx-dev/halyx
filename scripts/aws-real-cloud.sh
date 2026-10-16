@@ -21,6 +21,7 @@
 #   IT_TEST='RealAwsIT$SecretsManager' scripts/aws-real-cloud.sh     # one suite only
 #   TIER=2 scripts/aws-real-cloud.sh                                  # RDS PostgreSQL and MySQL with IAM auth
 #   TIER=3 scripts/aws-real-cloud.sh                                  # ElastiCache for Valkey with IAM auth
+#   TIER=4 scripts/aws-real-cloud.sh                                  # streams on MSK Serverless with IAM
 #
 # Tier 1 (the default):
 # 1. Terraform creates an S3 bucket and two DynamoDB tables named after a fresh run id (tagged halyx-test=<id>).
@@ -38,6 +39,12 @@
 # that accepts SSH only from this machine, with a key pair generated for the run. ElastiCache has no public
 # endpoint, so the script forwards a local port through the bastion and gives the test JVM a hosts file that
 # points the cache's real hostname at 127.0.0.1: the client verifies the real certificate and hostname.
+#
+# Tier 4: Terraform creates an MSK Serverless cluster (IAM access control), a bucket for claim checks and a
+# t4g.small runner VM in the same VPC that accepts SSH only from this machine. MSK Serverless has no public
+# endpoint and Kafka clients connect to each broker by name, so the tests run on the runner: the script builds
+# them here, copies them with their classpath, and runs RealAwsStreamIT there with temporary credentials of the
+# test identity (sts get-session-token, passed over SSH and never written to the runner's disk).
 set -uo pipefail
 
 export AWS_PROFILE="${AWS_PROFILE:-default}"
@@ -49,7 +56,7 @@ TF_DIR="$ROOT/infra/aws/tier$TIER"
 RUN="r$(date +%y%m%d%H%M)$(openssl rand -hex 2)"
 START="$(date -u +%Y-%m-%dT%H:%M:%S)"
 TF_VARS=(-var "region=$AWS_REGION" -var "run_id=$RUN")
-if [[ "$TIER" == 2 || "$TIER" == 3 ]]; then
+if [[ "$TIER" == 2 || "$TIER" == 3 || "$TIER" == 4 ]]; then
   CLIENT_IP=$(dig -4 +short myip.opendns.com A @208.67.222.222 | tail -1)
   [[ "$CLIENT_IP" =~ ^[0-9.]+$ ]] || { echo "Could not find this machine's public IPv4 address"; exit 1; }
   TF_VARS+=(-var "client_cidr=$CLIENT_IP/32")
@@ -59,17 +66,21 @@ if [[ "$TIER" == 2 ]]; then
   export TF_VAR_master_password="$(openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | head -c 32)"
   export HALYX_RDS_MASTER_PASSWORD="$TF_VAR_master_password"
 fi
-if [[ "$TIER" == 3 ]]; then
-  WORK="$(mktemp -d -t "halyx-$RUN")"   # run key, known_hosts, SSH control socket, JVM hosts file
+if [[ "$TIER" == 3 || "$TIER" == 4 ]]; then
+  WORK="$(mktemp -d -t "halyx-$RUN")"   # run key, known_hosts, SSH control socket, JVM hosts file, staged tests
   ssh-keygen -q -t ed25519 -N "" -C "halyx-$RUN" -f "$WORK/key"
-  export TF_VAR_default_user_password="$(openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | head -c 32)"
   TF_VARS+=(-var "ssh_public_key=$(cat "$WORK/key.pub")")
-  LOCAL_PORT=16379
   SSH_OPTS=(-i "$WORK/key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new
             -o UserKnownHostsFile="$WORK/known_hosts" -o ConnectTimeout=10 -o BatchMode=yes)
 fi
+if [[ "$TIER" == 3 ]]; then
+  export TF_VAR_default_user_password="$(openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | head -c 32)"
+  LOCAL_PORT=16379
+fi
 
 log() { printf '\n== %s\n' "$*"; }
+# shellcheck source=in-vpc-runner.sh
+source "$ROOT/scripts/in-vpc-runner.sh"
 
 sweep() {
   log "Sweeping resources of run $RUN created by the tests"
@@ -101,7 +112,7 @@ teardown() {
   if (cd "$TF_DIR" && terraform destroy -auto-approve -input=false "${TF_VARS[@]}" >/dev/null); then
     echo "  destroyed"
     rm -f "$TF_DIR"/terraform.tfstate "$TF_DIR"/terraform.tfstate.backup # held the run's generated passwords
-    [[ -n "${WORK:-}" ]] && rm -rf "$WORK"                                    # the run's SSH key
+    [[ -n "${WORK:-}" ]] && rm -rf "$WORK"                                    # the run's SSH key and staged tests
   else
     echo "  TERRAFORM DESTROY FAILED: run it again in $TF_DIR"
   fi
@@ -139,6 +150,18 @@ teardown() {
     left+=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=halyx-$RUN-bastion,halyx-$RUN-cache" \
         --query 'SecurityGroups[].GroupId' --output text)
   fi
+  if [[ "$TIER" == 4 ]]; then
+    left+=$(aws kafka list-clusters-v2 --cluster-name-filter "halyx-$RUN" \
+        --query 'ClusterInfoList[].[ClusterName,State]' --output text | sed 's/^/ MSK cluster /')
+    left+=$(aws ec2 describe-instances --filters "Name=tag:halyx-test,Values=$RUN" \
+        "Name=instance-state-name,Values=pending,running,stopping,stopped,shutting-down" \
+        --query 'Reservations[].Instances[].InstanceId' --output text)
+    left+=$(aws ec2 describe-volumes --filters "Name=tag:halyx-test,Values=$RUN" --query 'Volumes[].VolumeId' --output text)
+    left+=$(aws ec2 describe-key-pairs --filters "Name=key-name,Values=halyx-$RUN" --query 'KeyPairs[].KeyName' --output text)
+    left+=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=halyx-$RUN-runner,halyx-$RUN-msk" \
+        --query 'SecurityGroups[].GroupId' --output text)
+    left+=$(aws s3api head-bucket --bucket "halyx-$RUN-claims" 2>/dev/null && echo " bucket halyx-$RUN-claims")
+  fi
   left+=$(aws s3api head-bucket --bucket "halyx-$RUN-blobs" 2>/dev/null && echo " bucket halyx-$RUN-blobs")
   for table in items items-sorted; do
     left+=$(aws dynamodb describe-table --table-name "halyx-$RUN-$table" --query 'Table.TableStatus' --output text 2>/dev/null \
@@ -168,6 +191,36 @@ if [[ "$TIER" == 2 ]]; then
       -Dhalyx.real.aws.sql.mysql-host="$(terraform -chdir="$TF_DIR" output -raw mysql_host)" \
       -Dhalyx.real.aws.sql.master-user="$(terraform -chdir="$TF_DIR" output -raw master_user)"
   exit $?
+fi
+if [[ "$TIER" == 4 ]]; then
+  RUNNER="ec2-user@$(terraform -chdir="$TF_DIR" output -raw runner_ip)"
+  SPRING_MODULES=(halyx-spring-boot-autoconfigure halyx-spring-boot4-tests)
+  [[ -n "${IT_TEST:-}" ]] && SPRING_MODULES=()
+  for module in halyx-aws "${SPRING_MODULES[@]}"; do stage_tests "$module" || exit 1; done
+  log "Waiting for the runner"
+  wait_for_ssh "$RUNNER" || exit 1
+  for _ in $(seq 1 60); do   # cloud-init installs Java
+    ssh "${SSH_OPTS[@]}" "$RUNNER" test -f /var/tmp/halyx-ready && break
+    sleep 5
+  done
+  ssh "${SSH_OPTS[@]}" "$RUNNER" java -version 2>&1 | head -1 | sed 's/^/  /'
+  # Temporary credentials of the test identity for the runner, valid for the run only.
+  read -r KEY SECRET SESSION < <(aws sts get-session-token --duration-seconds 7200 \
+      --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' --output text) \
+    || { echo "  could not get a session token"; exit 1; }
+  CREDS=("AWS_ACCESS_KEY_ID=$KEY" "AWS_SECRET_ACCESS_KEY=$SECRET" "AWS_SESSION_TOKEN=$SESSION" "AWS_REGION=$AWS_REGION")
+  BOOTSTRAP="$(terraform -chdir="$TF_DIR" output -raw bootstrap)"
+  run_remote_tests "$RUNNER" halyx-aws "dev.halyx.aws.${IT_TEST:-RealAwsStreamIT}" "${CREDS[@]}" -- \
+      -Dhalyx.real.aws.streams=true -Dhalyx.real.aws.run="$RUN" -Dhalyx.real.aws.streams.bootstrap="$BOOTSTRAP" \
+      -Dhalyx.real.aws.streams.claims-bucket="$(terraform -chdir="$TF_DIR" output -raw claims_bucket)"
+  status=$?
+  # Spring Boot 3 and 4, with the Kafka clients each manages.
+  for module in "${SPRING_MODULES[@]}"; do
+    run_remote_tests "$RUNNER" "$module" dev.halyx.spring.stream.RealSpringStreamIT "${CREDS[@]}" -- \
+        -Dhalyx.real.spring.streams=true -Dhalyx.real.spring.provider=aws \
+        -Dhalyx.real.spring.bootstrap="$BOOTSTRAP" || status=1
+  done
+  exit $status
 fi
 if [[ "$TIER" == 3 ]]; then
   BASTION=$(terraform -chdir="$TF_DIR" output -raw bastion_ip)

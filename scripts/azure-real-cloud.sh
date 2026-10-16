@@ -21,7 +21,7 @@
 #   AZURE_LOCATION=australiaeast IT_TEST='RealAzureIT$Cosmos' scripts/azure-real-cloud.sh   # one suite only
 #   TIER=2 scripts/azure-real-cloud.sh     # Azure Database for PostgreSQL and Azure SQL with Entra ID login
 #   TIER=3 scripts/azure-real-cloud.sh     # Azure Managed Redis with Entra ID
-#   TIER=4 scripts/azure-real-cloud.sh     # Event Hubs (Kafka endpoint) with Entra ID
+#   TIER=4 scripts/azure-real-cloud.sh     # Event Hubs (Kafka endpoint) with Entra ID, plus Spring Boot 3 and 4
 #
 # Terraform and the tests act as the test service principal, whose credentials are read from
 # AZURE_CREDENTIALS_FILE (default ~/.azure/halyx-test.env, outside the repository):
@@ -181,12 +181,22 @@ if [[ "$TIER" == 4 ]]; then
   log "Waiting for the Data Owner role to take effect"
   sleep 90
   log "Running the stream kit against real Event Hubs"
+  NAMESPACES="$(terraform -chdir="$TF_DIR" output -raw eventhubs_namespaces)"
   # KAFKA_CLIENTS=4.2.1 runs the same tests on another version of Kafka's clients.
   mvn -o verify -pl halyx-azure -Dit.test="${IT_TEST:-RealAzureStreamIT}" -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
       ${KAFKA_CLIENTS:+-Dkafka.version="$KAFKA_CLIENTS"} \
-      -Dhalyx.real.azure.streams=true -Dhalyx.real.azure.run="$RUN" \
-      -Dhalyx.real.azure.streams.namespaces="$(terraform -chdir="$TF_DIR" output -raw eventhubs_namespaces)"
-  exit $?
+      -Dhalyx.real.azure.streams=true -Dhalyx.real.azure.run="$RUN" -Dhalyx.real.azure.streams.namespaces="$NAMESPACES"
+  status=$?
+  [[ -n "${IT_TEST:-}" ]] && exit $status
+  # Spring Boot 3 and 4, with the Kafka clients each manages, on the namespace the kit used least.
+  mvn -o -q install -DskipTests -pl halyx-spring-boot-autoconfigure -am || exit 1
+  for module in halyx-spring-boot-autoconfigure halyx-spring-boot4-tests; do
+    log "Running the Spring Boot stream test ($module) against real Event Hubs"
+    mvn -o verify -pl "$module" -Dit.test=RealSpringStreamIT -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+        -Dhalyx.real.spring.streams=true -Dhalyx.real.spring.provider=azure \
+        -Dhalyx.real.spring.bootstrap="${NAMESPACES##*,}:9093" || status=1
+  done
+  exit $status
 fi
 
 STORAGE=$(terraform -chdir="$TF_DIR" output -raw storage_account)

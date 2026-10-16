@@ -150,6 +150,16 @@
                 <version>${project.version}</version>
             </dependency>
             <dependency>
+                <groupId>dev.halyx</groupId>
+                <artifactId>halyx-azure</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>dev.halyx</groupId>
+                <artifactId>halyx-gcp</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
                 <groupId>com.google.cloud</groupId>
                 <artifactId>google-cloud-parametermanager</artifactId>
                 <version>${gcp-parametermanager.version}</version>

@@ -16,6 +16,7 @@ the `halyx_test` IAM user. Every run creates its own throwaway resources and del
 | [1](#tier-1-latest-result) | S3, DynamoDB, SSM Parameter Store, Secrets Manager, SNS, SQS | **170/172** passed, 2 skipped (expected) |
 | [2](#tier-2-latest-result) | RDS for PostgreSQL and MySQL with IAM auth | **12/12** |
 | [3](#tier-3-latest-result) | ElastiCache for Valkey with IAM auth | 52/53: the IAM policy still needs checking |
+| [4](#tier-4-not-run) | Streams on MSK Serverless with IAM | not run: the test account's Free plan doesn't allow MSK |
 
 <details open markdown="block">
   <summary>Contents</summary>
@@ -467,6 +468,27 @@ catch.
 
 </details>
 
+## Tier 4: not run
+
+```bash
+TIER=4 scripts/aws-real-cloud.sh
+```
+
+Tier 4 is ready but hasn't run. The test account is on the AWS Free plan, and the plan's service control
+policy denies every `kafka:*` action (`explicit deny in a service control policy`). Only moving the account
+to the paid plan lifts it; an IAM policy on the test user can't.
+
+What a run does: Terraform (`infra/aws/tier4`) creates an **MSK Serverless** cluster with IAM access control,
+a bucket for claim checks, and a `t4g.small` runner VM in the same VPC that accepts SSH only from the test
+machine, with a key pair generated for the run. MSK Serverless has no public endpoint, and Kafka clients
+connect to each broker by the name the cluster advertises, so the SSH tunnel used for ElastiCache can't
+work. Instead the script builds the tests on the test machine, copies them to the runner with their
+classpath (`scripts/in-vpc-runner.sh`), and runs `RealAwsStreamIT` there with the JUnit console launcher.
+The runner has no instance profile: it gets two-hour session credentials of the test user
+(`sts get-session-token`), sent over SSH and never written to its disk. Then `RealSpringStreamIT` runs there
+on Spring Boot 3 and 4, as on [Azure](azure.md#tier-4-latest-result) and [Google Cloud](gcp.md#tier-4-latest-result).
+The reports come back into each module's `target/failsafe-reports`.
+
 ## Run history
 
 | Run id | Scope | Result | Teardown | Notes |
@@ -487,6 +509,7 @@ catch.
 | `r2610111548cee8` | tier 3 | not run | clean | Stopped at `terraform apply`. The account is on the Free Tier plan, which can't launch `t4g.nano` (bastion moved to `t4g.micro`), and Valkey refuses password-free users (the `default` user now gets a random password). |
 | `r26101115542175` | tier 3 | 5/53 | clean | Every connection failed: Lettuce resolved the cache's name with Netty's DNS client, which ignores the JVM hosts file, so nothing went through the tunnel. Led to `redis.dns-resolver=jdk`. The bastion showed in the tagging index after termination, so the check now looks at instances and volumes directly. |
 | `r2610111628619f` | tier 3 | **52/53** | clean | Latest tier 3 result, above. The IAM user without `Connect` permission was let in. |
+| — | tier 4 | not run | nothing created | Checked before a run: with the tier 4 policy attached, `kafka:ListClustersV2` is still denied by the Free plan's service control policy. |
 
 ## What real AWS found
 
@@ -617,6 +640,54 @@ tiers 1 and 2 had used most of it. The EC2 security-group permissions come from 
       "Action": "iam:CreateServiceLinkedRole",
       "Resource": "*",
       "Condition": { "StringEquals": { "iam:AWSServiceName": "elasticache.amazonaws.com" } }
+    }
+  ]
+}
+```
+
+## IAM for tier 4
+
+Tier 4 also needs tier 3's EC2 permissions, for the runner, and tier 1's S3 permissions, for the claim-check
+bucket.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "kafka:CreateClusterV2", "kafka:DeleteCluster", "kafka:DescribeClusterV2", "kafka:ListClustersV2",
+        "kafka:GetBootstrapBrokers", "kafka:TagResource", "kafka:UntagResource", "kafka:ListTagsForResource"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["ec2:CreateVpcEndpoint", "ec2:DeleteVpcEndpoints", "ec2:DescribeVpcEndpoints"],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "kafka-cluster:Connect", "kafka-cluster:DescribeCluster",
+        "kafka-cluster:CreateTopic", "kafka-cluster:DeleteTopic", "kafka-cluster:DescribeTopic",
+        "kafka-cluster:ReadData", "kafka-cluster:WriteData", "kafka-cluster:WriteDataIdempotently",
+        "kafka-cluster:DescribeGroup", "kafka-cluster:AlterGroup",
+        "kafka-cluster:DescribeTransactionalId", "kafka-cluster:AlterTransactionalId"
+      ],
+      "Resource": [
+        "arn:aws:kafka:<region>:<account>:cluster/halyx-*/*",
+        "arn:aws:kafka:<region>:<account>:topic/halyx-*/*",
+        "arn:aws:kafka:<region>:<account>:group/halyx-*/*",
+        "arn:aws:kafka:<region>:<account>:transactional-id/halyx-*/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": "iam:CreateServiceLinkedRole",
+      "Resource": "*",
+      "Condition": { "StringEquals": { "iam:AWSServiceName": "kafka.amazonaws.com" } }
     }
   ]
 }
