@@ -52,6 +52,20 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
+            <!--
+              halyx-parent manages Reactor at halyx-reactor's baseline; a Boot 3.5 application gets the version
+              its BOM manages (Reactor 2024.0), so test with that.
+            -->
+            <dependency>
+                <groupId>io.projectreactor</groupId>
+                <artifactId>reactor-core</artifactId>
+                <version>3.7.19</version>
+            </dependency>
+            <dependency>
+                <groupId>io.projectreactor</groupId>
+                <artifactId>reactor-test</artifactId>
+                <version>3.7.19</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 

@@ -92,6 +92,8 @@
         <r2dbc-mssql.version>1.0.4.RELEASE</r2dbc-mssql.version>
         <reactor-core.version>3.7.9</reactor-core.version>
         <context-propagation.version>1.1.4</context-propagation.version>
+        <rxjava.version>3.1.8</rxjava.version>
+        <mutiny.version>2.6.0</mutiny.version>
         <!--
           Reactor Netty's core and HTTP modules must match: the Azure SDK brings reactor-netty-http 1.2, the R2DBC
           drivers reactor-netty-core 1.1, and a mix fails with IncompatibleClassChangeError.
@@ -257,6 +259,17 @@
                 <groupId>io.micrometer</groupId>
                 <artifactId>context-propagation</artifactId>
                 <version>${context-propagation.version}</version>
+            </dependency>
+            <!-- Interoperability tests of halyx-reactor -->
+            <dependency>
+                <groupId>io.reactivex.rxjava3</groupId>
+                <artifactId>rxjava</artifactId>
+                <version>${rxjava.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.smallrye.reactive</groupId>
+                <artifactId>mutiny</artifactId>
+                <version>${mutiny.version}</version>
             </dependency>
             <dependency>
                 <groupId>io.projectreactor.netty</groupId>

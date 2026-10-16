@@ -75,6 +75,25 @@
                 <artifactId>r2dbc-postgresql</artifactId>
                 <version>${r2dbc-postgresql4.version}</version>
             </dependency>
+            <!--
+              halyx-parent manages Reactor and context-propagation for halyx-reactor's baseline (3.7); a Boot 4
+              application gets the versions its BOM manages (Reactor 2025.0), so test with those.
+            -->
+            <dependency>
+                <groupId>io.projectreactor</groupId>
+                <artifactId>reactor-core</artifactId>
+                <version>3.8.7</version>
+            </dependency>
+            <dependency>
+                <groupId>io.projectreactor</groupId>
+                <artifactId>reactor-test</artifactId>
+                <version>3.8.7</version>
+            </dependency>
+            <dependency>
+                <groupId>io.micrometer</groupId>
+                <artifactId>context-propagation</artifactId>
+                <version>1.2.1</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 
