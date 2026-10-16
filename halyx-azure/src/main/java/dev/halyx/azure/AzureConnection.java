@@ -215,6 +215,11 @@ final class AzureConnection implements ProviderConnection {
                 EVENT_HUBS_DEFAULTS);
     }
 
+    @Override
+    public Map<String, Object> kafkaClientProperties(StreamConfig cluster) {
+        return KafkaStreamClients.clientProperties(cluster, eventHubsCredentials(cluster), EVENT_HUBS_DEFAULTS);
+    }
+
     private KafkaStreamClients streams() {
         if (streams == null) {
             streams = new KafkaStreamClients(AzureProvider.ID);

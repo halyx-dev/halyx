@@ -244,6 +244,11 @@ final class AwsConnection implements ProviderConnection {
         return streams().consumer(consumer, mskCredentials(consumer.cluster()), MSK_CAPABILITIES, Map.of());
     }
 
+    @Override
+    public Map<String, Object> kafkaClientProperties(StreamConfig cluster) {
+        return KafkaStreamClients.clientProperties(cluster, mskCredentials(cluster), Map.of());
+    }
+
     private KafkaStreamClients streams() {
         if (streams == null) {
             streams = new KafkaStreamClients(AwsProvider.ID);

@@ -21,3 +21,4 @@ dev.halyx.spring.autoconfigure.health.HalyxHealthContributorAutoConfiguration
 dev.halyx.spring.autoconfigure.cache.HalyxCacheManagerAutoConfiguration
 dev.halyx.spring.autoconfigure.metrics.HalyxCacheMetricsAutoConfiguration
 dev.halyx.spring.autoconfigure.observation.HalyxMessagingTracingAutoConfiguration
+dev.halyx.spring.autoconfigure.HalyxSpringKafkaAutoConfiguration

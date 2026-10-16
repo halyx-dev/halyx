@@ -41,6 +41,7 @@ import dev.halyx.storage.BlobStore;
 import dev.halyx.storage.DefaultBlobStore;
 import dev.halyx.stream.DefaultStreamConsumer;
 import dev.halyx.stream.DefaultStreamProducer;
+import dev.halyx.stream.StreamConfig;
 import dev.halyx.stream.StreamConsumer;
 import dev.halyx.stream.StreamConsumerConfig;
 import dev.halyx.stream.StreamProducer;
@@ -145,6 +146,17 @@ public final class CloudContext implements AutoCloseable {
      */
     public StreamConsumer streamConsumer(StreamConsumerConfig config) {
         return new DefaultStreamConsumer(connection().streamConsumer(config), config, interceptors);
+    }
+
+    /**
+     * Kafka client properties that connect and log in to a stream cluster the way this provider's producers and
+     * consumers do: bootstrap servers, TLS and SASL with the cloud login (MSK IAM, Entra ID or Google IAM tokens,
+     * refreshed before they expire), the provider's client defaults and the cluster's {@code kafka.*} properties.
+     * For Kafka's own clients and Spring for Apache Kafka. Some values are objects, not strings, so pass the map
+     * to the clients as it is.
+     */
+    public Map<String, Object> kafkaClientProperties(StreamConfig cluster) {
+        return connection().kafkaClientProperties(cluster);
     }
 
     /**

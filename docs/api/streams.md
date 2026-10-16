@@ -186,3 +186,18 @@ Consumer<byte[], byte[]> consumer = billing.unwrap(Consumer.class);   // only fr
 ```
 
 The same on every provider. See [Capabilities and native clients](capabilities-and-unwrap.md).
+
+For Kafka's own clients, or any library that takes Kafka client properties, `kafkaClientProperties` gives the
+properties Halyx' producers and consumers use: bootstrap servers, TLS, and SASL with the cloud login (MSK IAM,
+Entra ID or Google IAM tokens, refreshed before they expire), with the provider's defaults and the cluster's
+`kafka.*` properties.
+
+```java
+Map<String, Object> login = aws.kafkaClientProperties(events);   // events: the StreamConfig
+try (Admin admin = Admin.create(login)) {
+    admin.createTopics(List.of(new NewTopic("orders", 6, (short) 3))).all().get();
+}
+```
+
+Some values are objects rather than strings (the login's token source), so pass the map to the client as it
+is. [Spring for Apache Kafka](../spring-boot.md#spring-for-apache-kafka) uses the same properties.

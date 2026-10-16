@@ -170,6 +170,35 @@ partition, until `max-attempts` sends it to the `dead-letter` producer. Stream c
 the application stops. Each listener reports metrics and appears under the `streams` health entry, and each
 producer has its own health indicator. Wrap every stream listener with a `RecordListenerDecorator` bean.
 
+### Spring for Apache Kafka
+
+Applications that use Spring for Apache Kafka (`KafkaTemplate`, `@KafkaListener`) can log in to a stream
+cluster with Halyx instead of configuring SASL themselves:
+
+```yaml
+halyx:
+  spring-kafka:
+    cluster: events                  # one of halyx.stream-clusters
+spring:
+  kafka:
+    consumer: { auto-offset-reset: earliest }
+```
+
+```java
+@Autowired KafkaTemplate<String, String> template;
+
+@KafkaListener(topics = "orders", groupId = "shipping")
+void onOrder(String order) { ... }
+```
+
+Every `DefaultKafkaProducerFactory` and `DefaultKafkaConsumerFactory` bean, Boot's or your own, gets the
+cluster's bootstrap servers and login: MSK IAM, Entra ID or Google IAM tokens, refreshed before they expire.
+Halyx' settings go on top of `spring.kafka.*`, so leave out `spring.kafka.bootstrap-servers` and the
+`security` and `sasl` settings; serializers, groups and listener settings stay Spring's. Boot's `KafkaAdmin`
+keeps its own settings, so create topics outside the application, as with Halyx' own streams. Without
+`halyx.spring-kafka.cluster`, Spring for Apache Kafka is left alone. This needs `spring-kafka` on the classpath
+(`spring-boot-starter-kafka` on Boot 4), and works with the version each Boot manages.
+
 ## SQL databases
 
 ```yaml

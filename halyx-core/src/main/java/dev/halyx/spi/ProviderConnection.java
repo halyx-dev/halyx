@@ -29,10 +29,13 @@ import dev.halyx.parameters.spi.ParameterDriver;
 import dev.halyx.sql.Database;
 import dev.halyx.sql.SqlConfig;
 import dev.halyx.storage.spi.BlobStoreDriver;
+import dev.halyx.stream.StreamConfig;
 import dev.halyx.stream.StreamConsumerConfig;
 import dev.halyx.stream.StreamProducerConfig;
 import dev.halyx.stream.spi.ConsumerDriver;
 import dev.halyx.stream.spi.ProducerDriver;
+
+import java.util.Map;
 
 /**
  * A live connection to one provider account and region: the Abstract Factory for the family of
@@ -83,6 +86,11 @@ public interface ProviderConnection extends AutoCloseable {
 
     /** A consumer group member reading the stream topic {@code config.topic()} on {@code config.cluster()}. */
     default ConsumerDriver streamConsumer(StreamConsumerConfig config) {
+        throw new UnsupportedFeatureException("Streams are not supported by this provider");
+    }
+
+    /** Kafka client properties for {@code cluster}, logging in as this provider's stream drivers do. */
+    default Map<String, Object> kafkaClientProperties(StreamConfig cluster) {
         throw new UnsupportedFeatureException("Streams are not supported by this provider");
     }
 

@@ -325,6 +325,11 @@ final class GcpConnection implements ProviderConnection {
         return streams().consumer(consumer, managedKafkaCredentials(consumer.cluster()), MANAGED_KAFKA_CAPABILITIES, Map.of());
     }
 
+    @Override
+    public Map<String, Object> kafkaClientProperties(StreamConfig cluster) {
+        return KafkaStreamClients.clientProperties(cluster, managedKafkaCredentials(cluster), Map.of());
+    }
+
     private KafkaStreamClients streams() {
         if (streams == null) {
             streams = new KafkaStreamClients(GcpProvider.ID);

@@ -168,8 +168,14 @@ public final class KafkaStreamClients implements AutoCloseable {
         owned.add(client);
     }
 
-    /** Bootstrap servers, login, then the provider's defaults beneath and the cluster's {@code kafka.*} on top. */
-    static Map<String, Object> clientProperties(StreamConfig cluster, KafkaCredentialsSource credentials,
+    /**
+     * Kafka client properties for a cluster: bootstrap servers and login, with the provider's defaults beneath and
+     * the cluster's {@code kafka.*} properties on top. For IAM login the map holds the credentials source itself,
+     * which {@link OAuthBearerLoginHandler} reads, so pass it to the clients unchanged.
+     *
+     * @param credentials the IAM token source, or null unless the cluster uses {@code StreamAuth.iam()}
+     */
+    public static Map<String, Object> clientProperties(StreamConfig cluster, KafkaCredentialsSource credentials,
                                                 Map<String, String> defaults) {
         Map<String, Object> properties = new LinkedHashMap<>(defaults);
         properties.put(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, cluster.bootstrapServers());
