@@ -15,6 +15,8 @@
  */
 package dev.halyx.spring.messaging;
 
+import dev.halyx.events.CloudEvent;
+import dev.halyx.events.CloudEvents;
 import dev.halyx.messaging.ConsumerOptions;
 import dev.halyx.messaging.MessageConsumer;
 import dev.halyx.messaging.MessageListener;
@@ -90,7 +92,7 @@ public class HalyxListenerRegistrar implements BeanPostProcessor, SmartLifecycle
         methods.forEach((method, annotation) -> {
             if (method.getParameterCount() != 1 || !supported(method.getParameterTypes()[0])) {
                 throw new IllegalStateException("@HalyxListener method " + type.getName() + "." + method.getName()
-                        + " must take one parameter: ReceivedMessage or ReceivedRecord, String or byte[]");
+                        + " must take one parameter: ReceivedMessage, CloudEvent or ReceivedRecord, String or byte[]");
             }
             Method invocable = AopUtils.selectInvocableMethod(method, bean.getClass());
             ReflectionUtils.makeAccessible(invocable);
@@ -101,8 +103,8 @@ public class HalyxListenerRegistrar implements BeanPostProcessor, SmartLifecycle
     }
 
     private static boolean supported(Class<?> parameter) {
-        return parameter == ReceivedMessage.class || parameter == ReceivedRecord.class || parameter == String.class
-                || parameter == byte[].class;
+        return parameter == ReceivedMessage.class || parameter == CloudEvent.class || parameter == ReceivedRecord.class
+                || parameter == String.class || parameter == byte[].class;
     }
 
     @Override
@@ -144,7 +146,8 @@ public class HalyxListenerRegistrar implements BeanPostProcessor, SmartLifecycle
 
     private void startStream(Endpoint endpoint) {
         String name = endpoint.subscription();
-        if (endpoint.method().getParameterTypes()[0] == ReceivedMessage.class) {
+        Class<?> parameter = endpoint.method().getParameterTypes()[0];
+        if (parameter == ReceivedMessage.class || parameter == CloudEvent.class) {
             throw new IllegalStateException("@HalyxListener(\"" + name + "\") on " + endpoint.method()
                     + " refers to a stream consumer, whose methods take a ReceivedRecord, String or byte[]");
         }
@@ -173,8 +176,10 @@ public class HalyxListenerRegistrar implements BeanPostProcessor, SmartLifecycle
 
     private static void invoke(Endpoint endpoint, ReceivedMessage message) throws Exception {
         Class<?> parameter = endpoint.method().getParameterTypes()[0];
+        // A message that holds no CloudEvent fails like a throwing listener: retried, then dead-lettered.
         invoke(endpoint, parameter == String.class ? message.bodyAsString()
-                : parameter == byte[].class ? message.body() : message);
+                : parameter == byte[].class ? message.body()
+                : parameter == CloudEvent.class ? CloudEvents.decode(message) : message);
     }
 
     private static void invoke(Endpoint endpoint, ReceivedRecord record) throws Exception {

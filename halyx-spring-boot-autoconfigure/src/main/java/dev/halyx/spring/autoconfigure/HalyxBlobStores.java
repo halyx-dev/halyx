@@ -18,6 +18,7 @@ package dev.halyx.spring.autoconfigure;
 import dev.halyx.Halyx;
 import dev.halyx.cache.Cache;
 import dev.halyx.cache.CacheConfig;
+import dev.halyx.events.EventPublisher;
 import dev.halyx.messaging.Publisher;
 import dev.halyx.nosql.DocumentStore;
 import dev.halyx.messaging.Subscription;
@@ -59,6 +60,10 @@ public final class HalyxBlobStores {
 
     public DocumentStore documentStore(String provider, String name, HalyxProperties.DocumentStoreProperties store) {
         return halyx.provider(provider).documentStore(store.toTableConfig(name));
+    }
+
+    public EventPublisher eventPublisher(String provider, String name, HalyxProperties.EventBusProperties bus) {
+        return halyx.provider(provider).eventPublisher(bus.toEventBusConfig(name));
     }
 
     public Publisher publisher(String provider, String name, HalyxProperties.TopicProperties topic) {

@@ -23,6 +23,7 @@ import dev.halyx.interceptor.RetryPolicy;
 import dev.halyx.messaging.ClaimCheck;
 import dev.halyx.messaging.ConsumerOptions;
 import dev.halyx.messaging.SubscriptionConfig;
+import dev.halyx.events.EventBusConfig;
 import dev.halyx.messaging.TopicConfig;
 import dev.halyx.nosql.TableConfig;
 import dev.halyx.parameters.ParameterKind;
@@ -297,6 +298,29 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
      * @param sortAttribute      the string field results are ordered and narrowed by, if any
      */
     public record IndexProperties(String partitionAttribute, String sortAttribute) {
+    }
+
+    /**
+     * An event bus to publish CloudEvents to, from {@code halyx.event-buses.<key>}, registered as an
+     * {@code EventPublisher} bean named after its key.
+     *
+     * @param provider   the provider name; may be omitted when exactly one provider is configured
+     * @param name       the bus: an EventBridge event bus (name or ARN), an Event Grid namespace topic, or an
+     *                   Eventarc Advanced message bus; defaults to the key
+     * @param properties provider-specific settings, such as {@code azure.eventgrid.endpoint} or
+     *                   {@code gcp.eventarc.location}
+     */
+    public record EventBusProperties(String provider, String name, Map<String, String> properties) {
+
+        public EventBusProperties {
+            properties = ordered(properties);
+        }
+
+        EventBusConfig toEventBusConfig(String key) {
+            EventBusConfig.Builder config = EventBusConfig.builder(name == null || name.isBlank() ? key : name);
+            properties.forEach(config::property);
+            return config.build();
+        }
     }
 
     /**

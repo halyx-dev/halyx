@@ -16,6 +16,7 @@
 package dev.halyx.spring.autoconfigure;
 
 import dev.halyx.cache.Cache;
+import dev.halyx.events.EventPublisher;
 import dev.halyx.messaging.Publisher;
 import dev.halyx.nosql.DocumentStore;
 import dev.halyx.messaging.Subscription;
@@ -149,6 +150,21 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
                 .forEach((name, topic) -> registry.registerBeanDefinition(name, messagingBean(Publisher.class,
                         "halyx.topics." + name, name, topic.provider(), topic, topic.claimCheck(), "publisher",
                         providers, stores.keySet())));
+        binder.bind("halyx.event-buses", Bindable.mapOf(String.class, HalyxProperties.EventBusProperties.class))
+                .orElse(Map.of())
+                .forEach((name, bus) -> {
+                    String provider = resolveProvider("halyx.event-buses." + name, bus.provider(), providers);
+                    RootBeanDefinition definition = new RootBeanDefinition(EventPublisher.class);
+                    definition.setFactoryBeanName(FACTORY_BEAN);
+                    definition.setFactoryMethodName("eventPublisher");
+                    var args = definition.getConstructorArgumentValues();
+                    args.addIndexedArgumentValue(0, provider);
+                    args.addIndexedArgumentValue(1, name);
+                    args.addIndexedArgumentValue(2, bus);
+                    definition.setTargetType(EventPublisher.class);
+                    definition.setDescription("Halyx event bus " + provider + "/" + name);
+                    registry.registerBeanDefinition(name, definition);
+                });
         binder.bind("halyx.subscriptions", Bindable.mapOf(String.class, HalyxProperties.SubscriptionProperties.class))
                 .orElse(Map.of())
                 .forEach((name, subscription) -> registry.registerBeanDefinition(name, messagingBean(Subscription.class,
