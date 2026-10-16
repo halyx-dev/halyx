@@ -19,11 +19,13 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Scheduler;
 
+import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Semaphore;
 import java.util.function.Function;
+import java.util.stream.Stream;
 
 /**
  * Turns blocking Halyx calls into lazy publishers on the application's scheduler. A call runs once per
@@ -52,6 +54,39 @@ final class Calls {
             // subscriber's Reactor context.
             Object snapshot = context.capture(subscriberContext);
             return Mono.fromCallable(() -> context.call(snapshot, () -> limited(call))).subscribeOn(scheduler);
+        });
+    }
+
+    /**
+     * The stream's elements, pulled as the subscriber asks for them, each on the scheduler with the subscriber's
+     * context restored; the stream is closed however the {@code Flux} ends. Opening counts towards the
+     * concurrency limit; the pulls that follow, which may read further pages, don't.
+     */
+    <T> Flux<T> stream(Callable<? extends Stream<T>> open) {
+        return Flux.deferContextual(subscriberContext -> {
+            Object snapshot = context.capture(subscriberContext);
+            return Flux.<T, Stream<T>>using(() -> context.call(snapshot, () -> limited(open)),
+                    stream -> {
+                        Iterator<T> iterator = stream.iterator();
+                        return Flux.<T>generate(sink -> {
+                            try {
+                                boolean more = context.call(snapshot, () -> {
+                                    if (iterator.hasNext()) {
+                                        sink.next(iterator.next());
+                                        return true;
+                                    }
+                                    return false;
+                                });
+                                if (!more) {
+                                    sink.complete();
+                                }
+                            } catch (Exception e) {
+                                sink.error(e);
+                            }
+                        });
+                    },
+                    Stream::close)
+                    .subscribeOn(scheduler);
         });
     }
 

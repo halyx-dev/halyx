@@ -25,13 +25,17 @@ import dev.halyx.parameters.ParameterStore;
 import dev.halyx.storage.BlobStore;
 import dev.halyx.stream.StreamConsumer;
 import dev.halyx.stream.StreamProducer;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 
 import java.time.Duration;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
+import java.util.stream.Stream;
 
 /**
  * Project Reactor views of a {@link Halyx}'s services: {@code Mono} and {@code Flux} over the blocking API,
@@ -106,6 +110,23 @@ public final class ReactiveHalyx implements AutoCloseable {
 
     public Scheduler scheduler() {
         return calls.scheduler();
+    }
+
+    /**
+     * Any blocking work as a {@code Mono}, run like the services' calls: when subscribed, once per subscription,
+     * on this scheduler, with the subscriber's context and within the concurrency limit. A null result is an
+     * empty {@code Mono}.
+     */
+    public <T> Mono<T> call(Callable<T> work) {
+        return calls.mono(work);
+    }
+
+    /**
+     * A blocking {@code Stream} as a {@code Flux}: opened when subscribed, its elements pulled as the subscriber
+     * asks for them on this scheduler, and closed however the {@code Flux} ends.
+     */
+    public <T> Flux<T> stream(Callable<? extends Stream<T>> open) {
+        return calls.stream(open);
     }
 
     public ReactiveBlobStore wrap(BlobStore store) {

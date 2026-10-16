@@ -54,6 +54,7 @@
         <module>halyx-spring-boot-autoconfigure</module>
         <module>halyx-spring-boot-starter</module>
         <module>halyx-spring-boot4-tests</module>
+        <module>halyx-reactor-tests</module>
         <module>halyx-benchmarks</module>
     </modules>
 
