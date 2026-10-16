@@ -79,9 +79,10 @@ that.
 | `halyx-azure` | Azure SDK: Blob Storage, Cosmos DB, Service Bus, Key Vault, App Configuration, Entra ID login for caches and databases |
 | `halyx-gcp` | Google Cloud: Cloud Storage, Firestore, Pub/Sub, Secret Manager, Parameter Manager, Memorystore and Cloud SQL IAM login |
 | `halyx-vault` | HashiCorp Vault KV v2 parameters and secrets |
+| `halyx-spring-data-document` | Spring Data repositories over document stores: records as entities, derived queries on keys and indexes, optimistic locking, keyset scrolling |
 | `halyx-spring-boot-autoconfigure` | Spring Boot auto-configuration, properties, health and observations |
 | `halyx-spring-boot-starter` | the dependency Spring Boot applications add |
-| `halyx-spring-boot4-tests` | the shared Spring tests run on Boot 4 (not published) |
+| `halyx-spring-boot4-tests` | the shared Spring and Spring Data tests run on Boot 4 (not published) |
 | `halyx-benchmarks` | JMH benchmarks and a load-test harness (not published) |
 
 ## Build

@@ -198,6 +198,11 @@ returns the new versions of the written items.
 On Cosmos DB, item ids can't contain `/ \ ? #`; Halyx escapes them (with `~`), so any key string works.
 Keys with those characters are covered by the conformance kit on every provider.
 
+## Spring Data repositories
+
+Records can also be stored through Spring Data repositories, with derived queries on the keys and indexes,
+optimistic locking and keyset scrolling. See [Spring Data repositories](../spring-boot.md#spring-data-repositories).
+
 ## Native clients
 
 ```java

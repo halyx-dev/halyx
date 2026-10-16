@@ -193,7 +193,7 @@ to your build, ideally through the `halyx-bom`. See [Getting started](https://ka
 | [Errors and retries](https://kamranzafar.github.io/halyx/api/errors.html) | the portable error model, retries, throttling and interceptors |
 | [Capabilities and native clients](https://kamranzafar.github.io/halyx/api/capabilities-and-unwrap.html) | provider differences, and `unwrap` for the native SDK clients |
 | [Provider configuration](https://kamranzafar.github.io/halyx/providers.html) | credentials, regions, endpoints and every provider setting |
-| [Spring Boot](https://kamranzafar.github.io/halyx/spring-boot.html) | the starter, properties, listeners, health, metrics and configuration import |
+| [Spring Boot](https://kamranzafar.github.io/halyx/spring-boot.html) | the starter, properties, listeners, health, metrics, configuration import, [Spring Data repositories](https://kamranzafar.github.io/halyx/spring-boot.html#spring-data-repositories) and Spring for Apache Kafka |
 | [Design, build and test](https://kamranzafar.github.io/halyx/design.html) | architecture, building, the conformance kits and benchmarks |
 | [Cloud testing](https://kamranzafar.github.io/halyx/cloud-testing/) | results on real [AWS](https://kamranzafar.github.io/halyx/cloud-testing/aws.html), [Google Cloud](https://kamranzafar.github.io/halyx/cloud-testing/gcp.html) and [Azure](https://kamranzafar.github.io/halyx/cloud-testing/azure.html) |
 | [Roadmap](https://kamranzafar.github.io/halyx/roadmap.html) | what's done and what's next |

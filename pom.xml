@@ -48,6 +48,7 @@
         <module>halyx-azure</module>
         <module>halyx-gcp</module>
         <module>halyx-vault</module>
+        <module>halyx-spring-data-document</module>
         <module>halyx-spring-boot-autoconfigure</module>
         <module>halyx-spring-boot-starter</module>
         <module>halyx-spring-boot4-tests</module>
@@ -152,6 +153,11 @@
             <dependency>
                 <groupId>dev.halyx</groupId>
                 <artifactId>halyx-azure</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>dev.halyx</groupId>
+                <artifactId>halyx-spring-data-document</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

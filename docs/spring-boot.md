@@ -117,6 +117,55 @@ halyx:
         by-status: { partition-attribute: status, sort-attribute: placedAt }
 ```
 
+### Spring Data repositories
+
+With `halyx-spring-data-document` on the classpath, repository interfaces in the application's packages become beans over
+these document stores. Entities are records: the key components are annotated, and the rest of the record is the
+document.
+
+```xml
+<dependency>
+  <groupId>dev.halyx</groupId>
+  <artifactId>halyx-spring-data-document</artifactId>
+</dependency>
+```
+
+```java
+@DocumentTable("orders")                       // a halyx.document-stores bean; optional if there is only one
+record Order(@PartitionKey String customerId,
+             @SortKey String orderId,
+             String status,
+             String placedAt,
+             BigDecimal total,
+             @Version dev.halyx.nosql.Version version) { }   // Spring Data's @Version: optimistic writes
+
+interface OrderRepository extends DocumentRepository<Order, Key> {     // Key for tables with a sort key, else String
+    List<Order> findByCustomerId(String customerId);
+    List<Order> findByCustomerIdAndOrderIdBetweenOrderByOrderIdDesc(String customerId, String from, String to);
+    Optional<Order> findFirstByCustomerIdOrderByOrderIdDesc(String customerId);
+    Window<Order> findByCustomerId(String customerId, ScrollPosition position, Limit limit);
+    Stream<Order> findByStatus(String status);                         // the by-status index
+    List<Order> findByStatusAndPlacedAtGreaterThanEqual(String status, String from);
+    boolean existsByStatus(String status);
+}
+```
+
+| | |
+|---|---|
+| CRUD | `save`, `saveAll`, `findById`, `existsById`, `findAllById`, `deleteById`, `delete`, `deleteAllById`, `deleteAll`. Unversioned `saveAll` writes in batches |
+| Keys | `@PartitionKey`, and `@SortKey` for tables with a sort key: `String`, `UUID`, `LocalDate` or an enum, stored in the table's key attributes. Sort keys compare as strings, so use fixed-width values |
+| Optimistic locking | with a `@Version` component of type `dev.halyx.nosql.Version`, `save` inserts an entity without a version only if its id is free (`DuplicateKeyException`), and writes or deletes one with a version only if the stored item still has it (`OptimisticLockingFailureException`). `save` returns the entity with its new version. On Firestore, a save that changes nothing keeps the version |
+| Values | as in [records](api/nosql.md#records). Cosmos DB and Firestore keep decimals as doubles, so a `BigDecimal` can read back with another scale (`10` as `10.0`), and records holding one may not be `equals` to what was saved |
+| Derived queries | by the partition key, with at most one condition on the sort key (`Is`, `Between`, `StartingWith`, `GreaterThan(Equal)`, `LessThan(Equal)`, `After`, `Before`); or by the partition attribute of a declared index, with at most one condition on its sort attribute. Ordered by that sort attribute, ascending or `Desc`. `First`/`Top` and a `Limit` parameter cap the results; `exists` queries too |
+| Results | `List`, `Stream` (read page by page as it's consumed), a single entity or `Optional`, and `Window` with a `ScrollPosition` parameter: start from `ScrollPosition.keyset()` and continue from `window.positionAt(window.size() - 1)` |
+| Fails at startup | anything that would scan the table or skip by offset: conditions on other attributes, `Or`, `IgnoreCase`, nested properties, `count` and derived deletes, `Pageable`, `Slice`, `Page` and `Sort` parameters, projections, and `findAll`, since `DocumentRepository` has none |
+
+Index queries are eventually consistent on DynamoDB, as with `queryIndex`. There's no general `@Transactional`:
+use `DocumentStore.transact` for atomic writes across items. Without Spring Boot, `@EnableHalyxRepositories`
+creates the repositories over the application's `DocumentStore` beans; turn the auto-configuration off with
+`halyx.document-repositories.enabled=false`. Both work with the Spring Data each Boot version manages (2025.0 on Boot 3.5,
+2026.0 on Boot 4).
+
 ## Messaging
 
 ```yaml

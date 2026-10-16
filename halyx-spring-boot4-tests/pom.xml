@@ -29,7 +29,8 @@
 
     <!--
       Not published. Runs the shared auto-configuration tests of halyx-spring-boot-autoconfigure
-      (built against Boot 3.5) on Spring Boot 4, plus the Boot 4 health tests.
+      (built against Boot 3.5) and the repository tests of halyx-spring-data-document (built against Spring Data 2025.0)
+      on Spring Boot 4 and the Spring Data it manages, plus the Boot 4 health tests.
     -->
     <artifactId>halyx-spring-boot4-tests</artifactId>
     <name>Halyx :: Spring Boot 4 compatibility tests</name>
@@ -186,6 +187,12 @@
             <artifactId>spring-boot-kafka</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- Spring Data repositories, on the Spring Data Boot 4 manages -->
+        <dependency>
+            <groupId>dev.halyx</groupId>
+            <artifactId>halyx-spring-data-document</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-simple</artifactId>
@@ -208,6 +215,7 @@
                         <configuration>
                             <sources>
                                 <source>../halyx-spring-boot-autoconfigure/src/test/java</source>
+                                <source>../halyx-spring-data-document/src/test/java</source>
                             </sources>
                         </configuration>
                     </execution>

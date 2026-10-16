@@ -124,6 +124,12 @@
           Boot 4 health: org.springframework.boot.health. Compile-only API: its Boot 4 dependencies are
           excluded, and it is kept off this module's (Boot 3) test classpath below.
         -->
+        <!-- Spring Data repositories over document stores (HalyxRepositoriesAutoConfiguration) -->
+        <dependency>
+            <groupId>dev.halyx</groupId>
+            <artifactId>halyx-spring-data-document</artifactId>
+            <optional>true</optional>
+        </dependency>
         <!-- Spring for Apache Kafka on a Halyx stream cluster (HalyxSpringKafkaAutoConfiguration) -->
         <dependency>
             <groupId>org.springframework.kafka</groupId>
