@@ -49,6 +49,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import dev.halyx.tck.DocumentRepositoryConformanceTest;
 
 /**
  * The conformance kits against real Azure (tier 1: Blob Storage, Cosmos DB, Service Bus, Key Vault, App
@@ -130,6 +131,18 @@ class RealAzureIT {
                 table.sortKey("sk");
             }
             return azure().documentStore(indexes(table, sorted).build());
+        }
+    }
+
+    @Nested
+    class CosmosRepositories extends DocumentRepositoryConformanceTest {
+        @Override
+        protected DocumentStore store(boolean sorted) {
+            TableConfig.Builder table = TableConfig.builder(sorted ? "items-sorted" : "items");
+            if (sorted) {
+                table.sortKey("sk");
+            }
+            return azure().documentStore(DocumentStoreConformanceTest.indexes(table, sorted).build());
         }
     }
 

@@ -110,6 +110,7 @@ either portable or explicitly declared as a capability:
 | Kit | Tests | What it covers |
 |---|---|---|
 | Blob store | 75 | round trips, streams, parallel transfers, listing and pagination, conditional writes and deletes, batch delete, copy, metadata, checksums, tiers, presigned URLs and multipart |
+| Document repositories | 10 | Spring Data repositories on the document store kit's tables: CRUD with records, `UUID` keys, optimistic locking and taken ids, batched saves, partition queries both ways with sort-key conditions and limits, windows, streams, index queries with and without a sort attribute |
 | Document store | 23 | every value type, versions and conditions, partial updates with concurrent increments, batches beyond provider limits, sort-key queries both ways with paging, secondary indexes, transactions with rollback, keys with `/ ? # % \`, expiry |
 | Messaging | 15 | round trips, binary bodies, ack and nack, lease expiry and extension, batches, listener retries and concurrency, claim checks, ordering, deduplication, delays |
 | Streams | 25 | keys, headers, partitions and offsets, order per key, committed positions, uncommitted records read again, groups sharing partitions, start positions, listener retries holding only their partition, dead letters, commits on close, claim checks, idempotence and transactions |

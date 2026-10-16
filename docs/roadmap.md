@@ -26,6 +26,7 @@ nav_order: 8
 | 7 | Messaging | SNS and SQS, Service Bus, Pub/Sub; listeners, claim checks, tracing |
 | 8 | Production gaps | NoSQL secondary indexes and transactions, batched acks, Service Bus sessions |
 | 9 | Real-cloud testing | the conformance kits on real AWS, Google Cloud and Azure, in three tiers each, on throwaway infrastructure. [Results](cloud-testing/index.md) |
+| 10 | Spring Data repositories | `halyx-spring-data-document`: Spring Data repositories over DynamoDB, Cosmos DB and Firestore, with records as entities, derived queries on keys and indexes, optimistic locking and keyset scrolling; Boot 3.5 and 4; passing on the emulators and on all three clouds. [Guide](spring-boot.md#spring-data-repositories) |
 
 ## Next
 
@@ -109,10 +110,6 @@ no stored keys, and then spread across clouds:
 
 Planned, and prioritised by demand:
 
-- **Spring Data repositories over document stores** (`halyx-spring-data`): CRUD by composite id
-  (`@PartitionKey`, `@SortKey`), `@Version` optimistic locking, derived queries on the partition key, sort
-  range and declared indexes, and keyset scrolling (`Window` and `ScrollPosition`). Not planned: table
-  scans, general `@Transactional` and reactive repositories.
 - **R2DBC** for reactive Spring Data, with cloud IAM login.
 - **Aurora fast failover** through the AWS Advanced JDBC Wrapper.
 - **Nested field paths** in NoSQL updates.

@@ -252,3 +252,14 @@ log "Running the conformance kits against real AWS"
 mvn -o verify -pl halyx-aws -Dit.test="${IT_TEST:-RealAwsIT}" -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
     -Dhalyx.real.aws=true -Dhalyx.real.aws.run="$RUN" -Dhalyx.real.aws.bucket="$BUCKET" \
     -Dhalyx.real.aws.items-table="$ITEMS" -Dhalyx.real.aws.items-sorted-table="$ITEMS_SORTED"
+status=$?
+[[ -n "${IT_TEST:-}" ]] && exit $status
+# Spring Boot 3 and 4: an auto-configured repository on the run's table with a sort key.
+mvn -o -q install -DskipTests -pl halyx-spring-boot-autoconfigure -am || exit 1
+for module in halyx-spring-boot-autoconfigure halyx-spring-boot4-tests; do
+  log "Running the Spring Boot repository test ($module) against real AWS"
+  mvn -o verify -pl "$module" -Dit.test=RealSpringRepositoryIT -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+      -Dhalyx.real.spring.repositories=true -Dhalyx.real.spring.provider=aws \
+      -Dhalyx.real.spring.table="$ITEMS_SORTED" || status=1
+done
+exit $status

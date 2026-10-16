@@ -40,6 +40,8 @@ import software.amazon.awssdk.services.dynamodb.model.ScalarAttributeType;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
+import org.junit.jupiter.api.Nested;
+import dev.halyx.tck.DocumentRepositoryConformanceTest;
 
 /** The document store TCK on DynamoDB emulated by Floci. */
 @Testcontainers(disabledWithoutDocker = true)
@@ -106,5 +108,14 @@ class DynamoDocumentStoreConformanceIT extends DocumentStoreConformanceTest {
             table.sortKey("sk");
         }
         return halyx.provider("aws").documentStore(indexes(table, sorted).build());
+    }
+
+    /** The repository kit on the same tables. */
+    @Nested
+    class Repositories extends DocumentRepositoryConformanceTest {
+        @Override
+        protected DocumentStore store(boolean sorted) {
+            return DynamoDocumentStoreConformanceIT.this.store(sorted);
+        }
     }
 }

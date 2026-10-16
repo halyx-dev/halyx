@@ -36,6 +36,11 @@
             <groupId>dev.halyx</groupId>
             <artifactId>halyx-core</artifactId>
         </dependency>
+        <!-- The repository kit: Spring Data repositories over a provider's document store -->
+        <dependency>
+            <groupId>dev.halyx</groupId>
+            <artifactId>halyx-spring-data-document</artifactId>
+        </dependency>
 
         <!-- Compile scope: the TCK is a test library consumed by provider modules. -->
         <dependency>

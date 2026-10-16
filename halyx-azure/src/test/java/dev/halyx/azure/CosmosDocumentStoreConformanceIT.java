@@ -35,6 +35,8 @@ import org.testcontainers.utility.MountableFile;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import org.junit.jupiter.api.Nested;
+import dev.halyx.tck.DocumentRepositoryConformanceTest;
 
 /** The document store TCK on Cosmos DB (NoSQL API) emulated by Floci-az. */
 @Testcontainers(disabledWithoutDocker = true)
@@ -114,5 +116,14 @@ class CosmosDocumentStoreConformanceIT extends DocumentStoreConformanceTest {
             table.sortKey("sk");
         }
         return halyx.provider("azure").documentStore(indexes(table, sorted).build());
+    }
+
+    /** The repository kit on the same tables. */
+    @Nested
+    class Repositories extends DocumentRepositoryConformanceTest {
+        @Override
+        protected DocumentStore store(boolean sorted) {
+            return CosmosDocumentStoreConformanceIT.this.store(sorted);
+        }
     }
 }

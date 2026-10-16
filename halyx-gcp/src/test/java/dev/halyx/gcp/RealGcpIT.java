@@ -43,6 +43,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
+import dev.halyx.tck.DocumentRepositoryConformanceTest;
 
 /**
  * The conformance kits against real GCP (tier 1: Cloud Storage, Firestore, Pub/Sub, Secret Manager,
@@ -126,6 +127,18 @@ class RealGcpIT {
                 table.sortKey("sk");
             }
             return gcp().documentStore(indexes(table, sorted).build());
+        }
+    }
+
+    @Nested
+    class FirestoreRepositories extends DocumentRepositoryConformanceTest {
+        @Override
+        protected DocumentStore store(boolean sorted) {
+            TableConfig.Builder table = TableConfig.builder(sorted ? "items-sorted" : "items");
+            if (sorted) {
+                table.sortKey("sk");
+            }
+            return gcp().documentStore(DocumentStoreConformanceTest.indexes(table, sorted).build());
         }
     }
 

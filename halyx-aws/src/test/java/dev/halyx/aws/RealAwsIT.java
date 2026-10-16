@@ -44,6 +44,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
+import dev.halyx.tck.DocumentRepositoryConformanceTest;
 
 /**
  * The conformance kits against real AWS (tier 1: S3, DynamoDB, SNS, SQS, SSM, Secrets Manager). Runs only with
@@ -122,6 +123,18 @@ class RealAwsIT {
                 table.sortKey("sk");
             }
             return aws().documentStore(indexes(table, sorted).build());
+        }
+    }
+
+    @Nested
+    class DynamoDbRepositories extends DocumentRepositoryConformanceTest {
+        @Override
+        protected DocumentStore store(boolean sorted) {
+            TableConfig.Builder table = TableConfig.builder(sorted ? ITEMS_SORTED : ITEMS);
+            if (sorted) {
+                table.sortKey("sk");
+            }
+            return aws().documentStore(DocumentStoreConformanceTest.indexes(table, sorted).build());
         }
     }
 

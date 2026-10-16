@@ -32,6 +32,8 @@ import org.testcontainers.utility.DockerImageName;
 import java.net.URI;
 import java.time.Duration;
 import java.util.Map;
+import org.junit.jupiter.api.Nested;
+import dev.halyx.tck.DocumentRepositoryConformanceTest;
 
 /** The document store TCK on Firestore emulated by Floci. */
 @Testcontainers(disabledWithoutDocker = true)
@@ -81,5 +83,14 @@ class FirestoreDocumentStoreConformanceIT extends DocumentStoreConformanceTest {
             table.sortKey("sk");
         }
         return halyx.provider("gcp").documentStore(indexes(table, sorted).build());
+    }
+
+    /** The repository kit on the same tables. */
+    @Nested
+    class Repositories extends DocumentRepositoryConformanceTest {
+        @Override
+        protected DocumentStore store(boolean sorted) {
+            return FirestoreDocumentStoreConformanceIT.this.store(sorted);
+        }
     }
 }

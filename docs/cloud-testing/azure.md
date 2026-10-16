@@ -13,7 +13,7 @@ the `halyx-test` service principal. Every run creates its own throwaway resource
 
 | Tier | Services | Latest result |
 |---|---|---|
-| [1](#tier-1-latest-result) | Blob Storage, Cosmos DB, Service Bus, Key Vault, App Configuration (Entra ID only) | **156/158** passed, 2 skipped (expected) |
+| [1](#tier-1-latest-result) | Blob Storage, Cosmos DB, Service Bus, Key Vault, App Configuration (Entra ID only); Spring Data repositories and Spring Boot on Cosmos DB | **166/168** passed, 2 skipped (expected); Spring **2/2** |
 | [2](#tier-2-latest-result) | Azure Database for PostgreSQL and Azure SQL with Entra ID login | **11/11** |
 | [3](#tier-3-latest-result) | Azure Managed Redis with Entra ID (access keys off) | **52/52** |
 | [4](#tier-4-latest-result) | Event Hubs through its Kafka endpoint, with Entra ID (shared access keys off), plus Spring Boot 3 and 4 | **24/25** passed, 1 skipped (expected); Spring **2/2** |
@@ -66,20 +66,23 @@ resources, and deleted vaults and stores; a failed listing is reported as `CHECK
 
 | | |
 |---|---|
-| Date | 2026-10-11, 09:50–10:11 UTC (21 min: provisioning about 6 min, tests about 7 min, teardown about 8 min) |
-| Run id | `r26101120508d84` |
+| Date | 2026-10-16, 01:47–02:08 UTC (21 min) |
+| Run id | `r26101612477b26` |
 | Location | `australiaeast` |
-| Result | **BUILD SUCCESS**: 156 passed, 0 failed, 2 skipped (expected) |
+| Result | **BUILD SUCCESS**: 166 passed, 0 failed, 2 skipped (expected); Spring Boot repository test passed on Boot 3 and 4 |
 | Teardown | resource group destroyed, Key Vault and App Configuration store purged; check: **nothing left** |
 
 | Service | Halyx API | Tests | Passed | Skipped | Time |
 |---|---|---|---|---|---|
-| Blob Storage | `BlobStore` | 75 | 74 | 1 | 201.5s |
-| Cosmos DB | `DocumentStore` | 23 | 23 | 0 | 26.8s |
-| Service Bus | `Publisher` / `Subscription` | 16 | 16 | 0 | 128.8s |
-| Key Vault | `ParameterStore` | 22 | 22 | 0 | 55.1s |
-| App Configuration | `ParameterStore` | 22 | 21 | 1 | 18.1s |
-| **Total** | | **158** | **156** | **2** | |
+| Blob Storage | `BlobStore` | 75 | 74 | 1 | 138.2s |
+| Cosmos DB | `DocumentStore` | 23 | 23 | 0 | 18.3s |
+| Cosmos DB | Spring Data repositories | 10 | 10 | 0 | 14.0s |
+| Service Bus | `Publisher` / `Subscription` | 16 | 16 | 0 | 128.5s |
+| Key Vault | `ParameterStore` | 22 | 22 | 0 | 29.9s |
+| App Configuration | `ParameterStore` | 22 | 21 | 1 | 16.5s |
+| **Total** | | **168** | **166** | **2** | |
+| Cosmos DB, Spring Boot 3.5 | Spring Boot repository test | 1 | 1 | | |
+| Cosmos DB, Spring Boot 4 | Spring Boot repository test | 1 | 1 | | |
 
 Skipped tests, both expected:
 
@@ -91,207 +94,227 @@ Skipped tests, both expected:
 Service Bus passes every messaging test, including the ones other providers skip: duplicate detection
 and delayed delivery.
 
-**Key Vault timing.** In this run the driver still waited for Key Vault's long-running delete and
-recovery operations, so `deletedNamesCanBeReused` took 5.0s inside the API. The waits have since been
-removed (see the findings and the run history).
+**Key Vault timing.** The driver no longer waits for Key Vault's long-running deletes: `deletedNamesCanBeReused`
+took 3.5s, the kit retrying while the name was still being deleted (see the findings).
+
+The repository kit and the Spring Boot repository test run on the `items` and `items-sorted` containers,
+through `halyx-spring-data-document`. Cosmos DB needs no index beyond its default indexing.
 
 ### Per-test results
 
 <details>
-<summary>Blob Storage — BlobStore: 74/75 passed, 201.5s</summary>
+<summary>Blob Storage — BlobStore: 74/75 passed, 138.2s</summary>
 
 | Test | Result | Time (s) |
 |---|---|---|
-| `abortedPresignedUploadCreatesNoBlob` | passed | 0.30 |
-| `closingTheStreamInsideWriteDoesNotCommitEarly` | passed | 0.11 |
-| `contentEncodingIsStoredAndBytesAreReturnedUnchanged` | passed | 0.11 |
-| `copyDuplicatesContentAndKeepsSource` | passed | 0.33 |
-| `copyMissingSourceThrowsNotFound` | passed | 0.07 |
-| `copyPreservesHttpHeaders` | passed | 0.28 |
-| `defaultTierIsHot` | passed | 0.14 |
-| `deleteAllRemovesEveryKeyIncludingMissingOnes` | passed | 0.53 |
-| `deleteAllSpansSeveralProviderBatches` | passed | 16.71 |
+| `abortedPresignedUploadCreatesNoBlob` | passed | 0.27 |
+| `closingTheStreamInsideWriteDoesNotCommitEarly` | passed | 0.12 |
+| `contentEncodingIsStoredAndBytesAreReturnedUnchanged` | passed | 0.14 |
+| `copyDuplicatesContentAndKeepsSource` | passed | 0.37 |
+| `copyMissingSourceThrowsNotFound` | passed | 0.05 |
+| `copyPreservesHttpHeaders` | passed | 0.35 |
+| `defaultTierIsHot` | passed | 0.12 |
+| `deleteAllRemovesEveryKeyIncludingMissingOnes` | passed | 0.45 |
+| `deleteAllSpansSeveralProviderBatches` | passed | 17.64 |
 | `deleteAllWithNoKeys` | passed | 0.00 |
-| `deleteIfMatchOnMissingBlobFails` | passed | 0.21 |
+| `deleteIfMatchOnMissingBlobFails` | passed | 0.19 |
 | `deleteIfMatchWithCurrentETagDeletes` | passed | 0.20 |
-| `deleteIfMatchWithStaleETagFails` | passed | 0.22 |
+| `deleteIfMatchWithStaleETagFails` | passed | 0.21 |
 | `deleteMissingBlobIsIdempotent` | passed | 0.06 |
-| `deleteRemovesBlob` | passed | 0.21 |
-| `downloadWritesCompleteFile(Path)` | passed | 3.62 |
-| `emptyBlobRoundTrips` | passed | 0.15 |
-| `failedWriteKeepsExistingBlob` | passed | 7.09 |
-| `failedWriteStoresNothing` | passed | 5.42 |
-| `getMissingBlobThrowsNotFound` | passed | 0.07 |
-| `getReturnsMetadataWithContent` | passed | 0.11 |
-| `getWithStaleETagThrowsPreconditionFailed` | passed | 0.20 |
+| `deleteRemovesBlob` | passed | 0.26 |
+| `downloadWritesCompleteFile(Path)` | passed | 3.98 |
+| `emptyBlobRoundTrips` | passed | 0.17 |
+| `failedWriteKeepsExistingBlob` | passed | 3.49 |
+| `failedWriteStoresNothing` | passed | 4.77 |
+| `getMissingBlobThrowsNotFound` | passed | 0.06 |
+| `getReturnsMetadataWithContent` | passed | 0.15 |
+| `getWithStaleETagThrowsPreconditionFailed` | passed | 0.17 |
 | `headMissingBlobReturnsEmpty` | passed | 0.11 |
-| `headReturnsSizeAndLastModified` | passed | 0.10 |
-| `ifMatchWithCurrentETagSucceeds` | passed | 0.17 |
-| `ifMatchWithStaleETagThrowsPreconditionFailed` | passed | 0.29 |
-| `ifNotExistsCreatesMissingBlob` | passed | 0.14 |
-| `ifNotExistsRejectsExistingBlob` | passed | 0.18 |
-| `listAllStreamsEveryBlob` | passed | 0.58 |
-| `listEmptyPrefixReturnsNothing` | passed | 0.06 |
-| `listFiltersByPrefix` | passed | 0.23 |
-| `listPaginatesInKeyOrder` | passed | 2.78 |
-| `listSummariesCarrySize` | passed | 0.13 |
-| `listWithDelimiterGroupsKeysIntoPrefixes` | passed | 0.48 |
-| `listWithDelimiterPaginatesOverItemsAndPrefixes` | passed | 0.58 |
+| `headReturnsSizeAndLastModified` | passed | 0.13 |
+| `ifMatchWithCurrentETagSucceeds` | passed | 0.19 |
+| `ifMatchWithStaleETagThrowsPreconditionFailed` | passed | 0.26 |
+| `ifNotExistsCreatesMissingBlob` | passed | 0.11 |
+| `ifNotExistsRejectsExistingBlob` | passed | 0.20 |
+| `listAllStreamsEveryBlob` | passed | 0.59 |
+| `listEmptyPrefixReturnsNothing` | passed | 0.07 |
+| `listFiltersByPrefix` | passed | 0.28 |
+| `listPaginatesInKeyOrder` | passed | 2.60 |
+| `listSummariesCarrySize` | passed | 0.10 |
+| `listWithDelimiterGroupsKeysIntoPrefixes` | passed | 0.42 |
+| `listWithDelimiterPaginatesOverItemsAndPrefixes` | passed | 0.49 |
 | `listWithoutDelimiterReturnsNoPrefixes` | passed | 0.11 |
-| `openEndedRangeReadsToEnd` | passed | 0.12 |
-| `parallelReadReassemblesRangesInOrder` | passed | 7.64 |
-| `parallelReadValidatesChecksum` | passed | 4.57 |
+| `openEndedRangeReadsToEnd` | passed | 0.10 |
+| `parallelReadReassemblesRangesInOrder` | passed | 5.68 |
+| `parallelReadValidatesChecksum` | passed | 3.76 |
 | `presignWithoutCapabilityIsRejected` | skipped | 0.00 |
-| `presignedDownloadUrlDownloadsBlob` | passed | 0.33 |
-| `presignedMultipartUploadAssemblesPartsInOrder` | passed | 14.49 |
-| `presignedUploadUrlReplacesExistingBlob` | passed | 0.37 |
-| `presignedUploadUrlUploadsBlob` | passed | 0.26 |
-| `presignedUploadWithContentTypeSetsContentType` | passed | 0.68 |
-| `presignedUrlReportsExpiry` | passed | 0.07 |
-| `putFromFile(Path)` | passed | 0.14 |
+| `presignedDownloadUrlDownloadsBlob` | passed | 0.32 |
+| `presignedMultipartUploadAssemblesPartsInOrder` | passed | 14.18 |
+| `presignedUploadUrlReplacesExistingBlob` | passed | 0.34 |
+| `presignedUploadUrlUploadsBlob` | passed | 0.30 |
+| `presignedUploadWithContentTypeSetsContentType` | passed | 0.64 |
+| `presignedUrlReportsExpiry` | passed | 0.05 |
+| `putFromFile(Path)` | passed | 0.12 |
 | `putFromStream` | passed | 0.13 |
-| `putLargeFile(Path)` | passed | 13.25 |
-| `putOverwritesExistingBlob` | passed | 0.23 |
-| `putReturnsETagMatchingHead` | passed | 0.15 |
-| `putSmallUnknownLengthStream` | passed | 0.12 |
-| `putStoresContentTypeAndUserMetadata` | passed | 0.12 |
-| `putStoresStandardHttpHeaders` | passed | 0.14 |
-| `putThenGetRoundTripsContent` | passed | 0.11 |
-| `putUnknownLengthStream` | passed | 10.13 |
-| `putWithTierStoresTier` | passed | 0.24 |
-| `rangeReadReturnsSlice` | passed | 0.14 |
+| `putLargeFile(Path)` | passed | 14.40 |
+| `putOverwritesExistingBlob` | passed | 0.16 |
+| `putReturnsETagMatchingHead` | passed | 0.12 |
+| `putSmallUnknownLengthStream` | passed | 0.17 |
+| `putStoresContentTypeAndUserMetadata` | passed | 0.14 |
+| `putStoresStandardHttpHeaders` | passed | 0.11 |
+| `putThenGetRoundTripsContent` | passed | 0.17 |
+| `putUnknownLengthStream` | passed | 8.12 |
+| `putWithTierStoresTier` | passed | 0.19 |
+| `rangeReadReturnsSlice` | passed | 0.13 |
 | `setTierChangesTierButNotContent` | passed | 0.28 |
-| `setTierToCurrentTierIsANoOp` | passed | 0.42 |
-| `storedChecksumsMatchTheContent` | passed | 0.10 |
+| `setTierToCurrentTierIsANoOp` | passed | 0.35 |
+| `storedChecksumsMatchTheContent` | passed | 0.11 |
 | `unwrapUnknownTypeThrows` | passed | 0.00 |
-| `updateMetadataKeepsTier` | passed | 0.40 |
-| `updateMetadataOfMissingBlobThrowsNotFound` | passed | 0.06 |
-| `updateMetadataReplacesHeadersAndMetadataButNotContent` | passed | 0.44 |
-| `updateMetadataWithStaleETagFails` | passed | 0.20 |
-| `validatedFileAndStreamUploads(Path)` | passed | 1.12 |
-| `validatedLargeFileUploadRoundTrips(Path)` | passed | 25.08 |
-| `validatedPutStoresAChecksumThatValidatesOnDownload` | passed | 0.19 |
-| `validatedWriteInParts` | passed | 16.09 |
-| `writeEmptyBlob` | passed | 0.12 |
-| `writeExactMultipleOfPartSize` | passed | 21.51 |
-| `writeInPartsWithIfNotExistsRejectsExistingBlob` | passed | 7.05 |
-| `writeLargeBlobInParts` | passed | 32.76 |
-| `writeSmallBlobInOneRequest` | passed | 0.16 |
+| `updateMetadataKeepsTier` | passed | 0.37 |
+| `updateMetadataOfMissingBlobThrowsNotFound` | passed | 0.05 |
+| `updateMetadataReplacesHeadersAndMetadataButNotContent` | passed | 0.54 |
+| `updateMetadataWithStaleETagFails` | passed | 0.15 |
+| `validatedFileAndStreamUploads(Path)` | passed | 1.21 |
+| `validatedLargeFileUploadRoundTrips(Path)` | passed | 6.79 |
+| `validatedPutStoresAChecksumThatValidatesOnDownload` | passed | 0.16 |
+| `validatedWriteInParts` | passed | 7.47 |
+| `writeEmptyBlob` | passed | 0.11 |
+| `writeExactMultipleOfPartSize` | passed | 16.03 |
+| `writeInPartsWithIfNotExistsRejectsExistingBlob` | passed | 7.83 |
+| `writeLargeBlobInParts` | passed | 8.31 |
+| `writeSmallBlobInOneRequest` | passed | 0.20 |
 
 </details>
 
 <details>
-<summary>Cosmos DB — DocumentStore: 23/23 passed, 26.8s</summary>
+<summary>Cosmos DB — DocumentStore: 23/23 passed, 18.3s</summary>
 
 | Test | Result | Time (s) |
 |---|---|---|
-| `checksGuardATransactionWithoutWriting` | passed | 0.39 |
-| `concurrentIncrementsAreNotLost` | passed | 1.45 |
-| `decimalsRoundTripAsNumbers` | passed | 0.15 |
-| `deleteReportsWhetherAnItemWasRemoved` | passed | 0.47 |
-| `expiredItemsAreNeverReturned` | passed | 3.85 |
-| `failedConditionRollsBackTheWholeTransaction` | passed | 1.09 |
-| `getAllReturnsWhatExistsAcrossBatches` | passed | 0.99 |
+| `checksGuardATransactionWithoutWriting` | passed | 0.45 |
+| `concurrentIncrementsAreNotLost` | passed | 1.15 |
+| `decimalsRoundTripAsNumbers` | passed | 0.18 |
+| `deleteReportsWhetherAnItemWasRemoved` | passed | 0.56 |
+| `expiredItemsAreNeverReturned` | passed | 3.69 |
+| `failedConditionRollsBackTheWholeTransaction` | passed | 0.60 |
+| `getAllReturnsWhatExistsAcrossBatches` | passed | 0.83 |
 | `ifNotExistsCreatesOnlyOnce` | passed | 0.40 |
-| `indexQueryFindsItemsAcrossPartitionsInSortOrder` | passed | 7.42 |
-| `indexQueryPagesThroughManyMatches` | passed | 1.58 |
-| `indexWithoutSortAttributeFindsEveryMatch` | passed | 0.56 |
+| `indexQueryFindsItemsAcrossPartitionsInSortOrder` | passed | 1.14 |
+| `indexQueryPagesThroughManyMatches` | passed | 1.44 |
+| `indexWithoutSortAttributeFindsEveryMatch` | passed | 0.31 |
 | `invalidKeysAndReservedFieldsAreRejected` | passed | 0.00 |
-| `keysWithSpecialCharactersRoundTrip` | passed | 0.66 |
-| `missingItemIsEmpty` | passed | 0.26 |
-| `putAndGetRoundTripsEveryValueType` | passed | 0.37 |
+| `keysWithSpecialCharactersRoundTrip` | passed | 0.78 |
+| `missingItemIsEmpty` | passed | 0.24 |
+| `putAndGetRoundTripsEveryValueType` | passed | 0.19 |
 | `putReplacesTheWholeItem` | passed | 0.20 |
-| `queryPagesThroughLargePartitions` | passed | 4.22 |
-| `queryReturnsAPartitionInSortOrder` | passed | 1.01 |
-| `transactionAppliesEveryWriteTogether` | passed | 0.66 |
+| `queryPagesThroughLargePartitions` | passed | 3.31 |
+| `queryReturnsAPartitionInSortOrder` | passed | 1.08 |
+| `transactionAppliesEveryWriteTogether` | passed | 0.59 |
 | `transactionsStayWithinOnePartition` | passed | 0.00 |
-| `updateNeedsAnExistingItemAndTheRightVersion` | passed | 0.46 |
-| `updateSetsRemovesAndIncrements` | passed | 0.20 |
-| `versionsGuardConcurrentWrites` | passed | 0.41 |
+| `updateNeedsAnExistingItemAndTheRightVersion` | passed | 0.49 |
+| `updateSetsRemovesAndIncrements` | passed | 0.23 |
+| `versionsGuardConcurrentWrites` | passed | 0.44 |
 
 </details>
 
 <details>
-<summary>Service Bus — messaging: 16/16 passed, 128.8s</summary>
+<summary>Cosmos DB — Spring Data repositories: 10/10 passed, 14.0s</summary>
 
 | Test | Result | Time (s) |
 |---|---|---|
-| `ackedMessageIsNotRedelivered` | passed | 9.69 |
-| `binaryBodiesArriveUnchanged` | passed | 2.13 |
-| `claimCheckSendsLargeBodiesThroughBlobStorage` | passed | 4.10 |
-| `delayedMessageIsHeldBack` | passed | 5.07 |
-| `extendedLeaseKeepsMessageHidden` | passed | 61.84 |
-| `listenerAcksSuccessesAndRetriesFailures` | passed | 12.06 |
-| `listenerLimitsConcurrency` | passed | 3.50 |
-| `nackedMessageIsRedelivered` | passed | 2.09 |
-| `orderingKeyDeliversEachKeyInOrder` | passed | 4.09 |
-| `publishAllDeliversEveryMessage` | passed | 6.49 |
-| `publishedMessageArrivesWithBodyAndAttributes` | passed | 1.88 |
-| `queuesWorkPointToPoint` | passed | 1.39 |
-| `repeatedDeduplicationIdIsDeliveredOnce` | passed | 4.99 |
-| `reservedAttributesAndUnsupportedControlsAreRejected` | passed | 1.38 |
-| `settlingTwiceIsRejected` | passed | 1.49 |
-| `unsettledMessageReturnsAfterItsLease` | passed | 6.66 |
+| `indexQueriesAcrossPartitions` | passed | 1.18 |
+| `indexWithoutASortAttribute` | passed | 0.63 |
+| `partitionQueriesInSortKeyOrderEitherWay` | passed | 0.90 |
+| `savedEntitiesReadBackWithTheirVersion` | passed | 0.26 |
+| `sortKeyConditions` | passed | 1.41 |
+| `staleVersionsAndTakenIdsAreRejected` | passed | 7.33 |
+| `streamsReadLazily` | passed | 0.37 |
+| `unversionedEntitiesAreSavedInBatchesAndOverwritten` | passed | 0.66 |
+| `uuidKeysAndStringIds` | passed | 0.35 |
+| `windowsScrollThroughAPartition` | passed | 0.86 |
 
 </details>
 
 <details>
-<summary>Key Vault — ParameterStore: 22/22 passed, 55.1s</summary>
+<summary>Service Bus — Publisher / Subscription: 16/16 passed, 128.5s</summary>
 
 | Test | Result | Time (s) |
 |---|---|---|
-| `cachedReadsAreServedUntilRefresh` | passed | 2.27 |
-| `deleteIsIdempotent` | passed | 1.95 |
-| `deletedNamesCanBeReused` | passed | 5.00 |
-| `earlierVersionsCanBeRead` | passed | 2.16 |
-| `getAllDoesNotMatchPartialSegments` | passed | 5.32 |
-| `getAllReturnsEverythingBelowAPrefix` | passed | 6.99 |
-| `invalidNamesAreRejected` | passed | 0.29 |
-| `jsonFieldsCanBeRead` | passed | 2.38 |
-| `largeValues` | passed | 1.75 |
-| `missingIsEmptyAndRequireFails` | passed | 0.61 |
-| `nativeNamesAreUsedAsTheyAre` | passed | 2.37 |
-| `plainValuesHaveNoFields` | passed | 1.86 |
-| `putReplacesWithANewVersion` | passed | 1.96 |
-| `putThenGet` | passed | 2.12 |
+| `ackedMessageIsNotRedelivered` | passed | 9.67 |
+| `binaryBodiesArriveUnchanged` | passed | 1.64 |
+| `claimCheckSendsLargeBodiesThroughBlobStorage` | passed | 3.81 |
+| `delayedMessageIsHeldBack` | passed | 5.31 |
+| `extendedLeaseKeepsMessageHidden` | passed | 61.91 |
+| `listenerAcksSuccessesAndRetriesFailures` | passed | 12.23 |
+| `listenerLimitsConcurrency` | passed | 3.43 |
+| `nackedMessageIsRedelivered` | passed | 1.86 |
+| `orderingKeyDeliversEachKeyInOrder` | passed | 3.89 |
+| `publishAllDeliversEveryMessage` | passed | 6.93 |
+| `publishedMessageArrivesWithBodyAndAttributes` | passed | 1.65 |
+| `queuesWorkPointToPoint` | passed | 1.61 |
+| `repeatedDeduplicationIdIsDeliveredOnce` | passed | 4.78 |
+| `reservedAttributesAndUnsupportedControlsAreRejected` | passed | 1.10 |
+| `settlingTwiceIsRejected` | passed | 1.83 |
+| `unsettledMessageReturnsAfterItsLease` | passed | 6.86 |
+
+</details>
+
+<details>
+<summary>Key Vault — ParameterStore: 22/22 passed, 29.9s</summary>
+
+| Test | Result | Time (s) |
+|---|---|---|
+| `cachedReadsAreServedUntilRefresh` | passed | 1.08 |
+| `deleteIsIdempotent` | passed | 1.27 |
+| `deletedNamesCanBeReused` | passed | 3.50 |
+| `earlierVersionsCanBeRead` | passed | 1.02 |
+| `getAllDoesNotMatchPartialSegments` | passed | 1.93 |
+| `getAllReturnsEverythingBelowAPrefix` | passed | 2.41 |
+| `invalidNamesAreRejected` | passed | 0.28 |
+| `jsonFieldsCanBeRead` | passed | 1.19 |
+| `largeValues` | passed | 0.76 |
+| `missingIsEmptyAndRequireFails` | passed | 0.74 |
+| `nativeNamesAreUsedAsTheyAre` | passed | 1.21 |
+| `plainValuesHaveNoFields` | passed | 0.81 |
+| `putReplacesWithANewVersion` | passed | 0.98 |
+| `putThenGet` | passed | 1.13 |
 | `reportsKindAndProvider` | passed | 0.22 |
-| `statisticsCountCacheHits` | passed | 1.89 |
-| `storesAreIsolatedByPrefix` | passed | 2.73 |
-| `typedReads` | passed | 1.36 |
-| `valuesKeepSpecialCharactersAndLines` | passed | 1.54 |
-| `watchReportsAddedUpdatedAndRemovedValues` | passed | 5.16 |
-| `watchedChangesInvalidateTheCache` | passed | 3.22 |
-| `writesInvalidateTheirOwnCache` | passed | 1.97 |
+| `statisticsCountCacheHits` | passed | 0.96 |
+| `storesAreIsolatedByPrefix` | passed | 1.81 |
+| `typedReads` | passed | 0.87 |
+| `valuesKeepSpecialCharactersAndLines` | passed | 0.76 |
+| `watchReportsAddedUpdatedAndRemovedValues` | passed | 3.58 |
+| `watchedChangesInvalidateTheCache` | passed | 2.25 |
+| `writesInvalidateTheirOwnCache` | passed | 1.16 |
 
 </details>
 
 <details>
-<summary>App Configuration — ParameterStore: 21/22 passed, 18.1s</summary>
+<summary>App Configuration — ParameterStore: 21/22 passed, 16.5s</summary>
 
 | Test | Result | Time (s) |
 |---|---|---|
-| `cachedReadsAreServedUntilRefresh` | passed | 0.89 |
-| `deleteIsIdempotent` | passed | 0.89 |
-| `deletedNamesCanBeReused` | passed | 0.91 |
+| `cachedReadsAreServedUntilRefresh` | passed | 0.62 |
+| `deleteIsIdempotent` | passed | 0.90 |
+| `deletedNamesCanBeReused` | passed | 0.98 |
 | `earlierVersionsCanBeRead` | skipped | 0.00 |
-| `getAllDoesNotMatchPartialSegments` | passed | 0.98 |
-| `getAllReturnsEverythingBelowAPrefix` | passed | 1.35 |
-| `invalidNamesAreRejected` | passed | 0.17 |
-| `jsonFieldsCanBeRead` | passed | 0.98 |
-| `largeValues` | passed | 0.83 |
-| `missingIsEmptyAndRequireFails` | passed | 0.55 |
-| `nativeNamesAreUsedAsTheyAre` | passed | 0.73 |
-| `plainValuesHaveNoFields` | passed | 0.56 |
-| `putReplacesWithANewVersion` | passed | 0.73 |
-| `putThenGet` | passed | 0.79 |
-| `reportsKindAndProvider` | passed | 0.19 |
-| `statisticsCountCacheHits` | passed | 0.58 |
-| `storesAreIsolatedByPrefix` | passed | 0.89 |
-| `typedReads` | passed | 0.71 |
-| `valuesKeepSpecialCharactersAndLines` | passed | 0.55 |
-| `watchReportsAddedUpdatedAndRemovedValues` | passed | 2.94 |
-| `watchedChangesInvalidateTheCache` | passed | 1.37 |
-| `writesInvalidateTheirOwnCache` | passed | 0.50 |
+| `getAllDoesNotMatchPartialSegments` | passed | 1.11 |
+| `getAllReturnsEverythingBelowAPrefix` | passed | 1.15 |
+| `invalidNamesAreRejected` | passed | 0.15 |
+| `jsonFieldsCanBeRead` | passed | 0.88 |
+| `largeValues` | passed | 0.59 |
+| `missingIsEmptyAndRequireFails` | passed | 0.47 |
+| `nativeNamesAreUsedAsTheyAre` | passed | 0.57 |
+| `plainValuesHaveNoFields` | passed | 0.48 |
+| `putReplacesWithANewVersion` | passed | 0.67 |
+| `putThenGet` | passed | 0.68 |
+| `reportsKindAndProvider` | passed | 0.16 |
+| `statisticsCountCacheHits` | passed | 0.50 |
+| `storesAreIsolatedByPrefix` | passed | 1.18 |
+| `typedReads` | passed | 0.55 |
+| `valuesKeepSpecialCharactersAndLines` | passed | 0.56 |
+| `watchReportsAddedUpdatedAndRemovedValues` | passed | 2.27 |
+| `watchedChangesInvalidateTheCache` | passed | 1.46 |
+| `writesInvalidateTheirOwnCache` | passed | 0.55 |
 
 </details>
 
@@ -425,7 +448,7 @@ take effect.
 | Run id | Scope | Result | Teardown | Notes |
 |---|---|---|---|---|
 | `r26101120222893` | tier 1 | 150 passed, 1 failed, 6 errors, 2 skipped | clean (checked by hand) | Cosmos: patch returned no document (`NullPointerException`), and ids escaped with `%` couldn't be read back. Blob: `InvalidMetadata` for the name `schema-version`. The final check failed outright: the script passed `--subscription` before the `az` command. It reported `CHECK FAILED` instead of "nothing left", and a manual check found nothing. |
-| `r26101120508d84` | tier 1 | **156/158, 2 skipped** | clean | Latest result, above. |
+| `r26101120508d84` | tier 1 | **156/158, 2 skipped** | clean | |
 | `r26101121415f6f` | tier 1, Key Vault | **22/22** | clean | Key Vault waits removed from the driver; the kit retries via `deleteLag()`. `deletedNamesCanBeReused` took 4.2s. One transient error on a pooled connection to the vault made `missingIsEmptyAndRequireFails` take 43.8s while the SDK retried (0.6s in the run before). |
 | `r26101122061ed2` | tier 2 | not run | clean | Creating the PostgreSQL flexible server failed with `InternalServerError` (no detail) on Azure's side; the subscription isn't restricted (`OfferRestricted` is disabled, Burstable available). Retried unchanged. |
 | `r2610112224c642` | tier 3 | **52/52** | clean | Latest tier 3 result, above, on the first run. |
@@ -440,6 +463,7 @@ take effect.
 | `r2610161112d440` | tier 4 with idempotence on, plus Spring Boot 3 and 4 | kit 24/25, 1 skipped; Spring 0/2 | clean | Idempotence declared and on by default; the ordering tests pass with it. Both Spring tests created their topics through `kafkaClientProperties`, then failed on a SpEL expression in the test's `@KafkaListener`. |
 | `r2610161121e9c0` | tier 4, Kafka 4.2.1 clients, idempotence on | **24/25, 1 skipped** | clean | |
 | `r2610161144379f` | tier 4, plus Spring Boot 3 and 4 | **24/25, 1 skipped; Spring 2/2** | clean | Latest tier 4 result, above. |
+| `r26101612477b26` | tier 1, plus Spring Data repositories and Spring Boot 3 and 4 | **166/168, 2 skipped; Spring 2/2** | clean | Latest tier 1 result, above. Repositories 10/10 on Cosmos DB. |
 
 ## What real Azure found
 

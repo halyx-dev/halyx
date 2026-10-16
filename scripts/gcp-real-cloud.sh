@@ -276,3 +276,15 @@ mvn -o verify -pl halyx-gcp -Dit.test="${IT_TEST:-RealGcpIT}" -Dtest=none -Dsure
     -Dhalyx.real.gcp.region="$REGION" \
     -Dhalyx.real.gcp.bucket="$(terraform -chdir="$TF_DIR" output -raw bucket)" \
     -Dhalyx.real.gcp.firestore-database="$(terraform -chdir="$TF_DIR" output -raw firestore_database)"
+status=$?
+[[ -n "${IT_TEST:-}" ]] && exit $status
+# Spring Boot 3 and 4: an auto-configured repository on the run's table with a sort key.
+mvn -o -q install -DskipTests -pl halyx-spring-boot-autoconfigure -am || exit 1
+for module in halyx-spring-boot-autoconfigure halyx-spring-boot4-tests; do
+  log "Running the Spring Boot repository test ($module) against real GCP"
+  mvn -o verify -pl "$module" -Dit.test=RealSpringRepositoryIT -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+      -Dhalyx.real.spring.repositories=true -Dhalyx.real.spring.provider=gcp \
+      -Dhalyx.real.spring.table="items-sorted" \
+      -Dhalyx.real.spring.provider-properties="gcp.project-id=$PROJECT,gcp.firestore.database=$(terraform -chdir="$TF_DIR" output -raw firestore_database)" || status=1
+done
+exit $status

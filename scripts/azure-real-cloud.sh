@@ -220,3 +220,15 @@ mvn -o verify -pl halyx-azure -Dit.test="${IT_TEST:-RealAzureIT}" -Dtest=none -D
     -Dhalyx.real.azure.cosmos-endpoint="$(terraform -chdir="$TF_DIR" output -raw cosmos_endpoint)" \
     -Dhalyx.real.azure.key-vault-url="$(terraform -chdir="$TF_DIR" output -raw key_vault_url)" \
     -Dhalyx.real.azure.appconfig-endpoint="$(terraform -chdir="$TF_DIR" output -raw appconfig_endpoint)"
+status=$?
+[[ -n "${IT_TEST:-}" ]] && exit $status
+# Spring Boot 3 and 4: an auto-configured repository on the run's table with a sort key.
+mvn -o -q install -DskipTests -pl halyx-spring-boot-autoconfigure -am || exit 1
+for module in halyx-spring-boot-autoconfigure halyx-spring-boot4-tests; do
+  log "Running the Spring Boot repository test ($module) against real Azure"
+  mvn -o verify -pl "$module" -Dit.test=RealSpringRepositoryIT -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+      -Dhalyx.real.spring.repositories=true -Dhalyx.real.spring.provider=azure \
+      -Dhalyx.real.spring.table="items-sorted" \
+      -Dhalyx.real.spring.provider-properties="azure.cosmos.endpoint=$(terraform -chdir="$TF_DIR" output -raw cosmos_endpoint),azure.cosmos.database=halyx" || status=1
+done
+exit $status
