@@ -19,6 +19,7 @@ import dev.halyx.spring.data.document.DocumentRepository;
 import dev.halyx.spring.data.document.DocumentTable;
 
 import org.springframework.data.repository.config.RepositoryConfigurationExtensionSupport;
+import org.springframework.data.repository.core.RepositoryMetadata;
 
 import java.lang.annotation.Annotation;
 import java.util.Collection;
@@ -50,5 +51,11 @@ public class HalyxRepositoryConfigurationExtension extends RepositoryConfigurati
     @Override
     protected Collection<Class<?>> getIdentifyingTypes() {
         return List.of(DocumentRepository.class);
+    }
+
+    /** Reactive repository interfaces are left to {@link HalyxReactiveRepositoryConfigurationExtension}. */
+    @Override
+    protected boolean useRepositoryConfiguration(RepositoryMetadata metadata) {
+        return !metadata.isReactiveRepository();
     }
 }

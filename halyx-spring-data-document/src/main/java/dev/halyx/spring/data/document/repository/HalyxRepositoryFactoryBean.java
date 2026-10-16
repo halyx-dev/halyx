@@ -16,7 +16,6 @@
 package dev.halyx.spring.data.document.repository;
 
 import dev.halyx.nosql.DocumentStore;
-import dev.halyx.spring.data.document.DocumentTable;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.BeanFactory;
 import org.springframework.beans.factory.ListableBeanFactory;
@@ -24,7 +23,6 @@ import org.springframework.data.repository.Repository;
 import org.springframework.data.repository.core.support.RepositoryFactoryBeanSupport;
 import org.springframework.data.repository.core.support.RepositoryFactorySupport;
 
-import java.util.Arrays;
 
 /**
  * Creates a repository bean. Each entity's document store is the {@code DocumentStore} bean named by its
@@ -54,20 +52,6 @@ public class HalyxRepositoryFactoryBean<R extends Repository<T, ID>, T, ID>
     }
 
     private DocumentStore store(Class<?> entity) {
-        DocumentTable table = entity.getAnnotation(DocumentTable.class);
-        String[] names = beans.getBeanNamesForType(DocumentStore.class);
-        if (table != null) {
-            if (!Arrays.asList(names).contains(table.value())) {
-                throw new IllegalStateException(entity.getName() + " is stored in document store '" + table.value()
-                        + "', but there is no DocumentStore bean of that name. DocumentStore beans: "
-                        + Arrays.toString(names));
-            }
-            return beans.getBean(table.value(), DocumentStore.class);
-        }
-        if (names.length != 1) {
-            throw new IllegalStateException(entity.getName() + " needs @DocumentTable(\"<bean name>\"): there are "
-                    + names.length + " DocumentStore beans " + Arrays.toString(names));
-        }
-        return beans.getBean(names[0], DocumentStore.class);
+        return DocumentStores.forEntity(beans, entity);
     }
 }

@@ -66,7 +66,7 @@ final class PartTreeDocumentQuery<T extends Record> implements RepositoryQuery {
             Part.Type.STARTING_WITH, Part.Type.GREATER_THAN, Part.Type.GREATER_THAN_EQUAL, Part.Type.LESS_THAN,
             Part.Type.LESS_THAN_EQUAL, Part.Type.AFTER, Part.Type.BEFORE);
 
-    private enum Kind { LIST, STREAM, WINDOW, SINGLE, EXISTS }
+    enum Kind { LIST, STREAM, WINDOW, SINGLE, EXISTS }
 
     private final QueryMethod method;
     private final DocumentStore store;
@@ -84,6 +84,14 @@ final class PartTreeDocumentQuery<T extends Record> implements RepositoryQuery {
     private final Kind kind;
 
     PartTreeDocumentQuery(QueryMethod method, DocumentStore store, EntityModel<T> model) {
+        this(method, store, model, null);
+    }
+
+    /**
+     * @param reactiveKind for a reactive repository, the kind its return type asks for: STREAM for a Flux, WINDOW
+     *                     for a Mono of a Window, SINGLE for any other Mono; null to take it from the method
+     */
+    PartTreeDocumentQuery(QueryMethod method, DocumentStore store, EntityModel<T> model, Kind reactiveKind) {
         this.method = method;
         this.store = store;
         this.model = model;
@@ -182,6 +190,11 @@ final class PartTreeDocumentQuery<T extends Record> implements RepositoryQuery {
         }
         if (tree.isExistsProjection()) {
             this.kind = Kind.EXISTS;
+        } else if (reactiveKind != null) {
+            if (reactiveKind == Kind.WINDOW && !parameters.hasScrollPositionParameter()) {
+                throw invalid("a Window needs a ScrollPosition parameter");
+            }
+            this.kind = reactiveKind;
         } else if (method.isScrollQuery()) {
             if (!parameters.hasScrollPositionParameter()) {
                 throw invalid("a Window needs a ScrollPosition parameter");
@@ -199,6 +212,10 @@ final class PartTreeDocumentQuery<T extends Record> implements RepositoryQuery {
         if (kind != Kind.WINDOW && parameters.hasScrollPositionParameter()) {
             throw invalid("a ScrollPosition parameter needs a Window return type");
         }
+    }
+
+    Kind kind() {
+        return kind;
     }
 
     @Override

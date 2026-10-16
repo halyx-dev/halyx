@@ -41,6 +41,11 @@
             <groupId>dev.halyx</groupId>
             <artifactId>halyx-spring-data-document</artifactId>
         </dependency>
+        <!-- The reactive repository kit runs on halyx-reactor -->
+        <dependency>
+            <groupId>dev.halyx</groupId>
+            <artifactId>halyx-reactor</artifactId>
+        </dependency>
 
         <!-- Compile scope: the TCK is a test library consumed by provider modules. -->
         <dependency>
@@ -50,6 +55,10 @@
         <dependency>
             <groupId>org.assertj</groupId>
             <artifactId>assertj-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.projectreactor</groupId>
+            <artifactId>reactor-test</artifactId>
         </dependency>
     </dependencies>
 </project>
