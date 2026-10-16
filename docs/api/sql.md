@@ -145,6 +145,11 @@ close with the Halyx context. R2DBC connects to a host, so on Google Cloud use t
 the Cloud SQL connector (`gcp.sql.instance`). Other clients can get the same endpoint and login from
 `CloudContext.sqlEndpoint(config)`.
 
+**Reactor Netty versions.** The R2DBC drivers depend on `reactor-netty-core`, and the Azure SDK on
+`reactor-netty-http`. The two must be the same version, or the Azure SDK fails with
+`IncompatibleClassChangeError`. Spring Boot manages both. Without Boot, import `io.projectreactor:reactor-bom`
+in your build, or pin both modules to one version.
+
 ## Spring Boot
 
 Every `halyx.databases.<name>` entry becomes a `DataSource` bean, covered by Spring Boot's JDBC health

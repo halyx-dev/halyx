@@ -164,7 +164,18 @@ if [[ "$TIER" == 2 ]]; then
       -Dhalyx.real.azure.sql.principal-name="$(terraform -chdir="$TF_DIR" output -raw principal_name)" \
       -Dhalyx.real.azure.sql.postgres-host="$(terraform -chdir="$TF_DIR" output -raw postgres_host)" \
       -Dhalyx.real.azure.sql.sql-host="$(terraform -chdir="$TF_DIR" output -raw sql_host)"
-  exit $?
+  status=$?
+  [[ -n "${IT_TEST:-}" ]] && exit $status
+  # Spring Boot 3 and 4: Spring Data R2DBC over halyx.r2dbc-databases, logging in to PostgreSQL with the identity.
+  mvn -o -q install -DskipTests -pl halyx-spring-boot-autoconfigure -am || exit 1
+  for module in halyx-spring-boot-autoconfigure halyx-spring-boot4-tests; do
+    log "Running the Spring Boot R2DBC test ($module) against real Azure"
+    mvn -o verify -pl "$module" -Dit.test=RealSpringR2dbcIT -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+        -Dhalyx.real.spring.r2dbc=true -Dhalyx.real.spring.provider=azure \
+        -Dhalyx.real.spring.r2dbc.host="$(terraform -chdir="$TF_DIR" output -raw postgres_host)" \
+        -Dhalyx.real.spring.r2dbc.user="$(terraform -chdir="$TF_DIR" output -raw principal_name)" || status=1
+  done
+  exit $status
 fi
 if [[ "$TIER" == 3 ]]; then
   log "Waiting for the access policy assignment to take effect"

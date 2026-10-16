@@ -87,6 +87,22 @@
             <artifactId>halyx-tck</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- R2DBC logins in the real-cloud SQL tests -->
+        <dependency>
+            <groupId>dev.halyx</groupId>
+            <artifactId>halyx-r2dbc</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>r2dbc-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.asyncer</groupId>
+            <artifactId>r2dbc-mysql</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>testcontainers</artifactId>

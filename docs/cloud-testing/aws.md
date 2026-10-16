@@ -14,7 +14,7 @@ the `halyx_test` IAM user. Every run creates its own throwaway resources and del
 | Tier | Services | Latest result |
 |---|---|---|
 | [1](#tier-1-latest-result) | S3, DynamoDB, SSM Parameter Store, Secrets Manager, SNS, SQS; Spring Data repositories and Spring Boot on DynamoDB | 179/182 passed, 1 failed (SSM watch), 2 skipped (expected); Spring **2/2** |
-| [2](#tier-2-latest-result) | RDS for PostgreSQL and MySQL with IAM auth | **12/12** |
+| [2](#tier-2-latest-result) | RDS for PostgreSQL and MySQL with IAM auth; R2DBC and Spring Data R2DBC | **16/16**; Spring **2/2** |
 | [3](#tier-3-latest-result) | ElastiCache for Valkey with IAM auth | 52/53: the IAM policy still needs checking |
 | [4](#tier-4-not-run) | Streams on MSK Serverless with IAM | not run: the test account's Free plan doesn't allow MSK |
 
@@ -343,20 +343,23 @@ Terraform (`infra/aws/tier2`) creates RDS for PostgreSQL 17 and RDS for MySQL 8.
 
 | | |
 |---|---|
-| Date | 2026-10-11, 04:14–04:23 UTC |
-| Run id | `r26101115149618` |
+| Date | 2026-10-16: PostgreSQL in run `r261016153806f5` (04:38–05:14 UTC), MySQL in run `r261016162844ff` (05:28–05:37 UTC) |
+| Run id | `r261016153806f5` and `r261016162844ff` |
 | Engines | PostgreSQL 17, MySQL 8.4 |
-| Result | **BUILD SUCCESS**: 12 passed, 0 failed |
-| Teardown | instances, security group and subnet group destroyed; state deleted; check: **nothing left** |
+| Result | 16 passed, 0 failed (JDBC 12, R2DBC 4), across the two runs; Spring Boot R2DBC test passed on Boot 3 and 4 |
+| Teardown | instances, security group and subnet group destroyed; state deleted; check: **nothing left** after both runs |
 
 | Test | PostgreSQL | MySQL |
 |---|---|---|
-| `loginLatency`: runs first and times each login (see below); a warm token login must take under 3s | passed | passed |
-| `passwordLoginRunsQueriesOverTls`: master password login, and the session is encrypted | passed (1.2s) | passed (1.2s) |
-| `iamTokenLoginRunsQueriesOverTls`: `SqlAuth.iam("halyx_iam")` runs queries as `halyx_iam` over TLS, and the pool reports healthy | passed (9.4s) | passed (10.2s) |
-| `replacedConnectionsLogInAgainWithTokens`: three rounds of filling the pool, then evicting it, with every new connection signing in by token | passed (9.7s) | passed (8.9s) |
+| `loginLatency`: runs first and times each login (see below); a warm token login must take under 3s | passed (13.8s) | passed (17.4s) |
+| `passwordLoginRunsQueriesOverTls`: master password login, and the session is encrypted | passed (0.9s) | passed (1.4s) |
+| `iamTokenLoginRunsQueriesOverTls`: `SqlAuth.iam("halyx_iam")` runs queries as `halyx_iam` over TLS, and the pool reports healthy | passed (1.7s) | passed (1.5s) |
+| `replacedConnectionsLogInAgainWithTokens`: three rounds of filling the pool, then evicting it, with every new connection signing in by token | passed (10.2s) | passed (10.5s) |
 | `tokenDoesNotLogInAUserNotEnabledForIam`: a token for `halyx_password_only` is rejected, and the pool reports unhealthy | passed (2.6s) | passed (2.5s) |
-| `wrongPasswordDoesNotLogIn` | passed (1.4s) | passed (1.6s) |
+| `wrongPasswordDoesNotLogIn` | passed (1.3s) | passed (1.3s) |
+| `r2dbcIamLoginRunsQueriesOverTls`: R2DBC (`halyx-r2dbc`), `SqlAuth.iam("halyx_iam")`: runs as `halyx_iam`, over TLS | passed (0.9s) | passed (0.9s) |
+| `r2dbcTokenDoesNotLogInAUserNotEnabledForIam`: R2DBC: a token for `halyx_password_only` is refused | passed (0.8s) | passed (1.7s) |
+| Spring Data R2DBC over `halyx.r2dbc-databases` with RDS IAM, Spring Boot 3.5 and 4 | passed, passed | — |
 
 TLS is checked on the server side: `pg_stat_ssl` for the session on PostgreSQL, and `Ssl_version` on
 MySQL. It isn't inferred from the client settings. The per-test times above come from the earlier run
@@ -532,13 +535,16 @@ The reports come back into each module's `target/failsafe-reports`.
 | `r26101114370e5e` | tier 1, Secrets Manager | 22/22 | clean | The waits were removed from the driver. Writing a name that is still being deleted now fails with `UnavailableException`, and the kit retries via `deleteLag()`. `deletedNamesCanBeReused` took 18.2s, which is how long AWS took to finish that delete. |
 | `r26101114471b0c` | tier 2 | not run | clean (subnet group deleted) | Stopped at `terraform apply`: no `ec2:CreateSecurityGroup` permission. |
 | `r2610111453e0bc` | tier 2 | 10/10 | clean | The first IAM login took about 9s, which led to the latency investigation. |
-| `r26101115149618` | tier 2 | **12/12** | clean | Latest tier 2 result. `loginLatency` added: the slow first token login also happens with plain JDBC, so the cost is on the RDS side. |
+| `r26101115149618` | tier 2 | **12/12** | clean | Login latency above is from this run. `loginLatency` added: the slow first token login also happens with plain JDBC, so the cost is on the RDS side. |
 | `r26101115384945` | tier 1, DynamoDB | 23/23 | clean | DynamoDB batches no longer sleep and resend unprocessed items; they throw `ThrottledException`. |
 | `r2610111548cee8` | tier 3 | not run | clean | Stopped at `terraform apply`. The account is on the Free Tier plan, which can't launch `t4g.nano` (bastion moved to `t4g.micro`), and Valkey refuses password-free users (the `default` user now gets a random password). |
 | `r26101115542175` | tier 3 | 5/53 | clean | Every connection failed: Lettuce resolved the cache's name with Netty's DNS client, which ignores the JVM hosts file, so nothing went through the tunnel. Led to `redis.dns-resolver=jdk`. The bastion showed in the tagging index after termination, so the check now looks at instances and volumes directly. |
 | `r2610111628619f` | tier 3 | **52/53** | clean | Latest tier 3 result, above. The IAM user without `Connect` permission was let in. |
 | — | tier 4 | not run | nothing created | Checked before a run: with the tier 4 policy attached, `kafka:ListClustersV2` is still denied by the Free plan's service control policy. |
 | `r261016123896d3` | tier 1, plus Spring Data repositories and Spring Boot 3 and 4 | 179 passed, 1 failed, 2 skipped; Spring 2/2 | clean | Latest tier 1 result, above. Repositories 10/10 on DynamoDB. SSM `watchReportsAddedUpdatedAndRemovedValues` failed once: a change notification without the expected update. |
+| `r26101614545224` | tier 2, plus R2DBC and Spring Boot 3 and 4 | 8 passed, 8 errors; Spring 0/2 | clean | Every IAM login refused, over JDBC and R2DBC alike: the test user's `rds-db:connect` statement still named the database user from before the rename (`cirrus_iam`). Fixed in the policy. |
+| `r261016153806f5` | tier 2, plus R2DBC and Spring Boot 3 and 4 | PostgreSQL **8/8**; MySQL 4 passed, 4 errors; Spring **2/2** | clean | Latest tier 2 PostgreSQL result, above. PostgreSQL's IAM logins passed, over JDBC and R2DBC, and so did Spring Data R2DBC. MySQL still refused `halyx_iam`'s tokens, over JDBC too; its instance took 26m 45s to create. Not explained. |
+| `r261016162844ff` | tier 2, MySQL only | **8/8** | clean | MySQL tests only (`IT_TEST='RealAwsSqlIT$MySql'`): every login passed, on an instance ready in 5m 5s. Latest tier 2 MySQL result, above. |
 
 ## What real AWS found
 

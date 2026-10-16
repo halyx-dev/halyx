@@ -14,7 +14,7 @@ the `halyx-test` service account, impersonated through Application Default Crede
 | Tier | Services | Latest result |
 |---|---|---|
 | [1](#tier-1-latest-result) | Cloud Storage, Firestore, Pub/Sub, Secret Manager, Parameter Manager; Spring Data repositories and Spring Boot on Firestore | **186/189** passed, 3 skipped (expected); Spring **2/2** |
-| [2](#tier-2-latest-result) | Cloud SQL for PostgreSQL and MySQL with IAM auth, direct and through the Cloud SQL connector | **18/18** |
+| [2](#tier-2-latest-result) | Cloud SQL for PostgreSQL and MySQL with IAM auth, direct and through the Cloud SQL connector; R2DBC and Spring Data R2DBC | **22/22**; Spring **2/2** |
 | [3](#tier-3-latest-result) | Memorystore for Valkey with IAM auth and TLS (private CA) | **54/54** |
 | [4](#tier-4-latest-result) | Streams on Managed Service for Apache Kafka with Google IAM, from a runner inside the VPC, plus Spring Boot 3 and 4 | **25/25**; Spring **2/2** |
 
@@ -355,25 +355,30 @@ with no privileges there; see the findings below.
 
 | | |
 |---|---|
-| Date | 2026-10-11, 07:59–08:21 UTC (22 min: PostgreSQL ready in 11m 34s, MySQL in 16m 14s, tests 1m 57s, teardown about 4 min) |
-| Run id | `r2610111859cad1` |
+| Date | 2026-10-16, 04:18–04:36 UTC (18 min: PostgreSQL ready in 12m 13s, MySQL in 12m 43s) |
+| Run id | `r2610161518d9f9` |
 | Engines | PostgreSQL 17, MySQL 8.4 |
-| Result | **BUILD SUCCESS**: 18 passed, 0 failed |
+| Result | **BUILD SUCCESS**: 22 passed, 0 failed (JDBC 18, R2DBC 4); Spring Boot R2DBC test passed on Boot 3 and 4 |
 | Teardown | instances (with their databases and users) destroyed; state deleted; check: **nothing left** |
 
 | Test | PostgreSQL | MySQL |
 |---|---|---|
-| `loginLatency`: runs first and times each login (see below); a warm direct-token login must take under 3s | passed (6.1s) | passed (35.1s) |
-| `passwordLoginRunsQueriesOverTls`: direct, and the server reports the session encrypted | passed (0.9s) | passed (3.3s) |
-| `iamLoginWithDerivedUserRunsQueriesOverTls`: `SqlAuth.iam()` derives the user from the service account | passed (1.3s) | passed (17.7s) |
-| `iamLoginWithExplicitUser`: `SqlAuth.iam("<user>")` | passed (1.2s) | passed (4.3s) |
-| `connectorIamLogin`: `gcp.sql.instance` through the Cloud SQL Java connector, no host or authorized network | passed (0.9s) | passed (4.1s) |
-| `connectorPasswordLogin` | passed (1.1s) | passed (1.4s) |
-| `replacedConnectionsLogInAgainWithTokens`: three rounds of filling the pool, then evicting it | passed (6.8s) | passed (13.9s) |
-| `tokenDoesNotLogInAUserNotEnabledForIam`: a token for `halyx_password_only` is rejected | passed (3.1s) | passed (2.9s) |
-| `wrongPasswordDoesNotLogIn` | passed (1.3s) | passed (2.0s) |
+| `loginLatency`: runs first and times each login (see below); a warm direct-token login must take under 3s | passed (16.6s) | passed (7.0s) |
+| `passwordLoginRunsQueriesOverTls`: direct, and the server reports the session encrypted | passed (0.9s) | passed (1.0s) |
+| `iamLoginWithDerivedUserRunsQueriesOverTls`: `SqlAuth.iam()` derives the user from the service account | passed (1.4s) | passed (1.4s) |
+| `iamLoginWithExplicitUser`: `SqlAuth.iam("<user>")` | passed (1.3s) | passed (1.3s) |
+| `connectorIamLogin`: `gcp.sql.instance` through the Cloud SQL Java connector, no host or authorized network | passed (1.0s) | passed (1.0s) |
+| `connectorPasswordLogin` | passed (1.3s) | passed (1.2s) |
+| `replacedConnectionsLogInAgainWithTokens`: three rounds of filling the pool, then evicting it | passed (6.9s) | passed (7.3s) |
+| `tokenDoesNotLogInAUserNotEnabledForIam`: a token for `halyx_password_only` is rejected | passed (3.1s) | passed (3.1s) |
+| `wrongPasswordDoesNotLogIn` | passed (1.3s) | passed (1.3s) |
+| `r2dbcIamLoginWithDerivedUserRunsQueriesOverTls`: R2DBC (`halyx-r2dbc`), `SqlAuth.iam()` with the user derived from the service account, over TLS | passed (1.4s) | passed (1.4s) |
+| `r2dbcThroughTheConnectorIsRefused`: R2DBC needs a host: `gcp.sql.instance` is refused, saying so | passed (0.0s) | passed (0.0s) |
+| Spring Data R2DBC over `halyx.r2dbc-databases` with Cloud SQL IAM, Spring Boot 3.5 and 4 | passed, passed | — |
 
 ### Login latency
+
+From run `r2610111859cad1`, the last one that timed logins.
 
 Times per new connection, in the order they ran, on newly created instances:
 
@@ -584,12 +589,13 @@ nothing to fix.
 | `r2610111704a192` | tier 1 | 176 passed, 1 failed, 1 error, 3 skipped | clean (checked by hand) | Pub/Sub `orderingKeyDeliversEachKeyInOrder` and Cloud Storage `updateMetadataWithStaleETagFails` failed (see below). The regional Parameter Manager check failed with a misleading `PERMISSION_DENIED`, and the script took the failure as empty. |
 | `r2610111748599e` | tier 1 | **176/179, 3 skipped** | clean | |
 | `r26101118357636` | tier 2 | 13/18 | clean | PostgreSQL 9/9. MySQL's five IAM tests logged in, then were refused the `app` database: IAM users have no privileges until granted. |
-| `r2610111859cad1` | tier 2 | **18/18** | clean | Latest tier 2 result, above. The test now grants the MySQL IAM user `SELECT` on `app`. |
+| `r2610111859cad1` | tier 2 | **18/18** | clean | The test now grants the MySQL IAM user `SELECT` on `app`. Login latency above is from this run. |
 | `r261011193814e3` | tier 3 | **54/54** | clean | Latest tier 3 result, above, on the first run. Teardown took about 20 min: the VPC can only go once Memorystore's delete has finished. |
 | `r261016095774dd` | tier 4 | **25/25** | clean | The first run. Cluster created in 24m 7s. |
 | `r2610161130d877` | tier 4, plus Spring Boot 3 and 4 | **25/25; Spring 2/2** | clean | Latest tier 4 result, above. |
 | `r26101613087031` | tier 1, plus Spring Data repositories and Spring Boot 3 and 4 | 186/189, 3 skipped; Spring 0/2 | clean | Repositories 10/10 on Firestore. The Spring test compared whole records: Firestore keeps decimals as doubles, so a `BigDecimal` of 10 read back as 10.0, and the records weren't `equals`. The test now compares the value; the guide says so. |
 | `r26101613452b74` | tier 1, plus Spring Data repositories and Spring Boot 3 and 4 | **186/189, 3 skipped; Spring 2/2** | clean | Latest tier 1 result, above, after renaming the module to `halyx-spring-data-document`. |
+| `r2610161518d9f9` | tier 2, plus R2DBC and Spring Boot 3 and 4 | **22/22; Spring 2/2** | clean | Latest tier 2 result, above. R2DBC's IAM login passed on both engines first time. |
 
 ## What real GCP found
 

@@ -268,7 +268,18 @@ if [[ "$TIER" == 2 ]]; then
       -Dhalyx.real.gcp.sql.mysql-host="$(terraform -chdir="$TF_DIR" output -raw mysql_host)" \
       -Dhalyx.real.gcp.sql.postgres-instance="$(terraform -chdir="$TF_DIR" output -raw postgres_instance)" \
       -Dhalyx.real.gcp.sql.mysql-instance="$(terraform -chdir="$TF_DIR" output -raw mysql_instance)"
-  exit $?
+  status=$?
+  [[ -n "${IT_TEST:-}" ]] && exit $status
+  # Spring Boot 3 and 4: Spring Data R2DBC over halyx.r2dbc-databases, logging in to PostgreSQL with the identity.
+  mvn -o -q install -DskipTests -pl halyx-spring-boot-autoconfigure -am || exit 1
+  for module in halyx-spring-boot-autoconfigure halyx-spring-boot4-tests; do
+    log "Running the Spring Boot R2DBC test ($module) against real GCP"
+    mvn -o verify -pl "$module" -Dit.test=RealSpringR2dbcIT -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+        -Dhalyx.real.spring.r2dbc=true -Dhalyx.real.spring.provider=gcp \
+        -Dhalyx.real.spring.r2dbc.host="$(terraform -chdir="$TF_DIR" output -raw postgres_host)" \
+        -Dhalyx.real.spring.provider-properties="gcp.project-id=$PROJECT" || status=1
+  done
+  exit $status
 fi
 log "Running the conformance kits against real GCP"
 mvn -o verify -pl halyx-gcp -Dit.test="${IT_TEST:-RealGcpIT}" -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \

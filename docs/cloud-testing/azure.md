@@ -14,7 +14,7 @@ the `halyx-test` service principal. Every run creates its own throwaway resource
 | Tier | Services | Latest result |
 |---|---|---|
 | [1](#tier-1-latest-result) | Blob Storage, Cosmos DB, Service Bus, Key Vault, App Configuration (Entra ID only); Spring Data repositories and Spring Boot on Cosmos DB | **166/168** passed, 2 skipped (expected); Spring **2/2** |
-| [2](#tier-2-latest-result) | Azure Database for PostgreSQL and Azure SQL with Entra ID login | **11/11** |
+| [2](#tier-2-latest-result) | Azure Database for PostgreSQL and Azure SQL with Entra ID login; R2DBC and Spring Data R2DBC on PostgreSQL | **13/13**; Spring **2/2** |
 | [3](#tier-3-latest-result) | Azure Managed Redis with Entra ID (access keys off) | **52/52** |
 | [4](#tier-4-latest-result) | Event Hubs through its Kafka endpoint, with Entra ID (shared access keys off), plus Spring Boot 3 and 4 | **24/25** passed, 1 skipped (expected); Spring **2/2** |
 
@@ -340,25 +340,30 @@ which only a directory admin can grant. Left out by choice for now.
 
 | | |
 |---|---|
-| Date | 2026-10-11, 11:36–11:49 UTC (13 min: PostgreSQL ready in 6m 4s, Azure SQL in under 4 min, tests 45s) |
-| Run id | `r26101122362e30` |
+| Date | 2026-10-16, 05:14–05:28 UTC (14 min: PostgreSQL ready in 6m 3s, Azure SQL in under 4 min) |
+| Run id | `r26101616140f08` |
 | Engines | PostgreSQL 16 (flexible server), Azure SQL Database (Basic) |
-| Result | **BUILD SUCCESS**: 11 passed, 0 failed |
+| Result | **BUILD SUCCESS**: 13 passed, 0 failed (JDBC 11, R2DBC 2); Spring Boot R2DBC test passed on Boot 3 and 4 |
 | Teardown | resource group destroyed; state deleted; check: **nothing left** |
 
 | Test | PostgreSQL | Azure SQL |
 |---|---|---|
-| `loginLatency`: runs first; a warm Entra login must take under 3s | passed (6.0s) | passed (2.0s) |
-| `entraLoginRunsQueriesOverTls`: the server reports the session encrypted (`pg_stat_ssl` / `sys.dm_exec_connections.encrypt_option`) | passed (1.0s) | passed (0.9s) |
-| `replacedConnectionsLogInAgainWithTokens` | passed (5.2s) | passed (4.5s) |
-| `entraLoginIsThePrincipalsRole`: `current_user` is `halyx-test` | passed (9.4s) | — |
-| `passwordLoginRunsQueriesOverTls`: the password admin, over TLS | passed (2.5s) | — |
+| `loginLatency`: runs first; a warm Entra login must take under 3s | passed (2.3s) | passed (4.6s) |
+| `entraLoginRunsQueriesOverTls`: the server reports the session encrypted (`pg_stat_ssl` / `sys.dm_exec_connections.encrypt_option`) | passed (1.1s) | passed (1.0s) |
+| `replacedConnectionsLogInAgainWithTokens` | passed (5.2s) | passed (4.7s) |
+| `entraLoginIsThePrincipalsRole`: `current_user` is `halyx-test` | passed (0.9s) | — |
+| `passwordLoginRunsQueriesOverTls`: the password admin, over TLS | passed (0.9s) | — |
 | `tokenDoesNotLogInARoleThatIsNotAnEntraPrincipal`: a token for `halyx_admin` is refused | passed (6.8s) | — |
-| `wrongPasswordDoesNotLogIn` | passed (3.4s) | — |
-| `sqlPasswordLoginIsRefusedOnAnEntraOnlyServer` | — | passed (2.5s) |
+| `wrongPasswordDoesNotLogIn` | passed (3.3s) | — |
+| `sqlPasswordLoginIsRefusedOnAnEntraOnlyServer` | — | passed (2.6s) |
+| `r2dbcEntraLoginRunsQueriesOverTls`: R2DBC (`halyx-r2dbc`) with Entra ID tokens: runs as `halyx-test`, over TLS | passed (0.9s) | — |
+| `r2dbcTokenDoesNotLogInARoleThatIsNotAnEntraPrincipal`: R2DBC: a token for `halyx_admin` is refused | passed (5.0s) | — |
+| Spring Data R2DBC over `halyx.r2dbc-databases` with Entra ID, Spring Boot 3.5 and 4 | passed, passed | — |
 
 On Azure SQL the service principal's session runs as `<application id>@<tenant id>`
 (`SUSER_SNAME()`). The token is the driver's `accessToken` property, with no username.
+
+Login latency, from run `r26101122362e30`, the last one that timed logins:
 
 | Entra login, per new connection | PostgreSQL | Azure SQL |
 |---|---|---|
@@ -452,7 +457,7 @@ take effect.
 | `r26101121415f6f` | tier 1, Key Vault | **22/22** | clean | Key Vault waits removed from the driver; the kit retries via `deleteLag()`. `deletedNamesCanBeReused` took 4.2s. One transient error on a pooled connection to the vault made `missingIsEmptyAndRequireFails` take 43.8s while the SDK retried (0.6s in the run before). |
 | `r26101122061ed2` | tier 2 | not run | clean | Creating the PostgreSQL flexible server failed with `InternalServerError` (no detail) on Azure's side; the subscription isn't restricted (`OfferRestricted` is disabled, Burstable available). Retried unchanged. |
 | `r2610112224c642` | tier 3 | **52/52** | clean | Latest tier 3 result, above, on the first run. |
-| `r26101122362e30` | tier 2 | **11/11** | clean | Latest tier 2 result, above. The same configuration succeeded on retry. |
+| `r26101122362e30` | tier 2 | **11/11** | clean | The same configuration succeeded on retry. |
 | `r2610121824c199` | tier 4 | not run | clean | Terraform couldn't assign Azure Event Hubs Data Owner: the principal's role-assignment condition allowed only tier 1's four roles. `azure-setup-test-principal.sh` now allows it, and updates the condition on rerun. |
 | `r26101218310076` | tier 4 | 18 passed, 2 failed, 4 errors, 1 skipped | clean (the check printed `STILL PRESENT` for a stray newline; checked by hand, and the scripts now ignore whitespace) | Records with the same key arrived out of order: `[7, 10, …, 58, 1, 4]`. The last four topic creations failed with `PolicyViolationException`. `latestStartSkipsEarlierRecords` raced the consumer's first fetch. |
 | `r26101218441879` | tier 4 | 21 passed, 1 failed, 2 errors, 1 skipped | clean | Order fixed. A transactional producer failed in Event Hubs' `FindCoordinator` instead of with `UnsupportedFeatureException`. Topic creation still refused after about twenty, with two alive. |
@@ -464,6 +469,8 @@ take effect.
 | `r2610161121e9c0` | tier 4, Kafka 4.2.1 clients, idempotence on | **24/25, 1 skipped** | clean | |
 | `r2610161144379f` | tier 4, plus Spring Boot 3 and 4 | **24/25, 1 skipped; Spring 2/2** | clean | Latest tier 4 result, above. |
 | `r26101612477b26` | tier 1, plus Spring Data repositories and Spring Boot 3 and 4 | **166/168, 2 skipped; Spring 2/2** | clean | Latest tier 1 result, above. Repositories 10/10 on Cosmos DB. |
+| `r261016150465a1` | tier 2, plus R2DBC and Spring Boot 3 and 4 | 4 passed, 6 errors, 1 failure; Spring 2/2 | clean | Every Entra ID login in `halyx-azure`'s tests failed with `IncompatibleClassChangeError`: the R2DBC driver brought `reactor-netty-core` 1.1 next to the Azure SDK's `reactor-netty-http` 1.2. The Spring tests, on Boot's managed versions, passed. The build now pins both to one version, and the SQL guide says to align them. |
+| `r26101616140f08` | tier 2, plus R2DBC and Spring Boot 3 and 4 | **13/13; Spring 2/2** | clean | Latest tier 2 result, above. |
 
 ## What real Azure found
 
@@ -476,6 +483,7 @@ The emulators (Floci-az and Microsoft's Service Bus emulator) missed all of thes
 | Azure metadata names must be C# identifiers; `schema-version` is a 400 `InvalidMetadata`. Halyx documented "letters, digits and '-'" as portable | The portable form is now lower-case letters, digits and `_`, starting with a letter. The Azure driver rejects other names with a clear `InvalidArgumentException` before sending anything |
 | Azure SQL's Entra-only servers refuse every SQL login, and an Entra admin can be a service principal, whose session runs as `<application id>@<tenant id>` | Nothing to change: `SqlAuth.iam()` sends the token as `accessToken`, with no username |
 | Key Vault deletes and recoveries are long-running operations, and the driver waited for them (about 2–5s per call) | Removed: `delete` starts the soft delete and returns. Writing a name that is soft-deleted, or still being deleted or recovered, throws the retryable `UnavailableException`, and starts recovery if the name was soft-deleted. Applications retry; the kit does so through `deleteLag()` |
+| R2DBC drivers depend on `reactor-netty-core`, the Azure SDK on `reactor-netty-http`. Maven picked 1.1 of one and 1.2 of the other, and every Entra ID token request failed with `IncompatibleClassChangeError` | The build pins both modules to one version. Spring Boot applications get matching versions from Boot; others should import `reactor-bom`, as the SQL guide says |
 
 Event Hubs' Kafka endpoint found these:
 

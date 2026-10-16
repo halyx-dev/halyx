@@ -190,7 +190,18 @@ if [[ "$TIER" == 2 ]]; then
       -Dhalyx.real.aws.sql.postgres-host="$(terraform -chdir="$TF_DIR" output -raw postgres_host)" \
       -Dhalyx.real.aws.sql.mysql-host="$(terraform -chdir="$TF_DIR" output -raw mysql_host)" \
       -Dhalyx.real.aws.sql.master-user="$(terraform -chdir="$TF_DIR" output -raw master_user)"
-  exit $?
+  status=$?
+  [[ -n "${IT_TEST:-}" ]] && exit $status
+  # Spring Boot 3 and 4: Spring Data R2DBC over halyx.r2dbc-databases, logging in to PostgreSQL with the identity.
+  mvn -o -q install -DskipTests -pl halyx-spring-boot-autoconfigure -am || exit 1
+  for module in halyx-spring-boot-autoconfigure halyx-spring-boot4-tests; do
+    log "Running the Spring Boot R2DBC test ($module) against real AWS"
+    mvn -o verify -pl "$module" -Dit.test=RealSpringR2dbcIT -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+        -Dhalyx.real.spring.r2dbc=true -Dhalyx.real.spring.provider=aws \
+        -Dhalyx.real.spring.r2dbc.host="$(terraform -chdir="$TF_DIR" output -raw postgres_host)" \
+        -Dhalyx.real.spring.r2dbc.user=halyx_iam || status=1
+  done
+  exit $status
 fi
 if [[ "$TIER" == 4 ]]; then
   RUNNER="ec2-user@$(terraform -chdir="$TF_DIR" output -raw runner_ip)"

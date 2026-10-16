@@ -28,6 +28,10 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import dev.halyx.Halyx;
 import dev.halyx.CloudContext;
 import dev.halyx.config.ProviderConfig;
+import dev.halyx.r2dbc.R2dbcDatabases;
+import io.r2dbc.pool.ConnectionPool;
+import io.r2dbc.spi.ConnectionFactory;
+import reactor.core.publisher.Mono;
 import dev.halyx.sql.Database;
 import dev.halyx.sql.PoolSettings;
 import dev.halyx.sql.SqlAuth;
@@ -110,6 +114,12 @@ class RealGcpSqlIT {
         }
 
         private Database database(SqlAuth auth, Consumer<SqlConfig.Builder> where) {
+            Database database = gcp().database(config(auth, where));
+            open.add(database);
+            return database;
+        }
+
+        private SqlConfig config(SqlAuth auth, Consumer<SqlConfig.Builder> where) {
             SqlConfig.Builder config = SqlConfig.builder(engine())
                     .name("cloudsql-" + engine().name().toLowerCase())
                     .database("app")
@@ -120,9 +130,30 @@ class RealGcpSqlIT {
                 String[] tls = engine().tlsProperty(); // IAM login turns TLS on itself; ask for it here too
                 config.jdbcProperty(tls[0], tls[1]);
             }
-            Database database = gcp().database(config.build());
-            open.add(database);
-            return database;
+            return config.build();
+        }
+
+        @Test
+        void r2dbcIamLoginWithDerivedUserRunsQueriesOverTls() {
+            boolean postgres = engine() == SqlEngine.POSTGRESQL;
+            ConnectionPool pool = R2dbcDatabases.connectionFactory(gcp(), config(SqlAuth.iam(),
+                    b -> b.host(host()).port(postgres ? 5432 : 3306)));
+            try {
+                assertThat(first(pool, postgres ? "SELECT current_user" : "SELECT SUBSTRING_INDEX(CURRENT_USER(), '@', 1)"))
+                        .isEqualTo(iamUser());
+                assertThat(first(pool, postgres ? "SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()"
+                        : "SELECT VARIABLE_VALUE FROM performance_schema.session_status WHERE VARIABLE_NAME = 'Ssl_version'"))
+                        .as("TLS").isNotBlank().isNotEqualTo("false");
+            } finally {
+                pool.dispose();
+            }
+        }
+
+        @Test
+        void r2dbcThroughTheConnectorIsRefused() {
+            SqlConfig throughConnector = config(SqlAuth.iam(), b -> b.property(GcpProperties.SQL_INSTANCE, instance()));
+            assertThatThrownBy(() -> R2dbcDatabases.connectionFactory(gcp(), throughConnector))
+                    .hasMessageContaining("Cloud SQL connector");
         }
 
         static SqlAuth admin() {
@@ -356,5 +387,14 @@ class RealGcpSqlIT {
                 return rs.getString(1).replaceFirst("@.*$", "");
             }
         }
+    }
+
+    /** The first column of the query's first row, as a string, over a pooled R2DBC connection. */
+    static String first(ConnectionFactory pool, String sql) {
+        return Mono.usingWhen(pool.create(),
+                        c -> Mono.from(c.createStatement(sql).execute())
+                                .flatMap(r -> Mono.from(r.map((row, meta) -> String.valueOf(row.get(0))))),
+                        io.r2dbc.spi.Connection::close)
+                .block(Duration.ofSeconds(60));
     }
 }

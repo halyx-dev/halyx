@@ -28,6 +28,10 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import dev.halyx.Halyx;
 import dev.halyx.CloudContext;
 import dev.halyx.config.ProviderConfig;
+import dev.halyx.r2dbc.R2dbcDatabases;
+import io.r2dbc.pool.ConnectionPool;
+import io.r2dbc.spi.ConnectionFactory;
+import reactor.core.publisher.Mono;
 import dev.halyx.sql.Database;
 import dev.halyx.sql.PoolSettings;
 import dev.halyx.sql.SqlAuth;
@@ -98,6 +102,12 @@ class RealAzureSqlIT {
         }
 
         Database database(SqlAuth auth) {
+            Database database = azure().database(config(auth));
+            open.add(database);
+            return database;
+        }
+
+        SqlConfig config(SqlAuth auth) {
             SqlConfig.Builder config = SqlConfig.builder(engine())
                     .name("azure-" + engine().name().toLowerCase())
                     .host(host())
@@ -109,9 +119,7 @@ class RealAzureSqlIT {
                 String[] tls = engine().tlsProperty(); // Entra login turns TLS on itself; ask for it here too
                 config.jdbcProperty(tls[0], tls[1]);
             }
-            Database database = azure().database(config.build());
-            open.add(database);
-            return database;
+            return config.build();
         }
 
         @AfterAll
@@ -224,6 +232,28 @@ class RealAzureSqlIT {
         }
 
         @Test
+        void r2dbcEntraLoginRunsQueriesOverTls() {
+            ConnectionPool pool = R2dbcDatabases.connectionFactory(azure(), config(entra()));
+            try {
+                assertThat(first(pool, "SELECT current_user")).isEqualTo(PRINCIPAL);
+                assertThat(first(pool, "SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()")).as("TLS")
+                        .isEqualTo("true");
+            } finally {
+                pool.dispose();
+            }
+        }
+
+        @Test
+        void r2dbcTokenDoesNotLogInARoleThatIsNotAnEntraPrincipal() {
+            ConnectionPool pool = R2dbcDatabases.connectionFactory(azure(), config(SqlAuth.iam(PASSWORD_ADMIN)));
+            try {
+                assertThatThrownBy(() -> first(pool, "SELECT 1")).isInstanceOf(RuntimeException.class);
+            } finally {
+                pool.dispose();
+            }
+        }
+
+        @Test
         void entraLoginIsThePrincipalsRole() throws SQLException {
             try (Connection c = database(entra()).dataSource().getConnection(); Statement s = c.createStatement()) {
                 assertThat(currentLogin(s)).isEqualTo(PRINCIPAL);
@@ -299,5 +329,14 @@ class RealAzureSqlIT {
             assertThatThrownBy(() -> database.dataSource().getConnection().close()).isInstanceOf(SQLException.class);
             assertThat(database.isHealthy(2)).isFalse();
         }
+    }
+
+    /** The first column of the query's first row, as a string, over a pooled R2DBC connection. */
+    static String first(ConnectionFactory pool, String sql) {
+        return Mono.usingWhen(pool.create(),
+                        c -> Mono.from(c.createStatement(sql).execute())
+                                .flatMap(r -> Mono.from(r.map((row, meta) -> String.valueOf(row.get(0))))),
+                        io.r2dbc.spi.Connection::close)
+                .block(Duration.ofSeconds(60));
     }
 }

@@ -89,6 +89,11 @@
         <r2dbc-mysql.version>1.4.2</r2dbc-mysql.version>
         <r2dbc-mssql.version>1.0.4.RELEASE</r2dbc-mssql.version>
         <reactor-core.version>3.7.9</reactor-core.version>
+        <!--
+          Reactor Netty's core and HTTP modules must match: the Azure SDK brings reactor-netty-http 1.2, the R2DBC
+          drivers reactor-netty-core 1.1, and a mix fails with IncompatibleClassChangeError.
+        -->
+        <reactor-netty.version>1.2.18</reactor-netty.version>
         <!-- The R2DBC drivers Spring Boot 4.1 manages, for the Boot 4 tests -->
         <r2dbc-postgresql4.version>1.1.2.RELEASE</r2dbc-postgresql4.version>
         <!-- Kafka clients: the version Spring Boot 3.5 manages; applications' Boot BOMs choose their own -->
@@ -234,6 +239,16 @@
                 <groupId>io.projectreactor</groupId>
                 <artifactId>reactor-core</artifactId>
                 <version>${reactor-core.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.projectreactor.netty</groupId>
+                <artifactId>reactor-netty-core</artifactId>
+                <version>${reactor-netty.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.projectreactor.netty</groupId>
+                <artifactId>reactor-netty-http</artifactId>
+                <version>${reactor-netty.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.postgresql</groupId>

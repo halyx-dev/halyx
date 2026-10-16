@@ -29,11 +29,15 @@ import dev.halyx.Halyx;
 import dev.halyx.aws.rds.RdsIamTokens;
 import dev.halyx.CloudContext;
 import dev.halyx.config.ProviderConfig;
+import dev.halyx.r2dbc.R2dbcDatabases;
 import dev.halyx.sql.Database;
 import dev.halyx.sql.PoolSettings;
 import dev.halyx.sql.SqlAuth;
 import dev.halyx.sql.SqlConfig;
 import dev.halyx.sql.SqlEngine;
+import io.r2dbc.pool.ConnectionPool;
+import io.r2dbc.spi.ConnectionFactory;
+import reactor.core.publisher.Mono;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 
 import java.sql.Connection;
@@ -98,11 +102,23 @@ class RealAwsSqlIT {
         /** The user the current connection is logged in as, without any host part. */
         abstract String currentUser(Statement s) throws SQLException;
 
+        /** A query whose first column is the current user, without any host part (for R2DBC). */
+        abstract String userQuery();
+
+        /** A query whose first column is non-empty, and not false, when the connection is encrypted (for R2DBC). */
+        abstract String tlsQuery();
+
         CloudContext aws() {
             return halyx.provider("aws");
         }
 
         Database database(SqlAuth auth) {
+            Database database = aws().database(config(auth));
+            open.add(database);
+            return database;
+        }
+
+        SqlConfig config(SqlAuth auth) {
             SqlConfig.Builder config = SqlConfig.builder(engine())
                     .name("rds-" + engine().name().toLowerCase())
                     .host(host())
@@ -114,9 +130,28 @@ class RealAwsSqlIT {
                 String[] tls = engine().tlsProperty(); // IAM login enforces TLS itself; ask for it here too
                 config.jdbcProperty(tls[0], tls[1]);
             }
-            Database database = aws().database(config.build());
-            open.add(database);
-            return database;
+            return config.build();
+        }
+
+        @Test
+        void r2dbcIamLoginRunsQueriesOverTls() {
+            ConnectionPool pool = R2dbcDatabases.connectionFactory(aws(), config(SqlAuth.iam(IAM_USER)));
+            try {
+                assertThat(first(pool, userQuery())).isEqualTo(IAM_USER);
+                assertThat(first(pool, tlsQuery())).as("TLS").isNotBlank().isNotEqualTo("false");
+            } finally {
+                pool.dispose();
+            }
+        }
+
+        @Test
+        void r2dbcTokenDoesNotLogInAUserNotEnabledForIam() {
+            ConnectionPool pool = R2dbcDatabases.connectionFactory(aws(), config(SqlAuth.iam(NON_IAM_USER)));
+            try {
+                assertThatThrownBy(() -> first(pool, "SELECT 1")).isInstanceOf(RuntimeException.class);
+            } finally {
+                pool.dispose();
+            }
         }
 
         Database master() {
@@ -296,6 +331,16 @@ class RealAwsSqlIT {
                 return rs.getString(1);
             }
         }
+
+        @Override
+        String userQuery() {
+            return "SELECT current_user";
+        }
+
+        @Override
+        String tlsQuery() {
+            return "SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()";
+        }
     }
 
     @Nested
@@ -342,5 +387,24 @@ class RealAwsSqlIT {
                 return rs.getString(1).replaceFirst("@.*$", "");
             }
         }
+
+        @Override
+        String userQuery() {
+            return "SELECT SUBSTRING_INDEX(CURRENT_USER(), '@', 1)";
+        }
+
+        @Override
+        String tlsQuery() {
+            return "SELECT VARIABLE_VALUE FROM performance_schema.session_status WHERE VARIABLE_NAME = 'Ssl_version'";
+        }
+    }
+
+    /** The first column of the query's first row, as a string, over a pooled R2DBC connection. */
+    static String first(ConnectionFactory pool, String sql) {
+        return Mono.usingWhen(pool.create(),
+                        c -> Mono.from(c.createStatement(sql).execute())
+                                .flatMap(r -> Mono.from(r.map((row, meta) -> String.valueOf(row.get(0))))),
+                        io.r2dbc.spi.Connection::close)
+                .block(Duration.ofSeconds(60));
     }
 }

@@ -78,6 +78,23 @@ One API to publish events to the clouds' event routers, and to receive them:
 - [ ] Spring Boot: properties, auto-configuration and health
 - [ ] conformance kit, emulator tests and real-cloud tests
 
+### R2DBC with cloud IAM login
+
+Reactive SQL (`halyx-r2dbc`): a pooled R2DBC `ConnectionFactory` whose new connections log in with the cloud's
+identity, as `Database` does for JDBC, for Spring Data R2DBC and `DatabaseClient`:
+
+- [x] `CloudContext.sqlEndpoint(SqlConfig)`: the host, database, TLS requirement and login a provider uses
+- [x] a pooled `ConnectionFactory` (`r2dbc-pool`) for PostgreSQL and MySQL, logging each new connection in with
+  a current RDS IAM, Entra ID or Cloud SQL IAM token, fetched off the event loop and cached until shortly
+  before it expires; password logins, with rotation, too
+- [x] Spring Boot: `halyx.r2dbc-databases`, `ConnectionFactory` beans that Spring Data R2DBC and `DatabaseClient`
+  use, on Boot 3.5 and 4
+- [x] tests on PostgreSQL and MySQL containers, and real-cloud runs on RDS, Azure Database for PostgreSQL and
+  Cloud SQL, with Spring Data R2DBC on Boot 3 and 4 ([results](cloud-testing/index.md))
+- [ ] the Cloud SQL connector's R2DBC adapters
+
+SQL Server stays password-only over R2DBC: its driver takes no access tokens.
+
 ### Portable Spring Boot microservices
 
 One Spring Boot sample service, built once, that runs unchanged on AWS, Google Cloud and Azure: only its
@@ -110,7 +127,6 @@ no stored keys, and then spread across clouds:
 
 Planned, and prioritised by demand:
 
-- **R2DBC** for reactive Spring Data, with cloud IAM login.
 - **Aurora fast failover** through the AWS Advanced JDBC Wrapper.
 - **Nested field paths** in NoSQL updates.
 - **Cross-instance cache stampede protection**: a single-flight `getOrLoad`.
