@@ -52,6 +52,10 @@
         </dependency>
         <dependency>
             <groupId>com.azure</groupId>
+            <artifactId>azure-messaging-eventgrid-namespaces</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.azure</groupId>
             <artifactId>azure-storage-blob-batch</artifactId>
         </dependency>
         <dependency>

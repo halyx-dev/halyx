@@ -17,7 +17,14 @@ package dev.halyx.azure;
 
 import com.azure.cosmos.CosmosClient;
 import com.azure.cosmos.CosmosClientBuilder;
+import com.azure.core.credential.AzureKeyCredential;
 import com.azure.identity.DefaultAzureCredentialBuilder;
+import com.azure.messaging.eventgrid.namespaces.EventGridReceiverClientBuilder;
+import com.azure.messaging.eventgrid.namespaces.EventGridSenderClientBuilder;
+import dev.halyx.azure.eventgrid.EventGridPublisherDriver;
+import dev.halyx.azure.eventgrid.EventGridSubscriptionDriver;
+import dev.halyx.events.EventBusConfig;
+import dev.halyx.events.spi.EventPublisherDriver;
 import com.azure.messaging.servicebus.ServiceBusClientBuilder;
 import com.azure.messaging.servicebus.models.ServiceBusReceiveMode;
 import com.azure.storage.blob.BlobServiceAsyncClient;
@@ -280,6 +287,17 @@ final class AzureConnection implements ProviderConnection {
         return new CosmosDocumentStoreDriver(cosmos.getDatabase(database).getContainer(table.name()), table);
     }
 
+    /** An Event Grid namespace topic, at the namespace endpoint {@code azure.eventgrid.endpoint}. */
+    @Override
+    public synchronized EventPublisherDriver eventPublisher(EventBusConfig bus) {
+        String endpoint = bus.property(AzureProperties.EVENT_GRID_ENDPOINT).orElseThrow(() -> new IllegalArgumentException(
+                "An Event Grid event bus needs its namespace endpoint: property " + AzureProperties.EVENT_GRID_ENDPOINT));
+        var sender = new EventGridSenderClientBuilder().endpoint(endpoint).topicName(bus.name());
+        bus.property(AzureProperties.EVENT_GRID_ACCESS_KEY).ifPresentOrElse(
+                key -> sender.credential(new AzureKeyCredential(key)), () -> sender.credential(tokenCredential(false)));
+        return new EventGridPublisherDriver(sender.buildClient(), bus.name());
+    }
+
     /** A Service Bus topic, or with {@code azure.servicebus.entity=queue} a queue. */
     @Override
     public synchronized PublisherDriver publisher(TopicConfig topic) {
@@ -300,6 +318,18 @@ final class AzureConnection implements ProviderConnection {
     /** A Service Bus queue, or a topic subscription named {@code <topic>/subscriptions/<subscription>}. */
     @Override
     public synchronized SubscriptionDriver subscription(SubscriptionConfig subscription) {
+        if (subscription.property(AzureProperties.EVENT_GRID_ENDPOINT).isPresent()) {
+            String topic = subscription.topic().orElseThrow(() -> new IllegalArgumentException("An Event Grid pull "
+                    + "subscription needs its namespace topic: SubscriptionConfig.builder(name).topic(topic)"));
+            var receiver = new EventGridReceiverClientBuilder()
+                    .endpoint(subscription.property(AzureProperties.EVENT_GRID_ENDPOINT).orElseThrow())
+                    .topicName(topic).subscriptionName(subscription.name());
+            subscription.property(AzureProperties.EVENT_GRID_ACCESS_KEY).ifPresentOrElse(
+                    key -> receiver.credential(new AzureKeyCredential(key)), () -> receiver.credential(tokenCredential(false)));
+            Duration lock = subscription.property(AzureProperties.EVENT_GRID_LOCK_DURATION).map(Duration::parse)
+                    .orElse(Duration.ofSeconds(60));
+            return new EventGridSubscriptionDriver(receiver.buildClient(), subscription.name(), lock);
+        }
         if (subscription.property(AzureProperties.SERVICE_BUS_SESSIONS).map(Boolean::parseBoolean).orElse(false)) {
             var sessions = serviceBus().sessionReceiver().receiveMode(ServiceBusReceiveMode.PEEK_LOCK)
                     .disableAutoComplete().maxAutoLockRenewDuration(Duration.ZERO);

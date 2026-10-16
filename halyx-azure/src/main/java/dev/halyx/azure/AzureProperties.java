@@ -63,6 +63,19 @@ public final class AzureProperties {
     /** Largest message body in bytes: 262144 (256 KiB) on the standard tier, the default; up to 100 MB on premium. */
     public static final String SERVICE_BUS_MAX_MESSAGE_BYTES = "azure.servicebus.max-message-bytes";
 
+    /**
+     * Event bus and subscription property: the Event Grid namespace's endpoint, such as
+     * {@code https://orders.australiaeast-1.eventgrid.azure.net}. On an event bus, the bus name is the namespace
+     * topic; on a subscription, the name is the pull subscription and {@code topic} its namespace topic.
+     */
+    public static final String EVENT_GRID_ENDPOINT = "azure.eventgrid.endpoint";
+
+    /** Event bus and subscription property: an access key, instead of Entra ID login. */
+    public static final String EVENT_GRID_ACCESS_KEY = "azure.eventgrid.access-key";
+
+    /** Subscription property: the pull subscription's lock duration, ISO-8601 (default PT60S, Event Grid's). */
+    public static final String EVENT_GRID_LOCK_DURATION = "azure.eventgrid.lock-duration";
+
     private AzureProperties() {
     }
 }
