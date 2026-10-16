@@ -77,6 +77,29 @@ One API to publish events to the clouds' event routers, and to receive them:
 - [ ] Spring Boot: properties, auto-configuration and health
 - [ ] conformance kit, emulator tests and real-cloud tests
 
+### Portable Spring Boot microservices
+
+One Spring Boot sample service, built once, that runs unchanged on AWS, Google Cloud and Azure: only its
+configuration says which cloud it is on. It uses each Halyx API (blobs, documents, messaging, streams, caches,
+SQL, parameters and secrets), and the same end-to-end tests run against every deployment.
+
+- [ ] a sample service and its end-to-end tests, with the cloud chosen only by Spring profiles and properties
+- [ ] the same image on each cloud, with no cloud-specific code and no rebuild
+- [ ] the results and any differences between clouds in [Cloud testing](cloud-testing/index.md)
+
+### Microservices on Kubernetes: EKS, GKE and AKS
+
+The portable service on each cloud's managed Kubernetes, logging in with the platform's workload identity and
+no stored keys, and then spread across clouds:
+
+- [ ] **portable:** the same image and Helm chart on EKS (EKS Pod Identity or IRSA), GKE (Workload Identity
+  Federation for GKE) and AKS (Microsoft Entra Workload ID), each using its own cloud's services
+- [ ] **hybrid:** services on one cluster using another cloud's services, for example a pod on GKE reading S3,
+  or a pod on AKS consuming Pub/Sub, through cross-cloud identity federation rather than keys
+- [ ] **hybrid:** one application split across clusters on different clouds, talking through streams or
+  messaging
+- [ ] throwaway clusters per run, with Terraform and the same always-tear-down scripts as the other tiers
+
 ### Real-cloud test follow-ups
 
 - [ ] AWS tier 3: check the ElastiCache `Connect` permission scoping in the test IAM policy
