@@ -44,7 +44,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
+import dev.halyx.events.EventPublisher;
+import dev.halyx.messaging.Subscription;
 import dev.halyx.tck.DocumentRepositoryConformanceTest;
+import dev.halyx.tck.EventBusConformanceTest;
 
 /**
  * The conformance kits against real AWS (tier 1: S3, DynamoDB, SNS, SQS, SSM, Secrets Manager). Runs only with
@@ -59,6 +62,8 @@ class RealAwsIT {
     private static final String BUCKET = System.getProperty("halyx.real.aws.bucket");
     private static final String ITEMS = System.getProperty("halyx.real.aws.items-table");
     private static final String ITEMS_SORTED = System.getProperty("halyx.real.aws.items-sorted-table");
+    private static final String EVENT_BUS = System.getProperty("halyx.real.aws.event-bus");
+    private static final String EVENTS_INBOX = System.getProperty("halyx.real.aws.events-inbox");
 
     private static Halyx halyx;
     private static SnsClient sns;
@@ -123,6 +128,24 @@ class RealAwsIT {
                 table.sortKey("sk");
             }
             return aws().documentStore(indexes(table, sorted).build());
+        }
+    }
+
+    @Nested
+    class EventBridge extends EventBusConformanceTest {
+        private Subscription inbox;
+
+        @Override
+        protected EventPublisher publisher() {
+            return aws().eventPublisher(EVENT_BUS);
+        }
+
+        @Override
+        protected Subscription inbox() {
+            if (inbox == null) {
+                inbox = aws().subscription(EVENTS_INBOX);
+            }
+            return inbox;
         }
     }
 

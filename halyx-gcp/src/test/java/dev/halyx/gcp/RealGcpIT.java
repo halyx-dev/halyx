@@ -26,6 +26,7 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import dev.halyx.Halyx;
 import dev.halyx.CloudContext;
 import dev.halyx.config.ProviderConfig;
+import dev.halyx.events.EventPublisher;
 import dev.halyx.messaging.ClaimCheck;
 import dev.halyx.messaging.SubscriptionConfig;
 import dev.halyx.messaging.TopicConfig;
@@ -35,10 +36,12 @@ import dev.halyx.parameters.ParameterStoreConfig;
 import dev.halyx.storage.BlobStore;
 import dev.halyx.tck.BlobStoreConformanceTest;
 import dev.halyx.tck.DocumentStoreConformanceTest;
+import dev.halyx.tck.EventBusConformanceTest;
 import dev.halyx.tck.MessagingConformanceTest;
 import dev.halyx.tck.ParameterStoreConformanceTest;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -61,6 +64,8 @@ class RealGcpIT {
     private static final String RUN = System.getProperty("halyx.real.gcp.run", "local");
     private static final String BUCKET = System.getProperty("halyx.real.gcp.bucket");
     private static final String DATABASE = System.getProperty("halyx.real.gcp.firestore-database");
+    private static final String MESSAGE_BUS = System.getProperty("halyx.real.gcp.message-bus");
+    private static final String EVENTS_INBOX = System.getProperty("halyx.real.gcp.events-inbox");
 
     private static Halyx halyx;
     private static TopicAdminClient topics;
@@ -181,7 +186,43 @@ class RealGcpIT {
     }
 
     @Nested
+    class Eventarc extends EventBusConformanceTest {
+        private dev.halyx.messaging.Subscription inbox;
+
+        @Override
+        protected EventPublisher publisher() {
+            return gcp().eventPublisher(MESSAGE_BUS);
+        }
+
+        @Override
+        protected dev.halyx.messaging.Subscription inbox() {
+            if (inbox == null) {
+                inbox = gcp().subscription(EVENTS_INBOX);
+            }
+            return inbox;
+        }
+
+        @Override
+        protected Map<String, String> knownEnvironmentGaps() {
+            return Map.of("eventsWithoutDataArrive", "an Eventarc pipeline's publish of an event without data is "
+                    + "refused by Pub/Sub (HTTP 400), so such events never reach the topic");
+        }
+
+        /** A new pipeline can take a minute or two to start delivering. */
+        @Override
+        protected Duration timeout() {
+            return Duration.ofSeconds(120);
+        }
+    }
+
+    @Nested
     class SecretManager extends ParameterStoreConformanceTest {
+        /** Secret Manager's latest alias is eventually consistent; only reads by version number are strong. */
+        @Override
+        protected Duration overwriteLag() {
+            return Duration.ofSeconds(30);
+        }
+
         @Override
         protected CloudContext context() {
             return gcp();

@@ -82,7 +82,7 @@ if [[ "$TIER" == 3 || "$TIER" == 4 ]]; then
   SSH_OPTS=(-i "$WORK/key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new
             -o UserKnownHostsFile="$WORK/known_hosts" -o ConnectTimeout=10 -o BatchMode=yes)
 fi
-if [[ "$TIER" == 4 ]]; then
+if [[ "$TIER" == 1 || "$TIER" == 4 ]]; then
   TF_VARS+=(-var "service_account=$IMPERSONATE")
 fi
 if [[ "$TIER" == 2 ]]; then
@@ -167,6 +167,12 @@ teardown() {
   left+=$(check topics "${GCLOUD[@]}" pubsub topics list --filter="name~/halyx-$RUN-" --format='value(name)')
   left+=$(check subscriptions "${GCLOUD[@]}" pubsub subscriptions list --filter="name~/halyx-$RUN-" --format='value(name)')
   left+=$(check secrets "${GCLOUD[@]}" secrets list --filter="name~/secrets/tck- AND createTime>=$START" --format='value(name)')
+  if [[ "$TIER" == 1 ]]; then
+    for kind in message-buses pipelines enrollments; do
+      left+=$(check "Eventarc $kind" "${GCLOUD[@]}" eventarc "$kind" list --location="$REGION" \
+          --filter="name~/halyx-$RUN\$" --format='value(name)')
+    done
+  fi
   if [[ "$TIER" == 3 ]]; then
     left+=$(check Memorystore "${GCLOUD[@]}" memorystore instances list --location="$REGION" \
         --filter="name~/halyx-$RUN\$" --format='value(name)')
@@ -281,21 +287,25 @@ if [[ "$TIER" == 2 ]]; then
   done
   exit $status
 fi
+MESSAGE_BUS=$(terraform -chdir="$TF_DIR" output -raw message_bus)
+EVENTS_INBOX=$(terraform -chdir="$TF_DIR" output -raw events_inbox)
 log "Running the conformance kits against real GCP"
 mvn -o verify -pl halyx-gcp -Dit.test="${IT_TEST:-RealGcpIT}" -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
     -Dhalyx.real.gcp=true -Dhalyx.real.gcp.run="$RUN" -Dhalyx.real.gcp.project="$PROJECT" \
     -Dhalyx.real.gcp.region="$REGION" \
     -Dhalyx.real.gcp.bucket="$(terraform -chdir="$TF_DIR" output -raw bucket)" \
-    -Dhalyx.real.gcp.firestore-database="$(terraform -chdir="$TF_DIR" output -raw firestore_database)"
+    -Dhalyx.real.gcp.firestore-database="$(terraform -chdir="$TF_DIR" output -raw firestore_database)" \
+    -Dhalyx.real.gcp.message-bus="$MESSAGE_BUS" -Dhalyx.real.gcp.events-inbox="$EVENTS_INBOX"
 status=$?
 [[ -n "${IT_TEST:-}" ]] && exit $status
-# Spring Boot 3 and 4: an auto-configured repository on the run's table with a sort key.
+# Spring Boot 3 and 4: an auto-configured repository on the run's table with a sort key, and the event bus.
 mvn -o -q install -DskipTests -pl halyx-spring-boot-autoconfigure -am || exit 1
 for module in halyx-spring-boot-autoconfigure halyx-spring-boot4-tests; do
-  log "Running the Spring Boot repository test ($module) against real GCP"
-  mvn -o verify -pl "$module" -Dit.test=RealSpringRepositoryIT -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
-      -Dhalyx.real.spring.repositories=true -Dhalyx.real.spring.provider=gcp \
+  log "Running the Spring Boot repository and event tests ($module) against real GCP"
+  mvn -o verify -pl "$module" -Dit.test='RealSpringRepositoryIT,RealSpringEventIT' -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+      -Dhalyx.real.spring.repositories=true -Dhalyx.real.spring.events=true -Dhalyx.real.spring.provider=gcp \
       -Dhalyx.real.spring.table="items-sorted" \
-      -Dhalyx.real.spring.provider-properties="gcp.project-id=$PROJECT,gcp.firestore.database=$(terraform -chdir="$TF_DIR" output -raw firestore_database)" || status=1
+      -Dhalyx.real.spring.provider-properties="gcp.project-id=$PROJECT,gcp.firestore.database=$(terraform -chdir="$TF_DIR" output -raw firestore_database)" \
+      -Dhalyx.real.spring.event-bus="$MESSAGE_BUS" -Dhalyx.real.spring.inbox="$EVENTS_INBOX" || status=1
 done
 exit $status

@@ -148,6 +148,7 @@ trap teardown EXIT INT TERM
 
 log "Subscription $AZURE_SUBSCRIPTION_ID, location $LOCATION, acting as principal $AZURE_CLIENT_ID, run $RUN"
 case "$TIER" in
+  1) log "Registering resource providers"; register Microsoft.EventGrid ;;
   2) log "Registering resource providers"; register Microsoft.DBforPostgreSQL Microsoft.Sql ;;
   3) log "Registering resource providers"; register Microsoft.Cache ;;
   4) log "Registering resource providers"; register Microsoft.EventHub ;;
@@ -212,6 +213,9 @@ fi
 
 STORAGE=$(terraform -chdir="$TF_DIR" output -raw storage_account)
 CONTAINER=$(terraform -chdir="$TF_DIR" output -raw container)
+EVENT_GRID=$(terraform -chdir="$TF_DIR" output -raw eventgrid_endpoint)
+EVENT_GRID_TOPIC=$(terraform -chdir="$TF_DIR" output -raw eventgrid_topic)
+EVENT_GRID_SUBSCRIPTION=$(terraform -chdir="$TF_DIR" output -raw eventgrid_subscription)
 
 # Role assignments take a while to reach the data plane. Wait until the principal can list the container.
 log "Waiting for the principal's data-plane roles to take effect"
@@ -230,16 +234,21 @@ mvn -o verify -pl halyx-azure -Dit.test="${IT_TEST:-RealAzureIT}" -Dtest=none -D
     -Dhalyx.real.azure.servicebus-namespace="$(terraform -chdir="$TF_DIR" output -raw servicebus_namespace)" \
     -Dhalyx.real.azure.cosmos-endpoint="$(terraform -chdir="$TF_DIR" output -raw cosmos_endpoint)" \
     -Dhalyx.real.azure.key-vault-url="$(terraform -chdir="$TF_DIR" output -raw key_vault_url)" \
-    -Dhalyx.real.azure.appconfig-endpoint="$(terraform -chdir="$TF_DIR" output -raw appconfig_endpoint)"
+    -Dhalyx.real.azure.appconfig-endpoint="$(terraform -chdir="$TF_DIR" output -raw appconfig_endpoint)" \
+    -Dhalyx.real.azure.eventgrid-endpoint="$EVENT_GRID" -Dhalyx.real.azure.eventgrid-topic="$EVENT_GRID_TOPIC" \
+    -Dhalyx.real.azure.eventgrid-subscription="$EVENT_GRID_SUBSCRIPTION"
 status=$?
 [[ -n "${IT_TEST:-}" ]] && exit $status
 # Spring Boot 3 and 4: an auto-configured repository on the run's table with a sort key.
 mvn -o -q install -DskipTests -pl halyx-spring-boot-autoconfigure -am || exit 1
 for module in halyx-spring-boot-autoconfigure halyx-spring-boot4-tests; do
-  log "Running the Spring Boot repository test ($module) against real Azure"
-  mvn -o verify -pl "$module" -Dit.test=RealSpringRepositoryIT -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
-      -Dhalyx.real.spring.repositories=true -Dhalyx.real.spring.provider=azure \
+  log "Running the Spring Boot repository and event tests ($module) against real Azure"
+  mvn -o verify -pl "$module" -Dit.test='RealSpringRepositoryIT,RealSpringEventIT' -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+      -Dhalyx.real.spring.repositories=true -Dhalyx.real.spring.events=true -Dhalyx.real.spring.provider=azure \
       -Dhalyx.real.spring.table="items-sorted" \
-      -Dhalyx.real.spring.provider-properties="azure.cosmos.endpoint=$(terraform -chdir="$TF_DIR" output -raw cosmos_endpoint),azure.cosmos.database=halyx" || status=1
+      -Dhalyx.real.spring.provider-properties="azure.cosmos.endpoint=$(terraform -chdir="$TF_DIR" output -raw cosmos_endpoint),azure.cosmos.database=halyx" \
+      -Dhalyx.real.spring.event-bus="$EVENT_GRID_TOPIC" -Dhalyx.real.spring.event-bus-properties="azure.eventgrid.endpoint=$EVENT_GRID" \
+      -Dhalyx.real.spring.inbox="$EVENT_GRID_SUBSCRIPTION" -Dhalyx.real.spring.inbox-topic="$EVENT_GRID_TOPIC" \
+      -Dhalyx.real.spring.inbox-properties="azure.eventgrid.endpoint=$EVENT_GRID" || status=1
 done
 exit $status

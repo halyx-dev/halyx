@@ -125,6 +125,8 @@ teardown() {
       --query 'ResourceTagMappingList[].ResourceARN' --output text | tr '\t' '\n' | grep -v -E ':(instance|volume)/')
   left+=$(aws sns list-topics --query "Topics[?contains(TopicArn, ':halyx-$RUN-')].TopicArn" --output text)
   left+=$(aws sqs list-queues --queue-name-prefix "halyx-$RUN-" --query 'QueueUrls' --output text 2>/dev/null | grep -v None)
+  left+=$(aws events list-event-buses --name-prefix "halyx-$RUN-" --query 'EventBuses[].Name' --output text)
+  left+=$(aws events list-rules --name-prefix "halyx-$RUN-" --query 'Rules[].Name' --output text)
   if [[ "$TIER" == 2 ]]; then
     for db in pg mysql; do
       left+=$(aws rds describe-db-instances --db-instance-identifier "halyx-$RUN-$db" \
@@ -258,19 +260,23 @@ fi
 BUCKET=$(terraform -chdir="$TF_DIR" output -raw bucket)
 ITEMS=$(terraform -chdir="$TF_DIR" output -raw items_table)
 ITEMS_SORTED=$(terraform -chdir="$TF_DIR" output -raw items_sorted_table)
+EVENT_BUS=$(terraform -chdir="$TF_DIR" output -raw event_bus)
+EVENTS_INBOX=$(terraform -chdir="$TF_DIR" output -raw events_inbox)
 
 log "Running the conformance kits against real AWS"
 mvn -o verify -pl halyx-aws -Dit.test="${IT_TEST:-RealAwsIT}" -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
     -Dhalyx.real.aws=true -Dhalyx.real.aws.run="$RUN" -Dhalyx.real.aws.bucket="$BUCKET" \
-    -Dhalyx.real.aws.items-table="$ITEMS" -Dhalyx.real.aws.items-sorted-table="$ITEMS_SORTED"
+    -Dhalyx.real.aws.items-table="$ITEMS" -Dhalyx.real.aws.items-sorted-table="$ITEMS_SORTED" \
+    -Dhalyx.real.aws.event-bus="$EVENT_BUS" -Dhalyx.real.aws.events-inbox="$EVENTS_INBOX"
 status=$?
 [[ -n "${IT_TEST:-}" ]] && exit $status
-# Spring Boot 3 and 4: an auto-configured repository on the run's table with a sort key.
+# Spring Boot 3 and 4: an auto-configured repository on the run's table with a sort key, and the event bus.
 mvn -o -q install -DskipTests -pl halyx-spring-boot-autoconfigure -am || exit 1
 for module in halyx-spring-boot-autoconfigure halyx-spring-boot4-tests; do
-  log "Running the Spring Boot repository test ($module) against real AWS"
-  mvn -o verify -pl "$module" -Dit.test=RealSpringRepositoryIT -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
-      -Dhalyx.real.spring.repositories=true -Dhalyx.real.spring.provider=aws \
-      -Dhalyx.real.spring.table="$ITEMS_SORTED" || status=1
+  log "Running the Spring Boot repository and event tests ($module) against real AWS"
+  mvn -o verify -pl "$module" -Dit.test='RealSpringRepositoryIT,RealSpringEventIT' -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+      -Dhalyx.real.spring.repositories=true -Dhalyx.real.spring.events=true -Dhalyx.real.spring.provider=aws \
+      -Dhalyx.real.spring.table="$ITEMS_SORTED" \
+      -Dhalyx.real.spring.event-bus="$EVENT_BUS" -Dhalyx.real.spring.inbox="$EVENTS_INBOX" || status=1
 done
 exit $status

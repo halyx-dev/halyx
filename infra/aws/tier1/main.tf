@@ -132,6 +132,55 @@ resource "aws_dynamodb_table" "items_sorted" {
   }
 }
 
+# --- event bus ------------------------------------------------------------------------------------------
+
+# The event bus kit publishes to this bus; a rule routes its events (source /halyx-tck/...) to a queue it reads.
+resource "aws_cloudwatch_event_bus" "events" {
+  name = "halyx-${var.run_id}-events"
+}
+
+resource "aws_sqs_queue" "events_inbox" {
+  name                       = "halyx-${var.run_id}-events-inbox"
+  visibility_timeout_seconds = 30
+  message_retention_seconds  = 3600
+}
+
+resource "aws_cloudwatch_event_rule" "tck" {
+  name           = "halyx-${var.run_id}-tck"
+  event_bus_name = aws_cloudwatch_event_bus.events.name
+  event_pattern  = jsonencode({ source = [{ prefix = "/halyx-tck/" }] })
+}
+
+resource "aws_cloudwatch_event_target" "inbox" {
+  rule           = aws_cloudwatch_event_rule.tck.name
+  event_bus_name = aws_cloudwatch_event_bus.events.name
+  target_id      = "inbox"
+  arn            = aws_sqs_queue.events_inbox.arn
+}
+
+# EventBridge may send to the queue only for this rule.
+resource "aws_sqs_queue_policy" "events_inbox" {
+  queue_url = aws_sqs_queue.events_inbox.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "events.amazonaws.com" }
+      Action    = "sqs:SendMessage"
+      Resource  = aws_sqs_queue.events_inbox.arn
+      Condition = { ArnEquals = { "aws:SourceArn" = aws_cloudwatch_event_rule.tck.arn } }
+    }]
+  })
+}
+
+output "event_bus" {
+  value = aws_cloudwatch_event_bus.events.name
+}
+
+output "events_inbox" {
+  value = aws_sqs_queue.events_inbox.name
+}
+
 output "bucket" {
   value = aws_s3_bucket.blobs.id
 }

@@ -14,8 +14,8 @@
 # limitations under the License.
 #
 
-# Tier 1 real-cloud test resources on Azure: Blob Storage, Service Bus, Cosmos DB, Key Vault and App
-# Configuration in a resource group of the run's own. Entra ID only: shared keys and local auth are off,
+# Tier 1 real-cloud test resources on Azure: Blob Storage, Service Bus, Cosmos DB, Key Vault, App
+# Configuration and an Event Grid namespace in a resource group of the run's own. Entra ID only: shared keys and local auth are off,
 # and the test service principal gets data-plane roles on each resource.
 
 terraform {
@@ -24,6 +24,10 @@ terraform {
     azurerm = {
       source  = "hashicorp/azurerm"
       version = "~> 4.0"
+    }
+    azapi = {
+      source  = "Azure/azapi"
+      version = "~> 2.0"
     }
   }
 }
@@ -195,6 +199,64 @@ resource "azurerm_role_assignment" "parameters" {
   principal_id         = local.me
 }
 
+# --- Event Grid namespace: a topic with a pull (queue) subscription ------------------------------------------
+# azurerm has the namespace but not its topics or their subscriptions, so those go through azapi.
+
+resource "azurerm_eventgrid_namespace" "events" {
+  name                = local.name
+  resource_group_name = azurerm_resource_group.run.name
+  location            = var.location
+  sku                 = "Standard"
+  capacity            = 1
+  tags                = local.tags
+}
+
+resource "azapi_resource" "events_topic" {
+  type      = "Microsoft.EventGrid/namespaces/topics@2025-02-15"
+  name      = "orders"
+  parent_id = azurerm_eventgrid_namespace.events.id
+  body = {
+    properties = {
+      inputSchema          = "CloudEventSchemaV1_0"
+      publisherType        = "Custom"
+      eventRetentionInDays = 1
+    }
+  }
+}
+
+resource "azapi_resource" "events_inbox" {
+  type      = "Microsoft.EventGrid/namespaces/topics/eventSubscriptions@2025-02-15"
+  name      = "inbox"
+  parent_id = azapi_resource.events_topic.id
+  body = {
+    properties = {
+      eventDeliverySchema = "CloudEventSchemaV1_0"
+      deliveryConfiguration = {
+        deliveryMode = "Queue"
+        queue = {
+          receiveLockDurationInSeconds = 60
+          maxDeliveryCount             = 10
+          eventTimeToLive              = "P1D"
+        }
+      }
+    }
+  }
+}
+
+# The namespace's HTTP hostname, which azurerm doesn't export.
+data "azapi_resource" "events_namespace" {
+  type                   = "Microsoft.EventGrid/namespaces@2025-02-15"
+  resource_id            = azurerm_eventgrid_namespace.events.id
+  response_export_values = { hostname = "properties.topicsConfiguration.hostname" }
+}
+
+resource "azurerm_role_assignment" "events" {
+  for_each             = toset(["EventGrid Data Sender", "EventGrid Data Receiver"])
+  scope                = azurerm_eventgrid_namespace.events.id
+  role_definition_name = each.key
+  principal_id         = local.me
+}
+
 output "storage_account" {
   value = azurerm_storage_account.blobs.name
 }
@@ -217,4 +279,16 @@ output "key_vault_url" {
 
 output "appconfig_endpoint" {
   value = azurerm_app_configuration.parameters.endpoint
+}
+
+output "eventgrid_endpoint" {
+  value = "https://${data.azapi_resource.events_namespace.output.hostname}"
+}
+
+output "eventgrid_topic" {
+  value = azapi_resource.events_topic.name
+}
+
+output "eventgrid_subscription" {
+  value = azapi_resource.events_inbox.name
 }

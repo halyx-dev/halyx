@@ -15,8 +15,9 @@
 #
 
 # Tier 1 real-cloud test resources on GCP: a Cloud Storage bucket and a Firestore database of the run's own
-# (so tests never touch the project's (default) database), with the indexes the document store kit queries.
-# Pub/Sub topics, secrets and parameters are created by the tests themselves.
+# (so tests never touch the project's (default) database), with the indexes the document store kit queries,
+# and an Eventarc Advanced message bus whose enrollment sends every event through a pipeline to a Pub/Sub
+# topic. Other Pub/Sub topics, secrets and parameters are created by the tests themselves.
 
 terraform {
   required_version = ">= 1.5"
@@ -37,6 +38,11 @@ variable "region" {
 }
 
 variable "run_id" {
+  type = string
+}
+
+# The test service account, which the Eventarc pipeline publishes to Pub/Sub as.
+variable "service_account" {
   type = string
 }
 
@@ -115,10 +121,63 @@ resource "google_firestore_field" "owner" {
   }
 }
 
+# --- Eventarc Advanced: bus -> enrollment -> pipeline -> Pub/Sub ---------------------------------------------
+
+resource "google_eventarc_message_bus" "events" {
+  location       = var.region
+  message_bus_id = "halyx-${var.run_id}"
+}
+
+resource "google_pubsub_topic" "events" {
+  name = "halyx-${var.run_id}-events"
+}
+
+resource "google_pubsub_subscription" "events_inbox" {
+  name                       = "halyx-${var.run_id}-events-inbox"
+  topic                      = google_pubsub_topic.events.id
+  ack_deadline_seconds       = 60
+  message_retention_duration = "3600s"
+}
+
+# The pipeline publishes to Pub/Sub with an OAuth token for a service account: the test service account, which
+# can publish to the topic. The Eventarc service agent mints the token, so it needs Service Account Token Creator
+# on that account (granted once, outside Terraform: see docs/cloud-testing/gcp.md).
+resource "google_eventarc_pipeline" "events" {
+  location    = var.region
+  pipeline_id = "halyx-${var.run_id}"
+  destinations {
+    topic = google_pubsub_topic.events.id
+    authentication_config {
+      oauth_token {
+        service_account = var.service_account
+      }
+    }
+  }
+  logging_config {
+    log_severity = "ERROR" # delivery failures, such as a refused publish, appear in Cloud Logging
+  }
+}
+
+resource "google_eventarc_enrollment" "events" {
+  location      = var.region
+  enrollment_id = "halyx-${var.run_id}"
+  message_bus   = google_eventarc_message_bus.events.id
+  destination   = google_eventarc_pipeline.events.id
+  cel_match     = "true"
+}
+
 output "bucket" {
   value = google_storage_bucket.blobs.name
 }
 
 output "firestore_database" {
   value = google_firestore_database.items.name
+}
+
+output "message_bus" {
+  value = google_eventarc_message_bus.events.id
+}
+
+output "events_inbox" {
+  value = google_pubsub_subscription.events_inbox.name
 }

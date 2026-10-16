@@ -29,9 +29,12 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import dev.halyx.Halyx;
 import dev.halyx.CloudContext;
 import dev.halyx.config.ProviderConfig;
+import dev.halyx.events.EventBusConfig;
+import dev.halyx.events.EventPublisher;
 import dev.halyx.messaging.ClaimCheck;
 import dev.halyx.messaging.OutgoingMessage;
 import dev.halyx.messaging.ReceivedMessage;
+import dev.halyx.messaging.Subscription;
 import dev.halyx.messaging.SubscriptionConfig;
 import dev.halyx.messaging.TopicConfig;
 import dev.halyx.nosql.DocumentStore;
@@ -39,6 +42,7 @@ import dev.halyx.nosql.TableConfig;
 import dev.halyx.parameters.ParameterStoreConfig;
 import dev.halyx.storage.BlobStore;
 import dev.halyx.tck.BlobStoreConformanceTest;
+import dev.halyx.tck.EventBusConformanceTest;
 import dev.halyx.tck.DocumentStoreConformanceTest;
 import dev.halyx.tck.MessagingConformanceTest;
 import dev.halyx.tck.ParameterStoreConformanceTest;
@@ -69,6 +73,9 @@ class RealAzureIT {
     private static final String COSMOS = System.getProperty("halyx.real.azure.cosmos-endpoint");
     private static final String KEY_VAULT = System.getProperty("halyx.real.azure.key-vault-url");
     private static final String APP_CONFIG = System.getProperty("halyx.real.azure.appconfig-endpoint");
+    private static final String EVENT_GRID = System.getProperty("halyx.real.azure.eventgrid-endpoint");
+    private static final String EVENT_GRID_TOPIC = System.getProperty("halyx.real.azure.eventgrid-topic");
+    private static final String EVENT_GRID_SUBSCRIPTION = System.getProperty("halyx.real.azure.eventgrid-subscription");
 
     private static Halyx halyx;
     private static ServiceBusAdministrationClient admin;
@@ -203,6 +210,26 @@ class RealAzureIT {
             assertThat(message.bodyAsString()).isEqualTo("direct");
             assertThat(message.attributes()).containsEntry("via", "queue");
             message.ack();
+        }
+    }
+
+    @Nested
+    class EventGrid extends EventBusConformanceTest {
+        private Subscription inbox;
+
+        @Override
+        protected EventPublisher publisher() {
+            return azure().eventPublisher(EventBusConfig.builder(EVENT_GRID_TOPIC)
+                    .property(AzureProperties.EVENT_GRID_ENDPOINT, EVENT_GRID).build());
+        }
+
+        @Override
+        protected Subscription inbox() {
+            if (inbox == null) {
+                inbox = azure().subscription(SubscriptionConfig.builder(EVENT_GRID_SUBSCRIPTION).topic(EVENT_GRID_TOPIC)
+                        .property(AzureProperties.EVENT_GRID_ENDPOINT, EVENT_GRID).build());
+            }
+            return inbox;
         }
     }
 
