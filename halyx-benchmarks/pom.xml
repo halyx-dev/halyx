@@ -48,6 +48,12 @@
             <artifactId>halyx-core</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <!-- ReactiveBenchmark: the adapters' overhead -->
+        <dependency>
+            <groupId>dev.halyx</groupId>
+            <artifactId>halyx-reactor</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <!-- Providers for LoadTest against real buckets -->
         <dependency>
             <groupId>dev.halyx</groupId>
