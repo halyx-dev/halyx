@@ -16,12 +16,14 @@
 package dev.halyx.gcp;
 
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import dev.halyx.Halyx;
 import dev.halyx.config.Credentials;
 import dev.halyx.config.ProviderConfig;
 import dev.halyx.nosql.DocumentStore;
 import dev.halyx.nosql.TableConfig;
+import dev.halyx.reactor.ReactiveHalyx;
 import dev.halyx.tck.DocumentStoreConformanceTest;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
@@ -34,6 +36,7 @@ import java.time.Duration;
 import java.util.Map;
 import org.junit.jupiter.api.Nested;
 import dev.halyx.tck.DocumentRepositoryConformanceTest;
+import dev.halyx.tck.ReactiveDocumentRepositoryConformanceTest;
 
 /** The document store TCK on Firestore emulated by Floci. */
 @Testcontainers(disabledWithoutDocker = true)
@@ -91,6 +94,27 @@ class FirestoreDocumentStoreConformanceIT extends DocumentStoreConformanceTest {
         @Override
         protected DocumentStore store(boolean sorted) {
             return FirestoreDocumentStoreConformanceIT.this.store(sorted);
+        }
+    }
+
+    /** The reactive repository kit on the same tables. */
+    @Nested
+    class ReactiveRepositories extends ReactiveDocumentRepositoryConformanceTest {
+        private final ReactiveHalyx reactive = ReactiveHalyx.withVirtualThreads(halyx);
+
+        @AfterEach
+        void closeReactive() {
+            reactive.close();
+        }
+
+        @Override
+        protected DocumentStore store(boolean sorted) {
+            return FirestoreDocumentStoreConformanceIT.this.store(sorted);
+        }
+
+        @Override
+        protected ReactiveHalyx reactive() {
+            return reactive;
         }
     }
 }

@@ -270,12 +270,15 @@ mvn -o verify -pl halyx-aws -Dit.test="${IT_TEST:-RealAwsIT}" -Dtest=none -Dsure
     -Dhalyx.real.aws.event-bus="$EVENT_BUS" -Dhalyx.real.aws.events-inbox="$EVENTS_INBOX"
 status=$?
 [[ -n "${IT_TEST:-}" ]] && exit $status
-# Spring Boot 3 and 4: an auto-configured repository on the run's table with a sort key, and the event bus.
+# Spring Boot 3 and 4: an auto-configured repository on the run's table with a sort key, the event bus, and
+# halyx-reactor's WebFlux, reactive repository and event beans over the bucket, table and bus.
 mvn -o -q install -DskipTests -pl halyx-spring-boot-autoconfigure -am || exit 1
 for module in halyx-spring-boot-autoconfigure halyx-spring-boot4-tests; do
-  log "Running the Spring Boot repository and event tests ($module) against real AWS"
-  mvn -o verify -pl "$module" -Dit.test='RealSpringRepositoryIT,RealSpringEventIT' -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
-      -Dhalyx.real.spring.repositories=true -Dhalyx.real.spring.events=true -Dhalyx.real.spring.provider=aws \
+  log "Running the Spring Boot repository, event and reactive tests ($module) against real AWS"
+  mvn -o verify -pl "$module" -Dit.test='RealSpringRepositoryIT,RealSpringEventIT,RealSpringReactiveIT' -Dtest=none \
+      -Dsurefire.failIfNoSpecifiedTests=false \
+      -Dhalyx.real.spring.repositories=true -Dhalyx.real.spring.events=true -Dhalyx.real.spring.reactive=true \
+      -Dhalyx.real.spring.provider=aws -Dhalyx.real.spring.bucket="$BUCKET" \
       -Dhalyx.real.spring.table="$ITEMS_SORTED" \
       -Dhalyx.real.spring.event-bus="$EVENT_BUS" -Dhalyx.real.spring.inbox="$EVENTS_INBOX" || status=1
 done

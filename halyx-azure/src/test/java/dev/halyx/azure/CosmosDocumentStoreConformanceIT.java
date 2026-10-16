@@ -19,11 +19,13 @@ import com.azure.cosmos.CosmosClient;
 import com.azure.cosmos.CosmosClientBuilder;
 import com.azure.cosmos.models.CosmosContainerProperties;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import dev.halyx.Halyx;
 import dev.halyx.config.ProviderConfig;
 import dev.halyx.nosql.DocumentStore;
 import dev.halyx.nosql.TableConfig;
+import dev.halyx.reactor.ReactiveHalyx;
 import dev.halyx.tck.DocumentStoreConformanceTest;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
@@ -37,6 +39,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Nested;
 import dev.halyx.tck.DocumentRepositoryConformanceTest;
+import dev.halyx.tck.ReactiveDocumentRepositoryConformanceTest;
 
 /** The document store TCK on Cosmos DB (NoSQL API) emulated by Floci-az. */
 @Testcontainers(disabledWithoutDocker = true)
@@ -124,6 +127,27 @@ class CosmosDocumentStoreConformanceIT extends DocumentStoreConformanceTest {
         @Override
         protected DocumentStore store(boolean sorted) {
             return CosmosDocumentStoreConformanceIT.this.store(sorted);
+        }
+    }
+
+    /** The reactive repository kit on the same tables. */
+    @Nested
+    class ReactiveRepositories extends ReactiveDocumentRepositoryConformanceTest {
+        private final ReactiveHalyx reactive = ReactiveHalyx.withVirtualThreads(halyx);
+
+        @AfterEach
+        void closeReactive() {
+            reactive.close();
+        }
+
+        @Override
+        protected DocumentStore store(boolean sorted) {
+            return CosmosDocumentStoreConformanceIT.this.store(sorted);
+        }
+
+        @Override
+        protected ReactiveHalyx reactive() {
+            return reactive;
         }
     }
 }

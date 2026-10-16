@@ -44,6 +44,8 @@ import dev.halyx.storage.BlobStore;
 import dev.halyx.tck.BlobStoreConformanceTest;
 import dev.halyx.tck.EventBusConformanceTest;
 import dev.halyx.tck.DocumentStoreConformanceTest;
+import dev.halyx.tck.ReactiveDocumentRepositoryConformanceTest;
+import dev.halyx.reactor.ReactiveHalyx;
 import dev.halyx.tck.MessagingConformanceTest;
 import dev.halyx.tck.ParameterStoreConformanceTest;
 
@@ -95,8 +97,21 @@ class RealAzureIT {
                 .buildClient();
     }
 
+    private static ReactiveHalyx reactiveHalyx;
+
+    /** Reactive views on virtual threads, for the reactive repository kit; closed after the class. */
+    static synchronized ReactiveHalyx reactiveHalyx() {
+        if (reactiveHalyx == null) {
+            reactiveHalyx = ReactiveHalyx.withVirtualThreads(halyx);
+        }
+        return reactiveHalyx;
+    }
+
     @AfterAll
     static void stop() {
+        if (reactiveHalyx != null) {
+            reactiveHalyx.close();
+        }
         // Everything this run created that Terraform doesn't own (the resource group takes it anyway).
         for (String topic : topics) {
             try {
@@ -138,6 +153,23 @@ class RealAzureIT {
                 table.sortKey("sk");
             }
             return azure().documentStore(indexes(table, sorted).build());
+        }
+    }
+
+    @Nested
+    class ReactiveCosmosRepositories extends ReactiveDocumentRepositoryConformanceTest {
+        @Override
+        protected DocumentStore store(boolean sorted) {
+            TableConfig.Builder table = TableConfig.builder(sorted ? "items-sorted" : "items");
+            if (sorted) {
+                table.sortKey("sk");
+            }
+            return azure().documentStore(DocumentStoreConformanceTest.indexes(table, sorted).build());
+        }
+
+        @Override
+        protected ReactiveHalyx reactive() {
+            return reactiveHalyx();
         }
     }
 

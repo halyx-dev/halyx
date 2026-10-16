@@ -13,7 +13,7 @@ the `halyx-test` service principal. Every run creates its own throwaway resource
 
 | Tier | Services | Latest result |
 |---|---|---|
-| [1](#tier-1-latest-result) | Blob Storage, Cosmos DB, Service Bus, Key Vault, App Configuration, Event Grid namespaces (Entra ID only); Spring Data repositories on Cosmos DB, and Spring Boot on Cosmos DB and Event Grid | **173/175** passed, 2 skipped (expected); Spring **4/4** |
+| [1](#tier-1-latest-result) | Blob Storage, Cosmos DB, Service Bus, Key Vault, App Configuration, Event Grid namespaces (Entra ID only); Spring Data repositories (blocking and reactive) on Cosmos DB, and Spring Boot on Cosmos DB, Event Grid and, with halyx-reactor, WebFlux | **183/185** passed, 2 skipped (expected); Spring **10/10** |
 | [2](#tier-2-latest-result) | Azure Database for PostgreSQL and Azure SQL with Entra ID login; R2DBC and Spring Data R2DBC on PostgreSQL | **13/13**; Spring **2/2** |
 | [3](#tier-3-latest-result) | Azure Managed Redis with Entra ID (access keys off) | **52/52** |
 | [4](#tier-4-latest-result) | Event Hubs through its Kafka endpoint, with Entra ID (shared access keys off), plus Spring Boot 3 and 4 | **24/25** passed, 1 skipped (expected); Spring **2/2** |
@@ -68,26 +68,29 @@ resources, and deleted vaults and stores; a failed listing is reported as `CHECK
 
 | | |
 |---|---|
-| Date | 2026-10-16: 09:24–09:47 UTC (23 min), and 10:48–11:03 UTC for Event Grid |
-| Run id | `r261016202476f2`; Event Grid from `r261016214897d6`, after its fix |
+| Date | 2026-10-16, 15:53–16:15 UTC (22 min) |
+| Run id | `r26101702533254` |
 | Location | `australiaeast` |
-| Result | **173 passed**, 0 failed, 2 skipped (expected); Spring Boot repository and event tests passed on Boot 3 and 4 |
-| Teardown | resource group destroyed, Key Vault and App Configuration store purged; check: **nothing left** (both runs) |
+| Result | **BUILD SUCCESS**: 183 passed, 0 failed, 2 skipped (expected); Spring Boot repository, event and reactive tests passed on Boot 3 and 4 |
+| Teardown | resource group destroyed, Key Vault and App Configuration store purged; check: **nothing left** |
 
 | Service | Halyx API | Tests | Passed | Skipped | Time |
 |---|---|---|---|---|---|
-| Blob Storage | `BlobStore` | 75 | 74 | 1 | 181.7s |
-| Cosmos DB | `DocumentStore` | 23 | 23 | 0 | 18.1s |
-| Cosmos DB | Spring Data repositories | 10 | 10 | 0 | 15.5s |
-| Service Bus | `Publisher` / `Subscription` | 16 | 16 | 0 | 129.7s |
-| Key Vault | `ParameterStore` | 22 | 22 | 0 | 40.0s |
-| App Configuration | `ParameterStore` | 22 | 21 | 1 | 18.2s |
-| Event Grid namespace | `EventPublisher` / pull `Subscription` | 7 | 7 | 0 | 8.2s |
-| **Total** | | **175** | **173** | **2** | |
+| Blob Storage | `BlobStore` | 75 | 74 | 1 | 148.9s |
+| Cosmos DB | `DocumentStore` | 23 | 23 | 0 | 19.4s |
+| Cosmos DB | Spring Data repositories | 10 | 10 | 0 | 6.6s |
+| Cosmos DB | reactive Spring Data repositories | 10 | 10 | 0 | 16.3s |
+| Service Bus | `Publisher` / `Subscription` | 16 | 16 | 0 | 128.1s |
+| Key Vault | `ParameterStore` | 22 | 22 | 0 | 30.7s |
+| App Configuration | `ParameterStore` | 22 | 21 | 1 | 15.2s |
+| Event Grid namespace | `EventPublisher` / pull `Subscription` | 7 | 7 | 0 | 5.7s |
+| **Total** | | **185** | **183** | **2** | |
 | Cosmos DB, Spring Boot 3.5 | Spring Boot repository test | 1 | 1 | | |
 | Cosmos DB, Spring Boot 4 | Spring Boot repository test | 1 | 1 | | |
 | Event Grid, Spring Boot 3.5 | Spring Boot event test | 1 | 1 | | |
 | Event Grid, Spring Boot 4 | Spring Boot event test | 1 | 1 | | |
+| Blob Storage, Cosmos DB and Event Grid, Spring Boot 3.5 | Spring Boot reactive test (WebFlux, reactive repository, events) | 3 | 3 | | |
+| Blob Storage, Cosmos DB and Event Grid, Spring Boot 4 | Spring Boot reactive test (WebFlux, reactive repository, events) | 3 | 3 | | |
 
 Skipped tests, both expected:
 
@@ -108,233 +111,251 @@ through `halyx-spring-data-document`. Cosmos DB needs no index beyond its defaul
 ### Per-test results
 
 <details>
-<summary>Blob Storage — BlobStore: 74/75 passed, 181.7s</summary>
+<summary>Blob Storage — BlobStore: 74/75 passed, 148.9s</summary>
 
 | Test | Result | Time (s) |
 |---|---|---|
-| `abortedPresignedUploadCreatesNoBlob` | passed | 0.23 |
-| `closingTheStreamInsideWriteDoesNotCommitEarly` | passed | 0.12 |
-| `contentEncodingIsStoredAndBytesAreReturnedUnchanged` | passed | 0.14 |
-| `copyDuplicatesContentAndKeepsSource` | passed | 0.33 |
-| `copyMissingSourceThrowsNotFound` | passed | 0.05 |
-| `copyPreservesHttpHeaders` | passed | 0.41 |
-| `defaultTierIsHot` | passed | 0.09 |
-| `deleteAllRemovesEveryKeyIncludingMissingOnes` | passed | 0.56 |
-| `deleteAllSpansSeveralProviderBatches` | passed | 21.30 |
+| `abortedPresignedUploadCreatesNoBlob` | passed | 0.29 |
+| `closingTheStreamInsideWriteDoesNotCommitEarly` | passed | 0.11 |
+| `contentEncodingIsStoredAndBytesAreReturnedUnchanged` | passed | 0.11 |
+| `copyDuplicatesContentAndKeepsSource` | passed | 0.32 |
+| `copyMissingSourceThrowsNotFound` | passed | 0.06 |
+| `copyPreservesHttpHeaders` | passed | 0.30 |
+| `defaultTierIsHot` | passed | 0.11 |
+| `deleteAllRemovesEveryKeyIncludingMissingOnes` | passed | 0.47 |
+| `deleteAllSpansSeveralProviderBatches` | passed | 17.76 |
 | `deleteAllWithNoKeys` | passed | 0.00 |
-| `deleteIfMatchOnMissingBlobFails` | passed | 0.20 |
+| `deleteIfMatchOnMissingBlobFails` | passed | 0.18 |
 | `deleteIfMatchWithCurrentETagDeletes` | passed | 0.16 |
-| `deleteIfMatchWithStaleETagFails` | passed | 0.26 |
-| `deleteMissingBlobIsIdempotent` | passed | 0.06 |
-| `deleteRemovesBlob` | passed | 0.15 |
-| `downloadWritesCompleteFile(Path)` | passed | 2.57 |
-| `emptyBlobRoundTrips` | passed | 0.15 |
-| `failedWriteKeepsExistingBlob` | passed | 5.09 |
-| `failedWriteStoresNothing` | passed | 3.96 |
-| `getMissingBlobThrowsNotFound` | passed | 0.07 |
-| `getReturnsMetadataWithContent` | passed | 0.10 |
-| `getWithStaleETagThrowsPreconditionFailed` | passed | 0.15 |
-| `headMissingBlobReturnsEmpty` | passed | 0.10 |
+| `deleteIfMatchWithStaleETagFails` | passed | 0.25 |
+| `deleteMissingBlobIsIdempotent` | passed | 0.05 |
+| `deleteRemovesBlob` | passed | 0.19 |
+| `downloadWritesCompleteFile(Path)` | passed | 4.06 |
+| `emptyBlobRoundTrips` | passed | 0.19 |
+| `failedWriteKeepsExistingBlob` | passed | 5.66 |
+| `failedWriteStoresNothing` | passed | 4.04 |
+| `getMissingBlobThrowsNotFound` | passed | 0.04 |
+| `getReturnsMetadataWithContent` | passed | 0.11 |
+| `getWithStaleETagThrowsPreconditionFailed` | passed | 0.23 |
+| `headMissingBlobReturnsEmpty` | passed | 0.12 |
 | `headReturnsSizeAndLastModified` | passed | 0.11 |
-| `ifMatchWithCurrentETagSucceeds` | passed | 0.14 |
-| `ifMatchWithStaleETagThrowsPreconditionFailed` | passed | 0.28 |
-| `ifNotExistsCreatesMissingBlob` | passed | 0.13 |
-| `ifNotExistsRejectsExistingBlob` | passed | 0.17 |
-| `listAllStreamsEveryBlob` | passed | 0.43 |
-| `listEmptyPrefixReturnsNothing` | passed | 0.05 |
-| `listFiltersByPrefix` | passed | 0.22 |
-| `listPaginatesInKeyOrder` | passed | 0.96 |
-| `listSummariesCarrySize` | passed | 0.10 |
-| `listWithDelimiterGroupsKeysIntoPrefixes` | passed | 0.35 |
-| `listWithDelimiterPaginatesOverItemsAndPrefixes` | passed | 0.57 |
-| `listWithoutDelimiterReturnsNoPrefixes` | passed | 0.10 |
-| `openEndedRangeReadsToEnd` | passed | 0.13 |
-| `parallelReadReassemblesRangesInOrder` | passed | 8.72 |
-| `parallelReadValidatesChecksum` | passed | 4.21 |
+| `ifMatchWithCurrentETagSucceeds` | passed | 0.17 |
+| `ifMatchWithStaleETagThrowsPreconditionFailed` | passed | 0.22 |
+| `ifNotExistsCreatesMissingBlob` | passed | 0.11 |
+| `ifNotExistsRejectsExistingBlob` | passed | 0.18 |
+| `listAllStreamsEveryBlob` | passed | 0.63 |
+| `listEmptyPrefixReturnsNothing` | passed | 0.06 |
+| `listFiltersByPrefix` | passed | 0.26 |
+| `listPaginatesInKeyOrder` | passed | 1.18 |
+| `listSummariesCarrySize` | passed | 0.11 |
+| `listWithDelimiterGroupsKeysIntoPrefixes` | passed | 0.48 |
+| `listWithDelimiterPaginatesOverItemsAndPrefixes` | passed | 0.49 |
+| `listWithoutDelimiterReturnsNoPrefixes` | passed | 0.12 |
+| `openEndedRangeReadsToEnd` | passed | 0.12 |
+| `parallelReadReassemblesRangesInOrder` | passed | 8.41 |
+| `parallelReadValidatesChecksum` | passed | 3.81 |
 | `presignWithoutCapabilityIsRejected` | skipped | 0.00 |
-| `presignedDownloadUrlDownloadsBlob` | passed | 0.29 |
-| `presignedMultipartUploadAssemblesPartsInOrder` | passed | 23.70 |
-| `presignedUploadUrlReplacesExistingBlob` | passed | 0.40 |
-| `presignedUploadUrlUploadsBlob` | passed | 0.32 |
-| `presignedUploadWithContentTypeSetsContentType` | passed | 0.78 |
+| `presignedDownloadUrlDownloadsBlob` | passed | 0.30 |
+| `presignedMultipartUploadAssemblesPartsInOrder` | passed | 18.39 |
+| `presignedUploadUrlReplacesExistingBlob` | passed | 0.33 |
+| `presignedUploadUrlUploadsBlob` | passed | 0.31 |
+| `presignedUploadWithContentTypeSetsContentType` | passed | 0.59 |
 | `presignedUrlReportsExpiry` | passed | 0.05 |
-| `putFromFile(Path)` | passed | 0.14 |
-| `putFromStream` | passed | 0.10 |
-| `putLargeFile(Path)` | passed | 12.00 |
-| `putOverwritesExistingBlob` | passed | 0.13 |
+| `putFromFile(Path)` | passed | 0.12 |
+| `putFromStream` | passed | 0.11 |
+| `putLargeFile(Path)` | passed | 12.86 |
+| `putOverwritesExistingBlob` | passed | 0.21 |
 | `putReturnsETagMatchingHead` | passed | 0.10 |
-| `putSmallUnknownLengthStream` | passed | 0.10 |
-| `putStoresContentTypeAndUserMetadata` | passed | 0.11 |
-| `putStoresStandardHttpHeaders` | passed | 0.10 |
-| `putThenGetRoundTripsContent` | passed | 0.10 |
-| `putUnknownLengthStream` | passed | 10.14 |
-| `putWithTierStoresTier` | passed | 0.24 |
-| `rangeReadReturnsSlice` | passed | 0.18 |
-| `setTierChangesTierButNotContent` | passed | 0.30 |
-| `setTierToCurrentTierIsANoOp` | passed | 0.27 |
-| `storedChecksumsMatchTheContent` | passed | 0.11 |
+| `putSmallUnknownLengthStream` | passed | 0.13 |
+| `putStoresContentTypeAndUserMetadata` | passed | 0.12 |
+| `putStoresStandardHttpHeaders` | passed | 0.12 |
+| `putThenGetRoundTripsContent` | passed | 0.11 |
+| `putUnknownLengthStream` | passed | 8.83 |
+| `putWithTierStoresTier` | passed | 0.20 |
+| `rangeReadReturnsSlice` | passed | 0.13 |
+| `setTierChangesTierButNotContent` | passed | 0.33 |
+| `setTierToCurrentTierIsANoOp` | passed | 0.34 |
+| `storedChecksumsMatchTheContent` | passed | 0.13 |
 | `unwrapUnknownTypeThrows` | passed | 0.00 |
-| `updateMetadataKeepsTier` | passed | 0.30 |
-| `updateMetadataOfMissingBlobThrowsNotFound` | passed | 0.06 |
-| `updateMetadataReplacesHeadersAndMetadataButNotContent` | passed | 0.41 |
-| `updateMetadataWithStaleETagFails` | passed | 0.20 |
-| `validatedFileAndStreamUploads(Path)` | passed | 1.28 |
-| `validatedLargeFileUploadRoundTrips(Path)` | passed | 16.90 |
-| `validatedPutStoresAChecksumThatValidatesOnDownload` | passed | 0.15 |
-| `validatedWriteInParts` | passed | 12.26 |
-| `writeEmptyBlob` | passed | 0.09 |
-| `writeExactMultipleOfPartSize` | passed | 15.29 |
-| `writeInPartsWithIfNotExistsRejectsExistingBlob` | passed | 14.77 |
-| `writeLargeBlobInParts` | passed | 17.17 |
-| `writeSmallBlobInOneRequest` | passed | 0.22 |
+| `updateMetadataKeepsTier` | passed | 0.43 |
+| `updateMetadataOfMissingBlobThrowsNotFound` | passed | 0.05 |
+| `updateMetadataReplacesHeadersAndMetadataButNotContent` | passed | 0.46 |
+| `updateMetadataWithStaleETagFails` | passed | 0.19 |
+| `validatedFileAndStreamUploads(Path)` | passed | 0.69 |
+| `validatedLargeFileUploadRoundTrips(Path)` | passed | 12.30 |
+| `validatedPutStoresAChecksumThatValidatesOnDownload` | passed | 0.18 |
+| `validatedWriteInParts` | passed | 9.54 |
+| `writeEmptyBlob` | passed | 0.12 |
+| `writeExactMultipleOfPartSize` | passed | 10.91 |
+| `writeInPartsWithIfNotExistsRejectsExistingBlob` | passed | 10.42 |
+| `writeLargeBlobInParts` | passed | 8.35 |
+| `writeSmallBlobInOneRequest` | passed | 0.19 |
 
 </details>
 
 <details>
-<summary>Cosmos DB — DocumentStore: 23/23 passed, 18.1s</summary>
+<summary>Cosmos DB — DocumentStore: 23/23 passed, 19.4s</summary>
 
 | Test | Result | Time (s) |
 |---|---|---|
-| `checksGuardATransactionWithoutWriting` | passed | 0.40 |
-| `concurrentIncrementsAreNotLost` | passed | 1.05 |
-| `decimalsRoundTripAsNumbers` | passed | 0.24 |
-| `deleteReportsWhetherAnItemWasRemoved` | passed | 0.51 |
-| `expiredItemsAreNeverReturned` | passed | 3.76 |
-| `failedConditionRollsBackTheWholeTransaction` | passed | 0.64 |
-| `getAllReturnsWhatExistsAcrossBatches` | passed | 0.72 |
-| `ifNotExistsCreatesOnlyOnce` | passed | 0.39 |
-| `indexQueryFindsItemsAcrossPartitionsInSortOrder` | passed | 1.18 |
-| `indexQueryPagesThroughManyMatches` | passed | 1.47 |
+| `checksGuardATransactionWithoutWriting` | passed | 0.43 |
+| `concurrentIncrementsAreNotLost` | passed | 2.24 |
+| `decimalsRoundTripAsNumbers` | passed | 0.25 |
+| `deleteReportsWhetherAnItemWasRemoved` | passed | 0.49 |
+| `expiredItemsAreNeverReturned` | passed | 3.82 |
+| `failedConditionRollsBackTheWholeTransaction` | passed | 0.67 |
+| `getAllReturnsWhatExistsAcrossBatches` | passed | 0.83 |
+| `ifNotExistsCreatesOnlyOnce` | passed | 0.32 |
+| `indexQueryFindsItemsAcrossPartitionsInSortOrder` | passed | 0.99 |
+| `indexQueryPagesThroughManyMatches` | passed | 1.41 |
 | `indexWithoutSortAttributeFindsEveryMatch` | passed | 0.31 |
 | `invalidKeysAndReservedFieldsAreRejected` | passed | 0.00 |
-| `keysWithSpecialCharactersRoundTrip` | passed | 0.77 |
+| `keysWithSpecialCharactersRoundTrip` | passed | 0.70 |
 | `missingItemIsEmpty` | passed | 0.21 |
-| `putAndGetRoundTripsEveryValueType` | passed | 0.33 |
-| `putReplacesTheWholeItem` | passed | 0.20 |
-| `queryPagesThroughLargePartitions` | passed | 2.97 |
-| `queryReturnsAPartitionInSortOrder` | passed | 1.02 |
-| `transactionAppliesEveryWriteTogether` | passed | 0.79 |
+| `putAndGetRoundTripsEveryValueType` | passed | 0.25 |
+| `putReplacesTheWholeItem` | passed | 0.23 |
+| `queryPagesThroughLargePartitions` | passed | 3.44 |
+| `queryReturnsAPartitionInSortOrder` | passed | 1.05 |
+| `transactionAppliesEveryWriteTogether` | passed | 0.61 |
 | `transactionsStayWithinOnePartition` | passed | 0.00 |
-| `updateNeedsAnExistingItemAndTheRightVersion` | passed | 0.43 |
-| `updateSetsRemovesAndIncrements` | passed | 0.27 |
-| `versionsGuardConcurrentWrites` | passed | 0.43 |
+| `updateNeedsAnExistingItemAndTheRightVersion` | passed | 0.51 |
+| `updateSetsRemovesAndIncrements` | passed | 0.19 |
+| `versionsGuardConcurrentWrites` | passed | 0.50 |
 
 </details>
 
 <details>
-<summary>Cosmos DB — Spring Data repositories: 10/10 passed, 15.5s</summary>
+<summary>Cosmos DB — Spring Data repositories: 10/10 passed, 6.6s</summary>
 
 | Test | Result | Time (s) |
 |---|---|---|
-| `indexQueriesAcrossPartitions` | passed | 1.14 |
-| `indexWithoutASortAttribute` | passed | 0.77 |
-| `partitionQueriesInSortKeyOrderEitherWay` | passed | 1.09 |
-| `savedEntitiesReadBackWithTheirVersion` | passed | 0.32 |
-| `sortKeyConditions` | passed | 1.66 |
-| `staleVersionsAndTakenIdsAreRejected` | passed | 7.77 |
-| `streamsReadLazily` | passed | 0.45 |
-| `unversionedEntitiesAreSavedInBatchesAndOverwritten` | passed | 0.77 |
-| `uuidKeysAndStringIds` | passed | 0.43 |
-| `windowsScrollThroughAPartition` | passed | 1.09 |
+| `indexQueriesAcrossPartitions` | passed | 0.87 |
+| `indexWithoutASortAttribute` | passed | 0.37 |
+| `partitionQueriesInSortKeyOrderEitherWay` | passed | 0.82 |
+| `savedEntitiesReadBackWithTheirVersion` | passed | 0.24 |
+| `sortKeyConditions` | passed | 1.19 |
+| `staleVersionsAndTakenIdsAreRejected` | passed | 1.01 |
+| `streamsReadLazily` | passed | 0.28 |
+| `unversionedEntitiesAreSavedInBatchesAndOverwritten` | passed | 0.72 |
+| `uuidKeysAndStringIds` | passed | 0.31 |
+| `windowsScrollThroughAPartition` | passed | 0.82 |
 
 </details>
 
 <details>
-<summary>Service Bus — Publisher / Subscription: 16/16 passed, 129.7s</summary>
+<summary>Cosmos DB — reactive Spring Data repositories: 10/10 passed, 16.3s</summary>
 
 | Test | Result | Time (s) |
 |---|---|---|
-| `ackedMessageIsNotRedelivered` | passed | 9.70 |
-| `binaryBodiesArriveUnchanged` | passed | 1.78 |
-| `claimCheckSendsLargeBodiesThroughBlobStorage` | passed | 3.65 |
-| `delayedMessageIsHeldBack` | passed | 5.21 |
-| `extendedLeaseKeepsMessageHidden` | passed | 62.12 |
-| `listenerAcksSuccessesAndRetriesFailures` | passed | 11.61 |
-| `listenerLimitsConcurrency` | passed | 3.72 |
-| `nackedMessageIsRedelivered` | passed | 1.92 |
-| `orderingKeyDeliversEachKeyInOrder` | passed | 3.80 |
-| `publishAllDeliversEveryMessage` | passed | 7.98 |
-| `publishedMessageArrivesWithBodyAndAttributes` | passed | 1.71 |
-| `queuesWorkPointToPoint` | passed | 1.49 |
-| `repeatedDeduplicationIdIsDeliveredOnce` | passed | 4.88 |
-| `reservedAttributesAndUnsupportedControlsAreRejected` | passed | 1.57 |
-| `settlingTwiceIsRejected` | passed | 1.64 |
-| `unsettledMessageReturnsAfterItsLease` | passed | 6.96 |
+| `fluxQueriesStreamAndCanStopEarly` | passed | 0.40 |
+| `indexQueriesAcrossPartitions` | passed | 1.04 |
+| `indexWithoutASortAttribute` | passed | 0.43 |
+| `partitionQueriesInSortKeyOrderEitherWay` | passed | 1.00 |
+| `savedEntitiesReadBackWithTheirVersion` | passed | 0.46 |
+| `sortKeyConditions` | passed | 1.20 |
+| `staleVersionsAndTakenIdsAreRejected` | passed | 1.15 |
+| `unversionedEntitiesAreSavedInBatchesFromIterablesAndPublishers` | passed | 9.17 |
+| `uuidKeysAndStringIds` | passed | 0.42 |
+| `windowsScrollThroughAPartition` | passed | 0.99 |
 
 </details>
 
 <details>
-<summary>Key Vault — ParameterStore: 22/22 passed, 40.0s</summary>
+<summary>Service Bus — Publisher / Subscription: 16/16 passed, 128.1s</summary>
 
 | Test | Result | Time (s) |
 |---|---|---|
-| `cachedReadsAreServedUntilRefresh` | passed | 1.26 |
-| `deleteIsIdempotent` | passed | 1.48 |
-| `deletedNamesCanBeReused` | passed | 12.72 |
-| `earlierVersionsCanBeRead` | passed | 1.15 |
-| `getAllDoesNotMatchPartialSegments` | passed | 2.34 |
-| `getAllReturnsEverythingBelowAPrefix` | passed | 2.40 |
-| `invalidNamesAreRejected` | passed | 0.37 |
-| `jsonFieldsCanBeRead` | passed | 1.22 |
-| `largeValues` | passed | 1.01 |
-| `missingIsEmptyAndRequireFails` | passed | 0.61 |
-| `nativeNamesAreUsedAsTheyAre` | passed | 1.29 |
-| `plainValuesHaveNoFields` | passed | 0.81 |
-| `putReplacesWithANewVersion` | passed | 1.13 |
-| `putThenGet` | passed | 1.13 |
-| `reportsKindAndProvider` | passed | 0.26 |
-| `statisticsCountCacheHits` | passed | 1.00 |
-| `storesAreIsolatedByPrefix` | passed | 1.65 |
-| `typedReads` | passed | 0.98 |
-| `valuesKeepSpecialCharactersAndLines` | passed | 0.91 |
-| `watchReportsAddedUpdatedAndRemovedValues` | passed | 3.34 |
-| `watchedChangesInvalidateTheCache` | passed | 1.96 |
-| `writesInvalidateTheirOwnCache` | passed | 1.01 |
+| `ackedMessageIsNotRedelivered` | passed | 9.71 |
+| `binaryBodiesArriveUnchanged` | passed | 1.61 |
+| `claimCheckSendsLargeBodiesThroughBlobStorage` | passed | 3.39 |
+| `delayedMessageIsHeldBack` | passed | 5.42 |
+| `extendedLeaseKeepsMessageHidden` | passed | 61.78 |
+| `listenerAcksSuccessesAndRetriesFailures` | passed | 12.19 |
+| `listenerLimitsConcurrency` | passed | 3.50 |
+| `nackedMessageIsRedelivered` | passed | 1.84 |
+| `orderingKeyDeliversEachKeyInOrder` | passed | 4.55 |
+| `publishAllDeliversEveryMessage` | passed | 6.55 |
+| `publishedMessageArrivesWithBodyAndAttributes` | passed | 1.49 |
+| `queuesWorkPointToPoint` | passed | 1.51 |
+| `repeatedDeduplicationIdIsDeliveredOnce` | passed | 4.85 |
+| `reservedAttributesAndUnsupportedControlsAreRejected` | passed | 1.31 |
+| `settlingTwiceIsRejected` | passed | 1.67 |
+| `unsettledMessageReturnsAfterItsLease` | passed | 6.74 |
 
 </details>
 
 <details>
-<summary>App Configuration — ParameterStore: 21/22 passed, 18.2s</summary>
+<summary>Key Vault — ParameterStore: 22/22 passed, 30.7s</summary>
 
 | Test | Result | Time (s) |
 |---|---|---|
-| `cachedReadsAreServedUntilRefresh` | passed | 0.74 |
-| `deleteIsIdempotent` | passed | 0.98 |
-| `deletedNamesCanBeReused` | passed | 0.96 |
+| `cachedReadsAreServedUntilRefresh` | passed | 1.24 |
+| `deleteIsIdempotent` | passed | 1.11 |
+| `deletedNamesCanBeReused` | passed | 4.10 |
+| `earlierVersionsCanBeRead` | passed | 1.34 |
+| `getAllDoesNotMatchPartialSegments` | passed | 1.94 |
+| `getAllReturnsEverythingBelowAPrefix` | passed | 3.13 |
+| `invalidNamesAreRejected` | passed | 0.27 |
+| `jsonFieldsCanBeRead` | passed | 1.20 |
+| `largeValues` | passed | 0.82 |
+| `missingIsEmptyAndRequireFails` | passed | 0.69 |
+| `nativeNamesAreUsedAsTheyAre` | passed | 1.53 |
+| `plainValuesHaveNoFields` | passed | 0.84 |
+| `putReplacesWithANewVersion` | passed | 1.14 |
+| `putThenGet` | passed | 1.03 |
+| `reportsKindAndProvider` | passed | 0.21 |
+| `statisticsCountCacheHits` | passed | 0.92 |
+| `storesAreIsolatedByPrefix` | passed | 1.59 |
+| `typedReads` | passed | 1.02 |
+| `valuesKeepSpecialCharactersAndLines` | passed | 0.76 |
+| `watchReportsAddedUpdatedAndRemovedValues` | passed | 2.87 |
+| `watchedChangesInvalidateTheCache` | passed | 2.00 |
+| `writesInvalidateTheirOwnCache` | passed | 0.96 |
+
+</details>
+
+<details>
+<summary>App Configuration — ParameterStore: 21/22 passed, 15.2s</summary>
+
+| Test | Result | Time (s) |
+|---|---|---|
+| `cachedReadsAreServedUntilRefresh` | passed | 0.68 |
+| `deleteIsIdempotent` | passed | 0.89 |
+| `deletedNamesCanBeReused` | passed | 0.85 |
 | `earlierVersionsCanBeRead` | skipped | 0.00 |
-| `getAllDoesNotMatchPartialSegments` | passed | 0.95 |
-| `getAllReturnsEverythingBelowAPrefix` | passed | 1.28 |
-| `invalidNamesAreRejected` | passed | 0.17 |
-| `jsonFieldsCanBeRead` | passed | 0.85 |
-| `largeValues` | passed | 0.75 |
-| `missingIsEmptyAndRequireFails` | passed | 0.45 |
-| `nativeNamesAreUsedAsTheyAre` | passed | 0.68 |
-| `plainValuesHaveNoFields` | passed | 0.53 |
-| `putReplacesWithANewVersion` | passed | 0.82 |
-| `putThenGet` | passed | 0.92 |
-| `reportsKindAndProvider` | passed | 0.17 |
-| `statisticsCountCacheHits` | passed | 0.65 |
-| `storesAreIsolatedByPrefix` | passed | 1.20 |
-| `typedReads` | passed | 0.64 |
-| `valuesKeepSpecialCharactersAndLines` | passed | 0.74 |
-| `watchReportsAddedUpdatedAndRemovedValues` | passed | 2.73 |
-| `watchedChangesInvalidateTheCache` | passed | 1.18 |
-| `writesInvalidateTheirOwnCache` | passed | 0.77 |
+| `getAllDoesNotMatchPartialSegments` | passed | 0.86 |
+| `getAllReturnsEverythingBelowAPrefix` | passed | 1.03 |
+| `invalidNamesAreRejected` | passed | 0.20 |
+| `jsonFieldsCanBeRead` | passed | 0.75 |
+| `largeValues` | passed | 0.50 |
+| `missingIsEmptyAndRequireFails` | passed | 0.42 |
+| `nativeNamesAreUsedAsTheyAre` | passed | 0.74 |
+| `plainValuesHaveNoFields` | passed | 0.51 |
+| `putReplacesWithANewVersion` | passed | 0.65 |
+| `putThenGet` | passed | 0.62 |
+| `reportsKindAndProvider` | passed | 0.15 |
+| `statisticsCountCacheHits` | passed | 0.54 |
+| `storesAreIsolatedByPrefix` | passed | 1.03 |
+| `typedReads` | passed | 0.51 |
+| `valuesKeepSpecialCharactersAndLines` | passed | 0.52 |
+| `watchReportsAddedUpdatedAndRemovedValues` | passed | 2.08 |
+| `watchedChangesInvalidateTheCache` | passed | 1.05 |
+| `writesInvalidateTheirOwnCache` | passed | 0.63 |
 
 </details>
 
 <details>
-<summary>Event Grid namespace — EventPublisher / pull Subscription: 7/7 passed, 8.2s</summary>
+<summary>Event Grid namespace — EventPublisher / pull Subscription: 7/7 passed, 5.7s</summary>
 
 | Test | Result | Time (s) |
 |---|---|---|
-| `aRepublishedEventKeepsItsId` | passed | 0.69 |
-| `eventsWithoutDataArrive` | passed | 0.42 |
-| `listenersReceiveEvents` | passed | 0.90 |
-| `oversizedEventsAreRefusedBeforeSending` | passed | 0.06 |
-| `publishAllDeliversEveryEventAcrossRequests` | passed | 2.51 |
-| `publishedEventArrivesWithEveryAttribute` | passed | 3.00 |
-| `textAndBinaryData` | passed | 0.64 |
+| `aRepublishedEventKeepsItsId` | passed | 0.68 |
+| `eventsWithoutDataArrive` | passed | 0.46 |
+| `listenersReceiveEvents` | passed | 0.75 |
+| `oversizedEventsAreRefusedBeforeSending` | passed | 0.05 |
+| `publishAllDeliversEveryEventAcrossRequests` | passed | 2.26 |
+| `publishedEventArrivesWithEveryAttribute` | passed | 0.98 |
+| `textAndBinaryData` | passed | 0.56 |
 
 </details>
 
@@ -491,8 +512,9 @@ take effect.
 | `r26101612477b26` | tier 1, plus Spring Data repositories and Spring Boot 3 and 4 | **166/168, 2 skipped; Spring 2/2** | clean | Repositories 10/10 on Cosmos DB. |
 | `r261016150465a1` | tier 2, plus R2DBC and Spring Boot 3 and 4 | 4 passed, 6 errors, 1 failure; Spring 2/2 | clean | Every Entra ID login in `halyx-azure`'s tests failed with `IncompatibleClassChangeError`: the R2DBC driver brought `reactor-netty-core` 1.1 next to the Azure SDK's `reactor-netty-http` 1.2. The Spring tests, on Boot's managed versions, passed. The build now pins both to one version, and the SQL guide says to align them. |
 | `r26101616140f08` | tier 2, plus R2DBC and Spring Boot 3 and 4 | **13/13; Spring 2/2** | clean | Latest tier 2 result, above. |
-| `r261016202476f2` | tier 1, plus the event bus kit and Spring Boot 3 and 4 | 171 passed, 1 error, 2 skipped; Spring **4/4** | clean | Latest tier 1 result for every suite but Event Grid, above. Event Grid 5/6: `textBinaryAndAbsentData` failed because Event Grid refuses `"data": null`, which the Azure SDK writes for an event without data. |
-| `r261016214897d6` | tier 1, Event Grid only (`IT_TEST='RealAzureIT$EventGrid'`) | **7/7** | clean | Latest Event Grid result, above, after the fix and with the kit's data test split in two. |
+| `r261016202476f2` | tier 1, plus the event bus kit and Spring Boot 3 and 4 | 171 passed, 1 error, 2 skipped; Spring **4/4** | clean | Event Grid 5/6: `textBinaryAndAbsentData` failed because Event Grid refuses `"data": null`, which the Azure SDK writes for an event without data. |
+| `r261016214897d6` | tier 1, Event Grid only (`IT_TEST='RealAzureIT$EventGrid'`) | **7/7** | clean | After the fix, and with the kit's data test split in two. |
+| `r26101702533254` | tier 1, plus halyx-reactor and Spring Boot 3 and 4 | **183 passed, 2 skipped**; Spring **10/10** | clean | Latest tier 1 result, above. Reactive repositories 10/10 on Cosmos DB; the reactive Spring test (WebFlux over the container, a reactive repository, events through the reactive beans) 3/3 on Boot 3.5 and 4, the latter on Reactor 3.8 with the Azure SDK's Reactor Netty 1.2. |
 
 ## What real Azure found
 

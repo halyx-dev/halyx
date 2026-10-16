@@ -242,11 +242,13 @@ status=$?
 # Spring Boot 3 and 4: an auto-configured repository on the run's table with a sort key.
 mvn -o -q install -DskipTests -pl halyx-spring-boot-autoconfigure -am || exit 1
 for module in halyx-spring-boot-autoconfigure halyx-spring-boot4-tests; do
-  log "Running the Spring Boot repository and event tests ($module) against real Azure"
-  mvn -o verify -pl "$module" -Dit.test='RealSpringRepositoryIT,RealSpringEventIT' -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
-      -Dhalyx.real.spring.repositories=true -Dhalyx.real.spring.events=true -Dhalyx.real.spring.provider=azure \
+  log "Running the Spring Boot repository, event and reactive tests ($module) against real Azure"
+  mvn -o verify -pl "$module" -Dit.test='RealSpringRepositoryIT,RealSpringEventIT,RealSpringReactiveIT' -Dtest=none \
+      -Dsurefire.failIfNoSpecifiedTests=false \
+      -Dhalyx.real.spring.repositories=true -Dhalyx.real.spring.events=true -Dhalyx.real.spring.reactive=true \
+      -Dhalyx.real.spring.provider=azure -Dhalyx.real.spring.bucket="$CONTAINER" \
       -Dhalyx.real.spring.table="items-sorted" \
-      -Dhalyx.real.spring.provider-properties="azure.cosmos.endpoint=$(terraform -chdir="$TF_DIR" output -raw cosmos_endpoint),azure.cosmos.database=halyx" \
+      -Dhalyx.real.spring.provider-properties="azure.cosmos.endpoint=$(terraform -chdir="$TF_DIR" output -raw cosmos_endpoint),azure.cosmos.database=halyx,azure.storage.account=$STORAGE" \
       -Dhalyx.real.spring.event-bus="$EVENT_GRID_TOPIC" -Dhalyx.real.spring.event-bus-properties="azure.eventgrid.endpoint=$EVENT_GRID" \
       -Dhalyx.real.spring.inbox="$EVENT_GRID_SUBSCRIPTION" -Dhalyx.real.spring.inbox-topic="$EVENT_GRID_TOPIC" \
       -Dhalyx.real.spring.inbox-properties="azure.eventgrid.endpoint=$EVENT_GRID" || status=1

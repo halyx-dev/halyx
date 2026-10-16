@@ -298,12 +298,15 @@ mvn -o verify -pl halyx-gcp -Dit.test="${IT_TEST:-RealGcpIT}" -Dtest=none -Dsure
     -Dhalyx.real.gcp.message-bus="$MESSAGE_BUS" -Dhalyx.real.gcp.events-inbox="$EVENTS_INBOX"
 status=$?
 [[ -n "${IT_TEST:-}" ]] && exit $status
-# Spring Boot 3 and 4: an auto-configured repository on the run's table with a sort key, and the event bus.
+# Spring Boot 3 and 4: an auto-configured repository on the run's table with a sort key, the event bus, and
+# halyx-reactor's WebFlux, reactive repository and event beans over the bucket, table and message bus.
 mvn -o -q install -DskipTests -pl halyx-spring-boot-autoconfigure -am || exit 1
 for module in halyx-spring-boot-autoconfigure halyx-spring-boot4-tests; do
-  log "Running the Spring Boot repository and event tests ($module) against real GCP"
-  mvn -o verify -pl "$module" -Dit.test='RealSpringRepositoryIT,RealSpringEventIT' -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
-      -Dhalyx.real.spring.repositories=true -Dhalyx.real.spring.events=true -Dhalyx.real.spring.provider=gcp \
+  log "Running the Spring Boot repository, event and reactive tests ($module) against real GCP"
+  mvn -o verify -pl "$module" -Dit.test='RealSpringRepositoryIT,RealSpringEventIT,RealSpringReactiveIT' -Dtest=none \
+      -Dsurefire.failIfNoSpecifiedTests=false \
+      -Dhalyx.real.spring.repositories=true -Dhalyx.real.spring.events=true -Dhalyx.real.spring.reactive=true \
+      -Dhalyx.real.spring.provider=gcp -Dhalyx.real.spring.bucket="$(terraform -chdir="$TF_DIR" output -raw bucket)" \
       -Dhalyx.real.spring.table="items-sorted" \
       -Dhalyx.real.spring.provider-properties="gcp.project-id=$PROJECT,gcp.firestore.database=$(terraform -chdir="$TF_DIR" output -raw firestore_database)" \
       -Dhalyx.real.spring.event-bus="$MESSAGE_BUS" -Dhalyx.real.spring.inbox="$EVENTS_INBOX" || status=1

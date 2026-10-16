@@ -13,7 +13,7 @@ the `halyx-test` service account, impersonated through Application Default Crede
 
 | Tier | Services | Latest result |
 |---|---|---|
-| [1](#tier-1-latest-result) | Cloud Storage, Firestore, Pub/Sub, Secret Manager, Parameter Manager, Eventarc Advanced; Spring Data repositories on Firestore, and Spring Boot on Firestore and Eventarc | **192/196** passed, 4 skipped (expected); Spring **4/4** |
+| [1](#tier-1-latest-result) | Cloud Storage, Firestore, Pub/Sub, Secret Manager, Parameter Manager, Eventarc Advanced; Spring Data repositories (blocking and reactive) on Firestore, and Spring Boot on Firestore, Eventarc and, with halyx-reactor, WebFlux | **202/206** passed, 4 skipped (expected); Spring **10/10** |
 | [2](#tier-2-latest-result) | Cloud SQL for PostgreSQL and MySQL with IAM auth, direct and through the Cloud SQL connector; R2DBC and Spring Data R2DBC | **22/22**; Spring **2/2** |
 | [3](#tier-3-latest-result) | Memorystore for Valkey with IAM auth and TLS (private CA) | **54/54** |
 | [4](#tier-4-latest-result) | Streams on Managed Service for Apache Kafka with Google IAM, from a runner inside the VPC, plus Spring Boot 3 and 4 | **25/25**; Spring **2/2** |
@@ -55,27 +55,30 @@ lists every kind of resource. A listing that fails is reported as `CHECK FAILED`
 
 | | |
 |---|---|
-| Date | 2026-10-16, 11:03–11:38 UTC (35 min: the Eventarc pipeline and Firestore indexes about 7 min, tests about 19 min, teardown the rest) |
-| Run id | `r26101622034481` |
+| Date | 2026-10-16, 15:14–15:53 UTC (39 min: the Eventarc pipeline and Firestore indexes about 7 min, tests about 22 min, teardown the rest) |
+| Run id | `r2610170214c74e` |
 | Project and region | dedicated test project, `australia-southeast1` |
-| Result | **BUILD SUCCESS**: 192 passed, 0 failed, 4 skipped (expected); Spring Boot repository and event tests passed on Boot 3 and 4 |
+| Result | **BUILD SUCCESS**: 202 passed, 0 failed, 4 skipped (expected); Spring Boot repository, event and reactive tests passed on Boot 3 and 4 |
 | Teardown | bucket, Firestore database and Eventarc bus, pipeline and enrollment destroyed; check: **nothing left** |
 
 | Service | Halyx API | Tests | Passed | Skipped | Time |
 |---|---|---|---|---|---|
-| Cloud Storage | `BlobStore` | 75 | 74 | 1 | 244.6s |
-| Firestore | `DocumentStore` | 23 | 23 | 0 | 49.5s |
-| Firestore | Spring Data repositories | 10 | 10 | 0 | 5.5s |
-| Pub/Sub | `Publisher` / `Subscription` | 15 | 13 | 2 | 255.4s |
-| Secret Manager | `ParameterStore` | 22 | 22 | 0 | 229.0s |
-| Parameter Manager, global | `ParameterStore` | 22 | 22 | 0 | 141.5s |
-| Parameter Manager, `australia-southeast1` | `ParameterStore` | 22 | 22 | 0 | 37.4s |
-| Eventarc Advanced → Pub/Sub | `EventPublisher` / `CloudEvents.decode` | 7 | 6 | 1 | 69.4s |
-| **Total** | | **196** | **192** | **4** | |
+| Cloud Storage | `BlobStore` | 75 | 74 | 1 | 520.5s |
+| Firestore | `DocumentStore` | 23 | 23 | 0 | 15.3s |
+| Firestore | Spring Data repositories | 10 | 10 | 0 | 5.6s |
+| Firestore | reactive Spring Data repositories | 10 | 10 | 0 | 4.9s |
+| Pub/Sub | `Publisher` / `Subscription` | 15 | 13 | 2 | 250.8s |
+| Secret Manager | `ParameterStore` | 22 | 22 | 0 | 164.0s |
+| Parameter Manager, global | `ParameterStore` | 22 | 22 | 0 | 127.1s |
+| Parameter Manager, `australia-southeast1` | `ParameterStore` | 22 | 22 | 0 | 38.6s |
+| Eventarc Advanced → Pub/Sub | `EventPublisher` / `CloudEvents.decode` | 7 | 6 | 1 | 63.5s |
+| **Total** | | **206** | **202** | **4** | |
 | Firestore, Spring Boot 3.5 | Spring Boot repository test | 1 | 1 | | |
 | Firestore, Spring Boot 4 | Spring Boot repository test | 1 | 1 | | |
 | Eventarc → Pub/Sub, Spring Boot 3.5 | Spring Boot event test | 1 | 1 | | |
 | Eventarc → Pub/Sub, Spring Boot 4 | Spring Boot event test | 1 | 1 | | |
+| Bucket, Firestore and Eventarc, Spring Boot 3.5 | Spring Boot reactive test (WebFlux, reactive repository, events) | 3 | 3 | | |
+| Bucket, Firestore and Eventarc, Spring Boot 4 | Spring Boot reactive test (WebFlux, reactive repository, events) | 3 | 3 | | |
 
 Skipped tests, all expected:
 
@@ -94,262 +97,280 @@ collections and their `status`/`placedAt` composite indexes, through `halyx-spri
 ### Per-test results
 
 <details>
-<summary>Cloud Storage — BlobStore: 74/75 passed, 244.6s</summary>
+<summary>Cloud Storage — BlobStore: 74/75 passed, 520.5s</summary>
 
 | Test | Result | Time (s) |
 |---|---|---|
-| `abortedPresignedUploadCreatesNoBlob` | passed | 1.22 |
-| `closingTheStreamInsideWriteDoesNotCommitEarly` | passed | 0.40 |
-| `contentEncodingIsStoredAndBytesAreReturnedUnchanged` | passed | 0.40 |
-| `copyDuplicatesContentAndKeepsSource` | passed | 0.61 |
-| `copyMissingSourceThrowsNotFound` | passed | 0.07 |
-| `copyPreservesHttpHeaders` | passed | 0.40 |
-| `defaultTierIsHot` | passed | 0.31 |
-| `deleteAllRemovesEveryKeyIncludingMissingOnes` | passed | 1.43 |
-| `deleteAllSpansSeveralProviderBatches` | passed | 64.58 |
+| `abortedPresignedUploadCreatesNoBlob` | passed | 1.95 |
+| `closingTheStreamInsideWriteDoesNotCommitEarly` | passed | 1.26 |
+| `contentEncodingIsStoredAndBytesAreReturnedUnchanged` | passed | 1.72 |
+| `copyDuplicatesContentAndKeepsSource` | passed | 3.03 |
+| `copyMissingSourceThrowsNotFound` | passed | 0.29 |
+| `copyPreservesHttpHeaders` | passed | 1.20 |
+| `defaultTierIsHot` | passed | 0.93 |
+| `deleteAllRemovesEveryKeyIncludingMissingOnes` | passed | 5.23 |
+| `deleteAllSpansSeveralProviderBatches` | passed | 176.14 |
 | `deleteAllWithNoKeys` | passed | 0.00 |
-| `deleteIfMatchOnMissingBlobFails` | passed | 0.41 |
-| `deleteIfMatchWithCurrentETagDeletes` | passed | 0.39 |
-| `deleteIfMatchWithStaleETagFails` | passed | 0.71 |
-| `deleteMissingBlobIsIdempotent` | passed | 0.08 |
-| `deleteRemovesBlob` | passed | 0.43 |
-| `downloadWritesCompleteFile(Path)` | passed | 5.28 |
-| `emptyBlobRoundTrips` | passed | 0.42 |
-| `failedWriteKeepsExistingBlob` | passed | 0.52 |
-| `failedWriteStoresNothing` | passed | 0.22 |
-| `getMissingBlobThrowsNotFound` | passed | 0.08 |
-| `getReturnsMetadataWithContent` | passed | 0.43 |
-| `getWithStaleETagThrowsPreconditionFailed` | passed | 1.85 |
-| `headMissingBlobReturnsEmpty` | passed | 0.23 |
-| `headReturnsSizeAndLastModified` | passed | 0.28 |
-| `ifMatchWithCurrentETagSucceeds` | passed | 0.65 |
-| `ifMatchWithStaleETagThrowsPreconditionFailed` | passed | 0.89 |
-| `ifNotExistsCreatesMissingBlob` | passed | 0.44 |
-| `ifNotExistsRejectsExistingBlob` | passed | 0.58 |
-| `listAllStreamsEveryBlob` | passed | 1.54 |
-| `listEmptyPrefixReturnsNothing` | passed | 0.08 |
-| `listFiltersByPrefix` | passed | 0.82 |
-| `listPaginatesInKeyOrder` | passed | 3.05 |
-| `listSummariesCarrySize` | passed | 0.38 |
-| `listWithDelimiterGroupsKeysIntoPrefixes` | passed | 1.43 |
-| `listWithDelimiterPaginatesOverItemsAndPrefixes` | passed | 1.89 |
-| `listWithoutDelimiterReturnsNoPrefixes` | passed | 0.31 |
-| `openEndedRangeReadsToEnd` | passed | 0.47 |
-| `parallelReadReassemblesRangesInOrder` | passed | 7.50 |
-| `parallelReadValidatesChecksum` | passed | 4.80 |
+| `deleteIfMatchOnMissingBlobFails` | passed | 1.68 |
+| `deleteIfMatchWithCurrentETagDeletes` | passed | 1.27 |
+| `deleteIfMatchWithStaleETagFails` | passed | 2.32 |
+| `deleteMissingBlobIsIdempotent` | passed | 0.29 |
+| `deleteRemovesBlob` | passed | 1.25 |
+| `downloadWritesCompleteFile(Path)` | passed | 8.90 |
+| `emptyBlobRoundTrips` | passed | 1.50 |
+| `failedWriteKeepsExistingBlob` | passed | 1.53 |
+| `failedWriteStoresNothing` | passed | 0.60 |
+| `getMissingBlobThrowsNotFound` | passed | 0.29 |
+| `getReturnsMetadataWithContent` | passed | 1.21 |
+| `getWithStaleETagThrowsPreconditionFailed` | passed | 1.65 |
+| `headMissingBlobReturnsEmpty` | passed | 0.64 |
+| `headReturnsSizeAndLastModified` | passed | 0.92 |
+| `ifMatchWithCurrentETagSucceeds` | passed | 1.85 |
+| `ifMatchWithStaleETagThrowsPreconditionFailed` | passed | 3.47 |
+| `ifNotExistsCreatesMissingBlob` | passed | 1.56 |
+| `ifNotExistsRejectsExistingBlob` | passed | 1.83 |
+| `listAllStreamsEveryBlob` | passed | 4.72 |
+| `listEmptyPrefixReturnsNothing` | passed | 0.30 |
+| `listFiltersByPrefix` | passed | 2.16 |
+| `listPaginatesInKeyOrder` | passed | 7.23 |
+| `listSummariesCarrySize` | passed | 0.91 |
+| `listWithDelimiterGroupsKeysIntoPrefixes` | passed | 3.72 |
+| `listWithDelimiterPaginatesOverItemsAndPrefixes` | passed | 4.65 |
+| `listWithoutDelimiterReturnsNoPrefixes` | passed | 0.96 |
+| `openEndedRangeReadsToEnd` | passed | 1.27 |
+| `parallelReadReassemblesRangesInOrder` | passed | 8.41 |
+| `parallelReadValidatesChecksum` | passed | 7.74 |
 | `presignWithoutCapabilityIsRejected` | skipped | 0.00 |
-| `presignedDownloadUrlDownloadsBlob` | passed | 2.00 |
-| `presignedMultipartUploadAssemblesPartsInOrder` | passed | 16.29 |
-| `presignedUploadUrlReplacesExistingBlob` | passed | 0.93 |
-| `presignedUploadUrlUploadsBlob` | passed | 1.02 |
-| `presignedUploadWithContentTypeSetsContentType` | passed | 1.70 |
-| `presignedUrlReportsExpiry` | passed | 0.20 |
-| `putFromFile(Path)` | passed | 0.38 |
-| `putFromStream` | passed | 0.38 |
-| `putLargeFile(Path)` | passed | 17.21 |
-| `putOverwritesExistingBlob` | passed | 0.68 |
-| `putReturnsETagMatchingHead` | passed | 0.27 |
-| `putSmallUnknownLengthStream` | passed | 0.40 |
-| `putStoresContentTypeAndUserMetadata` | passed | 0.31 |
-| `putStoresStandardHttpHeaders` | passed | 0.32 |
-| `putThenGetRoundTripsContent` | passed | 0.41 |
-| `putUnknownLengthStream` | passed | 21.85 |
-| `putWithTierStoresTier` | passed | 0.58 |
-| `rangeReadReturnsSlice` | passed | 0.42 |
-| `setTierChangesTierButNotContent` | passed | 0.84 |
-| `setTierToCurrentTierIsANoOp` | passed | 0.96 |
-| `storedChecksumsMatchTheContent` | passed | 0.30 |
+| `presignedDownloadUrlDownloadsBlob` | passed | 1.62 |
+| `presignedMultipartUploadAssemblesPartsInOrder` | passed | 13.45 |
+| `presignedUploadUrlReplacesExistingBlob` | passed | 2.25 |
+| `presignedUploadUrlUploadsBlob` | passed | 1.44 |
+| `presignedUploadWithContentTypeSetsContentType` | passed | 1.10 |
+| `presignedUrlReportsExpiry` | passed | 0.22 |
+| `putFromFile(Path)` | passed | 1.17 |
+| `putFromStream` | passed | 1.23 |
+| `putLargeFile(Path)` | passed | 33.63 |
+| `putOverwritesExistingBlob` | passed | 1.87 |
+| `putReturnsETagMatchingHead` | passed | 0.93 |
+| `putSmallUnknownLengthStream` | passed | 1.21 |
+| `putStoresContentTypeAndUserMetadata` | passed | 0.91 |
+| `putStoresStandardHttpHeaders` | passed | 0.95 |
+| `putThenGetRoundTripsContent` | passed | 1.21 |
+| `putUnknownLengthStream` | passed | 33.64 |
+| `putWithTierStoresTier` | passed | 1.80 |
+| `rangeReadReturnsSlice` | passed | 1.69 |
+| `setTierChangesTierButNotContent` | passed | 3.21 |
+| `setTierToCurrentTierIsANoOp` | passed | 3.11 |
+| `storedChecksumsMatchTheContent` | passed | 0.94 |
 | `unwrapUnknownTypeThrows` | passed | 0.00 |
-| `updateMetadataKeepsTier` | passed | 0.52 |
-| `updateMetadataOfMissingBlobThrowsNotFound` | passed | 0.10 |
-| `updateMetadataReplacesHeadersAndMetadataButNotContent` | passed | 0.79 |
-| `updateMetadataWithStaleETagFails` | passed | 0.69 |
-| `validatedFileAndStreamUploads(Path)` | passed | 1.72 |
-| `validatedLargeFileUploadRoundTrips(Path)` | passed | 17.15 |
-| `validatedPutStoresAChecksumThatValidatesOnDownload` | passed | 0.51 |
-| `validatedWriteInParts` | passed | 10.21 |
-| `writeEmptyBlob` | passed | 0.34 |
-| `writeExactMultipleOfPartSize` | passed | 14.41 |
-| `writeInPartsWithIfNotExistsRejectsExistingBlob` | passed | 13.99 |
-| `writeLargeBlobInParts` | passed | 10.60 |
-| `writeSmallBlobInOneRequest` | passed | 0.52 |
+| `updateMetadataKeepsTier` | passed | 1.53 |
+| `updateMetadataOfMissingBlobThrowsNotFound` | passed | 0.28 |
+| `updateMetadataReplacesHeadersAndMetadataButNotContent` | passed | 2.39 |
+| `updateMetadataWithStaleETagFails` | passed | 1.83 |
+| `validatedFileAndStreamUploads(Path)` | passed | 4.55 |
+| `validatedLargeFileUploadRoundTrips(Path)` | passed | 20.70 |
+| `validatedPutStoresAChecksumThatValidatesOnDownload` | passed | 1.48 |
+| `validatedWriteInParts` | passed | 28.28 |
+| `writeEmptyBlob` | passed | 1.22 |
+| `writeExactMultipleOfPartSize` | passed | 31.27 |
+| `writeInPartsWithIfNotExistsRejectsExistingBlob` | passed | 23.56 |
+| `writeLargeBlobInParts` | passed | 27.14 |
+| `writeSmallBlobInOneRequest` | passed | 2.09 |
 
 </details>
 
 <details>
-<summary>Firestore — DocumentStore: 23/23 passed, 49.5s</summary>
+<summary>Firestore — DocumentStore: 23/23 passed, 15.3s</summary>
 
 | Test | Result | Time (s) |
 |---|---|---|
-| `checksGuardATransactionWithoutWriting` | passed | 3.03 |
-| `concurrentIncrementsAreNotLost` | passed | 4.08 |
-| `decimalsRoundTripAsNumbers` | passed | 0.54 |
-| `deleteReportsWhetherAnItemWasRemoved` | passed | 1.87 |
-| `expiredItemsAreNeverReturned` | passed | 6.37 |
-| `failedConditionRollsBackTheWholeTransaction` | passed | 4.38 |
-| `getAllReturnsWhatExistsAcrossBatches` | passed | 0.94 |
-| `ifNotExistsCreatesOnlyOnce` | passed | 1.08 |
-| `indexQueryFindsItemsAcrossPartitionsInSortOrder` | passed | 5.44 |
-| `indexQueryPagesThroughManyMatches` | passed | 1.47 |
-| `indexWithoutSortAttributeFindsEveryMatch` | passed | 1.11 |
+| `checksGuardATransactionWithoutWriting` | passed | 0.61 |
+| `concurrentIncrementsAreNotLost` | passed | 0.87 |
+| `decimalsRoundTripAsNumbers` | passed | 0.10 |
+| `deleteReportsWhetherAnItemWasRemoved` | passed | 0.58 |
+| `expiredItemsAreNeverReturned` | passed | 3.78 |
+| `failedConditionRollsBackTheWholeTransaction` | passed | 0.92 |
+| `getAllReturnsWhatExistsAcrossBatches` | passed | 0.31 |
+| `ifNotExistsCreatesOnlyOnce` | passed | 0.23 |
+| `indexQueryFindsItemsAcrossPartitionsInSortOrder` | passed | 2.92 |
+| `indexQueryPagesThroughManyMatches` | passed | 0.38 |
+| `indexWithoutSortAttributeFindsEveryMatch` | passed | 0.25 |
 | `invalidKeysAndReservedFieldsAreRejected` | passed | 0.00 |
-| `keysWithSpecialCharactersRoundTrip` | passed | 2.12 |
-| `missingItemIsEmpty` | passed | 0.52 |
-| `putAndGetRoundTripsEveryValueType` | passed | 0.59 |
-| `putReplacesTheWholeItem` | passed | 0.81 |
-| `queryPagesThroughLargePartitions` | passed | 3.57 |
-| `queryReturnsAPartitionInSortOrder` | passed | 2.16 |
-| `transactionAppliesEveryWriteTogether` | passed | 2.97 |
+| `keysWithSpecialCharactersRoundTrip` | passed | 0.49 |
+| `missingItemIsEmpty` | passed | 0.15 |
+| `putAndGetRoundTripsEveryValueType` | passed | 0.15 |
+| `putReplacesTheWholeItem` | passed | 0.16 |
+| `queryPagesThroughLargePartitions` | passed | 0.79 |
+| `queryReturnsAPartitionInSortOrder` | passed | 0.44 |
+| `transactionAppliesEveryWriteTogether` | passed | 0.76 |
 | `transactionsStayWithinOnePartition` | passed | 0.00 |
-| `updateNeedsAnExistingItemAndTheRightVersion` | passed | 1.91 |
-| `updateSetsRemovesAndIncrements` | passed | 1.06 |
-| `versionsGuardConcurrentWrites` | passed | 3.49 |
+| `updateNeedsAnExistingItemAndTheRightVersion` | passed | 0.43 |
+| `updateSetsRemovesAndIncrements` | passed | 0.20 |
+| `versionsGuardConcurrentWrites` | passed | 0.77 |
 
 </details>
 
 <details>
-<summary>Firestore — Spring Data repositories: 10/10 passed, 5.5s</summary>
+<summary>Firestore — Spring Data repositories: 10/10 passed, 5.6s</summary>
 
 | Test | Result | Time (s) |
 |---|---|---|
-| `indexQueriesAcrossPartitions` | passed | 0.58 |
+| `indexQueriesAcrossPartitions` | passed | 0.60 |
 | `indexWithoutASortAttribute` | passed | 0.30 |
-| `partitionQueriesInSortKeyOrderEitherWay` | passed | 0.64 |
+| `partitionQueriesInSortKeyOrderEitherWay` | passed | 0.73 |
 | `savedEntitiesReadBackWithTheirVersion` | passed | 0.20 |
-| `sortKeyConditions` | passed | 0.72 |
-| `staleVersionsAndTakenIdsAreRejected` | passed | 1.44 |
-| `streamsReadLazily` | passed | 0.25 |
-| `unversionedEntitiesAreSavedInBatchesAndOverwritten` | passed | 0.64 |
-| `uuidKeysAndStringIds` | passed | 0.25 |
-| `windowsScrollThroughAPartition` | passed | 0.48 |
+| `sortKeyConditions` | passed | 0.62 |
+| `staleVersionsAndTakenIdsAreRejected` | passed | 1.47 |
+| `streamsReadLazily` | passed | 0.26 |
+| `unversionedEntitiesAreSavedInBatchesAndOverwritten` | passed | 0.65 |
+| `uuidKeysAndStringIds` | passed | 0.26 |
+| `windowsScrollThroughAPartition` | passed | 0.54 |
 
 </details>
 
 <details>
-<summary>Pub/Sub — Publisher / Subscription: 13/15 passed, 255.4s</summary>
+<summary>Firestore — reactive Spring Data repositories: 10/10 passed, 4.9s</summary>
 
 | Test | Result | Time (s) |
 |---|---|---|
-| `ackedMessageIsNotRedelivered` | passed | 23.70 |
-| `binaryBodiesArriveUnchanged` | passed | 11.73 |
-| `claimCheckSendsLargeBodiesThroughBlobStorage` | passed | 15.96 |
+| `fluxQueriesStreamAndCanStopEarly` | passed | 0.24 |
+| `indexQueriesAcrossPartitions` | passed | 0.52 |
+| `indexWithoutASortAttribute` | passed | 0.26 |
+| `partitionQueriesInSortKeyOrderEitherWay` | passed | 0.60 |
+| `savedEntitiesReadBackWithTheirVersion` | passed | 0.24 |
+| `sortKeyConditions` | passed | 0.58 |
+| `staleVersionsAndTakenIdsAreRejected` | passed | 0.69 |
+| `unversionedEntitiesAreSavedInBatchesFromIterablesAndPublishers` | passed | 0.61 |
+| `uuidKeysAndStringIds` | passed | 0.22 |
+| `windowsScrollThroughAPartition` | passed | 0.96 |
+
+</details>
+
+<details>
+<summary>Pub/Sub — Publisher / Subscription: 13/15 passed, 250.8s</summary>
+
+| Test | Result | Time (s) |
+|---|---|---|
+| `ackedMessageIsNotRedelivered` | passed | 25.61 |
+| `binaryBodiesArriveUnchanged` | passed | 12.49 |
+| `claimCheckSendsLargeBodiesThroughBlobStorage` | passed | 13.57 |
 | `delayedMessageIsHeldBack` | skipped | 0.00 |
-| `extendedLeaseKeepsMessageHidden` | passed | 30.74 |
-| `listenerAcksSuccessesAndRetriesFailures` | passed | 31.95 |
-| `listenerLimitsConcurrency` | passed | 24.40 |
-| `nackedMessageIsRedelivered` | passed | 13.13 |
-| `orderingKeyDeliversEachKeyInOrder` | passed | 30.34 |
-| `publishAllDeliversEveryMessage` | passed | 19.87 |
-| `publishedMessageArrivesWithBodyAndAttributes` | passed | 12.25 |
+| `extendedLeaseKeepsMessageHidden` | passed | 31.93 |
+| `listenerAcksSuccessesAndRetriesFailures` | passed | 34.49 |
+| `listenerLimitsConcurrency` | passed | 22.06 |
+| `nackedMessageIsRedelivered` | passed | 13.64 |
+| `orderingKeyDeliversEachKeyInOrder` | passed | 20.60 |
+| `publishAllDeliversEveryMessage` | passed | 20.00 |
+| `publishedMessageArrivesWithBodyAndAttributes` | passed | 12.04 |
 | `repeatedDeduplicationIdIsDeliveredOnce` | skipped | 0.00 |
-| `reservedAttributesAndUnsupportedControlsAreRejected` | passed | 8.02 |
-| `settlingTwiceIsRejected` | passed | 11.26 |
-| `unsettledMessageReturnsAfterItsLease` | passed | 22.04 |
+| `reservedAttributesAndUnsupportedControlsAreRejected` | passed | 8.37 |
+| `settlingTwiceIsRejected` | passed | 12.49 |
+| `unsettledMessageReturnsAfterItsLease` | passed | 23.49 |
 
 </details>
 
 <details>
-<summary>Secret Manager — ParameterStore: 22/22 passed, 229.0s</summary>
+<summary>Secret Manager — ParameterStore: 22/22 passed, 164.0s</summary>
 
 | Test | Result | Time (s) |
 |---|---|---|
-| `cachedReadsAreServedUntilRefresh` | passed | 13.75 |
-| `deleteIsIdempotent` | passed | 7.48 |
-| `deletedNamesCanBeReused` | passed | 16.15 |
-| `earlierVersionsCanBeRead` | passed | 10.24 |
-| `getAllDoesNotMatchPartialSegments` | passed | 18.02 |
-| `getAllReturnsEverythingBelowAPrefix` | passed | 25.47 |
-| `invalidNamesAreRejected` | passed | 0.23 |
-| `jsonFieldsCanBeRead` | passed | 7.15 |
-| `largeValues` | passed | 7.63 |
-| `missingIsEmptyAndRequireFails` | passed | 1.08 |
-| `nativeNamesAreUsedAsTheyAre` | passed | 10.67 |
-| `plainValuesHaveNoFields` | passed | 8.14 |
-| `putReplacesWithANewVersion` | passed | 11.95 |
-| `putThenGet` | passed | 7.40 |
-| `reportsKindAndProvider` | passed | 0.17 |
-| `statisticsCountCacheHits` | passed | 7.11 |
-| `storesAreIsolatedByPrefix` | passed | 8.23 |
-| `typedReads` | passed | 8.51 |
-| `valuesKeepSpecialCharactersAndLines` | passed | 7.78 |
-| `watchReportsAddedUpdatedAndRemovedValues` | passed | 23.38 |
-| `watchedChangesInvalidateTheCache` | passed | 13.11 |
-| `writesInvalidateTheirOwnCache` | passed | 15.35 |
+| `cachedReadsAreServedUntilRefresh` | passed | 7.55 |
+| `deleteIsIdempotent` | passed | 7.20 |
+| `deletedNamesCanBeReused` | passed | 10.64 |
+| `earlierVersionsCanBeRead` | passed | 6.92 |
+| `getAllDoesNotMatchPartialSegments` | passed | 12.17 |
+| `getAllReturnsEverythingBelowAPrefix` | passed | 18.02 |
+| `invalidNamesAreRejected` | passed | 0.30 |
+| `jsonFieldsCanBeRead` | passed | 7.08 |
+| `largeValues` | passed | 5.75 |
+| `missingIsEmptyAndRequireFails` | passed | 1.20 |
+| `nativeNamesAreUsedAsTheyAre` | passed | 7.40 |
+| `plainValuesHaveNoFields` | passed | 5.88 |
+| `putReplacesWithANewVersion` | passed | 7.39 |
+| `putThenGet` | passed | 5.59 |
+| `reportsKindAndProvider` | passed | 0.31 |
+| `statisticsCountCacheHits` | passed | 5.82 |
+| `storesAreIsolatedByPrefix` | passed | 9.11 |
+| `typedReads` | passed | 5.77 |
+| `valuesKeepSpecialCharactersAndLines` | passed | 6.97 |
+| `watchReportsAddedUpdatedAndRemovedValues` | passed | 14.03 |
+| `watchedChangesInvalidateTheCache` | passed | 9.02 |
+| `writesInvalidateTheirOwnCache` | passed | 9.91 |
 
 </details>
 
 <details>
-<summary>Parameter Manager, global — ParameterStore: 22/22 passed, 141.5s</summary>
+<summary>Parameter Manager, global — ParameterStore: 22/22 passed, 127.1s</summary>
 
 | Test | Result | Time (s) |
 |---|---|---|
-| `cachedReadsAreServedUntilRefresh` | passed | 6.66 |
-| `deleteIsIdempotent` | passed | 4.06 |
-| `deletedNamesCanBeReused` | passed | 8.37 |
-| `earlierVersionsCanBeRead` | passed | 6.21 |
-| `getAllDoesNotMatchPartialSegments` | passed | 10.85 |
-| `getAllReturnsEverythingBelowAPrefix` | passed | 16.10 |
-| `invalidNamesAreRejected` | passed | 0.24 |
-| `jsonFieldsCanBeRead` | passed | 6.48 |
-| `largeValues` | passed | 5.44 |
+| `cachedReadsAreServedUntilRefresh` | passed | 6.18 |
+| `deleteIsIdempotent` | passed | 3.62 |
+| `deletedNamesCanBeReused` | passed | 7.27 |
+| `earlierVersionsCanBeRead` | passed | 5.74 |
+| `getAllDoesNotMatchPartialSegments` | passed | 9.84 |
+| `getAllReturnsEverythingBelowAPrefix` | passed | 14.48 |
+| `invalidNamesAreRejected` | passed | 0.25 |
+| `jsonFieldsCanBeRead` | passed | 6.06 |
+| `largeValues` | passed | 4.40 |
 | `missingIsEmptyAndRequireFails` | passed | 0.74 |
-| `nativeNamesAreUsedAsTheyAre` | passed | 6.55 |
-| `plainValuesHaveNoFields` | passed | 5.46 |
-| `putReplacesWithANewVersion` | passed | 6.58 |
-| `putThenGet` | passed | 5.63 |
-| `reportsKindAndProvider` | passed | 0.27 |
-| `statisticsCountCacheHits` | passed | 5.35 |
-| `storesAreIsolatedByPrefix` | passed | 7.47 |
-| `typedReads` | passed | 5.26 |
-| `valuesKeepSpecialCharactersAndLines` | passed | 4.71 |
-| `watchReportsAddedUpdatedAndRemovedValues` | passed | 13.27 |
-| `watchedChangesInvalidateTheCache` | passed | 8.94 |
-| `writesInvalidateTheirOwnCache` | passed | 6.90 |
+| `nativeNamesAreUsedAsTheyAre` | passed | 5.61 |
+| `plainValuesHaveNoFields` | passed | 4.27 |
+| `putReplacesWithANewVersion` | passed | 5.75 |
+| `putThenGet` | passed | 5.22 |
+| `reportsKindAndProvider` | passed | 0.24 |
+| `statisticsCountCacheHits` | passed | 4.30 |
+| `storesAreIsolatedByPrefix` | passed | 6.46 |
+| `typedReads` | passed | 4.68 |
+| `valuesKeepSpecialCharactersAndLines` | passed | 4.78 |
+| `watchReportsAddedUpdatedAndRemovedValues` | passed | 12.41 |
+| `watchedChangesInvalidateTheCache` | passed | 7.98 |
+| `writesInvalidateTheirOwnCache` | passed | 6.82 |
 
 </details>
 
 <details>
-<summary>Parameter Manager, `australia-southeast1` — ParameterStore: 22/22 passed, 37.4s</summary>
+<summary>Parameter Manager, `australia-southeast1` — ParameterStore: 22/22 passed, 38.6s</summary>
 
 | Test | Result | Time (s) |
 |---|---|---|
-| `cachedReadsAreServedUntilRefresh` | passed | 1.57 |
-| `deleteIsIdempotent` | passed | 1.21 |
-| `deletedNamesCanBeReused` | passed | 2.10 |
-| `earlierVersionsCanBeRead` | passed | 1.51 |
-| `getAllDoesNotMatchPartialSegments` | passed | 2.58 |
-| `getAllReturnsEverythingBelowAPrefix` | passed | 4.09 |
+| `cachedReadsAreServedUntilRefresh` | passed | 1.75 |
+| `deleteIsIdempotent` | passed | 1.16 |
+| `deletedNamesCanBeReused` | passed | 2.25 |
+| `earlierVersionsCanBeRead` | passed | 1.62 |
+| `getAllDoesNotMatchPartialSegments` | passed | 2.72 |
+| `getAllReturnsEverythingBelowAPrefix` | passed | 4.45 |
 | `invalidNamesAreRejected` | passed | 0.06 |
-| `jsonFieldsCanBeRead` | passed | 1.46 |
-| `largeValues` | passed | 1.34 |
-| `missingIsEmptyAndRequireFails` | passed | 0.19 |
-| `nativeNamesAreUsedAsTheyAre` | passed | 1.57 |
-| `plainValuesHaveNoFields` | passed | 1.22 |
+| `jsonFieldsCanBeRead` | passed | 1.70 |
+| `largeValues` | passed | 1.51 |
+| `missingIsEmptyAndRequireFails` | passed | 0.20 |
+| `nativeNamesAreUsedAsTheyAre` | passed | 1.51 |
+| `plainValuesHaveNoFields` | passed | 1.38 |
 | `putReplacesWithANewVersion` | passed | 1.53 |
-| `putThenGet` | passed | 1.45 |
-| `reportsKindAndProvider` | passed | 0.05 |
-| `statisticsCountCacheHits` | passed | 1.23 |
-| `storesAreIsolatedByPrefix` | passed | 3.05 |
-| `typedReads` | passed | 1.27 |
-| `valuesKeepSpecialCharactersAndLines` | passed | 1.17 |
-| `watchReportsAddedUpdatedAndRemovedValues` | passed | 4.14 |
-| `watchedChangesInvalidateTheCache` | passed | 2.49 |
-| `writesInvalidateTheirOwnCache` | passed | 2.11 |
+| `putThenGet` | passed | 1.48 |
+| `reportsKindAndProvider` | passed | 0.06 |
+| `statisticsCountCacheHits` | passed | 1.31 |
+| `storesAreIsolatedByPrefix` | passed | 2.54 |
+| `typedReads` | passed | 1.47 |
+| `valuesKeepSpecialCharactersAndLines` | passed | 1.35 |
+| `watchReportsAddedUpdatedAndRemovedValues` | passed | 3.96 |
+| `watchedChangesInvalidateTheCache` | passed | 2.42 |
+| `writesInvalidateTheirOwnCache` | passed | 2.15 |
 
 </details>
 
 <details>
-<summary>Eventarc Advanced → Pub/Sub — EventPublisher / CloudEvents.decode: 6/7 passed, 69.4s</summary>
+<summary>Eventarc Advanced → Pub/Sub — EventPublisher / CloudEvents.decode: 6/7 passed, 63.5s</summary>
 
 | Test | Result | Time (s) |
 |---|---|---|
-| `aRepublishedEventKeepsItsId` | passed | 4.38 |
+| `aRepublishedEventKeepsItsId` | passed | 3.07 |
 | `eventsWithoutDataArrive` | skipped | 0.00 |
-| `listenersReceiveEvents` | passed | 19.62 |
-| `oversizedEventsAreRefusedBeforeSending` | passed | 0.04 |
-| `publishAllDeliversEveryEventAcrossRequests` | passed | 32.78 |
-| `publishedEventArrivesWithEveryAttribute` | passed | 7.90 |
-| `textAndBinaryData` | passed | 4.72 |
+| `listenersReceiveEvents` | passed | 19.80 |
+| `oversizedEventsAreRefusedBeforeSending` | passed | 0.06 |
+| `publishAllDeliversEveryEventAcrossRequests` | passed | 30.39 |
+| `publishedEventArrivesWithEveryAttribute` | passed | 7.64 |
+| `textAndBinaryData` | passed | 2.59 |
 
 </details>
 
@@ -620,7 +641,8 @@ nothing to fix.
 | `r2610161518d9f9` | tier 2, plus R2DBC and Spring Boot 3 and 4 | **22/22; Spring 2/2** | clean | Latest tier 2 result, above. R2DBC's IAM login passed on both engines first time. |
 | `r2610161942fea5` | tier 1, plus the event bus kit and Spring Boot 3 and 4 | 184 passed, 1 failed, 5 errors, 3 skipped; Spring 2/4 | clean | Eventarc 1/6 and both Spring event tests: the driver published to the regional `<location>-eventarcpublishing` endpoint, which answers 404 for message buses. Probing by hand showed a second problem: the pipeline's publish to Pub/Sub was refused with 403, having no credentials. Secret Manager `putReplacesWithANewVersion` read the previous value once. |
 | `r26101620472de5` | tier 1, plus the event bus kit and Spring Boot 3 and 4 | 185 passed, 3 failed, 3 skipped; Spring **4/4** | clean | Global endpoint and authenticated pipeline: Eventarc 5/6. Pub/Sub refused (400) the pipeline's publish of the event without data. Secret Manager read a previous value twice; the kit now allows for `latest` being eventually consistent. |
-| `r26101622034481` | tier 1, plus the event bus kit and Spring Boot 3 and 4 | **192 passed, 4 skipped**; Spring **4/4** | clean | Latest tier 1 result, above. Eventarc 6/7, with events without data declared a known gap. |
+| `r26101622034481` | tier 1, plus the event bus kit and Spring Boot 3 and 4 | **192 passed, 4 skipped**; Spring **4/4** | clean | Eventarc 6/7, with events without data declared a known gap. |
+| `r2610170214c74e` | tier 1, plus halyx-reactor and Spring Boot 3 and 4 | **202 passed, 4 skipped**; Spring **10/10** | clean | Latest tier 1 result, above. Reactive repositories 10/10 on Firestore; the reactive Spring test (WebFlux over the bucket, a reactive repository, events through the reactive beans) 3/3 on Boot 3.5 and 4. |
 
 ## What real GCP found
 

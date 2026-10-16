@@ -13,7 +13,7 @@ the `halyx_test` IAM user. Every run creates its own throwaway resources and del
 
 | Tier | Services | Latest result |
 |---|---|---|
-| [1](#tier-1-latest-result) | S3, DynamoDB, SSM Parameter Store, Secrets Manager, SNS, SQS, EventBridge; Spring Data repositories on DynamoDB, and Spring Boot on DynamoDB and EventBridge | **187/189**, 2 skipped (expected); Spring **4/4** |
+| [1](#tier-1-latest-result) | S3, DynamoDB, SSM Parameter Store, Secrets Manager, SNS, SQS, EventBridge; Spring Data repositories (blocking and reactive) on DynamoDB, and Spring Boot on DynamoDB, EventBridge and, with halyx-reactor, WebFlux | **197/199**, 2 skipped (expected); Spring **10/10** |
 | [2](#tier-2-latest-result) | RDS for PostgreSQL and MySQL with IAM auth; R2DBC and Spring Data R2DBC | **16/16**; Spring **2/2** |
 | [3](#tier-3-latest-result) | ElastiCache for Valkey with IAM auth | 52/53: the IAM policy still needs checking |
 | [4](#tier-4-not-run) | Streams on MSK Serverless with IAM | not run: the test account's Free plan doesn't allow MSK |
@@ -52,28 +52,31 @@ Credentials come from the named AWS profile and never from the repository.
 
 | | |
 |---|---|
-| Date | 2026-10-16: 08:31–08:42 UTC (11 min including provision and teardown), and 11:39–11:42 UTC for EventBridge |
-| Run id | `r2610161931a2f8`; EventBridge from `r26101622397240`, with the kit's data test split in two |
+| Date | 2026-10-16, 16:16–16:26 UTC (10 min including provision and teardown) |
+| Run id | `r2610170316f538` |
 | Region | `ap-southeast-2` |
 | Toolchain | Java 25.0.2, Maven 3.9.14, Terraform 1.5.7; Spring Boot 3.5.16 and 4.1.1 |
-| Result | **187 passed**, 2 skipped (expected); Spring Boot repository and event tests passed on Boot 3 and 4 |
-| Teardown | check: **nothing left** (both runs) |
+| Result | **197 passed**, 2 skipped (expected); Spring Boot repository, event and reactive tests passed on Boot 3 and 4 |
+| Teardown | check: **nothing left** |
 
 | Service | Halyx API | Tests | Passed | Skipped | Time |
 |---|---|---|---|---|---|
-| S3 | `BlobStore` | 75 | 74 | 1 | 227.2s |
-| DynamoDB | `DocumentStore` | 23 | 23 | 0 | 10.7s |
-| DynamoDB | Spring Data repositories | 10 | 10 | 0 | 4.3s |
-| SSM Parameter Store | `ParameterStore` | 22 | 22 | 0 | 12.0s |
-| Secrets Manager | `ParameterStore` | 22 | 22 | 0 | 35.6s |
-| SNS → SQS | `Publisher` / `Subscription` | 15 | 14 | 1 | 80.8s |
-| SQS queue | `Publisher` / `Subscription` | 15 | 15 | 0 | 31.2s |
-| EventBridge → SQS | `EventPublisher` / `CloudEvents.decode` | 7 | 7 | 0 | 35.2s |
-| **Total** | | **189** | **187** | **2** | |
+| S3 | `BlobStore` | 75 | 74 | 1 | 159.9s |
+| DynamoDB | `DocumentStore` | 23 | 23 | 0 | 10.1s |
+| DynamoDB | Spring Data repositories | 10 | 10 | 0 | 4.1s |
+| DynamoDB | reactive Spring Data repositories | 10 | 10 | 0 | 3.4s |
+| SSM Parameter Store | `ParameterStore` | 22 | 22 | 0 | 13.0s |
+| Secrets Manager | `ParameterStore` | 22 | 22 | 0 | 32.5s |
+| SNS → SQS | `Publisher` / `Subscription` | 15 | 14 | 1 | 79.0s |
+| SQS queue | `Publisher` / `Subscription` | 15 | 15 | 0 | 32.4s |
+| EventBridge → SQS | `EventPublisher` / `CloudEvents.decode` | 7 | 7 | 0 | 34.9s |
+| **Total** | | **199** | **197** | **2** | |
 | DynamoDB, Spring Boot 3.5 | Spring Boot repository test | 1 | 1 | | |
 | DynamoDB, Spring Boot 4 | Spring Boot repository test | 1 | 1 | | |
 | EventBridge → SQS, Spring Boot 3.5 | Spring Boot event test | 1 | 1 | | |
 | EventBridge → SQS, Spring Boot 4 | Spring Boot event test | 1 | 1 | | |
+| S3, DynamoDB and EventBridge, Spring Boot 3.5 | Spring Boot reactive test (WebFlux, reactive repository, events) | 3 | 3 | | |
+| S3, DynamoDB and EventBridge, Spring Boot 4 | Spring Boot reactive test (WebFlux, reactive repository, events) | 3 | 3 | | |
 
 Skipped tests, both expected:
 
@@ -92,255 +95,273 @@ The repository kit and the Spring Boot repository test run on the tier's two Dyn
 ### Per-test results
 
 <details>
-<summary>S3 — BlobStore: 74/75 passed, 227.2s</summary>
+<summary>S3 — BlobStore: 74/75 passed, 159.9s</summary>
 
 | Test | Result | Time (s) |
 |---|---|---|
-| `abortedPresignedUploadCreatesNoBlob` | passed | 0.52 |
-| `closingTheStreamInsideWriteDoesNotCommitEarly` | passed | 0.13 |
-| `contentEncodingIsStoredAndBytesAreReturnedUnchanged` | passed | 0.12 |
-| `copyDuplicatesContentAndKeepsSource` | passed | 0.35 |
+| `abortedPresignedUploadCreatesNoBlob` | passed | 0.44 |
+| `closingTheStreamInsideWriteDoesNotCommitEarly` | passed | 0.12 |
+| `contentEncodingIsStoredAndBytesAreReturnedUnchanged` | passed | 0.13 |
+| `copyDuplicatesContentAndKeepsSource` | passed | 0.27 |
 | `copyMissingSourceThrowsNotFound` | passed | 0.06 |
 | `copyPreservesHttpHeaders` | passed | 0.21 |
-| `defaultTierIsHot` | passed | 0.11 |
-| `deleteAllRemovesEveryKeyIncludingMissingOnes` | passed | 0.57 |
-| `deleteAllSpansSeveralProviderBatches` | passed | 18.84 |
+| `defaultTierIsHot` | passed | 0.13 |
+| `deleteAllRemovesEveryKeyIncludingMissingOnes` | passed | 0.51 |
+| `deleteAllSpansSeveralProviderBatches` | passed | 20.39 |
 | `deleteAllWithNoKeys` | passed | 0.00 |
-| `deleteIfMatchOnMissingBlobFails` | passed | 0.23 |
-| `deleteIfMatchWithCurrentETagDeletes` | passed | 0.24 |
-| `deleteIfMatchWithStaleETagFails` | passed | 0.24 |
+| `deleteIfMatchOnMissingBlobFails` | passed | 0.17 |
+| `deleteIfMatchWithCurrentETagDeletes` | passed | 0.23 |
+| `deleteIfMatchWithStaleETagFails` | passed | 0.40 |
 | `deleteMissingBlobIsIdempotent` | passed | 0.06 |
-| `deleteRemovesBlob` | passed | 0.22 |
-| `downloadWritesCompleteFile(Path)` | passed | 4.53 |
+| `deleteRemovesBlob` | passed | 0.18 |
+| `downloadWritesCompleteFile(Path)` | passed | 4.34 |
 | `emptyBlobRoundTrips` | passed | 0.19 |
-| `failedWriteKeepsExistingBlob` | passed | 7.07 |
-| `failedWriteStoresNothing` | passed | 8.23 |
-| `getMissingBlobThrowsNotFound` | passed | 0.08 |
-| `getReturnsMetadataWithContent` | passed | 0.13 |
-| `getWithStaleETagThrowsPreconditionFailed` | passed | 0.19 |
-| `headMissingBlobReturnsEmpty` | passed | 0.08 |
-| `headReturnsSizeAndLastModified` | passed | 0.12 |
-| `ifMatchWithCurrentETagSucceeds` | passed | 0.20 |
-| `ifMatchWithStaleETagThrowsPreconditionFailed` | passed | 0.27 |
+| `failedWriteKeepsExistingBlob` | passed | 5.29 |
+| `failedWriteStoresNothing` | passed | 7.78 |
+| `getMissingBlobThrowsNotFound` | passed | 0.06 |
+| `getReturnsMetadataWithContent` | passed | 0.14 |
+| `getWithStaleETagThrowsPreconditionFailed` | passed | 0.20 |
+| `headMissingBlobReturnsEmpty` | passed | 0.11 |
+| `headReturnsSizeAndLastModified` | passed | 0.13 |
+| `ifMatchWithCurrentETagSucceeds` | passed | 0.21 |
+| `ifMatchWithStaleETagThrowsPreconditionFailed` | passed | 0.26 |
 | `ifNotExistsCreatesMissingBlob` | passed | 0.14 |
-| `ifNotExistsRejectsExistingBlob` | passed | 0.20 |
-| `listAllStreamsEveryBlob` | passed | 0.68 |
-| `listEmptyPrefixReturnsNothing` | passed | 0.05 |
-| `listFiltersByPrefix` | passed | 0.25 |
-| `listPaginatesInKeyOrder` | passed | 0.72 |
+| `ifNotExistsRejectsExistingBlob` | passed | 0.22 |
+| `listAllStreamsEveryBlob` | passed | 0.56 |
+| `listEmptyPrefixReturnsNothing` | passed | 0.06 |
+| `listFiltersByPrefix` | passed | 0.27 |
+| `listPaginatesInKeyOrder` | passed | 0.71 |
 | `listSummariesCarrySize` | passed | 0.13 |
-| `listWithDelimiterGroupsKeysIntoPrefixes` | passed | 0.48 |
-| `listWithDelimiterPaginatesOverItemsAndPrefixes` | passed | 0.56 |
-| `listWithoutDelimiterReturnsNoPrefixes` | passed | 0.17 |
-| `openEndedRangeReadsToEnd` | passed | 0.16 |
-| `parallelReadReassemblesRangesInOrder` | passed | 15.26 |
-| `parallelReadValidatesChecksum` | passed | 3.50 |
+| `listWithDelimiterGroupsKeysIntoPrefixes` | passed | 0.51 |
+| `listWithDelimiterPaginatesOverItemsAndPrefixes` | passed | 0.55 |
+| `listWithoutDelimiterReturnsNoPrefixes` | passed | 0.14 |
+| `openEndedRangeReadsToEnd` | passed | 0.15 |
+| `parallelReadReassemblesRangesInOrder` | passed | 4.89 |
+| `parallelReadValidatesChecksum` | passed | 5.78 |
 | `presignWithoutCapabilityIsRejected` | skipped | 0.00 |
-| `presignedDownloadUrlDownloadsBlob` | passed | 0.22 |
-| `presignedMultipartUploadAssemblesPartsInOrder` | passed | 30.57 |
-| `presignedUploadUrlReplacesExistingBlob` | passed | 0.38 |
-| `presignedUploadUrlUploadsBlob` | passed | 0.26 |
-| `presignedUploadWithContentTypeSetsContentType` | passed | 0.32 |
+| `presignedDownloadUrlDownloadsBlob` | passed | 0.32 |
+| `presignedMultipartUploadAssemblesPartsInOrder` | passed | 12.68 |
+| `presignedUploadUrlReplacesExistingBlob` | passed | 0.30 |
+| `presignedUploadUrlUploadsBlob` | passed | 0.28 |
+| `presignedUploadWithContentTypeSetsContentType` | passed | 0.30 |
 | `presignedUrlReportsExpiry` | passed | 0.00 |
-| `putFromFile(Path)` | passed | 0.18 |
-| `putFromStream` | passed | 0.17 |
-| `putLargeFile(Path)` | passed | 23.85 |
-| `putOverwritesExistingBlob` | passed | 0.21 |
-| `putReturnsETagMatchingHead` | passed | 0.17 |
-| `putSmallUnknownLengthStream` | passed | 0.12 |
-| `putStoresContentTypeAndUserMetadata` | passed | 0.11 |
-| `putStoresStandardHttpHeaders` | passed | 0.12 |
-| `putThenGetRoundTripsContent` | passed | 0.14 |
-| `putUnknownLengthStream` | passed | 6.33 |
-| `putWithTierStoresTier` | passed | 0.26 |
+| `putFromFile(Path)` | passed | 0.16 |
+| `putFromStream` | passed | 0.15 |
+| `putLargeFile(Path)` | passed | 24.50 |
+| `putOverwritesExistingBlob` | passed | 0.17 |
+| `putReturnsETagMatchingHead` | passed | 0.14 |
+| `putSmallUnknownLengthStream` | passed | 0.13 |
+| `putStoresContentTypeAndUserMetadata` | passed | 0.13 |
+| `putStoresStandardHttpHeaders` | passed | 0.14 |
+| `putThenGetRoundTripsContent` | passed | 0.13 |
+| `putUnknownLengthStream` | passed | 9.47 |
+| `putWithTierStoresTier` | passed | 0.28 |
 | `rangeReadReturnsSlice` | passed | 0.14 |
-| `setTierChangesTierButNotContent` | passed | 0.40 |
-| `setTierToCurrentTierIsANoOp` | passed | 0.41 |
+| `setTierChangesTierButNotContent` | passed | 0.36 |
+| `setTierToCurrentTierIsANoOp` | passed | 0.38 |
 | `storedChecksumsMatchTheContent` | passed | 0.15 |
 | `unwrapUnknownTypeThrows` | passed | 0.00 |
-| `updateMetadataKeepsTier` | passed | 0.30 |
+| `updateMetadataKeepsTier` | passed | 0.32 |
 | `updateMetadataOfMissingBlobThrowsNotFound` | passed | 0.05 |
-| `updateMetadataReplacesHeadersAndMetadataButNotContent` | passed | 0.42 |
+| `updateMetadataReplacesHeadersAndMetadataButNotContent` | passed | 0.44 |
 | `updateMetadataWithStaleETagFails` | passed | 0.24 |
-| `validatedFileAndStreamUploads(Path)` | passed | 1.74 |
-| `validatedLargeFileUploadRoundTrips(Path)` | passed | 26.25 |
-| `validatedPutStoresAChecksumThatValidatesOnDownload` | passed | 0.24 |
-| `validatedWriteInParts` | passed | 30.07 |
-| `writeEmptyBlob` | passed | 0.16 |
-| `writeExactMultipleOfPartSize` | passed | 21.16 |
-| `writeInPartsWithIfNotExistsRejectsExistingBlob` | passed | 7.70 |
-| `writeLargeBlobInParts` | passed | 8.91 |
+| `validatedFileAndStreamUploads(Path)` | passed | 1.58 |
+| `validatedLargeFileUploadRoundTrips(Path)` | passed | 8.62 |
+| `validatedPutStoresAChecksumThatValidatesOnDownload` | passed | 0.18 |
+| `validatedWriteInParts` | passed | 13.86 |
+| `writeEmptyBlob` | passed | 0.15 |
+| `writeExactMultipleOfPartSize` | passed | 12.30 |
+| `writeInPartsWithIfNotExistsRejectsExistingBlob` | passed | 6.59 |
+| `writeLargeBlobInParts` | passed | 9.00 |
 | `writeSmallBlobInOneRequest` | passed | 0.20 |
 
 </details>
 
 <details>
-<summary>DynamoDB — DocumentStore: 23/23 passed, 10.7s</summary>
+<summary>DynamoDB — DocumentStore: 23/23 passed, 10.1s</summary>
 
 | Test | Result | Time (s) |
 |---|---|---|
-| `checksGuardATransactionWithoutWriting` | passed | 0.40 |
-| `concurrentIncrementsAreNotLost` | passed | 0.58 |
-| `decimalsRoundTripAsNumbers` | passed | 0.08 |
+| `checksGuardATransactionWithoutWriting` | passed | 0.43 |
+| `concurrentIncrementsAreNotLost` | passed | 0.48 |
+| `decimalsRoundTripAsNumbers` | passed | 0.10 |
 | `deleteReportsWhetherAnItemWasRemoved` | passed | 0.32 |
-| `expiredItemsAreNeverReturned` | passed | 3.48 |
-| `failedConditionRollsBackTheWholeTransaction` | passed | 0.55 |
-| `getAllReturnsWhatExistsAcrossBatches` | passed | 0.54 |
-| `ifNotExistsCreatesOnlyOnce` | passed | 0.30 |
-| `indexQueryFindsItemsAcrossPartitionsInSortOrder` | passed | 0.64 |
-| `indexQueryPagesThroughManyMatches` | passed | 0.29 |
-| `indexWithoutSortAttributeFindsEveryMatch` | passed | 0.28 |
+| `expiredItemsAreNeverReturned` | passed | 3.45 |
+| `failedConditionRollsBackTheWholeTransaction` | passed | 0.51 |
+| `getAllReturnsWhatExistsAcrossBatches` | passed | 0.47 |
+| `ifNotExistsCreatesOnlyOnce` | passed | 0.19 |
+| `indexQueryFindsItemsAcrossPartitionsInSortOrder` | passed | 0.55 |
+| `indexQueryPagesThroughManyMatches` | passed | 0.25 |
+| `indexWithoutSortAttributeFindsEveryMatch` | passed | 0.19 |
 | `invalidKeysAndReservedFieldsAreRejected` | passed | 0.00 |
-| `keysWithSpecialCharactersRoundTrip` | passed | 0.44 |
-| `missingItemIsEmpty` | passed | 0.14 |
-| `putAndGetRoundTripsEveryValueType` | passed | 0.12 |
-| `putReplacesTheWholeItem` | passed | 0.13 |
+| `keysWithSpecialCharactersRoundTrip` | passed | 0.40 |
+| `missingItemIsEmpty` | passed | 0.10 |
+| `putAndGetRoundTripsEveryValueType` | passed | 0.11 |
+| `putReplacesTheWholeItem` | passed | 0.15 |
 | `queryPagesThroughLargePartitions` | passed | 0.70 |
-| `queryReturnsAPartitionInSortOrder` | passed | 0.44 |
+| `queryReturnsAPartitionInSortOrder` | passed | 0.41 |
 | `transactionAppliesEveryWriteTogether` | passed | 0.43 |
 | `transactionsStayWithinOnePartition` | passed | 0.00 |
-| `updateNeedsAnExistingItemAndTheRightVersion` | passed | 0.35 |
-| `updateSetsRemovesAndIncrements` | passed | 0.14 |
-| `versionsGuardConcurrentWrites` | passed | 0.33 |
+| `updateNeedsAnExistingItemAndTheRightVersion` | passed | 0.38 |
+| `updateSetsRemovesAndIncrements` | passed | 0.16 |
+| `versionsGuardConcurrentWrites` | passed | 0.28 |
 
 </details>
 
 <details>
-<summary>DynamoDB — Spring Data repositories: 10/10 passed, 4.3s</summary>
+<summary>DynamoDB — Spring Data repositories: 10/10 passed, 4.1s</summary>
 
 | Test | Result | Time (s) |
 |---|---|---|
-| `indexQueriesAcrossPartitions` | passed | 0.52 |
-| `indexWithoutASortAttribute` | passed | 0.31 |
-| `partitionQueriesInSortKeyOrderEitherWay` | passed | 0.55 |
-| `savedEntitiesReadBackWithTheirVersion` | passed | 0.18 |
-| `sortKeyConditions` | passed | 0.50 |
-| `staleVersionsAndTakenIdsAreRejected` | passed | 0.98 |
-| `streamsReadLazily` | passed | 0.22 |
-| `unversionedEntitiesAreSavedInBatchesAndOverwritten` | passed | 0.38 |
-| `uuidKeysAndStringIds` | passed | 0.23 |
-| `windowsScrollThroughAPartition` | passed | 0.45 |
+| `indexQueriesAcrossPartitions` | passed | 0.46 |
+| `indexWithoutASortAttribute` | passed | 0.23 |
+| `partitionQueriesInSortKeyOrderEitherWay` | passed | 0.50 |
+| `savedEntitiesReadBackWithTheirVersion` | passed | 0.16 |
+| `sortKeyConditions` | passed | 0.47 |
+| `staleVersionsAndTakenIdsAreRejected` | passed | 0.84 |
+| `streamsReadLazily` | passed | 0.21 |
+| `unversionedEntitiesAreSavedInBatchesAndOverwritten` | passed | 0.36 |
+| `uuidKeysAndStringIds` | passed | 0.44 |
+| `windowsScrollThroughAPartition` | passed | 0.42 |
 
 </details>
 
 <details>
-<summary>SSM Parameter Store — ParameterStore: 22/22 passed, 12.0s</summary>
+<summary>DynamoDB — reactive Spring Data repositories: 10/10 passed, 3.4s</summary>
 
 | Test | Result | Time (s) |
 |---|---|---|
-| `cachedReadsAreServedUntilRefresh` | passed | 0.49 |
-| `deleteIsIdempotent` | passed | 0.43 |
-| `deletedNamesCanBeReused` | passed | 0.55 |
-| `earlierVersionsCanBeRead` | passed | 0.50 |
-| `getAllDoesNotMatchPartialSegments` | passed | 0.71 |
-| `getAllReturnsEverythingBelowAPrefix` | passed | 0.91 |
+| `fluxQueriesStreamAndCanStopEarly` | passed | 0.21 |
+| `indexQueriesAcrossPartitions` | passed | 0.46 |
+| `indexWithoutASortAttribute` | passed | 0.20 |
+| `partitionQueriesInSortKeyOrderEitherWay` | passed | 0.49 |
+| `savedEntitiesReadBackWithTheirVersion` | passed | 0.19 |
+| `sortKeyConditions` | passed | 0.45 |
+| `staleVersionsAndTakenIdsAreRejected` | passed | 0.41 |
+| `unversionedEntitiesAreSavedInBatchesFromIterablesAndPublishers` | passed | 0.41 |
+| `uuidKeysAndStringIds` | passed | 0.18 |
+| `windowsScrollThroughAPartition` | passed | 0.43 |
+
+</details>
+
+<details>
+<summary>SSM Parameter Store — ParameterStore: 22/22 passed, 13.0s</summary>
+
+| Test | Result | Time (s) |
+|---|---|---|
+| `cachedReadsAreServedUntilRefresh` | passed | 0.51 |
+| `deleteIsIdempotent` | passed | 0.45 |
+| `deletedNamesCanBeReused` | passed | 0.59 |
+| `earlierVersionsCanBeRead` | passed | 0.48 |
+| `getAllDoesNotMatchPartialSegments` | passed | 0.79 |
+| `getAllReturnsEverythingBelowAPrefix` | passed | 0.92 |
 | `invalidNamesAreRejected` | passed | 0.12 |
-| `jsonFieldsCanBeRead` | passed | 0.77 |
-| `largeValues` | passed | 0.34 |
-| `missingIsEmptyAndRequireFails` | passed | 0.34 |
-| `nativeNamesAreUsedAsTheyAre` | passed | 0.59 |
-| `plainValuesHaveNoFields` | passed | 0.36 |
-| `putReplacesWithANewVersion` | passed | 0.43 |
-| `putThenGet` | passed | 0.38 |
-| `reportsKindAndProvider` | passed | 0.10 |
-| `statisticsCountCacheHits` | passed | 0.38 |
-| `storesAreIsolatedByPrefix` | passed | 0.90 |
-| `typedReads` | passed | 0.39 |
-| `valuesKeepSpecialCharactersAndLines` | passed | 0.38 |
-| `watchReportsAddedUpdatedAndRemovedValues` | passed | 1.54 |
-| `watchedChangesInvalidateTheCache` | passed | 0.94 |
-| `writesInvalidateTheirOwnCache` | passed | 0.47 |
+| `jsonFieldsCanBeRead` | passed | 0.50 |
+| `largeValues` | passed | 0.41 |
+| `missingIsEmptyAndRequireFails` | passed | 0.35 |
+| `nativeNamesAreUsedAsTheyAre` | passed | 0.70 |
+| `plainValuesHaveNoFields` | passed | 0.38 |
+| `putReplacesWithANewVersion` | passed | 0.45 |
+| `putThenGet` | passed | 0.52 |
+| `reportsKindAndProvider` | passed | 0.16 |
+| `statisticsCountCacheHits` | passed | 0.40 |
+| `storesAreIsolatedByPrefix` | passed | 0.98 |
+| `typedReads` | passed | 0.40 |
+| `valuesKeepSpecialCharactersAndLines` | passed | 0.43 |
+| `watchReportsAddedUpdatedAndRemovedValues` | passed | 1.85 |
+| `watchedChangesInvalidateTheCache` | passed | 1.01 |
+| `writesInvalidateTheirOwnCache` | passed | 0.59 |
 
 </details>
 
 <details>
-<summary>Secrets Manager — ParameterStore: 22/22 passed, 35.6s</summary>
+<summary>Secrets Manager — ParameterStore: 22/22 passed, 32.5s</summary>
 
 | Test | Result | Time (s) |
 |---|---|---|
-| `cachedReadsAreServedUntilRefresh` | passed | 0.61 |
-| `deleteIsIdempotent` | passed | 0.74 |
-| `deletedNamesCanBeReused` | passed | 14.62 |
-| `earlierVersionsCanBeRead` | passed | 0.69 |
-| `getAllDoesNotMatchPartialSegments` | passed | 2.24 |
-| `getAllReturnsEverythingBelowAPrefix` | passed | 3.16 |
-| `invalidNamesAreRejected` | passed | 0.07 |
-| `jsonFieldsCanBeRead` | passed | 0.75 |
-| `largeValues` | passed | 0.31 |
-| `missingIsEmptyAndRequireFails` | passed | 0.38 |
-| `nativeNamesAreUsedAsTheyAre` | passed | 1.43 |
-| `plainValuesHaveNoFields` | passed | 0.68 |
-| `putReplacesWithANewVersion` | passed | 0.47 |
-| `putThenGet` | passed | 0.49 |
-| `reportsKindAndProvider` | passed | 0.06 |
-| `statisticsCountCacheHits` | passed | 0.42 |
-| `storesAreIsolatedByPrefix` | passed | 0.97 |
+| `cachedReadsAreServedUntilRefresh` | passed | 0.59 |
+| `deleteIsIdempotent` | passed | 0.93 |
+| `deletedNamesCanBeReused` | passed | 11.04 |
+| `earlierVersionsCanBeRead` | passed | 0.47 |
+| `getAllDoesNotMatchPartialSegments` | passed | 2.16 |
+| `getAllReturnsEverythingBelowAPrefix` | passed | 2.68 |
+| `invalidNamesAreRejected` | passed | 0.09 |
+| `jsonFieldsCanBeRead` | passed | 0.51 |
+| `largeValues` | passed | 0.37 |
+| `missingIsEmptyAndRequireFails` | passed | 0.35 |
+| `nativeNamesAreUsedAsTheyAre` | passed | 1.99 |
+| `plainValuesHaveNoFields` | passed | 0.38 |
+| `putReplacesWithANewVersion` | passed | 0.58 |
+| `putThenGet` | passed | 0.56 |
+| `reportsKindAndProvider` | passed | 0.08 |
+| `statisticsCountCacheHits` | passed | 0.50 |
+| `storesAreIsolatedByPrefix` | passed | 0.80 |
 | `typedReads` | passed | 0.42 |
-| `valuesKeepSpecialCharactersAndLines` | passed | 0.38 |
+| `valuesKeepSpecialCharactersAndLines` | passed | 0.44 |
 | `watchReportsAddedUpdatedAndRemovedValues` | passed | 3.77 |
-| `watchedChangesInvalidateTheCache` | passed | 2.21 |
-| `writesInvalidateTheirOwnCache` | passed | 0.73 |
+| `watchedChangesInvalidateTheCache` | passed | 2.60 |
+| `writesInvalidateTheirOwnCache` | passed | 1.22 |
 
 </details>
 
 <details>
-<summary>SNS → SQS — Publisher / Subscription: 14/15 passed, 80.8s</summary>
+<summary>SNS → SQS — Publisher / Subscription: 14/15 passed, 79.0s</summary>
 
 | Test | Result | Time (s) |
 |---|---|---|
-| `ackedMessageIsNotRedelivered` | passed | 8.13 |
-| `binaryBodiesArriveUnchanged` | passed | 3.93 |
-| `claimCheckSendsLargeBodiesThroughBlobStorage` | passed | 5.81 |
+| `ackedMessageIsNotRedelivered` | passed | 7.90 |
+| `binaryBodiesArriveUnchanged` | passed | 4.02 |
+| `claimCheckSendsLargeBodiesThroughBlobStorage` | passed | 4.99 |
 | `delayedMessageIsHeldBack` | skipped | 0.00 |
-| `extendedLeaseKeepsMessageHidden` | passed | 7.91 |
-| `listenerAcksSuccessesAndRetriesFailures` | passed | 8.47 |
-| `listenerLimitsConcurrency` | passed | 5.70 |
-| `nackedMessageIsRedelivered` | passed | 4.30 |
-| `orderingKeyDeliversEachKeyInOrder` | passed | 5.18 |
-| `publishAllDeliversEveryMessage` | passed | 6.07 |
-| `publishedMessageArrivesWithBodyAndAttributes` | passed | 3.93 |
-| `repeatedDeduplicationIdIsDeliveredOnce` | passed | 8.08 |
-| `reservedAttributesAndUnsupportedControlsAreRejected` | passed | 3.56 |
-| `settlingTwiceIsRejected` | passed | 3.77 |
-| `unsettledMessageReturnsAfterItsLease` | passed | 5.90 |
+| `extendedLeaseKeepsMessageHidden` | passed | 7.99 |
+| `listenerAcksSuccessesAndRetriesFailures` | passed | 8.46 |
+| `listenerLimitsConcurrency` | passed | 5.55 |
+| `nackedMessageIsRedelivered` | passed | 4.09 |
+| `orderingKeyDeliversEachKeyInOrder` | passed | 5.02 |
+| `publishAllDeliversEveryMessage` | passed | 6.31 |
+| `publishedMessageArrivesWithBodyAndAttributes` | passed | 3.75 |
+| `repeatedDeduplicationIdIsDeliveredOnce` | passed | 7.84 |
+| `reservedAttributesAndUnsupportedControlsAreRejected` | passed | 3.58 |
+| `settlingTwiceIsRejected` | passed | 3.66 |
+| `unsettledMessageReturnsAfterItsLease` | passed | 5.83 |
 
 </details>
 
 <details>
-<summary>SQS queue — Publisher / Subscription: 15/15 passed, 31.2s</summary>
+<summary>SQS queue — Publisher / Subscription: 15/15 passed, 32.4s</summary>
 
 | Test | Result | Time (s) |
 |---|---|---|
-| `ackedMessageIsNotRedelivered` | passed | 4.41 |
+| `ackedMessageIsNotRedelivered` | passed | 4.42 |
 | `binaryBodiesArriveUnchanged` | passed | 0.31 |
-| `claimCheckSendsLargeBodiesThroughBlobStorage` | passed | 1.05 |
-| `delayedMessageIsHeldBack` | passed | 4.35 |
-| `extendedLeaseKeepsMessageHidden` | passed | 4.40 |
-| `listenerAcksSuccessesAndRetriesFailures` | passed | 4.89 |
-| `listenerLimitsConcurrency` | passed | 2.00 |
-| `nackedMessageIsRedelivered` | passed | 0.39 |
-| `orderingKeyDeliversEachKeyInOrder` | passed | 0.94 |
-| `publishAllDeliversEveryMessage` | passed | 2.09 |
-| `publishedMessageArrivesWithBodyAndAttributes` | passed | 0.28 |
-| `repeatedDeduplicationIdIsDeliveredOnce` | passed | 3.42 |
-| `reservedAttributesAndUnsupportedControlsAreRejected` | passed | 0.13 |
-| `settlingTwiceIsRejected` | passed | 0.28 |
-| `unsettledMessageReturnsAfterItsLease` | passed | 2.29 |
+| `claimCheckSendsLargeBodiesThroughBlobStorage` | passed | 1.17 |
+| `delayedMessageIsHeldBack` | passed | 4.36 |
+| `extendedLeaseKeepsMessageHidden` | passed | 4.50 |
+| `listenerAcksSuccessesAndRetriesFailures` | passed | 4.92 |
+| `listenerLimitsConcurrency` | passed | 2.02 |
+| `nackedMessageIsRedelivered` | passed | 0.41 |
+| `orderingKeyDeliversEachKeyInOrder` | passed | 0.93 |
+| `publishAllDeliversEveryMessage` | passed | 2.62 |
+| `publishedMessageArrivesWithBodyAndAttributes` | passed | 0.35 |
+| `repeatedDeduplicationIdIsDeliveredOnce` | passed | 3.40 |
+| `reservedAttributesAndUnsupportedControlsAreRejected` | passed | 0.14 |
+| `settlingTwiceIsRejected` | passed | 0.33 |
+| `unsettledMessageReturnsAfterItsLease` | passed | 2.50 |
 
 </details>
 
 <details>
-<summary>EventBridge → SQS — EventPublisher / CloudEvents.decode: 7/7 passed, 35.2s</summary>
+<summary>EventBridge → SQS — EventPublisher / CloudEvents.decode: 7/7 passed, 34.9s</summary>
 
 | Test | Result | Time (s) |
 |---|---|---|
-| `aRepublishedEventKeepsItsId` | passed | 0.36 |
-| `eventsWithoutDataArrive` | passed | 0.36 |
-| `listenersReceiveEvents` | passed | 0.50 |
+| `aRepublishedEventKeepsItsId` | passed | 0.37 |
+| `eventsWithoutDataArrive` | passed | 0.29 |
+| `listenersReceiveEvents` | passed | 0.47 |
 | `oversizedEventsAreRefusedBeforeSending` | passed | 0.06 |
-| `publishAllDeliversEveryEventAcrossRequests` | passed | 2.40 |
-| `publishedEventArrivesWithEveryAttribute` | passed | 1.20 |
-| `textAndBinaryData` | passed | 30.29 |
+| `publishAllDeliversEveryEventAcrossRequests` | passed | 2.16 |
+| `publishedEventArrivesWithEveryAttribute` | passed | 1.23 |
+| `textAndBinaryData` | passed | 30.28 |
 
 </details>
 
@@ -564,8 +585,10 @@ The reports come back into each module's `target/failsafe-reports`.
 | `r26101614545224` | tier 2, plus R2DBC and Spring Boot 3 and 4 | 8 passed, 8 errors; Spring 0/2 | clean | Every IAM login refused, over JDBC and R2DBC alike: the test user's `rds-db:connect` statement still named the database user from before the rename (`cirrus_iam`). Fixed in the policy. |
 | `r261016153806f5` | tier 2, plus R2DBC and Spring Boot 3 and 4 | PostgreSQL **8/8**; MySQL 4 passed, 4 errors; Spring **2/2** | clean | Latest tier 2 PostgreSQL result, above. PostgreSQL's IAM logins passed, over JDBC and R2DBC, and so did Spring Data R2DBC. MySQL still refused `halyx_iam`'s tokens, over JDBC too; its instance took 26m 45s to create. Not explained. |
 | `r261016162844ff` | tier 2, MySQL only | **8/8** | clean | MySQL tests only (`IT_TEST='RealAwsSqlIT$MySql'`): every login passed, on an instance ready in 5m 5s. Latest tier 2 MySQL result, above. |
-| `r2610161931a2f8` | tier 1, plus the event bus kit and Spring Boot 3 and 4 | **186 passed, 2 skipped**; Spring 4/4 | clean | Latest tier 1 result for every suite but EventBridge, above. EventBridge 6/6 through a rule to SQS. The Boot 4 event test took 32s against 2.5s on Boot 3, likely because the inbox queue is shared: SQS can hand messages to a long poll the Boot 3 JVM abandoned when it exited, and they stay hidden for the 30s visibility timeout. |
-| `r26101622397240` | tier 1, EventBridge only (`IT_TEST='RealAwsIT$EventBridge'`) | **7/7** | clean | Latest EventBridge result, above, with the kit's data test split in two. |
+| `r2610161931a2f8` | tier 1, plus the event bus kit and Spring Boot 3 and 4 | **186 passed, 2 skipped**; Spring 4/4 | clean | EventBridge 6/6 through a rule to SQS. The Boot 4 event test took 32s against 2.5s on Boot 3, likely because the inbox queue is shared: SQS can hand messages to a long poll the Boot 3 JVM abandoned when it exited, and they stay hidden for the 30s visibility timeout. |
+| `r26101622397240` | tier 1, EventBridge only (`IT_TEST='RealAwsIT$EventBridge'`) | **7/7** | clean | With the kit's data test split in two. |
+| `r2610170203d8cc` | tier 1, plus halyx-reactor and Spring Boot 3 and 4 | 196 passed, 1 failed, 2 skipped; Spring 4/10 | clean | Reactive repositories 10/10 on DynamoDB. The reactive Spring test failed to start on both Boots: the test gave its document store and event bus the same key, `orders`, so their beans clashed. SSM `watchReportsAddedUpdatedAndRemovedValues` failed again (see the roadmap). |
+| `r2610170316f538` | tier 1, plus halyx-reactor and Spring Boot 3 and 4 | **197 passed, 2 skipped**; Spring **10/10** | clean | Latest tier 1 result, above. The reactive Spring test (WebFlux over the bucket, a reactive repository, events through the reactive beans) 3/3 on Boot 3.5 and 4. |
 
 ## What real AWS found
 

@@ -26,14 +26,14 @@ and Azure services.
 
 | Cloud | Tier | Services | Latest result |
 |---|---|---|---|
-| [AWS](aws.md) | 1 | S3, DynamoDB, SSM Parameter Store, Secrets Manager, SNS, SQS, EventBridge; Spring Data repositories and Spring Boot | **187/189** passed, 2 skipped (expected); Spring **4/4** |
+| [AWS](aws.md) | 1 | S3, DynamoDB, SSM Parameter Store, Secrets Manager, SNS, SQS, EventBridge; Spring Data repositories, Spring Boot and halyx-reactor | **197/199** passed, 2 skipped (expected); Spring **10/10** |
 | [AWS](aws.md) | 2 | RDS for PostgreSQL and MySQL with IAM auth; R2DBC and Spring Data R2DBC | **16/16**; Spring **2/2** |
 | [AWS](aws.md) | 3 | ElastiCache for Valkey with IAM auth | 52/53: the test IAM policy still needs checking |
-| [GCP](gcp.md) | 1 | Cloud Storage, Firestore, Pub/Sub, Secret Manager, Parameter Manager, Eventarc Advanced; Spring Data repositories and Spring Boot | **192/196** passed, 4 skipped (expected); Spring **4/4** |
+| [GCP](gcp.md) | 1 | Cloud Storage, Firestore, Pub/Sub, Secret Manager, Parameter Manager, Eventarc Advanced; Spring Data repositories, Spring Boot and halyx-reactor | **202/206** passed, 4 skipped (expected); Spring **10/10** |
 | [GCP](gcp.md) | 2 | Cloud SQL for PostgreSQL and MySQL with IAM auth, direct and through the Cloud SQL connector; R2DBC and Spring Data R2DBC | **22/22**; Spring **2/2** |
 | [GCP](gcp.md) | 3 | Memorystore for Valkey with IAM auth and TLS (private CA) | **54/54** |
 | [GCP](gcp.md) | 4 | Managed Service for Apache Kafka with Google IAM, plus Spring Boot 3 and 4 | **25/25**; Spring **2/2** |
-| [Azure](azure.md) | 1 | Blob Storage, Cosmos DB, Service Bus, Key Vault, App Configuration, Event Grid namespaces (Entra ID only); Spring Data repositories and Spring Boot | **173/175** passed, 2 skipped (expected); Spring **4/4** |
+| [Azure](azure.md) | 1 | Blob Storage, Cosmos DB, Service Bus, Key Vault, App Configuration, Event Grid namespaces (Entra ID only); Spring Data repositories, Spring Boot and halyx-reactor | **183/185** passed, 2 skipped (expected); Spring **10/10** |
 | [Azure](azure.md) | 2 | Azure Database for PostgreSQL and Azure SQL with Entra ID login; R2DBC and Spring Data R2DBC | **13/13**; Spring **2/2** |
 | [Azure](azure.md) | 3 | Azure Managed Redis with Entra ID (access keys off) | **52/52** |
 | [Azure](azure.md) | 4 | Event Hubs through its Kafka endpoint, with Entra ID (shared access keys off), plus Spring Boot 3 and 4 | **24/25** passed, 1 skipped (expected); Spring **2/2** |

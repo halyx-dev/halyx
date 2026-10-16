@@ -36,6 +36,8 @@ import dev.halyx.parameters.ParameterStoreConfig;
 import dev.halyx.storage.BlobStore;
 import dev.halyx.tck.BlobStoreConformanceTest;
 import dev.halyx.tck.DocumentStoreConformanceTest;
+import dev.halyx.tck.ReactiveDocumentRepositoryConformanceTest;
+import dev.halyx.reactor.ReactiveHalyx;
 import dev.halyx.tck.EventBusConformanceTest;
 import dev.halyx.tck.MessagingConformanceTest;
 import dev.halyx.tck.ParameterStoreConformanceTest;
@@ -83,8 +85,21 @@ class RealGcpIT {
         subscriptions = SubscriptionAdminClient.create();
     }
 
+    private static ReactiveHalyx reactiveHalyx;
+
+    /** Reactive views on virtual threads, for the reactive repository kit; closed after the class. */
+    static synchronized ReactiveHalyx reactiveHalyx() {
+        if (reactiveHalyx == null) {
+            reactiveHalyx = ReactiveHalyx.withVirtualThreads(halyx);
+        }
+        return reactiveHalyx;
+    }
+
     @AfterAll
     static void stop() {
+        if (reactiveHalyx != null) {
+            reactiveHalyx.close();
+        }
         // Everything this run created that Terraform doesn't own.
         for (String subscription : createdSubscriptions) {
             try {
@@ -132,6 +147,23 @@ class RealGcpIT {
                 table.sortKey("sk");
             }
             return gcp().documentStore(indexes(table, sorted).build());
+        }
+    }
+
+    @Nested
+    class ReactiveFirestoreRepositories extends ReactiveDocumentRepositoryConformanceTest {
+        @Override
+        protected DocumentStore store(boolean sorted) {
+            TableConfig.Builder table = TableConfig.builder(sorted ? "items-sorted" : "items");
+            if (sorted) {
+                table.sortKey("sk");
+            }
+            return gcp().documentStore(DocumentStoreConformanceTest.indexes(table, sorted).build());
+        }
+
+        @Override
+        protected ReactiveHalyx reactive() {
+            return reactiveHalyx();
         }
     }
 
