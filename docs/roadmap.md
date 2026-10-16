@@ -98,6 +98,22 @@ identity, as `Database` does for JDBC, for Spring Data R2DBC and `DatabaseClient
 
 SQL Server stays password-only over R2DBC: its driver takes no access tokens.
 
+### Reactive adapters: `halyx-reactor`
+
+Halyx stays blocking, and the application chooses the threads: [Reactive and async code](api/reactive.md)
+shows the patterns, tested on Boot 3.5 and 4. An optional module would package the parts that are easy to get
+wrong, always on a scheduler the application passes in, never one of Halyx's own:
+
+- [x] the guide: single calls on the application's scheduler, fan-out with a limit, paged queries and
+  subscriptions as a `Flux` (acked after processing, nacked when cancelled), context propagation, WebFlux
+- [ ] `HalyxReactor.wrap(service, scheduler)`: `Mono` and `Flux` views of every service on the given scheduler
+- [ ] streaming adapters: subscriptions and stream consumers as a `Flux` with acks or commits after
+  processing and back-pressure through the consumer's concurrency; listings, queries and blob bodies as a `Flux`
+- [ ] reactive Spring Data repositories (`ReactiveCrudRepository`) over document stores
+- [ ] WebFlux tests on Boot 3.5 and 4, and the conformance kits run through the adapters
+- [ ] non-blocking drivers on the clouds' async SDK clients (Azure, AWS, Lettuce first), only where
+  benchmarks show the blocking path on virtual threads is the bottleneck
+
 ### Portable Spring Boot microservices
 
 One Spring Boot sample service, built once, that runs unchanged on AWS, Google Cloud and Azure: only its

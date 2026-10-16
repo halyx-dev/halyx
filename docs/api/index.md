@@ -69,6 +69,7 @@ halyx.names();   // [orders, analytics]
 | [Parameters and secrets](parameters.md) | `ParameterStore` | configuration values and secrets, versions, JSON fields, watching for changes |
 | [Errors and retries](errors.md) | `CloudException` | the portable error model, retries, throttling and interceptors |
 | [Capabilities and native clients](capabilities-and-unwrap.md) | `Capabilities`, `unwrap` | optional features per provider, and the native SDK clients |
+| [Reactive and async code](reactive.md) | all of them | calling Halyx from Reactor, WebFlux or `CompletableFuture` code: schedulers, fan-out, paged queries and subscriptions as a `Flux`, context propagation |
 
 ## Conventions shared by every service
 
@@ -78,7 +79,8 @@ small values are records, such as `BlobKey`, `Key`, `ETag` and `Version`.
 
 **Synchronous, thread-safe, virtual-thread friendly.** Every call blocks until it completes, and every
 service object is thread-safe. Calls are cheap to make from virtual threads, and Halyx itself uses
-virtual threads for parallel transfers and message listeners.
+virtual threads for parallel transfers and message listeners. Reactive and async applications wrap the
+calls on threads they choose; see [Reactive and async code](reactive.md).
 
 **One error model.** Failures are unchecked `CloudException` subtypes, such as `NotFoundException`,
 `PreconditionFailedException` and `ThrottledException`, with the same meaning on every provider. See
