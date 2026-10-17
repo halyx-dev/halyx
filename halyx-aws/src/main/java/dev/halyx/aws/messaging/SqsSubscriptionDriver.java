@@ -23,11 +23,15 @@ import dev.halyx.json.Json;
 import dev.halyx.messaging.MessagingCapability;
 import dev.halyx.messaging.spi.AbstractSubscriptionDriver;
 import dev.halyx.messaging.spi.DriverMessage;
+import software.amazon.awssdk.services.sqs.SqsAsyncClient;
 import software.amazon.awssdk.services.sqs.SqsClient;
+import software.amazon.awssdk.services.sqs.model.ChangeMessageVisibilityRequest;
 import software.amazon.awssdk.services.sqs.model.DeleteMessageBatchRequestEntry;
 import software.amazon.awssdk.services.sqs.model.Message;
 import software.amazon.awssdk.services.sqs.model.MessageSystemAttributeName;
 import software.amazon.awssdk.services.sqs.model.QueueAttributeName;
+import software.amazon.awssdk.services.sqs.model.ReceiveMessageRequest;
+import software.amazon.awssdk.services.sqs.model.ReceiveMessageResponse;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -36,6 +40,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.function.Supplier;
 
 /**
  * Receives from an SQS queue with long polling. The lease is the queue's visibility timeout, extended and
@@ -48,13 +55,16 @@ public final class SqsSubscriptionDriver extends AbstractSubscriptionDriver {
     private static final Duration MAX_VISIBILITY = Duration.ofHours(12);
 
     private final SqsClient sqs;
+    private final Supplier<SqsAsyncClient> sqsAsync;
     private final String queueUrl;
     private final boolean fifo;
     private final Duration lease;
 
-    public SqsSubscriptionDriver(SqsClient sqs, String queue) {
+    /** @param sqsAsync the non-blocking client for asynchronous receives, made when first asked for */
+    public SqsSubscriptionDriver(SqsClient sqs, String queue, Supplier<SqsAsyncClient> sqsAsync) {
         super(AwsProvider.ID);
         this.sqs = sqs;
+        this.sqsAsync = sqsAsync;
         this.queueUrl = resolve(sqs, queue);
         this.fifo = queueUrl.endsWith(".fifo");
         String visibility;
@@ -92,12 +102,41 @@ public final class SqsSubscriptionDriver extends AbstractSubscriptionDriver {
 
     @Override
     public List<DriverMessage> receive(int max, Duration wait) {
-        var response = sqs.receiveMessage(b -> b.queueUrl(queueUrl)
+        return toDriverMessages(sqs.receiveMessage(receiveRequest(max, wait)));
+    }
+
+    /** The long poll without a waiting thread. */
+    @Override
+    public CompletableFuture<List<DriverMessage>> receiveAsync(int max, Duration wait, Executor blocking) {
+        return sqsAsync.get().receiveMessage(receiveRequest(max, wait)).thenApply(this::toDriverMessages);
+    }
+
+    @Override
+    public CompletableFuture<Void> ackAsync(DriverMessage message, Executor blocking) {
+        return sqsAsync.get().deleteMessage(b -> b.queueUrl(queueUrl).receiptHandle(message.receipt())).thenApply(r -> null);
+    }
+
+    @Override
+    public CompletableFuture<Void> nackAsync(DriverMessage message, Duration delay, Executor blocking) {
+        return sqsAsync.get().changeMessageVisibility(visibilityRequest(message, delay)).thenApply(r -> null);
+    }
+
+    @Override
+    public CompletableFuture<Void> extendLeaseAsync(DriverMessage message, Duration lease, Executor blocking) {
+        return sqsAsync.get().changeMessageVisibility(visibilityRequest(message, lease)).thenApply(r -> null);
+    }
+
+    private ReceiveMessageRequest receiveRequest(int max, Duration wait) {
+        return ReceiveMessageRequest.builder().queueUrl(queueUrl)
                 .maxNumberOfMessages(Math.min(max, 10))
                 .waitTimeSeconds((int) Math.min(20, Math.max(0, wait.toSeconds())))
                 .messageAttributeNames("All")
                 .messageSystemAttributeNames(MessageSystemAttributeName.APPROXIMATE_RECEIVE_COUNT,
-                        MessageSystemAttributeName.SENT_TIMESTAMP, MessageSystemAttributeName.MESSAGE_GROUP_ID));
+                        MessageSystemAttributeName.SENT_TIMESTAMP, MessageSystemAttributeName.MESSAGE_GROUP_ID)
+                .build();
+    }
+
+    private List<DriverMessage> toDriverMessages(ReceiveMessageResponse response) {
         List<DriverMessage> messages = new ArrayList<>(response.messages().size());
         for (Message message : response.messages()) {
             messages.add(toDriverMessage(message));
@@ -191,9 +230,13 @@ public final class SqsSubscriptionDriver extends AbstractSubscriptionDriver {
     }
 
     private void changeVisibility(DriverMessage message, Duration timeout) {
+        sqs.changeMessageVisibility(visibilityRequest(message, timeout));
+    }
+
+    private ChangeMessageVisibilityRequest visibilityRequest(DriverMessage message, Duration timeout) {
         long seconds = Math.min(MAX_VISIBILITY.toSeconds(), Math.max(0, timeout.toSeconds()));
-        sqs.changeMessageVisibility(b -> b.queueUrl(queueUrl).receiptHandle(message.receipt())
-                .visibilityTimeout((int) seconds));
+        return ChangeMessageVisibilityRequest.builder().queueUrl(queueUrl).receiptHandle(message.receipt())
+                .visibilityTimeout((int) seconds).build();
     }
 
     @Override

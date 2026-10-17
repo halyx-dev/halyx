@@ -67,7 +67,8 @@ class PubSubConformanceIT extends PubSubConformance {
         return Map.of(
                 "unsettledMessageReturnsAfterItsLease", noRedelivery,
                 "nackedMessageIsRedelivered", noRedelivery,
-                "listenerAcksSuccessesAndRetriesFailures", noRedelivery);
+                "listenerAcksSuccessesAndRetriesFailures", noRedelivery,
+                "asyncNackRedelivers", noRedelivery);
     }
 
     @Override

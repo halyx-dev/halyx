@@ -18,6 +18,7 @@ package dev.halyx.reactor;
 import dev.halyx.capability.Capabilities;
 import dev.halyx.events.CloudEvent;
 import dev.halyx.events.CloudEvents;
+import dev.halyx.messaging.AsyncSubscription;
 import dev.halyx.messaging.ConsumerOptions;
 import dev.halyx.messaging.ReceivedMessage;
 import dev.halyx.messaging.Subscription;
@@ -28,6 +29,7 @@ import reactor.core.publisher.Mono;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.Executor;
 import java.util.function.Function;
 
 /**
@@ -51,6 +53,15 @@ public final class ReactiveSubscription {
     ReactiveSubscription(Subscription subscription, Calls calls) {
         this.subscription = Objects.requireNonNull(subscription, "subscription");
         this.calls = calls;
+    }
+
+    /**
+     * The subscription's asynchronous view for one call, whose blocking work (where the driver has no non-blocking
+     * path) runs on {@code blocking}: the scheduler, with the subscriber's context restored.
+     */
+    private AsyncSubscription async(Executor blocking) {
+        AsyncSubscription view = subscription.async(blocking);
+        return view != null ? view : AsyncSubscription.onExecutor(subscription, blocking); // a mock or proxy without one
     }
 
     public String provider() {
@@ -115,19 +126,19 @@ public final class ReactiveSubscription {
 
     /** Up to {@code max} messages, waiting up to {@code wait}; settle them with {@link #ack} and {@link #nack}. */
     public Mono<List<ReceivedMessage>> receive(int max, Duration wait) {
-        return calls.mono(() -> subscription.receive(max, wait));
+        return calls.future(blocking -> async(blocking).receive(max, wait));
     }
 
     public Mono<Void> ack(ReceivedMessage message) {
-        return calls.run(message::ack);
+        return calls.future(blocking -> message.ackAsync()).then();
     }
 
     public Mono<Void> nack(ReceivedMessage message, Duration delay) {
-        return calls.run(() -> message.nack(delay));
+        return calls.future(blocking -> message.nackAsync(delay)).then();
     }
 
     public Mono<Void> extendLease(ReceivedMessage message, Duration lease) {
-        return calls.run(() -> message.extendLease(lease));
+        return calls.future(blocking -> message.extendLeaseAsync(lease)).then();
     }
 
     public Duration defaultLease() {

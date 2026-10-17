@@ -30,6 +30,7 @@ import dev.halyx.config.Credentials;
 import dev.halyx.config.ProviderConfig;
 import dev.halyx.messaging.ClaimCheck;
 import dev.halyx.messaging.OutgoingMessage;
+import dev.halyx.messaging.ReceivedMessage;
 import dev.halyx.messaging.SubscriptionConfig;
 import dev.halyx.messaging.TopicConfig;
 import dev.halyx.tck.CompletingThreads;
@@ -38,6 +39,8 @@ import dev.halyx.tck.MessagingConformanceTest;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -122,5 +125,22 @@ abstract class PubSubConformance extends MessagingConformanceTest {
                 .get(30, TimeUnit.SECONDS);
 
         threads.assertNonBlocking(2, Thread.currentThread());
+    }
+
+    @Test
+    void asyncReceivesCompleteOnTheSdksNonBlockingClient() throws Exception {
+        CompletingThreads threads = new CompletingThreads();
+        Channel c = channel("tck-rthreads-" + UUID.randomUUID().toString().substring(0, 8), null);
+        c.publisher().publish("one");
+
+        List<ReceivedMessage> received = new ArrayList<>();
+        long deadline = System.nanoTime() + Duration.ofSeconds(60).toNanos();
+        while (received.isEmpty() && System.nanoTime() < deadline) {
+            received.addAll(threads.track(c.subscription().async().receive(10, Duration.ofSeconds(5))).get(60, TimeUnit.SECONDS));
+        }
+        threads.track(received.getFirst().ackAsync()).get(30, TimeUnit.SECONDS);
+
+        assertThat(threads.names()).isNotEmpty();
+        threads.assertNonBlocking(threads.names().size(), Thread.currentThread());
     }
 }

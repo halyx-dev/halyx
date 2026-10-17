@@ -103,6 +103,23 @@ for (ReceivedMessage message : billing.receive(10, Duration.ofSeconds(20))) {
 `extendLease(duration)` keeps a slow message from being redelivered. `deliveryAttempt()` tells you how
 many times a message has been delivered. Manual acks are sent at once.
 
+### Receiving without blocking
+
+`async()` also gives a subscription's asynchronous view: `receive(max, wait)` as a `CompletableFuture`, with no
+thread waiting out the long poll, and claim-checked bodies fetched through the blob store's asynchronous view. Settle
+the messages with `ackAsync()`, `nackAsync(delay)` and `extendLeaseAsync(lease)`.
+
+```java
+billing.async().receive(10, Duration.ofSeconds(20))
+        .thenCompose(messages -> CompletableFuture.allOf(messages.stream()
+                .map(message -> handle(message).thenCompose(done -> message.ackAsync()))
+                .toArray(CompletableFuture[]::new)));
+```
+
+Receives and settlements are non-blocking on SQS, Pub/Sub and Event Grid. Service Bus receives through its
+blocking client on a virtual thread: its asynchronous receiver is a continuous stream whose messages can only be
+settled by that receiver. `listen` keeps its polling threads, which are virtual threads, cheap while they wait.
+
 ## Ordering, deduplication and delays
 
 ```java

@@ -15,6 +15,7 @@
  */
 package dev.halyx.azure.eventgrid;
 
+import com.azure.messaging.eventgrid.namespaces.EventGridReceiverAsyncClient;
 import com.azure.messaging.eventgrid.namespaces.EventGridReceiverClient;
 import com.azure.messaging.eventgrid.namespaces.models.FailedLockToken;
 import com.azure.messaging.eventgrid.namespaces.models.ReceiveDetails;
@@ -36,6 +37,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 /**
  * Receives from an Event Grid namespace topic's pull subscription. Each event arrives as a message holding the
@@ -56,15 +59,18 @@ public final class EventGridSubscriptionDriver extends AbstractSubscriptionDrive
             Map.entry(Duration.ofSeconds(10), ReleaseDelay.TEN_SECONDS));
 
     private final EventGridReceiverClient client;
+    private final EventGridReceiverAsyncClient asyncClient;
     private final String name;
     private final Duration lockDuration;
 
     /**
      * @param lockDuration the subscription's lock duration (Event Grid's default is 60 seconds)
      */
-    public EventGridSubscriptionDriver(EventGridReceiverClient client, String name, Duration lockDuration) {
+    public EventGridSubscriptionDriver(EventGridReceiverClient client, EventGridReceiverAsyncClient asyncClient, String name,
+                                       Duration lockDuration) {
         super(AzureProvider.ID);
         this.client = client;
+        this.asyncClient = asyncClient;
         this.name = name;
         this.lockDuration = lockDuration;
     }
@@ -81,9 +87,41 @@ public final class EventGridSubscriptionDriver extends AbstractSubscriptionDrive
 
     @Override
     public List<DriverMessage> receive(int max, Duration wait) {
-        Duration clamped = wait.compareTo(MIN_WAIT) < 0 ? MIN_WAIT : wait.compareTo(MAX_WAIT) > 0 ? MAX_WAIT : wait;
+        return toDriverMessages(client.receive(Math.min(max, maxReceiveBatch()), clamped(wait)).getDetails());
+    }
+
+    /** The receive without a waiting thread. */
+    @Override
+    public CompletableFuture<List<DriverMessage>> receiveAsync(int max, Duration wait, Executor blocking) {
+        return asyncClient.receive(Math.min(max, maxReceiveBatch()), clamped(wait)).toFuture()
+                .thenApply(result -> toDriverMessages(result.getDetails()));
+    }
+
+    @Override
+    public CompletableFuture<Void> ackAsync(DriverMessage message, Executor blocking) {
+        return asyncClient.acknowledge(List.of(message.receipt())).toFuture()
+                .thenAccept(result -> check(result.getFailedLockTokens(), "acknowledge"));
+    }
+
+    @Override
+    public CompletableFuture<Void> nackAsync(DriverMessage message, Duration delay, Executor blocking) {
+        return asyncClient.release(List.of(message.receipt()), releaseDelay(delay)).toFuture()
+                .thenAccept(result -> check(result.getFailedLockTokens(), "release"));
+    }
+
+    @Override
+    public CompletableFuture<Void> extendLeaseAsync(DriverMessage message, Duration lease, Executor blocking) {
+        return asyncClient.renewLocks(List.of(message.receipt())).toFuture()
+                .thenAccept(result -> check(result.getFailedLockTokens(), "renew the lock of"));
+    }
+
+    private static Duration clamped(Duration wait) {
+        return wait.compareTo(MIN_WAIT) < 0 ? MIN_WAIT : wait.compareTo(MAX_WAIT) > 0 ? MAX_WAIT : wait;
+    }
+
+    private static List<DriverMessage> toDriverMessages(List<ReceiveDetails> received) {
         List<DriverMessage> messages = new ArrayList<>();
-        for (ReceiveDetails details : client.receive(Math.min(max, maxReceiveBatch()), clamped).getDetails()) {
+        for (ReceiveDetails details : received) {
             CloudEvent event = EventGridEvents.fromAzure(details.getEvent());
             messages.add(new DriverMessage(event.id(), details.getBrokerProperties().getLockToken(),
                     CloudEvents.toJson(event).getBytes(StandardCharsets.UTF_8),
@@ -115,14 +153,17 @@ public final class EventGridSubscriptionDriver extends AbstractSubscriptionDrive
 
     @Override
     public void nack(DriverMessage message, Duration delay) {
-        ReleaseDelay release = ReleaseDelay.NO_DELAY;
+        check(client.release(List.of(message.receipt()), releaseDelay(delay)).getFailedLockTokens(), "release");
+    }
+
+    /** The longest of Event Grid's release delays that {@code delay} reaches. */
+    private static ReleaseDelay releaseDelay(Duration delay) {
         for (Map.Entry<Duration, ReleaseDelay> option : RELEASE_DELAYS) {
             if (delay.compareTo(option.getKey()) >= 0) {
-                release = option.getValue();
-                break;
+                return option.getValue();
             }
         }
-        check(client.release(List.of(message.receipt()), release).getFailedLockTokens(), "release");
+        return ReleaseDelay.NO_DELAY;
     }
 
     @Override

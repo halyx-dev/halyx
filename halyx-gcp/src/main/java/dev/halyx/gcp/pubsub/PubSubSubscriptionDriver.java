@@ -18,12 +18,16 @@ package dev.halyx.gcp.pubsub;
 import com.google.api.gax.grpc.GrpcCallContext;
 import com.google.api.gax.rpc.DeadlineExceededException;
 import com.google.cloud.pubsub.v1.SubscriptionAdminClient;
+import com.google.pubsub.v1.AcknowledgeRequest;
+import com.google.pubsub.v1.ModifyAckDeadlineRequest;
 import com.google.pubsub.v1.PullRequest;
 import com.google.pubsub.v1.ReceivedMessage;
 import dev.halyx.capability.Capabilities;
 import dev.halyx.error.CloudException;
 import dev.halyx.gcp.GcpErrors;
+import dev.halyx.gcp.GcpFutures;
 import dev.halyx.gcp.GcpProvider;
+import dev.halyx.interceptor.AsyncInvocation;
 import dev.halyx.messaging.MessagingCapability;
 import dev.halyx.messaging.spi.AbstractSubscriptionDriver;
 import dev.halyx.messaging.spi.DriverMessage;
@@ -33,6 +37,8 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 /**
  * Pulls from a Pub/Sub subscription. The lease is the subscription's ack deadline; nacks and extensions
@@ -83,6 +89,45 @@ public final class PubSubSubscriptionDriver extends AbstractSubscriptionDriver {
         } catch (DeadlineExceededException e) {
             return List.of();
         }
+        return toDriverMessages(received);
+    }
+
+    /** The pull without a waiting thread; a pull that times out with nothing to deliver gives no messages. */
+    @Override
+    public CompletableFuture<List<DriverMessage>> receiveAsync(int max, Duration wait, Executor blocking) {
+        var request = PullRequest.newBuilder().setSubscription(subscription).setMaxMessages(max).build();
+        return GcpFutures.of(client.pullCallable().futureCall(request,
+                        GrpcCallContext.createDefault().withTimeoutDuration(wait.plusSeconds(1))))
+                .thenApply(response -> toDriverMessages(response.getReceivedMessagesList()))
+                .exceptionallyCompose(error -> AsyncInvocation.unwrap(error) instanceof DeadlineExceededException
+                        ? CompletableFuture.completedFuture(List.of())
+                        : CompletableFuture.failedFuture(error));
+    }
+
+    @Override
+    public CompletableFuture<Void> ackAsync(DriverMessage message, Executor blocking) {
+        return GcpFutures.of(client.acknowledgeCallable().futureCall(AcknowledgeRequest.newBuilder()
+                .setSubscription(subscription).addAckIds(message.receipt()).build())).thenApply(r -> null);
+    }
+
+    @Override
+    public CompletableFuture<Void> nackAsync(DriverMessage message, Duration delay, Executor blocking) {
+        return modifyDeadlineAsync(message, delay);
+    }
+
+    @Override
+    public CompletableFuture<Void> extendLeaseAsync(DriverMessage message, Duration lease, Executor blocking) {
+        return modifyDeadlineAsync(message, lease);
+    }
+
+    private CompletableFuture<Void> modifyDeadlineAsync(DriverMessage message, Duration deadline) {
+        long seconds = Math.min(MAX_DEADLINE.toSeconds(), Math.max(0, deadline.toSeconds()));
+        return GcpFutures.of(client.modifyAckDeadlineCallable().futureCall(ModifyAckDeadlineRequest.newBuilder()
+                .setSubscription(subscription).addAckIds(message.receipt()).setAckDeadlineSeconds((int) seconds).build()))
+                .thenApply(r -> null);
+    }
+
+    private static List<DriverMessage> toDriverMessages(List<ReceivedMessage> received) {
         List<DriverMessage> messages = new ArrayList<>(received.size());
         for (ReceivedMessage m : received) {
             var message = m.getMessage();

@@ -435,6 +435,62 @@ public abstract class MessagingConformanceTest {
         message.ack();
     }
 
+    /** Receives with the asynchronous view until {@code count} messages arrived, without settling them. */
+    private static List<ReceivedMessage> receiveAsync(Subscription subscription, int count) throws Exception {
+        List<ReceivedMessage> received = new ArrayList<>();
+        long deadline = System.nanoTime() + Duration.ofSeconds(60).toNanos();
+        while (received.size() < count && System.nanoTime() < deadline) {
+            received.addAll(subscription.async().receive(10, Duration.ofSeconds(5)).get(60, TimeUnit.SECONDS));
+        }
+        return received;
+    }
+
+    @Test
+    void asyncReceiveAndAckSettleLikeBlockingOnes() throws Exception {
+        Channel c = channel();
+        c.publisher().publishAll(List.of(OutgoingMessage.of("first"), OutgoingMessage.of("second")));
+
+        List<ReceivedMessage> received = receiveAsync(c.subscription(), 2);
+        for (ReceivedMessage message : received) {
+            message.ackAsync().get(30, TimeUnit.SECONDS);
+        }
+
+        assertThat(received).extracting(ReceivedMessage::bodyAsString).containsExactlyInAnyOrder("first", "second");
+        assertThat(received.getFirst().isSettled()).isTrue();
+        assertThat(received.getFirst().ackAsync()).isCompletedExceptionally(); // settled once only
+        assertThat(c.subscription().receive(10, c.subscription().defaultLease().plusSeconds(2))).isEmpty();
+    }
+
+    @Test
+    void asyncNackRedelivers() throws Exception {
+        Channel c = channel();
+        c.publisher().publish("again");
+
+        ReceivedMessage first = receiveAsync(c.subscription(), 1).getFirst();
+        first.extendLeaseAsync(Duration.ofSeconds(30)).get(30, TimeUnit.SECONDS);
+        first.nackAsync(Duration.ZERO).get(30, TimeUnit.SECONDS);
+
+        ReceivedMessage again = receiveAsync(c.subscription(), 1).getFirst();
+        assertThat(again.bodyAsString()).isEqualTo("again");
+        again.ackAsync().get(30, TimeUnit.SECONDS);
+    }
+
+    @Test
+    void asyncReceiveFetchesClaimCheckedBodies() throws Exception {
+        BlobStore store = claimCheckStore();
+        assumeTrue(store != null, "no blob store for claim checks");
+        Channel c = channel(name + "-arc", new ClaimCheck(store, 64 * 1024, "tck-claims/" + name + "/"));
+        byte[] large = new byte[300 * 1024];
+        new Random(13).nextBytes(large);
+        c.publisher().publish(OutgoingMessage.builder(large).build());
+
+        ReceivedMessage message = receiveAsync(c.subscription(), 1).getFirst();
+
+        assertThat(message.body()).isEqualTo(large);
+        assertThat(message.attributes()).doesNotContainKey(ClaimCheck.ATTRIBUTE);
+        message.ackAsync().get(30, TimeUnit.SECONDS);
+    }
+
     /** Receives and acks until {@code count} distinct bodies arrived. */
     private static Set<String> drain(Subscription subscription, int count, Duration timeout) {
         Set<String> bodies = ConcurrentHashMap.newKeySet();

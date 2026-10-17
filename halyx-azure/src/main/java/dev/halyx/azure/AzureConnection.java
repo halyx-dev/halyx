@@ -351,7 +351,7 @@ final class AzureConnection implements ProviderConnection {
                     key -> receiver.credential(new AzureKeyCredential(key)), () -> receiver.credential(tokenCredential(false)));
             Duration lock = subscription.property(AzureProperties.EVENT_GRID_LOCK_DURATION).map(Duration::parse)
                     .orElse(Duration.ofSeconds(60));
-            return new EventGridSubscriptionDriver(receiver.buildClient(), subscription.name(), lock);
+            return new EventGridSubscriptionDriver(receiver.buildClient(), receiver.buildAsyncClient(), subscription.name(), lock);
         }
         if (subscription.property(AzureProperties.SERVICE_BUS_SESSIONS).map(Boolean::parseBoolean).orElse(false)) {
             var sessions = serviceBus().sessionReceiver().receiveMode(ServiceBusReceiveMode.PEEK_LOCK)

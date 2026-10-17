@@ -15,12 +15,15 @@
  */
 package dev.halyx.messaging;
 
+import dev.halyx.interceptor.InterceptorChain;
+
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /** A delivered message. Settle it exactly once with {@link #ack()} or {@link #nack}. */
@@ -38,6 +41,18 @@ public final class ReceivedMessage {
         void nack(Duration delay);
 
         void extendLease(Duration lease);
+
+        default CompletableFuture<Void> ackAsync() {
+            return CompletableFuture.runAsync(this::ack, InterceptorChain.blocking());
+        }
+
+        default CompletableFuture<Void> nackAsync(Duration delay) {
+            return CompletableFuture.runAsync(() -> nack(delay), InterceptorChain.blocking());
+        }
+
+        default CompletableFuture<Void> extendLeaseAsync(Duration lease) {
+            return CompletableFuture.runAsync(() -> extendLease(lease), InterceptorChain.blocking());
+        }
     }
 
     private final String id;
@@ -128,6 +143,38 @@ public final class ReceivedMessage {
             throw new IllegalStateException("Message " + id + " is already settled");
         }
         settlement.extendLease(lease);
+    }
+
+    /** {@link #ack()} without blocking where the provider allows it. */
+    public CompletableFuture<Void> ackAsync() {
+        try {
+            settle();
+        } catch (IllegalStateException e) {
+            return CompletableFuture.failedFuture(e);
+        }
+        return settlement.ackAsync();
+    }
+
+    /** {@link #nack(Duration)} without blocking where the provider allows it. */
+    public CompletableFuture<Void> nackAsync(Duration delay) {
+        try {
+            Objects.requireNonNull(delay, "delay");
+            settle();
+        } catch (RuntimeException e) {
+            return CompletableFuture.failedFuture(e);
+        }
+        return settlement.nackAsync(delay);
+    }
+
+    /** {@link #extendLease} without blocking where the provider allows it. */
+    public CompletableFuture<Void> extendLeaseAsync(Duration lease) {
+        if (lease == null) {
+            return CompletableFuture.failedFuture(new NullPointerException("lease"));
+        }
+        if (settled.get()) {
+            return CompletableFuture.failedFuture(new IllegalStateException("Message " + id + " is already settled"));
+        }
+        return settlement.extendLeaseAsync(lease);
     }
 
     private void settle() {

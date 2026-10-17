@@ -305,7 +305,7 @@ final class AwsConnection implements ProviderConnection {
     /** An SQS queue, on its own or subscribed to an SNS topic. */
     @Override
     public synchronized SubscriptionDriver subscription(SubscriptionConfig subscription) {
-        return new SqsSubscriptionDriver(sqs(), subscription.name());
+        return new SqsSubscriptionDriver(sqs(), subscription.name(), this::sqsAsync);
     }
 
     private SnsClient sns() {

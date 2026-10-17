@@ -20,6 +20,8 @@ import dev.halyx.error.CloudException;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 /**
  * Pulls from one subscription or queue. Every received message stays invisible to other consumers for
@@ -62,6 +64,27 @@ public interface SubscriptionDriver extends AutoCloseable {
 
     /** How long a received message stays invisible without an extension. */
     Duration defaultLease();
+
+    // --- asynchronous calls ------------------------------------------------------------------------
+    // Each defaults to its blocking call on the blocking executor; a driver whose SDK has non-blocking clients
+    // overrides them. Failures may be returned or thrown; the API layer translates both.
+
+    /** {@link #receive} without a thread waiting out the long poll. */
+    default CompletableFuture<List<DriverMessage>> receiveAsync(int max, Duration wait, Executor blocking) {
+        return CompletableFuture.supplyAsync(() -> receive(max, wait), blocking);
+    }
+
+    default CompletableFuture<Void> ackAsync(DriverMessage message, Executor blocking) {
+        return CompletableFuture.runAsync(() -> ack(message), blocking);
+    }
+
+    default CompletableFuture<Void> nackAsync(DriverMessage message, Duration delay, Executor blocking) {
+        return CompletableFuture.runAsync(() -> nack(message, delay), blocking);
+    }
+
+    default CompletableFuture<Void> extendLeaseAsync(DriverMessage message, Duration lease, Executor blocking) {
+        return CompletableFuture.runAsync(() -> extendLease(message, lease), blocking);
+    }
 
     CloudException translate(Throwable error);
 

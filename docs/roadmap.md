@@ -143,9 +143,11 @@ Project Reactor views of every service, on a scheduler the application chooses, 
 - [x] the other clouds' publishers and documents: Service Bus and Pub/Sub publishes, Cosmos DB and Firestore (but
   their read-then-write calls), each proven on its emulator to complete on the SDK's threads; Event Grid and
   Eventarc, which have no emulator, on the real clouds
-- [ ] next: `Subscription.async()` receives (long polls without a waiting thread); Lettuce caches and Kafka
-  producers (already async inside); parameter stores. Cloud Storage has no asynchronous API and keeps the
-  blocking path
+- [x] `Subscription.async()` receives and `ackAsync`, `nackAsync` and `extendLeaseAsync`, with claim-checked bodies
+  fetched asynchronously and the messaging kit's async receive cases; non-blocking on SQS, Pub/Sub and Event Grid.
+  Service Bus receives stay blocking: its async receiver is a prefetching stream that alone can settle its messages
+- [ ] next: Lettuce caches and Kafka producers (already async inside); parameter stores. Cloud Storage has no
+  asynchronous API and keeps the blocking path
 
 ### Portable Spring Boot microservices
 

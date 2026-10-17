@@ -45,9 +45,11 @@ import software.amazon.awssdk.services.sqs.model.QueueAttributeName;
 
 import java.net.URI;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -183,6 +185,23 @@ class AwsMessagingConformanceIT {
         @Override
         protected BlobStore claimCheckStore() {
             return claims();
+        }
+
+        @Test
+        void asyncReceivesCompleteOnTheSdksNonBlockingClient() throws Exception {
+            CompletingThreads threads = new CompletingThreads();
+            Channel c = channel("tck-rthreads-" + UUID.randomUUID().toString().substring(0, 8), null);
+            c.publisher().publish("one");
+
+            List<ReceivedMessage> received = new ArrayList<>();
+            long deadline = System.nanoTime() + Duration.ofSeconds(60).toNanos();
+            while (received.isEmpty() && System.nanoTime() < deadline) {
+                received.addAll(threads.track(c.subscription().async().receive(10, Duration.ofSeconds(5))).get(60, TimeUnit.SECONDS));
+            }
+            threads.track(received.getFirst().ackAsync()).get(30, TimeUnit.SECONDS);
+
+            assertThat(threads.names()).isNotEmpty();
+            threads.assertNonBlocking(threads.names().size(), Thread.currentThread());
         }
     }
 

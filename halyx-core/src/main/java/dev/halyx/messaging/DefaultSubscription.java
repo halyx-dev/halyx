@@ -16,6 +16,7 @@
 package dev.halyx.messaging;
 
 import dev.halyx.capability.Capabilities;
+import dev.halyx.interceptor.AsyncInvocation;
 import dev.halyx.interceptor.InterceptorChain;
 import dev.halyx.interceptor.OperationContext;
 import dev.halyx.messaging.spi.DriverMessage;
@@ -30,9 +31,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /** The portable subscription: claim-check resolution, settlement and interceptors over a driver. */
@@ -46,6 +50,7 @@ public final class DefaultSubscription implements Subscription {
     private final SubscriptionDriver driver;
     private final SubscriptionConfig config;
     private final InterceptorChain interceptors;
+    private final AsyncSubscription async = new Async(InterceptorChain.blocking());
     private final List<DriverMessage> pendingAcks = new ArrayList<>();
     private ScheduledExecutorService ackFlusher;
 
@@ -98,17 +103,30 @@ public final class DefaultSubscription implements Subscription {
     }
 
     private ReceivedMessage toReceived(DriverMessage message) {
-        byte[] body = message.body();
-        Map<String, String> attributes = message.attributes();
-        String claim = attributes.get(ClaimCheck.ATTRIBUTE);
+        String claim = message.attributes().get(ClaimCheck.ATTRIBUTE);
         if (claim != null && config.claimCheck().isPresent()) {
-            body = execute("claimCheck", true, () -> config.claimCheck().get().store().getBytes(BlobKey.of(claim)));
-            attributes = new LinkedHashMap<>(attributes);
-            attributes.remove(ClaimCheck.ATTRIBUTE);
-        } else if (claim != null) {
+            byte[] body = execute("claimCheck", true, () -> config.claimCheck().get().store().getBytes(BlobKey.of(claim)));
+            return received(message, body, withoutClaim(message), InterceptorChain.blocking());
+        }
+        warnIfUnclaimed(message, claim);
+        return received(message, message.body(), message.attributes(), InterceptorChain.blocking());
+    }
+
+    private static Map<String, String> withoutClaim(DriverMessage message) {
+        Map<String, String> attributes = new LinkedHashMap<>(message.attributes());
+        attributes.remove(ClaimCheck.ATTRIBUTE);
+        return attributes;
+    }
+
+    private void warnIfUnclaimed(DriverMessage message, String claim) {
+        if (claim != null) {
             LOG.warn("Message {} on {} has a claim check ({}) but the subscription has no ClaimCheck configured; "
                     + "delivering the pointer as the body", message.id(), name(), claim);
         }
+    }
+
+    /** The message as delivered; its asynchronous settlements run any blocking work on {@code blocking}. */
+    private ReceivedMessage received(DriverMessage message, byte[] body, Map<String, String> attributes, Executor blocking) {
         return new ReceivedMessage(message.id(), body, attributes, message.orderingKey(), message.publishTime(),
                 message.deliveryAttempt(), new ReceivedMessage.Settlement() {
             @Override
@@ -139,7 +157,107 @@ public final class DefaultSubscription implements Subscription {
                     return null;
                 });
             }
+
+            @Override
+            public CompletableFuture<Void> ackAsync() {
+                return executeAsync("ack", blocking, executor -> driver.ackAsync(message, executor));
+            }
+
+            @Override
+            public CompletableFuture<Void> nackAsync(Duration delay) {
+                return executeAsync("nack", blocking, executor -> driver.nackAsync(message, delay, executor));
+            }
+
+            @Override
+            public CompletableFuture<Void> extendLeaseAsync(Duration lease) {
+                return executeAsync("extendLease", blocking, executor -> driver.extendLeaseAsync(message, lease, executor));
+            }
         });
+    }
+
+    /** The asynchronous {@link #execute}: the driver's future through the interceptors, its failure translated first. */
+    private <T> CompletableFuture<T> executeAsync(String operation, Executor blocking,
+                                                  Function<Executor, CompletableFuture<T>> call) {
+        OperationContext context = new OperationContext(DefaultPublisher.SERVICE, operation, provider(), name(), true);
+        return interceptors.executeAsync(context, () -> {
+            CompletableFuture<T> future;
+            try {
+                future = call.apply(blocking);
+            } catch (RuntimeException e) {
+                return CompletableFuture.failedFuture(driver.translate(e));
+            }
+            return future.exceptionallyCompose(error -> {
+                Throwable cause = AsyncInvocation.unwrap(error);
+                return CompletableFuture.failedFuture(cause instanceof RuntimeException r ? driver.translate(r) : cause);
+            });
+        }, blocking);
+    }
+
+    @Override
+    public AsyncSubscription async() {
+        return async;
+    }
+
+    @Override
+    public AsyncSubscription async(Executor blocking) {
+        return blocking == InterceptorChain.blocking() ? async : new Async(Objects.requireNonNull(blocking, "blocking"));
+    }
+
+    /** The asynchronous view: receives on the driver's non-blocking path, claim checks through the blob store's. */
+    private final class Async implements AsyncSubscription {
+
+        private final Executor blocking;
+
+        Async(Executor blocking) {
+            this.blocking = blocking;
+        }
+
+        @Override
+        public String provider() {
+            return DefaultSubscription.this.provider();
+        }
+
+        @Override
+        public String name() {
+            return DefaultSubscription.this.name();
+        }
+
+        @Override
+        public CompletableFuture<List<ReceivedMessage>> receive(int max, Duration wait) {
+            if (max < 1) {
+                return CompletableFuture.failedFuture(new IllegalArgumentException("max must be at least 1"));
+            }
+            if (wait == null) {
+                return CompletableFuture.failedFuture(new NullPointerException("wait"));
+            }
+            int batch = Math.min(max, Math.max(1, driver.maxReceiveBatch()));
+            return executeAsync("receive", blocking, executor -> driver.receiveAsync(batch, wait, executor))
+                    .thenCompose(raw -> {
+                        List<CompletableFuture<ReceivedMessage>> messages = raw.stream().map(this::resolve).toList();
+                        return CompletableFuture.allOf(messages.toArray(CompletableFuture[]::new))
+                                .thenApply(done -> messages.stream().map(CompletableFuture::join).toList());
+                    });
+        }
+
+        private CompletableFuture<ReceivedMessage> resolve(DriverMessage message) {
+            String claim = message.attributes().get(ClaimCheck.ATTRIBUTE);
+            if (claim != null && config.claimCheck().isPresent()) {
+                return config.claimCheck().get().store().async(blocking).getBytes(BlobKey.of(claim))
+                        .thenApply(body -> received(message, body, withoutClaim(message), blocking));
+            }
+            warnIfUnclaimed(message, claim);
+            return CompletableFuture.completedFuture(received(message, message.body(), message.attributes(), blocking));
+        }
+
+        @Override
+        public Subscription blocking() {
+            return DefaultSubscription.this;
+        }
+
+        @Override
+        public String toString() {
+            return "Async" + DefaultSubscription.this;
+        }
     }
 
     private void deferAck(DriverMessage message) {

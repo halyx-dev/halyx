@@ -16,9 +16,11 @@
 package dev.halyx.messaging;
 
 import dev.halyx.capability.Capabilities;
+import dev.halyx.interceptor.InterceptorChain;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.Executor;
 
 /** Consumes from one subscription or queue: pull with {@link #receive}, or run a listener with {@link #listen}. */
 public interface Subscription {
@@ -36,6 +38,19 @@ public interface Subscription {
     List<ReceivedMessage> receive(int max, Duration wait);
 
     /** Runs {@code listener} on every message until the returned consumer is closed. */
+    /**
+     * The asynchronous view of this subscription, whose receives return {@code CompletableFuture}s, with no thread
+     * waiting out the long poll where the provider's driver has a non-blocking path. Cheap to call.
+     */
+    default AsyncSubscription async() {
+        return async(InterceptorChain.blocking());
+    }
+
+    /** The asynchronous view, running any blocking work on {@code blocking}, such as an application's scheduler. */
+    default AsyncSubscription async(Executor blocking) {
+        return AsyncSubscription.onExecutor(this, blocking);
+    }
+
     MessageConsumer listen(MessageListener listener, ConsumerOptions options);
 
     default MessageConsumer listen(MessageListener listener) {

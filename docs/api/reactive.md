@@ -33,7 +33,8 @@ non-blocking path, the reactive view uses it through the service's asynchronous 
 blob `put` of content in memory, `getBytes`, `head`, `exists`, `delete` and `list` on S3 and Azure Blob Storage
 ([asynchronous calls](storage.md#asynchronous-calls)); document `get`, `put`, `delete` and queries on DynamoDB,
 Cosmos DB and Firestore ([asynchronous calls](nosql.md#asynchronous-calls)); message publishes on SNS, SQS,
-Service Bus and Pub/Sub; and event publishes on EventBridge, Event Grid and Eventarc. Other calls, and Cloud
+Service Bus and Pub/Sub; message receives and their acks, nacks and lease extensions on SQS, Pub/Sub and Event
+Grid; and event publishes on EventBridge, Event Grid and Eventarc. Other calls, and Cloud
 Storage, whose library has no asynchronous API, take the blocking path on the scheduler, with the same results.
 
 ## Getting the reactive services
