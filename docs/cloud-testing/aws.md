@@ -594,6 +594,7 @@ The reports come back into each module's `target/failsafe-reports`.
 | `r26101712087b06` | tier 3, plus Spring Boot 3 and 4 | 53/54; Spring 0/2 | clean | The IAM user without `Connect` permission was still let in, as before. The new Spring cache test's own `@Bean` was named like its `halyx.caches` bean; renamed. |
 | `r26101715276919` | tier 1, plus Spring Boot 3 and 4 | **201 passed, 2 skipped**; Spring **16/16** | clean | Latest tier 1 result: events, reactive (3), repository, messaging and parameters (SSM and Secrets Manager) on Boot 3.5 and 4. |
 | `r261017153996fd` | tier 3, plus Spring Boot 3 and 4 | 53/54; Spring **2/2** | clean | Latest tier 3 result. `Cache` beans with IAM, a JSON codec and `@Cacheable` on Boot 3.5 and 4. The IAM user without `Connect` permission was still let in: the test IAM policy still needs checking. |
+| `r26101720233d49` | tier 1, plus Spring Boot 3 and 4 | **215 passed, 2 skipped**; Spring **16/16** | clean | Latest tier 1 result, with the asynchronous views (blob, document, messaging and event kits) on every service, non-blocking where the driver has a path: S3, DynamoDB, SNS, SQS and EventBridge. |
 
 ## What real AWS found
 

@@ -647,6 +647,7 @@ nothing to fix.
 | `r2610171412729c` | tier 2, plus Spring Boot 3 and 4 | **22/22**; Spring **2/2** | clean | Latest tier 2 result. |
 | `r261017143360ac` | tier 3, plus Spring Boot 3 and 4 | **55/55**; Spring **2/2** | clean | Latest tier 3 result: the cache kit with `ping`, then `Cache` beans with IAM over TLS (private CA), a JSON codec and `@Cacheable` on Boot 3.5 and 4. |
 | `r2610171453c670` | tier 4, plus Spring Boot 3 and 4 | **25/25**; Spring **2/2** | clean | Latest tier 4 result. |
+| `r26101721004590` | tier 1, plus Spring Boot 3 and 4 | **218 passed, 4 skipped**; Spring **16/16** | clean | Latest tier 1 result, with the asynchronous views (blob, document, messaging and event kits) on every service, non-blocking where the driver has a path: Firestore, Pub/Sub and Eventarc. |
 
 ## What real GCP found
 

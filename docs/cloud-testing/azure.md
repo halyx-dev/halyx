@@ -519,6 +519,7 @@ take effect.
 | `r2610171252db43` | tier 2, plus Spring Boot 3 and 4 | **13/13**; Spring **2/2** | clean | Latest tier 2 result. |
 | `r26101713052821` | tier 3, plus Spring Boot 3 and 4 | **53/53**; Spring **2/2** | clean | Latest tier 3 result: the cache kit with `ping`, then `Cache` beans with Entra ID, a JSON codec and `@Cacheable` on Boot 3.5 and 4. |
 | `r2610171320c3b7` | tier 4, plus Spring Boot 3 and 4 | **24 passed, 1 skipped**; Spring **2/2** | clean | Latest tier 4 result. |
+| `r2610172037dfd5` | tier 1, plus Spring Boot 3 and 4 | **198 passed, 2 skipped**; Spring **16/16** | clean | Latest tier 1 result, with the asynchronous views (blob, document, messaging and event kits) on every service, non-blocking where the driver has a path: Blob Storage, Cosmos DB, Service Bus and Event Grid. |
 
 ## What real Azure found
 
