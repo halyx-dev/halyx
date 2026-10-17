@@ -32,6 +32,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 /**
  * One table on one provider. Core validates keys and documents, filters expired items and splits batches;
@@ -82,6 +84,36 @@ public interface DocumentStoreDriver extends AutoCloseable {
 
     /** {@code index} is the table's declared index named by the query. */
     QueryPage queryIndex(Index index, IndexQuery query);
+
+    // --- asynchronous calls ------------------------------------------------------------------------
+    // Each defaults to its blocking call on the blocking executor; a driver whose SDK has non-blocking clients
+    // overrides them. Failures may be returned or thrown; the API layer translates both.
+
+    default CompletableFuture<Optional<Item>> getAsync(Key key, Executor blocking) {
+        return CompletableFuture.supplyAsync(() -> get(key), blocking);
+    }
+
+    default CompletableFuture<Version> putAsync(Key key, Document document, WriteCondition condition, Instant expiresAt,
+                                                Executor blocking) {
+        return CompletableFuture.supplyAsync(() -> put(key, document, condition, expiresAt), blocking);
+    }
+
+    default CompletableFuture<Item> updateAsync(Key key, DocumentUpdate update, Optional<Version> ifVersion,
+                                                Instant expiresAt, Executor blocking) {
+        return CompletableFuture.supplyAsync(() -> update(key, update, ifVersion, expiresAt), blocking);
+    }
+
+    default CompletableFuture<Boolean> deleteAsync(Key key, Optional<Version> ifVersion, Executor blocking) {
+        return CompletableFuture.supplyAsync(() -> delete(key, ifVersion), blocking);
+    }
+
+    default CompletableFuture<QueryPage> queryAsync(Query query, Executor blocking) {
+        return CompletableFuture.supplyAsync(() -> query(query), blocking);
+    }
+
+    default CompletableFuture<QueryPage> queryIndexAsync(Index index, IndexQuery query, Executor blocking) {
+        return CompletableFuture.supplyAsync(() -> queryIndex(index, query), blocking);
+    }
 
     CloudException translate(Throwable error);
 

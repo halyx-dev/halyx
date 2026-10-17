@@ -29,13 +29,21 @@ import dev.halyx.Halyx;
 import dev.halyx.config.Credentials;
 import dev.halyx.config.ProviderConfig;
 import dev.halyx.messaging.ClaimCheck;
+import dev.halyx.messaging.OutgoingMessage;
 import dev.halyx.messaging.SubscriptionConfig;
 import dev.halyx.messaging.TopicConfig;
+import dev.halyx.tck.CompletingThreads;
 import dev.halyx.tck.MessagingConformanceTest;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Messaging TCK plumbing shared by the Pub/Sub emulators: a Halyx context plus admin clients to create topics. */
 abstract class PubSubConformance extends MessagingConformanceTest {
@@ -102,5 +110,17 @@ abstract class PubSubConformance extends MessagingConformanceTest {
     @Override
     protected Channel orderedChannel(String name) {
         return emulator().create(name, null, true);
+    }
+
+    @Test
+    void asyncPublishesCompleteOnTheSdksNonBlockingClient() throws Exception {
+        CompletingThreads threads = new CompletingThreads();
+        Channel c = channel("tck-threads-" + UUID.randomUUID().toString().substring(0, 8), null);
+
+        threads.track(c.publisher().async().publish("one")).get(30, TimeUnit.SECONDS);
+        threads.track(c.publisher().async().publishAll(List.of(OutgoingMessage.of("two"), OutgoingMessage.of("three"))))
+                .get(30, TimeUnit.SECONDS);
+
+        threads.assertNonBlocking(2, Thread.currentThread());
     }
 }

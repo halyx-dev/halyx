@@ -15,9 +15,12 @@
  */
 package dev.halyx.nosql;
 
+import dev.halyx.interceptor.InterceptorChain;
+
 import java.util.Collection;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.Executor;
 import java.util.stream.Stream;
 
 /** A portable table of documents addressed by {@link Key}. Thread-safe; share one per table. */
@@ -26,6 +29,19 @@ public interface DocumentStore {
     String provider();
 
     TableConfig table();
+
+    /**
+     * The asynchronous view of this store, whose calls return {@code CompletableFuture}s; non-blocking where the
+     * provider's driver has a non-blocking path. Cheap to call: Halyx' stores keep one.
+     */
+    default AsyncDocumentStore async() {
+        return async(InterceptorChain.blocking());
+    }
+
+    /** The asynchronous view, running any blocking work on {@code blocking}, such as an application's scheduler. */
+    default AsyncDocumentStore async(Executor blocking) {
+        return AsyncDocumentStore.onExecutor(this, blocking);
+    }
 
     /** The item, or empty if there is none (or it has expired). Reads are strongly consistent. */
     Optional<Item> get(Key key);

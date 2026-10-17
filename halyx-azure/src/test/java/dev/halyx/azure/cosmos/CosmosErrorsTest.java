@@ -31,7 +31,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Errors from outside Cosmos DB itself are classified like every other Azure driver's. */
 class CosmosErrorsTest {
 
-    private final CosmosDocumentStoreDriver driver = new CosmosDocumentStoreDriver(null, TableConfig.builder("t").build());
+    private final CosmosDocumentStoreDriver driver = new CosmosDocumentStoreDriver(null, TableConfig.builder("t").build(), () -> null);
 
     @Test
     void ioFailuresAreUnavailable() {

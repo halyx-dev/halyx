@@ -22,6 +22,7 @@ import dev.halyx.error.UnknownCloudException;
 import dev.halyx.events.CloudEvent;
 import dev.halyx.events.CloudEvents;
 import dev.halyx.events.spi.AbstractEventPublisherDriver;
+import software.amazon.awssdk.services.eventbridge.EventBridgeAsyncClient;
 import software.amazon.awssdk.services.eventbridge.EventBridgeClient;
 import software.amazon.awssdk.services.eventbridge.model.PutEventsRequestEntry;
 import software.amazon.awssdk.services.eventbridge.model.PutEventsResponse;
@@ -31,6 +32,9 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.function.Supplier;
 
 /**
  * Publishes to an EventBridge event bus with {@code PutEvents}: the CloudEvent's {@code source} and {@code type}
@@ -45,11 +49,14 @@ public final class EventBridgePublisherDriver extends AbstractEventPublisherDriv
     static final long MAX_EVENT_BYTES = MAX_REQUEST_BYTES - 2048;
 
     private final EventBridgeClient client;
+    private final Supplier<EventBridgeAsyncClient> asyncClient;
     private final String bus;
 
-    public EventBridgePublisherDriver(EventBridgeClient client, String bus) {
+    /** @param asyncClient the non-blocking client for asynchronous publishes, made when first asked for */
+    public EventBridgePublisherDriver(EventBridgeClient client, String bus, Supplier<EventBridgeAsyncClient> asyncClient) {
         super(AwsProvider.ID);
         this.client = client;
+        this.asyncClient = asyncClient;
         this.bus = bus;
     }
 
@@ -60,7 +67,25 @@ public final class EventBridgePublisherDriver extends AbstractEventPublisherDriv
 
     @Override
     public void publish(List<CloudEvent> events) {
-        // Split further when the entries of one batch together exceed the request limit.
+        for (List<PutEventsRequestEntry> request : requests(events)) {
+            check(request, client.putEvents(r -> r.entries(request)));
+        }
+    }
+
+    /** Each request after the one before, so a failure leaves only earlier requests sent, as the blocking publish. */
+    @Override
+    public CompletableFuture<Void> publishAsync(List<CloudEvent> events, Executor blocking) {
+        CompletableFuture<Void> chain = CompletableFuture.completedFuture(null);
+        for (List<PutEventsRequestEntry> request : requests(events)) {
+            chain = chain.thenCompose(done -> asyncClient.get().putEvents(r -> r.entries(request))
+                    .thenAccept(response -> check(request, response)));
+        }
+        return chain;
+    }
+
+    /** The events split further when the entries of one batch together exceed the request limit. */
+    private List<List<PutEventsRequestEntry>> requests(List<CloudEvent> events) {
+        List<List<PutEventsRequestEntry>> requests = new ArrayList<>();
         List<PutEventsRequestEntry> request = new ArrayList<>();
         long size = 0;
         for (CloudEvent event : events) {
@@ -68,7 +93,7 @@ public final class EventBridgePublisherDriver extends AbstractEventPublisherDriv
             long entrySize = entry.detail().getBytes(StandardCharsets.UTF_8).length + entry.source().length()
                     + entry.detailType().length() + 64;
             if (!request.isEmpty() && size + entrySize > MAX_REQUEST_BYTES) {
-                send(request);
+                requests.add(request);
                 request = new ArrayList<>();
                 size = 0;
             }
@@ -76,8 +101,9 @@ public final class EventBridgePublisherDriver extends AbstractEventPublisherDriv
             size += entrySize;
         }
         if (!request.isEmpty()) {
-            send(request);
+            requests.add(request);
         }
+        return requests;
     }
 
     private PutEventsRequestEntry entry(CloudEvent event) {
@@ -90,8 +116,7 @@ public final class EventBridgePublisherDriver extends AbstractEventPublisherDriv
         return entry.build();
     }
 
-    private void send(List<PutEventsRequestEntry> entries) {
-        PutEventsResponse response = client.putEvents(r -> r.entries(entries));
+    private void check(List<PutEventsRequestEntry> entries, PutEventsResponse response) {
         if (response.failedEntryCount() == null || response.failedEntryCount() == 0) {
             return;
         }

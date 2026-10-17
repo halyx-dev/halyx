@@ -21,6 +21,7 @@ import dev.halyx.error.CloudException;
 import dev.halyx.error.NotFoundException;
 import dev.halyx.error.PreconditionFailedException;
 import dev.halyx.error.ThrottledException;
+import dev.halyx.interceptor.AsyncInvocation;
 import dev.halyx.json.Json;
 import dev.halyx.nosql.Document;
 import dev.halyx.nosql.DocumentUpdate;
@@ -36,14 +37,22 @@ import dev.halyx.nosql.Version;
 import dev.halyx.nosql.spi.AbstractDocumentStoreDriver;
 import dev.halyx.nosql.spi.TransactionWrite;
 import dev.halyx.nosql.spi.WriteCondition;
+import software.amazon.awssdk.services.dynamodb.DynamoDbAsyncClient;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 import software.amazon.awssdk.services.dynamodb.model.ConditionalCheckFailedException;
+import software.amazon.awssdk.services.dynamodb.model.DeleteItemRequest;
+import software.amazon.awssdk.services.dynamodb.model.GetItemRequest;
+import software.amazon.awssdk.services.dynamodb.model.GetItemResponse;
 import software.amazon.awssdk.services.dynamodb.model.KeysAndAttributes;
+import software.amazon.awssdk.services.dynamodb.model.PutItemRequest;
 import software.amazon.awssdk.services.dynamodb.model.PutRequest;
+import software.amazon.awssdk.services.dynamodb.model.QueryRequest;
+import software.amazon.awssdk.services.dynamodb.model.QueryResponse;
 import software.amazon.awssdk.services.dynamodb.model.ReturnValue;
 import software.amazon.awssdk.services.dynamodb.model.TransactWriteItem;
 import software.amazon.awssdk.services.dynamodb.model.TransactionCanceledException;
+import software.amazon.awssdk.services.dynamodb.model.UpdateItemRequest;
 import software.amazon.awssdk.services.dynamodb.model.WriteRequest;
 
 import java.nio.charset.StandardCharsets;
@@ -58,6 +67,9 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.function.Supplier;
 
 /**
  * A DynamoDB table with string partition (and optional sort) keys. Halyx keeps each item's version in
@@ -72,12 +84,15 @@ public final class DynamoDocumentStoreDriver extends AbstractDocumentStoreDriver
     public static final String TTL_ATTRIBUTE = "aws.dynamodb.ttl-attribute";
 
     private final DynamoDbClient dynamo;
+    private final Supplier<DynamoDbAsyncClient> dynamoAsync;
     private final TableConfig table;
     private final String ttl;
 
-    public DynamoDocumentStoreDriver(DynamoDbClient dynamo, TableConfig table) {
+    /** @param dynamoAsync the non-blocking client for asynchronous calls, made when first asked for */
+    public DynamoDocumentStoreDriver(DynamoDbClient dynamo, TableConfig table, Supplier<DynamoDbAsyncClient> dynamoAsync) {
         super(AwsProvider.ID);
         this.dynamo = dynamo;
+        this.dynamoAsync = dynamoAsync;
         this.table = table;
         this.ttl = table.property(TTL_ATTRIBUTE).orElse(DEFAULT_TTL_ATTRIBUTE);
     }
@@ -122,37 +137,67 @@ public final class DynamoDocumentStoreDriver extends AbstractDocumentStoreDriver
 
     @Override
     public Optional<Item> get(Key key) {
-        var response = dynamo.getItem(b -> b.tableName(table.name()).key(keyAttributes(key)).consistentRead(true));
+        return toItem(dynamo.getItem(getRequest(key)));
+    }
+
+    @Override
+    public CompletableFuture<Optional<Item>> getAsync(Key key, Executor blocking) {
+        return dynamoAsync.get().getItem(getRequest(key)).thenApply(this::toItem);
+    }
+
+    private GetItemRequest getRequest(Key key) {
+        return GetItemRequest.builder().tableName(table.name()).key(keyAttributes(key)).consistentRead(true).build();
+    }
+
+    private Optional<Item> toItem(GetItemResponse response) {
         return response.hasItem() && !response.item().isEmpty() ? Optional.of(toItem(response.item())) : Optional.empty();
     }
 
     @Override
     public Version put(Key key, Document document, WriteCondition condition, Instant expiresAt) {
+        String version = UUID.randomUUID().toString();
+        try {
+            dynamo.putItem(putRequest(key, document, condition, expiresAt, version));
+        } catch (ConditionalCheckFailedException e) {
+            throw putFailure(key, e);
+        }
+        return new Version(version);
+    }
+
+    @Override
+    public CompletableFuture<Version> putAsync(Key key, Document document, WriteCondition condition, Instant expiresAt,
+                                               Executor blocking) {
+        String version = UUID.randomUUID().toString();
+        return dynamoAsync.get().putItem(putRequest(key, document, condition, expiresAt, version))
+                .thenApply(response -> new Version(version))
+                .exceptionallyCompose(error -> CompletableFuture.failedFuture(
+                        AsyncInvocation.unwrap(error) instanceof ConditionalCheckFailedException e ? putFailure(key, e) : error));
+    }
+
+    private static PreconditionFailedException putFailure(Key key, ConditionalCheckFailedException e) {
+        return new PreconditionFailedException("Condition failed for " + key, e, AwsProvider.ID, e.awsErrorDetails().errorCode());
+    }
+
+    private PutItemRequest putRequest(Key key, Document document, WriteCondition condition, Instant expiresAt,
+                                      String version) {
         Map<String, AttributeValue> item = new LinkedHashMap<>(DynamoValues.toAttributes(document, Set.of()));
         item.putAll(keyAttributes(key));
-        String version = UUID.randomUUID().toString();
         item.put(VERSION, AttributeValue.fromS(version));
         if (expiresAt != null) {
             item.put(ttl, AttributeValue.fromN(String.valueOf(expiresAt.getEpochSecond())));
         }
-        try {
-            dynamo.putItem(b -> {
-                b.tableName(table.name()).item(item);
-                switch (condition) {
-                    case WriteCondition.None ignored -> { }
-                    // An expired item DynamoDB hasn't swept yet counts as absent.
-                    case WriteCondition.NotExists ignored -> b.conditionExpression("attribute_not_exists(#pk) OR #ttl < :now")
-                            .expressionAttributeNames(Map.of("#pk", table.partitionKey(), "#ttl", ttl))
-                            .expressionAttributeValues(Map.of(":now", AttributeValue.fromN(String.valueOf(Instant.now().getEpochSecond()))));
-                    case WriteCondition.IfVersion v -> b.conditionExpression("#v = :v")
-                            .expressionAttributeNames(Map.of("#v", VERSION))
-                            .expressionAttributeValues(Map.of(":v", AttributeValue.fromS(v.version().value())));
-                }
-            });
-        } catch (ConditionalCheckFailedException e) {
-            throw new PreconditionFailedException("Condition failed for " + key, e, AwsProvider.ID, e.awsErrorDetails().errorCode());
+        var b = PutItemRequest.builder().tableName(table.name()).item(item);
+        switch (condition) {
+            case WriteCondition.None ignored -> { }
+            // An expired item DynamoDB hasn't swept yet counts as absent.
+            case WriteCondition.NotExists ignored -> b.conditionExpression("attribute_not_exists(#pk) OR #ttl < :now")
+                    .expressionAttributeNames(Map.of("#pk", table.partitionKey(), "#ttl", ttl))
+                    .expressionAttributeValues(Map.of(":now", AttributeValue.fromN(String.valueOf(Instant.now().getEpochSecond()))));
+            case WriteCondition.IfVersion v -> b.conditionExpression("#v = :v")
+                    .expressionAttributeNames(Map.of("#v", VERSION))
+                    .expressionAttributeValues(Map.of(":v", AttributeValue.fromS(v.version().value())));
         }
-        return new Version(version);
+        return b.build();
     }
 
     /** An UpdateItem expression for {@code update}, conditional on the item existing (and on its version). */
@@ -210,34 +255,67 @@ public final class DynamoDocumentStoreDriver extends AbstractDocumentStoreDriver
 
     @Override
     public Item update(Key key, DocumentUpdate update, Optional<Version> ifVersion, Instant expiresAt) {
-        UpdateSpec spec = updateSpec(update, ifVersion, expiresAt);
         try {
-            var response = dynamo.updateItem(b -> b.tableName(table.name()).key(keyAttributes(key))
-                    .updateExpression(spec.expression()).conditionExpression(spec.condition())
-                    .expressionAttributeNames(spec.names()).expressionAttributeValues(spec.values())
-                    .returnValues(ReturnValue.ALL_NEW));
-            return toItem(response.attributes());
+            return toItem(dynamo.updateItem(updateRequest(key, update, ifVersion, expiresAt)).attributes());
         } catch (ConditionalCheckFailedException e) {
-            if (get(key).isEmpty()) {
-                throw new NotFoundException("No item " + key, e, AwsProvider.ID, e.awsErrorDetails().errorCode());
-            }
-            throw new PreconditionFailedException("Item " + key + " changed", e, AwsProvider.ID, e.awsErrorDetails().errorCode());
+            throw updateFailure(key, e, get(key).isPresent());
         }
+    }
+
+    /** A failed condition is a missing item or a changed one: a read, without blocking, tells which. */
+    @Override
+    public CompletableFuture<Item> updateAsync(Key key, DocumentUpdate update, Optional<Version> ifVersion,
+                                               Instant expiresAt, Executor blocking) {
+        return dynamoAsync.get().updateItem(updateRequest(key, update, ifVersion, expiresAt))
+                .thenApply(response -> toItem(response.attributes()))
+                .exceptionallyCompose(error -> AsyncInvocation.unwrap(error) instanceof ConditionalCheckFailedException e
+                        ? getAsync(key, blocking).thenCompose(item -> CompletableFuture.<Item>failedFuture(
+                                updateFailure(key, e, item.isPresent())))
+                        : CompletableFuture.failedFuture(error));
+    }
+
+    private UpdateItemRequest updateRequest(Key key, DocumentUpdate update, Optional<Version> ifVersion, Instant expiresAt) {
+        UpdateSpec spec = updateSpec(update, ifVersion, expiresAt);
+        return UpdateItemRequest.builder().tableName(table.name()).key(keyAttributes(key))
+                .updateExpression(spec.expression()).conditionExpression(spec.condition())
+                .expressionAttributeNames(spec.names()).expressionAttributeValues(spec.values())
+                .returnValues(ReturnValue.ALL_NEW).build();
+    }
+
+    private static RuntimeException updateFailure(Key key, ConditionalCheckFailedException e, boolean exists) {
+        return exists
+                ? new PreconditionFailedException("Item " + key + " changed", e, AwsProvider.ID, e.awsErrorDetails().errorCode())
+                : new NotFoundException("No item " + key, e, AwsProvider.ID, e.awsErrorDetails().errorCode());
     }
 
     @Override
     public boolean delete(Key key, Optional<Version> ifVersion) {
         try {
-            var response = dynamo.deleteItem(b -> {
-                b.tableName(table.name()).key(keyAttributes(key)).returnValues(ReturnValue.ALL_OLD);
-                ifVersion.ifPresent(v -> b.conditionExpression("#v = :v")
-                        .expressionAttributeNames(Map.of("#v", VERSION))
-                        .expressionAttributeValues(Map.of(":v", AttributeValue.fromS(v.value()))));
-            });
+            var response = dynamo.deleteItem(deleteRequest(key, ifVersion));
             return response.hasAttributes() && !response.attributes().isEmpty();
         } catch (ConditionalCheckFailedException e) {
-            throw new PreconditionFailedException("Item " + key + " changed", e, AwsProvider.ID, e.awsErrorDetails().errorCode());
+            throw deleteFailure(key, e);
         }
+    }
+
+    @Override
+    public CompletableFuture<Boolean> deleteAsync(Key key, Optional<Version> ifVersion, Executor blocking) {
+        return dynamoAsync.get().deleteItem(deleteRequest(key, ifVersion))
+                .thenApply(response -> response.hasAttributes() && !response.attributes().isEmpty())
+                .exceptionallyCompose(error -> CompletableFuture.failedFuture(
+                        AsyncInvocation.unwrap(error) instanceof ConditionalCheckFailedException e ? deleteFailure(key, e) : error));
+    }
+
+    private DeleteItemRequest deleteRequest(Key key, Optional<Version> ifVersion) {
+        var b = DeleteItemRequest.builder().tableName(table.name()).key(keyAttributes(key)).returnValues(ReturnValue.ALL_OLD);
+        ifVersion.ifPresent(v -> b.conditionExpression("#v = :v")
+                .expressionAttributeNames(Map.of("#v", VERSION))
+                .expressionAttributeValues(Map.of(":v", AttributeValue.fromS(v.value()))));
+        return b.build();
+    }
+
+    private static PreconditionFailedException deleteFailure(Key key, ConditionalCheckFailedException e) {
+        return new PreconditionFailedException("Item " + key + " changed", e, AwsProvider.ID, e.awsErrorDetails().errorCode());
     }
 
     /**
@@ -300,6 +378,15 @@ public final class DynamoDocumentStoreDriver extends AbstractDocumentStoreDriver
 
     @Override
     public QueryPage query(Query query) {
+        return toPage(query, dynamo.query(queryRequest(query)));
+    }
+
+    @Override
+    public CompletableFuture<QueryPage> queryAsync(Query query, Executor blocking) {
+        return dynamoAsync.get().query(queryRequest(query)).thenApply(response -> toPage(query, response));
+    }
+
+    private QueryRequest queryRequest(Query query) {
         String sk = table.sortKey().orElseThrow();
         // DynamoDB rejects names the expression doesn't use, so #sk only joins with a sort condition.
         Map<String, String> names = new HashMap<>(Map.of("#pk", table.partitionKey()));
@@ -328,17 +415,20 @@ public final class DynamoDocumentStoreDriver extends AbstractDocumentStoreDriver
                 }
             }
         });
-        var response = dynamo.query(b -> {
-            b.tableName(table.name()).keyConditionExpression(condition.toString())
-                    .expressionAttributeNames(names).expressionAttributeValues(values)
-                    .scanIndexForward(!query.descending()).limit(query.limit()).consistentRead(true);
-            query.pageToken().ifPresent(token -> {
-                Map<String, AttributeValue> start = new HashMap<>();
-                start.put(table.partitionKey(), AttributeValue.fromS(query.partitionKey()));
-                start.put(sk, AttributeValue.fromS(new String(Base64.getUrlDecoder().decode(token), StandardCharsets.UTF_8)));
-                b.exclusiveStartKey(start);
-            });
+        var b = QueryRequest.builder().tableName(table.name()).keyConditionExpression(condition.toString())
+                .expressionAttributeNames(names).expressionAttributeValues(values)
+                .scanIndexForward(!query.descending()).limit(query.limit()).consistentRead(true);
+        query.pageToken().ifPresent(token -> {
+            Map<String, AttributeValue> start = new HashMap<>();
+            start.put(table.partitionKey(), AttributeValue.fromS(query.partitionKey()));
+            start.put(sk, AttributeValue.fromS(new String(Base64.getUrlDecoder().decode(token), StandardCharsets.UTF_8)));
+            b.exclusiveStartKey(start);
         });
+        return b.build();
+    }
+
+    private QueryPage toPage(Query query, QueryResponse response) {
+        String sk = table.sortKey().orElseThrow();
         List<Item> items = response.items().stream().map(this::toItem).toList();
         Optional<String> next = response.hasLastEvaluatedKey() && !response.lastEvaluatedKey().isEmpty()
                 ? Optional.of(Base64.getUrlEncoder().withoutPadding().encodeToString(
@@ -412,6 +502,15 @@ public final class DynamoDocumentStoreDriver extends AbstractDocumentStoreDriver
     /** A global secondary index of the index's name; GSI reads are eventually consistent. */
     @Override
     public QueryPage queryIndex(Index index, IndexQuery query) {
+        return toIndexPage(dynamo.query(queryIndexRequest(index, query)));
+    }
+
+    @Override
+    public CompletableFuture<QueryPage> queryIndexAsync(Index index, IndexQuery query, Executor blocking) {
+        return dynamoAsync.get().query(queryIndexRequest(index, query)).thenApply(this::toIndexPage);
+    }
+
+    private QueryRequest queryIndexRequest(Index index, IndexQuery query) {
         Map<String, String> names = new HashMap<>(Map.of("#a", index.partitionAttribute()));
         Map<String, AttributeValue> values = new HashMap<>(Map.of(":v", DynamoValues.toAttribute(query.value())));
         StringBuilder condition = new StringBuilder("#a = :v");
@@ -419,12 +518,15 @@ public final class DynamoDocumentStoreDriver extends AbstractDocumentStoreDriver
             names.put("#s", index.sortAttribute().orElseThrow());
             condition.append(sortCondition("#s", c, values));
         });
-        var response = dynamo.query(b -> {
-            b.tableName(table.name()).indexName(index.name()).keyConditionExpression(condition.toString())
-                    .expressionAttributeNames(names).expressionAttributeValues(values)
-                    .scanIndexForward(!query.descending()).limit(query.limit());
-            query.pageToken().ifPresent(token -> b.exclusiveStartKey(decodeKey(token)));
-        });
+        var b = QueryRequest.builder().tableName(table.name()).indexName(index.name())
+                .keyConditionExpression(condition.toString())
+                .expressionAttributeNames(names).expressionAttributeValues(values)
+                .scanIndexForward(!query.descending()).limit(query.limit());
+        query.pageToken().ifPresent(token -> b.exclusiveStartKey(decodeKey(token)));
+        return b.build();
+    }
+
+    private QueryPage toIndexPage(QueryResponse response) {
         List<Item> items = response.items().stream().map(this::toItem).toList();
         Optional<String> next = response.hasLastEvaluatedKey() && !response.lastEvaluatedKey().isEmpty()
                 ? Optional.of(encodeKey(response.lastEvaluatedKey()))

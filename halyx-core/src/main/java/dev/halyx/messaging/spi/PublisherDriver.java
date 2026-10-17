@@ -20,6 +20,8 @@ import dev.halyx.error.CloudException;
 import dev.halyx.messaging.OutgoingMessage;
 
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 /** Publishes to one topic or queue. Core splits batches to {@link #maxBatchSize()} and checks capabilities. */
 public interface PublisherDriver extends AutoCloseable {
@@ -38,6 +40,14 @@ public interface PublisherDriver extends AutoCloseable {
 
     /** Largest body the provider accepts, before attributes. */
     long maxMessageBytes();
+
+    /**
+     * {@link #publish} without blocking, where the SDK allows it; by default the blocking call on the blocking
+     * executor. Failures may be returned or thrown; the API layer translates both.
+     */
+    default CompletableFuture<List<String>> publishAsync(List<OutgoingMessage> messages, Executor blocking) {
+        return CompletableFuture.supplyAsync(() -> publish(messages), blocking);
+    }
 
     CloudException translate(Throwable error);
 

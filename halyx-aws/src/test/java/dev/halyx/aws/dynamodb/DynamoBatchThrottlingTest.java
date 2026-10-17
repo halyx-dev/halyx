@@ -75,7 +75,9 @@ class DynamoBatchThrottlingTest {
         }
     };
 
-    private final DynamoDocumentStoreDriver driver = new DynamoDocumentStoreDriver(throttling, TableConfig.of("items"));
+    private final DynamoDocumentStoreDriver driver = new DynamoDocumentStoreDriver(throttling, TableConfig.of("items"), () -> {
+        throw new UnsupportedOperationException("batch calls are blocking only");
+    });
 
     @Test
     void unprocessedReadsThrowThrottledAfterOneRequest() {

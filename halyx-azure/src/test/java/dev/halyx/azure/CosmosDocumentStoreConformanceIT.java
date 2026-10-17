@@ -23,10 +23,16 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import dev.halyx.Halyx;
 import dev.halyx.config.ProviderConfig;
+import dev.halyx.nosql.AsyncDocumentStore;
+import dev.halyx.nosql.Document;
 import dev.halyx.nosql.DocumentStore;
+import dev.halyx.nosql.Key;
+import dev.halyx.nosql.Query;
 import dev.halyx.nosql.TableConfig;
 import dev.halyx.reactor.ReactiveHalyx;
+import dev.halyx.tck.CompletingThreads;
 import dev.halyx.tck.DocumentStoreConformanceTest;
+import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.junit.jupiter.Container;
@@ -37,9 +43,13 @@ import org.testcontainers.utility.MountableFile;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Nested;
 import dev.halyx.tck.DocumentRepositoryConformanceTest;
 import dev.halyx.tck.ReactiveDocumentRepositoryConformanceTest;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** The document store TCK on Cosmos DB (NoSQL API) emulated by Floci-az. */
 @Testcontainers(disabledWithoutDocker = true)
@@ -149,5 +159,19 @@ class CosmosDocumentStoreConformanceIT extends DocumentStoreConformanceTest {
         protected ReactiveHalyx reactive() {
             return reactive;
         }
+    }
+
+    @Test
+    void asyncCallsCompleteOnTheSdksNonBlockingClient() throws Exception {
+        CompletingThreads threads = new CompletingThreads();
+        AsyncDocumentStore async = store(true).async();
+        Key key = Key.of("async-threads-" + UUID.randomUUID(), "a");
+
+        threads.track(async.put(key, Document.builder().put("n", 1).build())).get(30, TimeUnit.SECONDS);
+        threads.track(async.get(key)).get(30, TimeUnit.SECONDS);
+        threads.track(async.query(Query.partition(key.partition()))).get(30, TimeUnit.SECONDS);
+        threads.track(async.delete(key)).get(30, TimeUnit.SECONDS);
+
+        threads.assertNonBlocking(4, Thread.currentThread());
     }
 }

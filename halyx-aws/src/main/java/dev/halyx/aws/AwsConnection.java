@@ -68,11 +68,15 @@ import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
 import software.amazon.awssdk.core.retry.RetryMode;
+import software.amazon.awssdk.services.eventbridge.EventBridgeAsyncClient;
+import software.amazon.awssdk.services.sns.SnsAsyncClient;
+import software.amazon.awssdk.services.sqs.SqsAsyncClient;
 import software.amazon.awssdk.utils.SdkAutoCloseable;
 import software.amazon.awssdk.http.SdkHttpClient;
 import software.amazon.awssdk.http.apache5.Apache5HttpClient;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.regions.providers.DefaultAwsRegionProviderChain;
+import software.amazon.awssdk.services.dynamodb.DynamoDbAsyncClient;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.http.async.SdkAsyncHttpClient;
 import software.amazon.awssdk.http.nio.netty.NettyNioAsyncHttpClient;
@@ -105,6 +109,10 @@ final class AwsConnection implements ProviderConnection {
     private S3Client s3;
     private S3Presigner presigner;
     private S3AsyncClient s3Async;
+    private DynamoDbAsyncClient dynamoAsync;
+    private SnsAsyncClient snsAsync;
+    private SqsAsyncClient sqsAsync;
+    private EventBridgeAsyncClient eventBridgeAsync;
     private SdkAsyncHttpClient nettyHttp;
     private RedisCaches caches;
     private KafkaStreamClients streams;
@@ -142,6 +150,63 @@ final class AwsConnection implements ProviderConnection {
     /** The non-blocking S3 client, made on the first asynchronous call, on its own Netty connection pool. */
     private synchronized S3AsyncClient s3Async() {
         if (s3Async == null) {
+            var client = S3AsyncClient.builder().region(region()).credentialsProvider(credentials())
+                    .forcePathStyle(config.booleanProperty(AwsProperties.S3_PATH_STYLE, false))
+                    .httpClient(nettyHttp())
+                    .overrideConfiguration(overrides());
+            config.endpoint().ifPresent(client::endpointOverride);
+            s3Async = client.build();
+        }
+        return s3Async;
+    }
+
+    /** The non-blocking DynamoDB client, made on the first asynchronous call. */
+    private synchronized DynamoDbAsyncClient dynamoAsync() {
+        if (dynamoAsync == null) {
+            var builder = DynamoDbAsyncClient.builder().region(region()).credentialsProvider(credentials())
+                    .httpClient(nettyHttp()).overrideConfiguration(overrides());
+            config.endpoint().ifPresent(builder::endpointOverride);
+            dynamoAsync = builder.build();
+        }
+        return dynamoAsync;
+    }
+
+    /** The non-blocking SNS client, made on the first asynchronous publish. */
+    private synchronized SnsAsyncClient snsAsync() {
+        if (snsAsync == null) {
+            var builder = SnsAsyncClient.builder().region(region()).credentialsProvider(credentials())
+                    .httpClient(nettyHttp()).overrideConfiguration(overrides());
+            config.endpoint().ifPresent(builder::endpointOverride);
+            snsAsync = builder.build();
+        }
+        return snsAsync;
+    }
+
+    /** The non-blocking SQS client, made on the first asynchronous send. */
+    private synchronized SqsAsyncClient sqsAsync() {
+        if (sqsAsync == null) {
+            var builder = SqsAsyncClient.builder().region(region()).credentialsProvider(credentials())
+                    .httpClient(nettyHttp()).overrideConfiguration(overrides());
+            config.endpoint().ifPresent(builder::endpointOverride);
+            sqsAsync = builder.build();
+        }
+        return sqsAsync;
+    }
+
+    /** The non-blocking EventBridge client, made on the first asynchronous publish. */
+    private synchronized EventBridgeAsyncClient eventBridgeAsync() {
+        if (eventBridgeAsync == null) {
+            var builder = EventBridgeAsyncClient.builder().region(region()).credentialsProvider(credentials())
+                    .httpClient(nettyHttp()).overrideConfiguration(overrides());
+            config.endpoint().ifPresent(builder::endpointOverride);
+            eventBridgeAsync = builder.build();
+        }
+        return eventBridgeAsync;
+    }
+
+    /** One Netty connection pool for every non-blocking client, tuned by {@link HttpSettings} as the blocking one is. */
+    private synchronized SdkAsyncHttpClient nettyHttp() {
+        if (nettyHttp == null) {
             HttpSettings settings = HttpSettings.from(config);
             nettyHttp = NettyNioAsyncHttpClient.builder()
                     .maxConcurrency(settings.maxConnections())
@@ -150,14 +215,8 @@ final class AwsConnection implements ProviderConnection {
                     .connectionMaxIdleTime(settings.idleTimeout())
                     .connectionAcquisitionTimeout(settings.acquireTimeout())
                     .build();
-            var client = S3AsyncClient.builder().region(region()).credentialsProvider(credentials())
-                    .forcePathStyle(config.booleanProperty(AwsProperties.S3_PATH_STYLE, false))
-                    .httpClient(nettyHttp)
-                    .overrideConfiguration(overrides());
-            config.endpoint().ifPresent(client::endpointOverride);
-            s3Async = client.build();
         }
-        return s3Async;
+        return nettyHttp;
     }
 
     @Override
@@ -229,7 +288,7 @@ final class AwsConnection implements ProviderConnection {
             config.endpoint().ifPresent(builder::endpointOverride);
             dynamo = builder.build();
         }
-        return new DynamoDocumentStoreDriver(dynamo, table);
+        return new DynamoDocumentStoreDriver(dynamo, table, this::dynamoAsync);
     }
 
     /** An SNS topic, or with {@code aws.target=sqs} an SQS queue. */
@@ -237,8 +296,8 @@ final class AwsConnection implements ProviderConnection {
     public synchronized PublisherDriver publisher(TopicConfig topic) {
         String target = topic.property(AwsProperties.MESSAGING_TARGET).orElse("sns");
         return switch (target) {
-            case "sns" -> new SnsPublisherDriver(sns(), topic.name());
-            case "sqs" -> new SqsPublisherDriver(sqs(), topic.name());
+            case "sns" -> new SnsPublisherDriver(sns(), topic.name(), this::snsAsync);
+            case "sqs" -> new SqsPublisherDriver(sqs(), topic.name(), this::sqsAsync);
             default -> throw new IllegalArgumentException(AwsProperties.MESSAGING_TARGET + " must be sns or sqs, not " + target);
         };
     }
@@ -261,7 +320,7 @@ final class AwsConnection implements ProviderConnection {
 
     @Override
     public synchronized EventPublisherDriver eventPublisher(EventBusConfig bus) {
-        return new EventBridgePublisherDriver(eventBridge(), bus.name());
+        return new EventBridgePublisherDriver(eventBridge(), bus.name(), this::eventBridgeAsync);
     }
 
     private EventBridgeClient eventBridge() {
@@ -419,8 +478,26 @@ final class AwsConnection implements ProviderConnection {
         }
         if (s3Async != null) {
             s3Async.close();
-            nettyHttp.close(); // clients never close an HTTP client they were given
             s3Async = null;
+        }
+        if (dynamoAsync != null) {
+            dynamoAsync.close();
+            dynamoAsync = null;
+        }
+        if (snsAsync != null) {
+            snsAsync.close();
+            snsAsync = null;
+        }
+        if (sqsAsync != null) {
+            sqsAsync.close();
+            sqsAsync = null;
+        }
+        if (eventBridgeAsync != null) {
+            eventBridgeAsync.close();
+            eventBridgeAsync = null;
+        }
+        if (nettyHttp != null) {
+            nettyHttp.close(); // clients never close an HTTP client they were given
             nettyHttp = null;
         }
         if (s3 != null) {

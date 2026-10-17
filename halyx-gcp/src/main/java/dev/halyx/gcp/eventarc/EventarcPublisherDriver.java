@@ -22,10 +22,13 @@ import dev.halyx.events.CloudEvent;
 import dev.halyx.events.CloudEvents;
 import dev.halyx.events.spi.AbstractEventPublisherDriver;
 import dev.halyx.gcp.GcpErrors;
+import dev.halyx.gcp.GcpFutures;
 import dev.halyx.gcp.GcpProvider;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 /**
  * Publishes to an Eventarc Advanced message bus, one event per request in the CloudEvents JSON format. The bus's
@@ -55,8 +58,23 @@ public final class EventarcPublisherDriver extends AbstractEventPublisherDriver 
     @Override
     public void publish(List<CloudEvent> events) {
         for (CloudEvent event : events) {
-            client.publish(PublishRequest.newBuilder().setMessageBus(bus).setJsonMessage(CloudEvents.toJson(event)).build());
+            client.publish(request(event));
         }
+    }
+
+    /** Each event after the one before, as the blocking publish sends them. */
+    @Override
+    public CompletableFuture<Void> publishAsync(List<CloudEvent> events, Executor blocking) {
+        CompletableFuture<Void> chain = CompletableFuture.completedFuture(null);
+        for (CloudEvent event : events) {
+            PublishRequest request = request(event);
+            chain = chain.thenCompose(done -> GcpFutures.of(client.publishCallable().futureCall(request)).thenApply(r -> null));
+        }
+        return chain;
+    }
+
+    private PublishRequest request(CloudEvent event) {
+        return PublishRequest.newBuilder().setMessageBus(bus).setJsonMessage(CloudEvents.toJson(event)).build();
     }
 
     @Override

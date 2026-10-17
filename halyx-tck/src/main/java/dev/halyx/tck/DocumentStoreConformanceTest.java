@@ -21,6 +21,7 @@ import org.junit.jupiter.api.TestInfo;
 import dev.halyx.error.InvalidArgumentException;
 import dev.halyx.error.NotFoundException;
 import dev.halyx.error.PreconditionFailedException;
+import dev.halyx.nosql.AsyncDocumentStore;
 import dev.halyx.nosql.Document;
 import dev.halyx.nosql.DocumentStore;
 import dev.halyx.nosql.DocumentUpdate;
@@ -519,5 +520,81 @@ public abstract class DocumentStoreConformanceTest {
 
     private static List<String> months(QueryPage page) {
         return page.items().stream().map(i -> i.document().getString("month").orElseThrow()).toList();
+    }
+
+    // --- the asynchronous view -------------------------------------------------------------------
+    // Non-blocking where the driver has a path for it (DynamoDB), the blocking call on a virtual thread elsewhere:
+    // either way, the same results and the same CloudExceptions as the blocking calls.
+
+    private static <T> T await(java.util.concurrent.CompletableFuture<T> future) throws Exception {
+        try {
+            return future.get(60, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (java.util.concurrent.ExecutionException e) {
+            if (e.getCause() instanceof Exception cause) {
+                throw cause;
+            }
+            throw e;
+        }
+    }
+
+    @Test
+    void asyncCrudMatchesTheBlockingCalls() throws Exception {
+        AsyncDocumentStore async = store(false).async();
+        Key key = key("async");
+
+        Item put = await(async.put(key, Document.builder().put("n", 1).build()));
+        assertThat(await(async.get(key))).hasValueSatisfying(item -> {
+            assertThat(item.document().getLong("n")).hasValue(1L);
+            assertThat(item.version()).isEqualTo(put.version());
+        });
+        assertThat(store(false).get(key)).isPresent();
+
+        Item updated = await(async.update(key, DocumentUpdate.builder().increment("n", 2).set("s", "x").build()));
+        assertThat(updated.document().getLong("n")).hasValue(3L);
+        assertThat(updated.version()).isNotEqualTo(put.version());
+
+        assertThatThrownBy(() -> await(async.put(key, Document.empty(), WriteOptions.ifVersion(put.version()))))
+                .isInstanceOf(PreconditionFailedException.class);
+        assertThatThrownBy(() -> await(async.put(key, Document.empty(), WriteOptions.ifNotExists())))
+                .isInstanceOf(PreconditionFailedException.class);
+        assertThatThrownBy(() -> await(async.delete(key, put.version()))).isInstanceOf(PreconditionFailedException.class);
+
+        assertThat(await(async.delete(key, updated.version()))).isTrue();
+        assertThat(await(async.get(key))).isEmpty();
+        assertThat(await(async.delete(key))).isFalse();
+    }
+
+    @Test
+    void asyncUpdateOfAMissingItemFailsWithNotFound() {
+        assertThatThrownBy(() -> await(store(false).async().update(key("async-missing"),
+                DocumentUpdate.builder().set("a", 1).build()))).isInstanceOf(NotFoundException.class);
+    }
+
+    @Test
+    void asyncQueriesMatchTheBlockingOnes() throws Exception {
+        DocumentStore store = store(true);
+        String p = partition("async-orders");
+        String status = prefix + "ASYNC";
+        Map<Key, Document> items = new LinkedHashMap<>();
+        for (String month : List.of("2026-01", "2026-02", "2026-03")) {
+            items.put(Key.of(p, month), order(status, month + "-01"));
+        }
+        store.putAll(items);
+
+        QueryPage page = await(store.async().query(Query.builder(p).limit(2).build()));
+        assertThat(page.items()).extracting(item -> item.key().sort().orElseThrow()).containsExactly("2026-01", "2026-02");
+        assertThat(page.nextPageToken()).isPresent();
+        assertThat(await(store.async().query(Query.builder(p).limit(2).pageToken(page.nextPageToken().get()).build()))
+                .items()).extracting(item -> item.key().sort().orElseThrow()).containsExactly("2026-03");
+
+        List<String> placed = eventually(() -> {
+            try {
+                return await(store.async().queryIndex(IndexQuery.builder(BY_STATUS).equalTo(status).build())).items()
+                        .stream().map(i -> i.document().getString("placedAt").orElseThrow()).toList();
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        }, 3);
+        assertThat(placed).containsExactly("2026-01-01", "2026-02-01", "2026-03-01");
     }
 }

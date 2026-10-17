@@ -15,6 +15,7 @@
  */
 package dev.halyx.reactor;
 
+import dev.halyx.nosql.AsyncDocumentStore;
 import dev.halyx.nosql.Document;
 import dev.halyx.nosql.DocumentStore;
 import dev.halyx.nosql.DocumentUpdate;
@@ -37,11 +38,14 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.Executor;
 
 /**
  * A {@link DocumentStore} as {@code Mono} and {@code Flux}: each call runs when subscribed, once per
- * subscription, on the scheduler of the {@link ReactiveHalyx} that made it. A missing item is an empty
- * {@code Mono}.
+ * subscription. {@code get}, {@code put}, {@code update}, {@code delete} and the queries use the store's
+ * {@link DocumentStore#async() asynchronous view}, non-blocking where the provider allows it (DynamoDB) and on the
+ * scheduler where it doesn't; the other calls run on the scheduler of the {@link ReactiveHalyx} that made it. A
+ * missing item is an empty {@code Mono}.
  */
 public final class ReactiveDocumentStore {
 
@@ -66,35 +70,44 @@ public final class ReactiveDocumentStore {
         return store;
     }
 
+    /**
+     * The store's asynchronous view for one call, whose blocking work (where the driver has no non-blocking path) runs
+     * on {@code blocking}: the scheduler, with the subscriber's context restored.
+     */
+    private AsyncDocumentStore async(Executor blocking) {
+        AsyncDocumentStore view = store.async(blocking);
+        return view != null ? view : AsyncDocumentStore.onExecutor(store, blocking); // a mock or proxy without one
+    }
+
     /** The item, or empty if there is none. */
     public Mono<Item> get(Key key) {
-        return calls.optional(() -> store.get(key));
+        return calls.future(blocking -> async(blocking).get(key)).flatMap(Mono::justOrEmpty);
     }
 
     public Mono<Item> put(Key key, Document document) {
-        return calls.mono(() -> store.put(key, document));
+        return put(key, document, WriteOptions.defaults());
     }
 
     public Mono<Item> put(Key key, Document document, WriteOptions options) {
-        return calls.mono(() -> store.put(key, document, options));
+        return calls.future(blocking -> async(blocking).put(key, document, options));
     }
 
     public Mono<Item> update(Key key, DocumentUpdate update) {
-        return calls.mono(() -> store.update(key, update));
+        return update(key, update, WriteOptions.defaults());
     }
 
     public Mono<Item> update(Key key, DocumentUpdate update, WriteOptions options) {
-        return calls.mono(() -> store.update(key, update, options));
+        return calls.future(blocking -> async(blocking).update(key, update, options));
     }
 
     /** True if there was an item to delete. */
     public Mono<Boolean> delete(Key key) {
-        return calls.mono(() -> store.delete(key));
+        return delete(key, null);
     }
 
     /** Deletes only if the stored item still has {@code ifVersion}; see {@link DocumentStore#delete(Key, Version)}. */
     public Mono<Boolean> delete(Key key, Version ifVersion) {
-        return calls.mono(() -> store.delete(key, ifVersion));
+        return calls.future(blocking -> async(blocking).delete(key, ifVersion));
     }
 
     public Mono<Map<Key, Item>> getAll(Collection<Key> keys) {
@@ -126,7 +139,7 @@ public final class ReactiveDocumentStore {
 
     /** One page of results. */
     public Mono<QueryPage> query(Query query) {
-        return calls.mono(() -> store.query(query));
+        return calls.future(blocking -> async(blocking).query(query));
     }
 
     /** Every result, page by page as the subscriber asks: at most one page ahead of its demand, none after cancel. */
@@ -137,7 +150,7 @@ public final class ReactiveDocumentStore {
     }
 
     public Mono<QueryPage> queryIndex(IndexQuery query) {
-        return calls.mono(() -> store.queryIndex(query));
+        return calls.future(blocking -> async(blocking).queryIndex(query));
     }
 
     /** Every index result, page by page, as {@link #queryAll} reads them. */

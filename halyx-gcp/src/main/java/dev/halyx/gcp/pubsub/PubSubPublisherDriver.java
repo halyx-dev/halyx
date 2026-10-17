@@ -17,10 +17,12 @@ package dev.halyx.gcp.pubsub;
 
 import com.google.cloud.pubsub.v1.TopicAdminClient;
 import com.google.protobuf.ByteString;
+import com.google.pubsub.v1.PublishRequest;
 import com.google.pubsub.v1.PubsubMessage;
 import dev.halyx.capability.Capabilities;
 import dev.halyx.error.CloudException;
 import dev.halyx.gcp.GcpErrors;
+import dev.halyx.gcp.GcpFutures;
 import dev.halyx.gcp.GcpProvider;
 import dev.halyx.messaging.MessagingCapability;
 import dev.halyx.messaging.OutgoingMessage;
@@ -31,6 +33,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 /**
  * Publishes to a Pub/Sub topic with synchronous batch requests, so messages sharing an ordering key keep
@@ -65,11 +69,33 @@ public final class PubSubPublisherDriver extends AbstractPublisherDriver {
      */
     @Override
     public List<String> publish(List<OutgoingMessage> messages) {
+        String[] ids = new String[messages.size()];
+        for (var batch : batches(messages)) {
+            record(ids, batch.getKey(), client.publish(topic, batch.getValue()).getMessageIdsList());
+        }
+        return List.of(ids);
+    }
+
+    /** One request per ordering key, each after the one before, as the blocking publish sends them. */
+    @Override
+    public CompletableFuture<List<String>> publishAsync(List<OutgoingMessage> messages, Executor blocking) {
+        String[] ids = new String[messages.size()];
+        CompletableFuture<Void> chain = CompletableFuture.completedFuture(null);
+        for (var batch : batches(messages)) {
+            PublishRequest request = PublishRequest.newBuilder().setTopic(topic).addAllMessages(batch.getValue()).build();
+            chain = chain.thenCompose(done -> GcpFutures.of(client.publishCallable().futureCall(request))
+                    .thenAccept(response -> record(ids, batch.getKey(), response.getMessageIdsList())));
+        }
+        return chain.thenApply(done -> List.of(ids));
+    }
+
+    /** The messages grouped by ordering key, each with its positions in {@code messages}. */
+    private static List<Map.Entry<List<Integer>, List<PubsubMessage>>> batches(List<OutgoingMessage> messages) {
         Map<String, List<Integer>> byKey = new LinkedHashMap<>();
         for (int i = 0; i < messages.size(); i++) {
             byKey.computeIfAbsent(messages.get(i).orderingKey().orElse(""), k -> new ArrayList<>()).add(i);
         }
-        String[] ids = new String[messages.size()];
+        List<Map.Entry<List<Integer>, List<PubsubMessage>>> batches = new ArrayList<>();
         for (List<Integer> positions : byKey.values()) {
             List<PubsubMessage> batch = new ArrayList<>(positions.size());
             for (int i : positions) {
@@ -80,12 +106,15 @@ public final class PubSubPublisherDriver extends AbstractPublisherDriver {
                 message.orderingKey().ifPresent(builder::setOrderingKey);
                 batch.add(builder.build());
             }
-            List<String> published = client.publish(topic, batch).getMessageIdsList();
-            for (int j = 0; j < positions.size(); j++) {
-                ids[positions.get(j)] = published.get(j);
-            }
+            batches.add(Map.entry(positions, batch));
         }
-        return List.of(ids);
+        return batches;
+    }
+
+    private static void record(String[] ids, List<Integer> positions, List<String> published) {
+        for (int j = 0; j < positions.size(); j++) {
+            ids[positions.get(j)] = published.get(j);
+        }
     }
 
     @Override

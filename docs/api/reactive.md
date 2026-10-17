@@ -30,9 +30,11 @@ methods that return a `Mono`; see [Spring Boot](../spring-boot.md#reactive-appli
 It needs Reactor 3.7 or later (Spring Boot 3.5 and 4 manage 3.7 and 3.8). Most calls block underneath, on the
 scheduler's threads: virtual threads make that cheap, but it isn't non-blocking I/O. Where a driver has a
 non-blocking path, the reactive view uses it through the service's asynchronous view, and no thread waits: today
-that is Amazon S3's `put` of content in memory, `getBytes`, `head`, `exists`, `delete` and `list` (see
-[asynchronous calls](storage.md#asynchronous-calls)). On other providers those calls take the blocking path as
-before, with the same results.
+blob `put` of content in memory, `getBytes`, `head`, `exists`, `delete` and `list` on S3 and Azure Blob Storage
+([asynchronous calls](storage.md#asynchronous-calls)); document `get`, `put`, `delete` and queries on DynamoDB,
+Cosmos DB and Firestore ([asynchronous calls](nosql.md#asynchronous-calls)); message publishes on SNS, SQS,
+Service Bus and Pub/Sub; and event publishes on EventBridge, Event Grid and Eventarc. Other calls, and Cloud
+Storage, whose library has no asynchronous API, take the blocking path on the scheduler, with the same results.
 
 ## Getting the reactive services
 

@@ -28,6 +28,7 @@ import dev.halyx.messaging.ReceivedMessage;
 import dev.halyx.messaging.SubscriptionConfig;
 import dev.halyx.messaging.TopicConfig;
 import dev.halyx.storage.BlobStore;
+import dev.halyx.tck.CompletingThreads;
 import dev.halyx.tck.MessagingConformanceTest;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
@@ -47,6 +48,7 @@ import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -182,6 +184,25 @@ class AwsMessagingConformanceIT {
         protected BlobStore claimCheckStore() {
             return claims();
         }
+    }
+
+    @Test
+    void asyncPublishesCompleteOnTheSdksNonBlockingClients() throws Exception {
+        String[] topic = createTopicWithQueue("async-threads", false, true);
+        String queue = createQueue("async-threads-direct", false);
+        CompletingThreads threads = new CompletingThreads();
+        URI endpoint = URI.create("http://" + FLOCI.getHost() + ":" + FLOCI.getMappedPort(4566));
+        try (Halyx observed = Halyx.builder().interceptor(threads)
+                .register("aws", ProviderConfig.of("aws").region("us-east-1").endpoint(endpoint)
+                        .credentials(Credentials.of("test", "test")))
+                .build()) {
+            var aws = observed.provider("aws");
+            aws.publisher(topic[0]).async().publish("via sns").get(30, TimeUnit.SECONDS);
+            aws.publisher(TopicConfig.builder(queue).property(AwsProperties.MESSAGING_TARGET, "sqs").build()).async()
+                    .publish("via sqs").get(30, TimeUnit.SECONDS);
+        }
+
+        threads.assertNonBlocking(2, Thread.currentThread());
     }
 
     @Test

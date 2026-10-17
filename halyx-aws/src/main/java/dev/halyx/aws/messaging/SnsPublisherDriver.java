@@ -23,15 +23,21 @@ import dev.halyx.error.NotFoundException;
 import dev.halyx.messaging.MessagingCapability;
 import dev.halyx.messaging.OutgoingMessage;
 import dev.halyx.messaging.spi.AbstractPublisherDriver;
+import software.amazon.awssdk.services.sns.SnsAsyncClient;
 import software.amazon.awssdk.services.sns.SnsClient;
 import software.amazon.awssdk.services.sns.model.MessageAttributeValue;
+import software.amazon.awssdk.services.sns.model.PublishBatchRequest;
 import software.amazon.awssdk.services.sns.model.PublishBatchRequestEntry;
+import software.amazon.awssdk.services.sns.model.PublishBatchResponse;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.function.Supplier;
 
 /**
  * Publishes to an SNS topic, which fans out to its subscribed SQS queues. FIFO topics ({@code .fifo})
@@ -41,12 +47,15 @@ import java.util.Optional;
 public final class SnsPublisherDriver extends AbstractPublisherDriver {
 
     private final SnsClient sns;
+    private final Supplier<SnsAsyncClient> snsAsync;
     private final String topicArn;
     private final boolean fifo;
 
-    public SnsPublisherDriver(SnsClient sns, String topic) {
+    /** @param snsAsync the non-blocking client for asynchronous publishes, made when first asked for */
+    public SnsPublisherDriver(SnsClient sns, String topic, Supplier<SnsAsyncClient> snsAsync) {
         super(AwsProvider.ID);
         this.sns = sns;
+        this.snsAsync = snsAsync;
         this.topicArn = topic.startsWith("arn:") ? topic : resolve(sns, topic);
         this.fifo = topicArn.endsWith(".fifo");
     }
@@ -79,6 +88,15 @@ public final class SnsPublisherDriver extends AbstractPublisherDriver {
 
     @Override
     public List<String> publish(List<OutgoingMessage> messages) {
+        return ids(messages, sns.publishBatch(request(messages)));
+    }
+
+    @Override
+    public CompletableFuture<List<String>> publishAsync(List<OutgoingMessage> messages, Executor blocking) {
+        return snsAsync.get().publishBatch(request(messages)).thenApply(response -> ids(messages, response));
+    }
+
+    private PublishBatchRequest request(List<OutgoingMessage> messages) {
         List<PublishBatchRequestEntry> entries = new ArrayList<>(messages.size());
         for (int i = 0; i < messages.size(); i++) {
             OutgoingMessage message = messages.get(i);
@@ -89,7 +107,10 @@ public final class SnsPublisherDriver extends AbstractPublisherDriver {
             message.deduplicationId().ifPresent(entry::messageDeduplicationId);
             entries.add(entry.build());
         }
-        var response = sns.publishBatch(b -> b.topicArn(topicArn).publishBatchRequestEntries(entries));
+        return PublishBatchRequest.builder().topicArn(topicArn).publishBatchRequestEntries(entries).build();
+    }
+
+    private List<String> ids(List<OutgoingMessage> messages, PublishBatchResponse response) {
         if (!response.failed().isEmpty()) {
             var failure = response.failed().getFirst();
             throw AwsErrors.fromCode(failure.code(), "SNS publish to " + topicArn + " failed for "

@@ -18,6 +18,7 @@ package dev.halyx.azure.servicebus;
 import com.azure.core.util.BinaryData;
 import com.azure.messaging.servicebus.ServiceBusMessage;
 import com.azure.messaging.servicebus.ServiceBusMessageBatch;
+import com.azure.messaging.servicebus.ServiceBusSenderAsyncClient;
 import com.azure.messaging.servicebus.ServiceBusSenderClient;
 import dev.halyx.azure.AzureProvider;
 import dev.halyx.capability.Capabilities;
@@ -32,6 +33,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.function.Supplier;
 
 /**
  * Sends to a Service Bus queue or topic. The message id is the deduplication id when given (Service Bus
@@ -42,13 +46,18 @@ import java.util.UUID;
 public final class ServiceBusPublisherDriver extends AbstractPublisherDriver {
 
     private final ServiceBusSenderClient sender;
+    private final Supplier<ServiceBusSenderAsyncClient> asyncSenders;
+    private ServiceBusSenderAsyncClient asyncSender;
     private final String entity;
     private final long maxMessageBytes;
     private final boolean sessions;
 
-    public ServiceBusPublisherDriver(ServiceBusSenderClient sender, String entity, long maxMessageBytes, boolean sessions) {
+    /** @param asyncSenders makes the non-blocking sender, on the first asynchronous publish */
+    public ServiceBusPublisherDriver(ServiceBusSenderClient sender, Supplier<ServiceBusSenderAsyncClient> asyncSenders,
+                                     String entity, long maxMessageBytes, boolean sessions) {
         super(AzureProvider.ID);
         this.sender = sender;
+        this.asyncSenders = asyncSenders;
         this.entity = entity;
         this.maxMessageBytes = maxMessageBytes;
         this.sessions = sessions;
@@ -70,7 +79,57 @@ public final class ServiceBusPublisherDriver extends AbstractPublisherDriver {
     public List<String> publish(List<OutgoingMessage> messages) {
         List<String> ids = new ArrayList<>(messages.size());
         List<ServiceBusMessage> scheduled = new ArrayList<>();
+        List<ServiceBusMessage> immediate = toNative(messages, ids, scheduled);
         ServiceBusMessageBatch batch = sender.createMessageBatch();
+        for (ServiceBusMessage message : immediate) {
+            if (!batch.tryAddMessage(message)) {
+                send(batch);
+                batch = sender.createMessageBatch();
+                if (!batch.tryAddMessage(message)) {
+                    throw tooLarge(message);
+                }
+            }
+        }
+        send(batch);
+        if (!scheduled.isEmpty()) {
+            sender.sendMessages(scheduled);
+        }
+        return ids;
+    }
+
+    /** The same batches without blocking, each sent before the next is filled, then the scheduled messages. */
+    @Override
+    public CompletableFuture<List<String>> publishAsync(List<OutgoingMessage> messages, Executor blocking) {
+        List<String> ids = new ArrayList<>(messages.size());
+        List<ServiceBusMessage> scheduled = new ArrayList<>();
+        List<ServiceBusMessage> immediate = toNative(messages, ids, scheduled);
+        ServiceBusSenderAsyncClient async = asyncSender();
+        return sendFrom(async, immediate, 0)
+                .thenCompose(done -> scheduled.isEmpty() ? CompletableFuture.completedFuture(null)
+                        : async.sendMessages(scheduled).toFuture())
+                .thenApply(done -> ids);
+    }
+
+    private CompletableFuture<Void> sendFrom(ServiceBusSenderAsyncClient async, List<ServiceBusMessage> messages, int from) {
+        if (from >= messages.size()) {
+            return CompletableFuture.completedFuture(null);
+        }
+        return async.createMessageBatch().toFuture().thenCompose(batch -> {
+            int next = from;
+            while (next < messages.size() && batch.tryAddMessage(messages.get(next))) {
+                next++;
+            }
+            if (next == from) {
+                return CompletableFuture.failedFuture(tooLarge(messages.get(from)));
+            }
+            int sent = next;
+            return async.sendMessages(batch).toFuture().thenCompose(done -> sendFrom(async, messages, sent));
+        });
+    }
+
+    /** The messages to send now, in order; delayed ones go to {@code scheduled}, and every id to {@code ids}. */
+    private List<ServiceBusMessage> toNative(List<OutgoingMessage> messages, List<String> ids, List<ServiceBusMessage> scheduled) {
+        List<ServiceBusMessage> immediate = new ArrayList<>(messages.size());
         for (OutgoingMessage message : messages) {
             String id = message.deduplicationId().orElseGet(() -> UUID.randomUUID().toString());
             ids.add(id);
@@ -82,22 +141,23 @@ public final class ServiceBusPublisherDriver extends AbstractPublisherDriver {
             if (message.delay().isPresent()) {
                 native_.setScheduledEnqueueTime(OffsetDateTime.now().plus(message.delay().get()));
                 scheduled.add(native_);
-                continue;
-            }
-            if (!batch.tryAddMessage(native_)) {
-                send(batch);
-                batch = sender.createMessageBatch();
-                if (!batch.tryAddMessage(native_)) {
-                    throw new InvalidArgumentException("Message of " + message.size() + " bytes does not fit in a "
-                            + "Service Bus message", null, AzureProvider.ID, null);
-                }
+            } else {
+                immediate.add(native_);
             }
         }
-        send(batch);
-        if (!scheduled.isEmpty()) {
-            sender.sendMessages(scheduled);
+        return immediate;
+    }
+
+    private static InvalidArgumentException tooLarge(ServiceBusMessage message) {
+        return new InvalidArgumentException("Message of " + message.getBody().toBytes().length + " bytes does not fit in a "
+                + "Service Bus message", null, AzureProvider.ID, null);
+    }
+
+    private synchronized ServiceBusSenderAsyncClient asyncSender() {
+        if (asyncSender == null) {
+            asyncSender = asyncSenders.get();
         }
-        return ids;
+        return asyncSender;
     }
 
     private void send(ServiceBusMessageBatch batch) {
@@ -129,5 +189,11 @@ public final class ServiceBusPublisherDriver extends AbstractPublisherDriver {
     @Override
     public void close() {
         sender.close();
+        synchronized (this) {
+            if (asyncSender != null) {
+                asyncSender.close();
+                asyncSender = null;
+            }
+        }
     }
 }

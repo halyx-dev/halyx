@@ -15,6 +15,7 @@
  */
 package dev.halyx.azure.eventgrid;
 
+import com.azure.messaging.eventgrid.namespaces.EventGridSenderAsyncClient;
 import com.azure.messaging.eventgrid.namespaces.EventGridSenderClient;
 import dev.halyx.azure.AzureErrors;
 import dev.halyx.azure.AzureProvider;
@@ -27,6 +28,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 /**
  * Publishes to an Event Grid namespace topic, natively in CloudEvents. Its subscriptions deliver the events, by
@@ -39,11 +42,13 @@ public final class EventGridPublisherDriver extends AbstractEventPublisherDriver
     static final long MAX_EVENT_BYTES = MAX_REQUEST_BYTES - 4096;
 
     private final EventGridSenderClient client;
+    private final EventGridSenderAsyncClient asyncClient;
     private final String topic;
 
-    public EventGridPublisherDriver(EventGridSenderClient client, String topic) {
+    public EventGridPublisherDriver(EventGridSenderClient client, EventGridSenderAsyncClient asyncClient, String topic) {
         super(AzureProvider.ID);
         this.client = client;
+        this.asyncClient = asyncClient;
         this.topic = topic;
     }
 
@@ -54,12 +59,30 @@ public final class EventGridPublisherDriver extends AbstractEventPublisherDriver
 
     @Override
     public void publish(List<CloudEvent> events) {
+        for (List<com.azure.core.models.CloudEvent> request : requests(events)) {
+            client.send(request);
+        }
+    }
+
+    /** Each request after the one before, as the blocking publish sends them. */
+    @Override
+    public CompletableFuture<Void> publishAsync(List<CloudEvent> events, Executor blocking) {
+        CompletableFuture<Void> chain = CompletableFuture.completedFuture(null);
+        for (List<com.azure.core.models.CloudEvent> request : requests(events)) {
+            chain = chain.thenCompose(done -> asyncClient.send(request).toFuture());
+        }
+        return chain;
+    }
+
+    /** The events split further when together they exceed the request limit. */
+    private static List<List<com.azure.core.models.CloudEvent>> requests(List<CloudEvent> events) {
+        List<List<com.azure.core.models.CloudEvent>> requests = new ArrayList<>();
         List<com.azure.core.models.CloudEvent> request = new ArrayList<>();
         long size = 0;
         for (CloudEvent event : events) {
             long eventSize = CloudEvents.toJson(event).getBytes(StandardCharsets.UTF_8).length;
             if (!request.isEmpty() && size + eventSize > MAX_REQUEST_BYTES) {
-                client.send(request);
+                requests.add(request);
                 request = new ArrayList<>();
                 size = 0;
             }
@@ -67,8 +90,9 @@ public final class EventGridPublisherDriver extends AbstractEventPublisherDriver
             size += eventSize;
         }
         if (!request.isEmpty()) {
-            client.send(request);
+            requests.add(request);
         }
+        return requests;
     }
 
     @Override

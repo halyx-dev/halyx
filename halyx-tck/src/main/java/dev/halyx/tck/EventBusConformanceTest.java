@@ -166,6 +166,24 @@ public abstract class EventBusConformanceTest {
     }
 
     @Test
+    void asyncPublishesArriveLikeBlockingOnes() throws Exception {
+        List<CloudEvent> events = IntStream.range(0, 12)
+                .mapToObj(i -> event("async").subject("item-" + i).json("{\"i\":" + i + "}").build()).toList();
+
+        publisher().async().publishAll(events).get(60, java.util.concurrent.TimeUnit.SECONDS);
+
+        assertThat(awaitEvents(12).keySet()).containsAll(events.stream().map(CloudEvent::id).toList());
+    }
+
+    @Test
+    void asyncOversizedEventsAreRefusedBeforeSending() {
+        CloudEvent huge = event("huge").data("application/octet-stream", new byte[2 * 1024 * 1024]).build();
+
+        assertThat(publisher().async().publish(huge)).failsWithin(10, java.util.concurrent.TimeUnit.SECONDS)
+                .withThrowableThat().havingCause().isInstanceOf(InvalidArgumentException.class);
+    }
+
+    @Test
     void oversizedEventsAreRefusedBeforeSending() {
         CloudEvent huge = event("huge").data("application/octet-stream", new byte[2 * 1024 * 1024]).build();
 

@@ -16,8 +16,10 @@
 package dev.halyx.messaging;
 
 import dev.halyx.capability.Capabilities;
+import dev.halyx.interceptor.InterceptorChain;
 
 import java.util.List;
+import java.util.concurrent.Executor;
 
 /** Publishes to one topic or queue. Thread-safe; share one per topic. */
 public interface Publisher {
@@ -41,5 +43,18 @@ public interface Publisher {
     List<PublishResult> publishAll(List<OutgoingMessage> messages);
 
     /** The native client, such as {@code SnsClient}. */
+    /**
+     * The asynchronous view of this publisher, whose calls return {@code CompletableFuture}s; non-blocking where the
+     * provider's driver has a non-blocking path. Cheap to call: Halyx' publishers keep one.
+     */
+    default AsyncPublisher async() {
+        return async(InterceptorChain.blocking());
+    }
+
+    /** The asynchronous view, running any blocking work on {@code blocking}, such as an application's scheduler. */
+    default AsyncPublisher async(Executor blocking) {
+        return AsyncPublisher.onExecutor(this, blocking);
+    }
+
     <T> T unwrap(Class<T> nativeType);
 }

@@ -333,7 +333,7 @@ async.put(BlobKey.of("a.pdf"), BlobContent.ofBytes(pdf))
 | | |
 |---|---|
 | Operations | `put` (content in memory is sent without blocking; files and streams are read on a virtual thread), `getBytes`, `head`, `exists`, `delete` and `list`. `blocking()` returns the store for the rest |
-| Non-blocking on | Amazon S3 (`S3AsyncClient` over Netty, created on the first asynchronous call). Elsewhere the blocking call runs on a virtual thread, with the same results |
+| Non-blocking on | Amazon S3 (`S3AsyncClient` over Netty, created on the first asynchronous call) and Azure Blob Storage (the SDK's async client). Elsewhere the blocking call runs on a virtual thread, with the same results |
 | Your own threads | `async(executor)` runs any blocking work (a call without a non-blocking path, a blocking interceptor, reading a file) on your executor instead; the reactive views pass their scheduler, with the subscriber's context restored |
 | Same as blocking | argument and capability checks, interceptors, error translation: a failed future holds the `CloudException` the blocking call would throw |
 | Retries | `RetryInterceptor` waits on a timer, not a thread; cancelling the future stops retrying |

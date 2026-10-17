@@ -18,6 +18,7 @@ package dev.halyx.nosql;
 import dev.halyx.error.InvalidArgumentException;
 import dev.halyx.error.NotFoundException;
 import dev.halyx.error.PreconditionFailedException;
+import dev.halyx.interceptor.AsyncInvocation;
 import dev.halyx.interceptor.InterceptorChain;
 import dev.halyx.interceptor.OperationContext;
 import dev.halyx.nosql.spi.DocumentStoreDriver;
@@ -35,6 +36,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -49,6 +53,8 @@ public final class DefaultDocumentStore implements DocumentStore {
     private final InterceptorChain interceptors;
     private final Clock clock;
     private final Set<String> reserved;
+
+    private final AsyncDocumentStore async = new Async(InterceptorChain.blocking());
 
     public DefaultDocumentStore(DocumentStoreDriver driver, InterceptorChain interceptors) {
         this(driver, interceptors, Clock.systemUTC());
@@ -258,6 +264,190 @@ public final class DefaultDocumentStore implements DocumentStore {
         if (reserved.contains(field)) {
             throw new IllegalArgumentException("Field '" + field + "' is reserved on " + table().name()
                     + " (key attributes and Halyx' own: " + reserved + ")");
+        }
+    }
+
+    @Override
+    public AsyncDocumentStore async() {
+        return async;
+    }
+
+    @Override
+    public AsyncDocumentStore async(Executor blocking) {
+        return blocking == InterceptorChain.blocking() ? async : new Async(Objects.requireNonNull(blocking, "blocking"));
+    }
+
+    /** The asynchronous {@link #execute}: the driver's future through the interceptors, its failure translated first. */
+    private <T> CompletableFuture<T> executeAsync(String operation, Key key, boolean idempotent, Executor blocking,
+                                                  Function<Executor, CompletableFuture<T>> call) {
+        OperationContext context = new OperationContext(SERVICE, operation, provider(), table().name() + "/" + key, idempotent);
+        return interceptors.executeAsync(context, () -> {
+            CompletableFuture<T> future;
+            try {
+                future = call.apply(blocking);
+            } catch (RuntimeException e) {
+                return CompletableFuture.failedFuture(driver.translate(e));
+            }
+            return future.exceptionallyCompose(error -> {
+                Throwable cause = AsyncInvocation.unwrap(error);
+                return CompletableFuture.failedFuture(cause instanceof RuntimeException r ? driver.translate(r) : cause);
+            });
+        }, blocking);
+    }
+
+    /** Runs the argument checks, then the call: a check that fails gives a failed future, as the call would. */
+    private static <T> CompletableFuture<T> checked(Runnable checks, Supplier<CompletableFuture<T>> call) {
+        try {
+            checks.run();
+        } catch (RuntimeException e) {
+            return CompletableFuture.failedFuture(e);
+        }
+        return call.get();
+    }
+
+    /** The live items of a page, as the blocking queries return. */
+    private QueryPage livePage(QueryPage page) {
+        List<Item> live = page.items().stream().filter(this::live).toList();
+        return live.size() == page.items().size() ? page : new QueryPage(live, page.nextPageToken());
+    }
+
+    /**
+     * The asynchronous view: the same checks as the blocking calls, then the driver's non-blocking path where it has
+     * one; blocking work runs on {@link #blocking}.
+     */
+    private final class Async implements AsyncDocumentStore {
+
+        private final Executor blocking;
+
+        Async(Executor blocking) {
+            this.blocking = blocking;
+        }
+
+        @Override
+        public String provider() {
+            return DefaultDocumentStore.this.provider();
+        }
+
+        @Override
+        public TableConfig table() {
+            return DefaultDocumentStore.this.table();
+        }
+
+        @Override
+        public CompletableFuture<Optional<Item>> get(Key key) {
+            return checked(() -> checkKey(key), () -> executeAsync("get", key, true, blocking,
+                    executor -> driver.getAsync(key, executor)).thenApply(item -> item.filter(DefaultDocumentStore.this::live)));
+        }
+
+        @Override
+        public CompletableFuture<Item> put(Key key, Document document, WriteOptions options) {
+            return checked(() -> {
+                checkKey(key);
+                checkDocument(document);
+                Objects.requireNonNull(options, "options");
+            }, () -> {
+                Instant expiresAt = options.expiresAt(clock.instant());
+                WriteCondition condition = options.notExists() ? new WriteCondition.NotExists()
+                        : options.version().<WriteCondition>map(WriteCondition.IfVersion::new).orElse(WriteCondition.NONE);
+                boolean idempotent = condition instanceof WriteCondition.None;
+                return executeAsync("put", key, idempotent, blocking,
+                        executor -> driver.putAsync(key, document, condition, expiresAt, executor))
+                        .exceptionallyCompose(error -> retryOverExpired(key, document, condition, expiresAt,
+                                AsyncInvocation.unwrap(error)))
+                        .thenApply(version -> new Item(key, document, version, Optional.ofNullable(expiresAt)));
+            });
+        }
+
+        /**
+         * As the blocking put: an expired item the store hasn't removed yet still blocks a create-only write, so it
+         * is removed and the write retried once.
+         */
+        private CompletableFuture<Version> retryOverExpired(Key key, Document document, WriteCondition condition,
+                                                            Instant expiresAt, Throwable failure) {
+            if (!(failure instanceof PreconditionFailedException e) || !(condition instanceof WriteCondition.NotExists)) {
+                return CompletableFuture.failedFuture(failure);
+            }
+            return executeAsync("get", key, true, blocking, executor -> driver.getAsync(key, executor))
+                    .thenCompose(existing -> {
+                        if (existing.isPresent() && live(existing.get())) {
+                            return CompletableFuture.<Version>failedFuture(e);
+                        }
+                        CompletableFuture<Boolean> cleared = existing.isEmpty() ? CompletableFuture.completedFuture(true)
+                                : executeAsync("delete", key, false, blocking, executor -> driver.deleteAsync(key,
+                                        Optional.of(existing.get().version()), executor))
+                                .exceptionallyCompose(error -> CompletableFuture.failedFuture(
+                                        // someone wrote a new item meanwhile
+                                        AsyncInvocation.unwrap(error) instanceof PreconditionFailedException ? e
+                                                : AsyncInvocation.unwrap(error)));
+                        return cleared.thenCompose(done -> executeAsync("put", key, false, blocking,
+                                executor -> driver.putAsync(key, document, condition, expiresAt, executor)));
+                    });
+        }
+
+        @Override
+        public CompletableFuture<Item> update(Key key, DocumentUpdate update, WriteOptions options) {
+            return checked(() -> {
+                checkKey(key);
+                Objects.requireNonNull(update, "update");
+                Objects.requireNonNull(options, "options");
+                if (options.notExists()) {
+                    throw new IllegalArgumentException("update needs an existing item; use put with ifNotExists");
+                }
+                update.fields().forEach(DefaultDocumentStore.this::checkField);
+            }, () -> {
+                Instant expiresAt = options.expiresAt(clock.instant());
+                boolean idempotent = update.increment().isEmpty() && options.version().isEmpty();
+                return executeAsync("update", key, idempotent, blocking,
+                        executor -> driver.updateAsync(key, update, options.version(), expiresAt, executor))
+                        .thenApply(item -> {
+                            if (!live(item)) {
+                                throw new NotFoundException("No item " + key + " (expired)", null, provider(), null);
+                            }
+                            return item;
+                        });
+            });
+        }
+
+        @Override
+        public CompletableFuture<Boolean> delete(Key key, Version ifVersion) {
+            return checked(() -> checkKey(key), () -> executeAsync("delete", key, true, blocking,
+                    executor -> driver.deleteAsync(key, Optional.ofNullable(ifVersion), executor)));
+        }
+
+        @Override
+        public CompletableFuture<QueryPage> query(Query query) {
+            return checked(() -> {
+                Objects.requireNonNull(query, "query");
+                if (!table().hasSortKey()) {
+                    throw new InvalidArgumentException("Queries need a table with a sort key; " + table().name()
+                            + " has none", null, provider(), null);
+                }
+            }, () -> executeAsync("query", Key.of(query.partitionKey()), true, blocking,
+                    executor -> driver.queryAsync(query, executor)).thenApply(DefaultDocumentStore.this::livePage));
+        }
+
+        @Override
+        public CompletableFuture<QueryPage> queryIndex(IndexQuery query) {
+            Index[] index = new Index[1];
+            return checked(() -> {
+                Objects.requireNonNull(query, "query");
+                index[0] = table().index(query.index()).orElseThrow(() -> new IllegalArgumentException(
+                        "Table " + table().name() + " has no index '" + query.index() + "'; declare it with TableConfig.index"));
+                if (query.condition().isPresent() && index[0].sortAttribute().isEmpty()) {
+                    throw new IllegalArgumentException("Index " + index[0].name() + " has no sort attribute to put a condition on");
+                }
+            }, () -> executeAsync("queryIndex", Key.of(index[0].name()), true, blocking,
+                    executor -> driver.queryIndexAsync(index[0], query, executor)).thenApply(DefaultDocumentStore.this::livePage));
+        }
+
+        @Override
+        public DocumentStore blocking() {
+            return DefaultDocumentStore.this;
+        }
+
+        @Override
+        public String toString() {
+            return "Async" + DefaultDocumentStore.this;
         }
     }
 

@@ -15,6 +15,7 @@
  */
 package dev.halyx.reactor;
 
+import dev.halyx.events.AsyncEventPublisher;
 import dev.halyx.events.CloudEvent;
 import dev.halyx.events.EventPublisher;
 import org.reactivestreams.Publisher;
@@ -24,6 +25,7 @@ import reactor.core.publisher.Mono;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.Executor;
 
 /** An {@link EventPublisher} as {@code Mono}s, each publishing once per subscription on the application's scheduler. */
 public final class ReactiveEventPublisher {
@@ -50,13 +52,22 @@ public final class ReactiveEventPublisher {
     }
 
     /** Publishes the event; resubscribing after a failure publishes it again with the same id. */
+    /**
+     * The publisher's asynchronous view for one call, whose blocking work (where the driver has no non-blocking path)
+     * runs on {@code blocking}: the scheduler, with the subscriber's context restored.
+     */
+    private AsyncEventPublisher async(Executor blocking) {
+        AsyncEventPublisher view = publisher.async(blocking);
+        return view != null ? view : AsyncEventPublisher.onExecutor(publisher, blocking); // a mock or proxy without one
+    }
+
     public Mono<Void> publish(CloudEvent event) {
-        return calls.run(() -> publisher.publish(event));
+        return calls.future(blocking -> async(blocking).publish(event)).then();
     }
 
     /** Publishes in as few requests as the router allows; not atomic, see {@link EventPublisher#publishAll}. */
     public Mono<Void> publishAll(List<CloudEvent> events) {
-        return calls.run(() -> publisher.publishAll(events));
+        return calls.future(blocking -> async(blocking).publishAll(events)).then();
     }
 
     /**

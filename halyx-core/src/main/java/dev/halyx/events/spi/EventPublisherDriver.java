@@ -19,6 +19,8 @@ import dev.halyx.error.CloudException;
 import dev.halyx.events.CloudEvent;
 
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 /** A provider's event publisher. */
 public interface EventPublisherDriver extends AutoCloseable {
@@ -35,6 +37,14 @@ public interface EventPublisherDriver extends AutoCloseable {
 
     /** Largest event the router accepts, in its CloudEvents JSON form. */
     long maxEventBytes();
+
+    /**
+     * {@link #publish} without blocking, where the SDK allows it; by default the blocking call on the blocking
+     * executor. Failures may be returned or thrown; the API layer translates both.
+     */
+    default CompletableFuture<Void> publishAsync(List<CloudEvent> events, Executor blocking) {
+        return CompletableFuture.runAsync(() -> publish(events), blocking);
+    }
 
     CloudException translate(Throwable error);
 

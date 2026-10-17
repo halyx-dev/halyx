@@ -181,6 +181,23 @@ Map<Key, Version> versions = orders.transact(Transaction.builder()
 If any condition fails, nothing is applied, and the call throws `PreconditionFailedException`. It
 returns the new versions of the written items.
 
+## Asynchronous calls
+
+`async()` gives the store's asynchronous view: `get`, `put`, `update`, `delete`, `query` and `queryIndex` as
+`CompletableFuture`s, with the same checks, conditions, expiry handling and errors as the blocking calls.
+
+```java
+orders.async().put(key, document, WriteOptions.ifNotExists())
+        .thenCompose(item -> orders.async().query(Query.partition(customer)))
+        .thenAccept(page -> log.info("{} orders", page.items().size()));
+```
+
+They're non-blocking on DynamoDB (`DynamoDbAsyncClient` over Netty, created on the first asynchronous call), Cosmos
+DB (the SDK's async client) and Firestore (its own futures), except where a call needs a read-then-write: `update`
+on Cosmos DB and Firestore, and a versioned `put` on Firestore, which runs in a transaction. Those, and every call on
+the memory provider, run the blocking call on a virtual thread, or on the executor given to `async(executor)`.
+Batches and transactions are on `blocking()`. The reactive views use it.
+
 ## Provider details
 
 | | DynamoDB | Cosmos DB (NoSQL API) | Firestore (native mode) |

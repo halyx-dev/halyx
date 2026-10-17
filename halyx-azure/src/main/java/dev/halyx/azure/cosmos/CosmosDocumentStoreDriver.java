@@ -15,6 +15,7 @@
  */
 package dev.halyx.azure.cosmos;
 
+import com.azure.cosmos.CosmosAsyncContainer;
 import com.azure.cosmos.CosmosContainer;
 import com.azure.cosmos.CosmosException;
 import com.azure.cosmos.models.CosmosBatch;
@@ -25,6 +26,7 @@ import com.azure.cosmos.models.CosmosItemRequestOptions;
 import com.azure.cosmos.models.CosmosPatchItemRequestOptions;
 import com.azure.cosmos.models.CosmosPatchOperations;
 import com.azure.cosmos.models.CosmosQueryRequestOptions;
+import com.azure.cosmos.models.FeedResponse;
 import com.azure.cosmos.models.PartitionKey;
 import com.azure.cosmos.models.SqlParameter;
 import com.azure.cosmos.models.SqlQuerySpec;
@@ -40,6 +42,7 @@ import dev.halyx.error.PreconditionFailedException;
 import dev.halyx.error.ThrottledException;
 import dev.halyx.error.UnavailableException;
 import dev.halyx.error.UnknownCloudException;
+import dev.halyx.interceptor.AsyncInvocation;
 import dev.halyx.nosql.Document;
 import dev.halyx.nosql.DocumentUpdate;
 import dev.halyx.nosql.Index;
@@ -64,9 +67,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.function.Supplier;
+import reactor.core.publisher.Flux;
 
 /**
  * A Cosmos DB (NoSQL API) container partitioned on {@code /<partitionKey>}. Each item's id is its sort key
@@ -82,11 +89,14 @@ public final class CosmosDocumentStoreDriver extends AbstractDocumentStoreDriver
     private static final Set<String> SYSTEM = Set.of("id", "ttl", "_rid", "_self", "_etag", "_attachments", "_ts", "_lsn");
 
     private final CosmosContainer container;
+    private final Supplier<CosmosAsyncContainer> asyncContainer;
     private final TableConfig table;
 
-    public CosmosDocumentStoreDriver(CosmosContainer container, TableConfig table) {
+    /** @param asyncContainer the non-blocking container for asynchronous calls, made when first asked for */
+    public CosmosDocumentStoreDriver(CosmosContainer container, TableConfig table, Supplier<CosmosAsyncContainer> asyncContainer) {
         super(AzureProvider.ID);
         this.container = container;
+        this.asyncContainer = asyncContainer;
         this.table = table;
     }
 
@@ -170,6 +180,16 @@ public final class CosmosDocumentStoreDriver extends AbstractDocumentStoreDriver
     }
 
     @Override
+    public CompletableFuture<Optional<Item>> getAsync(Key key, Executor blocking) {
+        return asyncContainer.get().readItem(id(key), new PartitionKey(key.partition()), ObjectNode.class).toFuture()
+                .thenApply(response -> Optional.of(toItem(response.getItem(), response.getETag())))
+                .exceptionallyCompose(error -> AsyncInvocation.unwrap(error) instanceof CosmosException e
+                        && e.getStatusCode() == 404
+                        ? CompletableFuture.completedFuture(Optional.empty())
+                        : CompletableFuture.failedFuture(error));
+    }
+
+    @Override
     public Version put(Key key, Document document, WriteCondition condition, Instant expiresAt) {
         ObjectNode node = toNode(key, document, expiresAt);
         PartitionKey pk = new PartitionKey(key.partition());
@@ -182,12 +202,33 @@ public final class CosmosDocumentStoreDriver extends AbstractDocumentStoreDriver
             };
             return new Version(response.getETag());
         } catch (CosmosException e) {
-            if (e.getStatusCode() == 409 || e.getStatusCode() == 412
-                    || (e.getStatusCode() == 404 && condition instanceof WriteCondition.IfVersion)) {
-                throw new PreconditionFailedException("Condition failed for " + key, e, AzureProvider.ID, String.valueOf(e.getStatusCode()));
-            }
-            throw e;
+            throw putFailure(key, condition, e);
         }
+    }
+
+    @Override
+    public CompletableFuture<Version> putAsync(Key key, Document document, WriteCondition condition, Instant expiresAt,
+                                               Executor blocking) {
+        ObjectNode node = toNode(key, document, expiresAt);
+        PartitionKey pk = new PartitionKey(key.partition());
+        CosmosAsyncContainer async = asyncContainer.get();
+        var response = switch (condition) {
+            case WriteCondition.None ignored -> async.upsertItem(node, pk, new CosmosItemRequestOptions());
+            case WriteCondition.NotExists ignored -> async.createItem(node, pk, new CosmosItemRequestOptions());
+            case WriteCondition.IfVersion v -> async.replaceItem(node, id(key), pk,
+                    new CosmosItemRequestOptions().setIfMatchETag(v.version().value()));
+        };
+        return response.toFuture().thenApply(r -> new Version(r.getETag()))
+                .exceptionallyCompose(error -> CompletableFuture.failedFuture(
+                        AsyncInvocation.unwrap(error) instanceof CosmosException e ? putFailure(key, condition, e) : error));
+    }
+
+    private static RuntimeException putFailure(Key key, WriteCondition condition, CosmosException e) {
+        if (e.getStatusCode() == 409 || e.getStatusCode() == 412
+                || (e.getStatusCode() == 404 && condition instanceof WriteCondition.IfVersion)) {
+            return new PreconditionFailedException("Condition failed for " + key, e, AzureProvider.ID, String.valueOf(e.getStatusCode()));
+        }
+        return e;
     }
 
     @Override
@@ -264,12 +305,31 @@ public final class CosmosDocumentStoreDriver extends AbstractDocumentStoreDriver
             if (e.getStatusCode() == 404 && ifVersion.isEmpty()) {
                 return false;
             }
-            if (e.getStatusCode() == 404 || e.getStatusCode() == 412) {
-                throw new PreconditionFailedException("Item " + key + " is not at version " + ifVersion.orElseThrow(),
-                        e, AzureProvider.ID, String.valueOf(e.getStatusCode()));
-            }
-            throw e;
+            throw deleteFailure(key, ifVersion, e);
         }
+    }
+
+    @Override
+    public CompletableFuture<Boolean> deleteAsync(Key key, Optional<Version> ifVersion, Executor blocking) {
+        var options = new CosmosItemRequestOptions();
+        ifVersion.ifPresent(v -> options.setIfMatchETag(v.value()));
+        return asyncContainer.get().deleteItem(id(key), new PartitionKey(key.partition()), options).toFuture()
+                .thenApply(response -> true)
+                .exceptionallyCompose(error -> {
+                    if (!(AsyncInvocation.unwrap(error) instanceof CosmosException e)) {
+                        return CompletableFuture.failedFuture(error);
+                    }
+                    return e.getStatusCode() == 404 && ifVersion.isEmpty() ? CompletableFuture.completedFuture(false)
+                            : CompletableFuture.failedFuture(deleteFailure(key, ifVersion, e));
+                });
+    }
+
+    private static RuntimeException deleteFailure(Key key, Optional<Version> ifVersion, CosmosException e) {
+        if (e.getStatusCode() == 404 || e.getStatusCode() == 412) {
+            return new PreconditionFailedException("Item " + key + " is not at version " + ifVersion.orElseThrow(),
+                    e, AzureProvider.ID, String.valueOf(e.getStatusCode()));
+        }
+        return e;
     }
 
     @Override
@@ -320,6 +380,21 @@ public final class CosmosDocumentStoreDriver extends AbstractDocumentStoreDriver
 
     @Override
     public QueryPage query(Query query) {
+        var options = new CosmosQueryRequestOptions().setPartitionKey(new PartitionKey(query.partitionKey()));
+        var pages = container.queryItems(querySpec(query), options, ObjectNode.class)
+                .iterableByPage(query.pageToken().orElse(null), query.limit()).iterator();
+        return pages.hasNext() ? toPage(pages.next()) : new QueryPage(List.of(), Optional.empty());
+    }
+
+    @Override
+    public CompletableFuture<QueryPage> queryAsync(Query query, Executor blocking) {
+        var options = new CosmosQueryRequestOptions().setPartitionKey(new PartitionKey(query.partitionKey()));
+        var flux = asyncContainer.get().queryItems(querySpec(query), options, ObjectNode.class);
+        return firstPage(query.pageToken().isEmpty() ? flux.byPage(query.limit())
+                : flux.byPage(query.pageToken().get(), query.limit()));
+    }
+
+    private SqlQuerySpec querySpec(Query query) {
         String sk = "c[\"" + table.sortKey().orElseThrow() + "\"]";
         String pk = "c[\"" + table.partitionKey() + "\"]";
         StringBuilder sql = new StringBuilder("SELECT * FROM c WHERE " + pk + " = @pk");
@@ -347,15 +422,18 @@ public final class CosmosDocumentStoreDriver extends AbstractDocumentStoreDriver
             }
         });
         sql.append(" ORDER BY ").append(sk).append(query.descending() ? " DESC" : " ASC");
-        var options = new CosmosQueryRequestOptions().setPartitionKey(new PartitionKey(query.partitionKey()));
-        var pages = container.queryItems(new SqlQuerySpec(sql.toString(), parameters), options, ObjectNode.class)
-                .iterableByPage(query.pageToken().orElse(null), query.limit()).iterator();
-        if (!pages.hasNext()) {
-            return new QueryPage(List.of(), Optional.empty());
-        }
-        var page = pages.next();
+        return new SqlQuerySpec(sql.toString(), parameters);
+    }
+
+    private QueryPage toPage(FeedResponse<ObjectNode> page) {
         List<Item> items = page.getResults().stream().map(n -> toItem(n, null)).toList();
         return new QueryPage(items, Optional.ofNullable(page.getContinuationToken()));
+    }
+
+    /** The first page the flux gives, or an empty page if it gives none. */
+    private CompletableFuture<QueryPage> firstPage(Flux<FeedResponse<ObjectNode>> pages) {
+        return pages.next().toFuture()
+                .thenApply(page -> page == null ? new QueryPage(List.of(), Optional.empty()) : toPage(page));
     }
 
     /**
@@ -449,6 +527,19 @@ public final class CosmosDocumentStoreDriver extends AbstractDocumentStoreDriver
     /** A cross-partition query on the index's fields; Cosmos' default indexing covers it. */
     @Override
     public QueryPage queryIndex(Index index, IndexQuery query) {
+        var pages = container.queryItems(indexSpec(index, query), new CosmosQueryRequestOptions(), ObjectNode.class)
+                .iterableByPage(query.pageToken().orElse(null), query.limit()).iterator();
+        return pages.hasNext() ? toPage(pages.next()) : new QueryPage(List.of(), Optional.empty());
+    }
+
+    @Override
+    public CompletableFuture<QueryPage> queryIndexAsync(Index index, IndexQuery query, Executor blocking) {
+        var flux = asyncContainer.get().queryItems(indexSpec(index, query), new CosmosQueryRequestOptions(), ObjectNode.class);
+        return firstPage(query.pageToken().isEmpty() ? flux.byPage(query.limit())
+                : flux.byPage(query.pageToken().get(), query.limit()));
+    }
+
+    private SqlQuerySpec indexSpec(Index index, IndexQuery query) {
         String attribute = "c[\"" + index.partitionAttribute() + "\"]";
         StringBuilder sql = new StringBuilder("SELECT * FROM c WHERE " + attribute + " = @v");
         List<SqlParameter> parameters = new ArrayList<>(List.of(new SqlParameter("@v", CosmosValues.toJson(query.value()))));
@@ -458,14 +549,7 @@ public final class CosmosDocumentStoreDriver extends AbstractDocumentStoreDriver
             query.condition().ifPresent(c -> sql.append(sortClause(sort, c, parameters)));
             sql.append(" ORDER BY ").append(sort).append(query.descending() ? " DESC" : " ASC");
         }
-        var pages = container.queryItems(new SqlQuerySpec(sql.toString(), parameters), new CosmosQueryRequestOptions(),
-                ObjectNode.class).iterableByPage(query.pageToken().orElse(null), query.limit()).iterator();
-        if (!pages.hasNext()) {
-            return new QueryPage(List.of(), Optional.empty());
-        }
-        var page = pages.next();
-        return new QueryPage(page.getResults().stream().map(n -> toItem(n, null)).toList(),
-                Optional.ofNullable(page.getContinuationToken()));
+        return new SqlQuerySpec(sql.toString(), parameters);
     }
 
     private static String sortClause(String field, SortCondition condition, List<SqlParameter> parameters) {

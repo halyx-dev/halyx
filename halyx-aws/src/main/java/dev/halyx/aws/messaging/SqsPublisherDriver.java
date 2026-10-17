@@ -23,9 +23,12 @@ import dev.halyx.error.InvalidArgumentException;
 import dev.halyx.messaging.MessagingCapability;
 import dev.halyx.messaging.OutgoingMessage;
 import dev.halyx.messaging.spi.AbstractPublisherDriver;
+import software.amazon.awssdk.services.sqs.SqsAsyncClient;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.MessageAttributeValue;
+import software.amazon.awssdk.services.sqs.model.SendMessageBatchRequest;
 import software.amazon.awssdk.services.sqs.model.SendMessageBatchRequestEntry;
+import software.amazon.awssdk.services.sqs.model.SendMessageBatchResponse;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -33,6 +36,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.function.Supplier;
 
 /**
  * Sends straight to an SQS queue (point to point, no topic). Standard queues support per-message delays up
@@ -43,12 +49,15 @@ public final class SqsPublisherDriver extends AbstractPublisherDriver {
     static final Duration MAX_DELAY = Duration.ofMinutes(15);
 
     private final SqsClient sqs;
+    private final Supplier<SqsAsyncClient> sqsAsync;
     private final String queueUrl;
     private final boolean fifo;
 
-    public SqsPublisherDriver(SqsClient sqs, String queue) {
+    /** @param sqsAsync the non-blocking client for asynchronous sends, made when first asked for */
+    public SqsPublisherDriver(SqsClient sqs, String queue, Supplier<SqsAsyncClient> sqsAsync) {
         super(AwsProvider.ID);
         this.sqs = sqs;
+        this.sqsAsync = sqsAsync;
         this.queueUrl = SqsSubscriptionDriver.resolve(sqs, queue);
         this.fifo = queueUrl.endsWith(".fifo");
     }
@@ -66,6 +75,15 @@ public final class SqsPublisherDriver extends AbstractPublisherDriver {
 
     @Override
     public List<String> publish(List<OutgoingMessage> messages) {
+        return ids(messages, sqs.sendMessageBatch(request(messages)));
+    }
+
+    @Override
+    public CompletableFuture<List<String>> publishAsync(List<OutgoingMessage> messages, Executor blocking) {
+        return sqsAsync.get().sendMessageBatch(request(messages)).thenApply(response -> ids(messages, response));
+    }
+
+    private SendMessageBatchRequest request(List<OutgoingMessage> messages) {
         List<SendMessageBatchRequestEntry> entries = new ArrayList<>(messages.size());
         for (int i = 0; i < messages.size(); i++) {
             OutgoingMessage message = messages.get(i);
@@ -84,7 +102,10 @@ public final class SqsPublisherDriver extends AbstractPublisherDriver {
             }
             entries.add(entry.build());
         }
-        var response = sqs.sendMessageBatch(b -> b.queueUrl(queueUrl).entries(entries));
+        return SendMessageBatchRequest.builder().queueUrl(queueUrl).entries(entries).build();
+    }
+
+    private List<String> ids(List<OutgoingMessage> messages, SendMessageBatchResponse response) {
         if (!response.failed().isEmpty()) {
             var failure = response.failed().getFirst();
             throw AwsErrors.fromCode(failure.code(), "SQS send to " + queueUrl + " failed for "

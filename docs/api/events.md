@@ -82,6 +82,16 @@ EventPublisher grid = azure.eventPublisher(EventBusConfig.builder("orders")
 On EventBridge the event's `source` and `type` become the entry's `Source` and `DetailType`, so rules can match
 them, and the whole CloudEvent travels as `detail`.
 
+### Without blocking
+
+`async()` gives the publisher's asynchronous view: `publish` and `publishAll` as `CompletableFuture`s, with the same
+size checks (every event is checked before any is sent) and errors. They're non-blocking on EventBridge, Event Grid
+and Eventarc; with Micrometer Tracing, the trace is taken from the calling thread.
+
+```java
+orders.async().publish(placed).thenRun(() -> log.info("published {}", placed.id()));
+```
+
 ## Receiving
 
 Receive from the queue the router delivers to, and decode each message:

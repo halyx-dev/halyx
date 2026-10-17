@@ -15,7 +15,10 @@
  */
 package dev.halyx.events;
 
+import dev.halyx.interceptor.InterceptorChain;
+
 import java.util.List;
+import java.util.concurrent.Executor;
 
 /**
  * Publishes CloudEvents to a cloud's event router: Amazon EventBridge, an Azure Event Grid namespace topic, or a
@@ -38,6 +41,19 @@ public interface EventPublisher {
      * earlier requests stay published; retrying the call is safe, as the events keep their ids.
      */
     void publishAll(List<CloudEvent> events);
+
+    /**
+     * The asynchronous view of this publisher, whose calls return {@code CompletableFuture}s; non-blocking where the
+     * provider's driver has a non-blocking path. Cheap to call: Halyx' publishers keep one.
+     */
+    default AsyncEventPublisher async() {
+        return async(InterceptorChain.blocking());
+    }
+
+    /** The asynchronous view, running any blocking work on {@code blocking}, such as an application's scheduler. */
+    default AsyncEventPublisher async(Executor blocking) {
+        return AsyncEventPublisher.onExecutor(this, blocking);
+    }
 
     /** The native client, such as {@code EventBridgeClient}. */
     <T> T unwrap(Class<T> nativeType);

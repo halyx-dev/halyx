@@ -21,10 +21,18 @@ import org.junit.jupiter.api.BeforeAll;
 import dev.halyx.Halyx;
 import dev.halyx.config.Credentials;
 import dev.halyx.config.ProviderConfig;
+import dev.halyx.nosql.AsyncDocumentStore;
+import dev.halyx.nosql.Document;
 import dev.halyx.nosql.DocumentStore;
+import dev.halyx.nosql.DocumentUpdate;
+import dev.halyx.nosql.Item;
+import dev.halyx.nosql.Key;
+import dev.halyx.nosql.Query;
 import dev.halyx.nosql.TableConfig;
 import dev.halyx.reactor.ReactiveHalyx;
+import dev.halyx.tck.CompletingThreads;
 import dev.halyx.tck.DocumentStoreConformanceTest;
+import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.junit.jupiter.Container;
@@ -42,11 +50,15 @@ import software.amazon.awssdk.services.dynamodb.model.ScalarAttributeType;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Nested;
 import dev.halyx.tck.DocumentRepositoryConformanceTest;
 import dev.halyx.tck.ReactiveDocumentRepositoryConformanceTest;
 
 /** The document store TCK on DynamoDB emulated by Floci. */
+import static org.assertj.core.api.Assertions.assertThat;
+
 @Testcontainers(disabledWithoutDocker = true)
 class DynamoDocumentStoreConformanceIT extends DocumentStoreConformanceTest {
 
@@ -141,5 +153,28 @@ class DynamoDocumentStoreConformanceIT extends DocumentStoreConformanceTest {
         protected ReactiveHalyx reactive() {
             return reactive;
         }
+    }
+
+    @Test
+    void asyncCallsCompleteOnTheSdksNonBlockingClient() throws Exception {
+        CompletingThreads threads = new CompletingThreads();
+        try (Halyx observed = Halyx.builder().interceptor(threads)
+                .register("aws", ProviderConfig.of("aws").region("us-east-1")
+                        .endpoint(URI.create("http://" + FLOCI.getHost() + ":" + FLOCI.getMappedPort(4566)))
+                        .credentials(Credentials.of("test", "test")))
+                .build()) {
+            AsyncDocumentStore async = observed.provider("aws").documentStore(TableConfig.builder("items-sorted")
+                    .sortKey("sk").build()).async();
+            Key key = Key.of("async-threads-" + UUID.randomUUID(), "a");
+
+            Item put = async.put(key, Document.builder().put("n", 1).build()).get(30, TimeUnit.SECONDS);
+            async.get(key).get(30, TimeUnit.SECONDS);
+            async.update(key, DocumentUpdate.builder().increment("n", 1).build()).get(30, TimeUnit.SECONDS);
+            async.query(Query.partition(key.partition())).get(30, TimeUnit.SECONDS);
+            async.delete(key).get(30, TimeUnit.SECONDS);
+            assertThat(put.version()).isNotNull();
+        }
+
+        threads.assertNonBlocking(5, Thread.currentThread());
     }
 }

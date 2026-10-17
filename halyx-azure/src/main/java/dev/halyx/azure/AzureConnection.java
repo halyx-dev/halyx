@@ -15,6 +15,7 @@
  */
 package dev.halyx.azure;
 
+import com.azure.cosmos.CosmosAsyncClient;
 import com.azure.cosmos.CosmosClient;
 import com.azure.cosmos.CosmosClientBuilder;
 import com.azure.core.credential.AzureKeyCredential;
@@ -101,6 +102,8 @@ final class AzureConnection implements ProviderConnection {
     private JdbcDatabases databases;
     private ServiceBusClientBuilder serviceBus;
     private CosmosClient cosmos;
+    private CosmosClientBuilder cosmosBuilder;
+    private CosmosAsyncClient cosmosAsync;
     /** Senders and receivers own AMQP links, closed with the connection. */
     private final List<AutoCloseable> serviceBusClients = new ArrayList<>();
     private BlobServiceClient blobService;
@@ -276,6 +279,14 @@ final class AzureConnection implements ProviderConnection {
         });
     }
 
+    /** The non-blocking Cosmos DB client, made with the same settings on the first asynchronous call. */
+    private synchronized CosmosAsyncClient cosmosAsync() {
+        if (cosmosAsync == null) {
+            cosmosAsync = cosmosBuilder.buildAsyncClient();
+        }
+        return cosmosAsync;
+    }
+
     /** A Cosmos DB container in {@code azure.cosmos.database}. */
     @Override
     public synchronized DocumentStoreDriver documentStore(TableConfig table) {
@@ -290,10 +301,12 @@ final class AzureConnection implements ProviderConnection {
                 builder.credential(defaultCredential());
             }
             cosmos = builder.buildClient();
+            cosmosBuilder = builder;
         }
         String database = config.property(AzureProperties.COSMOS_DATABASE)
                 .orElseThrow(() -> new IllegalArgumentException("Cosmos DB needs '" + AzureProperties.COSMOS_DATABASE + "'"));
-        return new CosmosDocumentStoreDriver(cosmos.getDatabase(database).getContainer(table.name()), table);
+        return new CosmosDocumentStoreDriver(cosmos.getDatabase(database).getContainer(table.name()), table,
+                () -> cosmosAsync().getDatabase(database).getContainer(table.name()));
     }
 
     /** An Event Grid namespace topic, at the namespace endpoint {@code azure.eventgrid.endpoint}. */
@@ -304,7 +317,7 @@ final class AzureConnection implements ProviderConnection {
         var sender = new EventGridSenderClientBuilder().endpoint(endpoint).topicName(bus.name());
         bus.property(AzureProperties.EVENT_GRID_ACCESS_KEY).ifPresentOrElse(
                 key -> sender.credential(new AzureKeyCredential(key)), () -> sender.credential(tokenCredential(false)));
-        return new EventGridPublisherDriver(sender.buildClient(), bus.name());
+        return new EventGridPublisherDriver(sender.buildClient(), sender.buildAsyncClient(), bus.name());
     }
 
     /** A Service Bus topic, or with {@code azure.servicebus.entity=queue} a queue. */
@@ -319,7 +332,8 @@ final class AzureConnection implements ProviderConnection {
         }
         long maxBytes = config.property(AzureProperties.SERVICE_BUS_MAX_MESSAGE_BYTES).map(Long::parseLong).orElse(256L * 1024);
         boolean sessions = topic.property(AzureProperties.SERVICE_BUS_SESSIONS).map(Boolean::parseBoolean).orElse(false);
-        var driver = new ServiceBusPublisherDriver(sender.buildClient(), topic.name(), maxBytes, sessions);
+        var driver = new ServiceBusPublisherDriver(sender.buildClient(), sender::buildAsyncClient, topic.name(), maxBytes,
+                sessions);
         serviceBusClients.add(driver);
         return driver;
     }
@@ -431,6 +445,11 @@ final class AzureConnection implements ProviderConnection {
             cosmos.close();
             cosmos = null;
         }
+        if (cosmosAsync != null) {
+            cosmosAsync.close();
+            cosmosAsync = null;
+        }
+        cosmosBuilder = null;
         for (AutoCloseable client : serviceBusClients) {
             try {
                 client.close();

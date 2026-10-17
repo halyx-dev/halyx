@@ -24,6 +24,7 @@ import dev.halyx.messaging.ConsumerOptions;
 import dev.halyx.messaging.MessageConsumer;
 import dev.halyx.messaging.MessagingCapability;
 import dev.halyx.messaging.OutgoingMessage;
+import dev.halyx.messaging.PublishResult;
 import dev.halyx.messaging.Publisher;
 import dev.halyx.messaging.ReceivedMessage;
 import dev.halyx.messaging.Subscription;
@@ -385,6 +386,53 @@ public abstract class MessagingConformanceTest {
             }
         }
         throw new AssertionError("No message on " + subscription.name() + " within " + timeout);
+    }
+
+    // --- the asynchronous view -------------------------------------------------------------------
+    // Non-blocking where the driver has a path for it (SNS, SQS), the blocking call on a virtual thread elsewhere.
+
+    @Test
+    void asyncPublishesArriveLikeBlockingOnes() throws Exception {
+        Channel c = channel();
+        List<OutgoingMessage> batch = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            batch.add(OutgoingMessage.builder("async-" + i).attribute("n", String.valueOf(i)).build());
+        }
+
+        List<PublishResult> results = c.publisher().async().publishAll(batch).get(60, TimeUnit.SECONDS);
+        String single = c.publisher().async().publish("async-single").get(60, TimeUnit.SECONDS).messageId();
+
+        assertThat(results).hasSize(3).allSatisfy(result -> assertThat(result.messageId()).isNotBlank());
+        assertThat(single).isNotBlank();
+        assertThat(drain(c.subscription(), 4, Duration.ofSeconds(60)))
+                .containsExactlyInAnyOrder("async-0", "async-1", "async-2", "async-single");
+    }
+
+    @Test
+    void asyncPublishChecksMessagesBeforeSendingAny() {
+        Channel c = channel();
+        var failed = c.publisher().async().publishAll(List.of(OutgoingMessage.of("fine"),
+                OutgoingMessage.builder("bad").attribute("halyx-reserved", "x").build()));
+
+        assertThat(failed).failsWithin(10, TimeUnit.SECONDS).withThrowableThat()
+                .havingCause().isInstanceOf(IllegalArgumentException.class);
+        assertThat(c.subscription().receive(10, Duration.ofSeconds(3))).isEmpty();
+    }
+
+    @Test
+    void asyncPublishSendsLargeBodiesThroughTheClaimCheck() throws Exception {
+        BlobStore store = claimCheckStore();
+        assumeTrue(store != null, "no blob store for claim checks");
+        Channel c = channel(name + "-acc", new ClaimCheck(store, 64 * 1024, "tck-claims/" + name + "/"));
+        byte[] large = new byte[300 * 1024];
+        new Random(11).nextBytes(large);
+
+        c.publisher().async().publish(OutgoingMessage.builder(large).build()).get(60, TimeUnit.SECONDS);
+
+        ReceivedMessage message = receiveOne(c.subscription());
+        assertThat(message.body()).isEqualTo(large);
+        assertThat(message.attributes()).doesNotContainKey(ClaimCheck.ATTRIBUTE);
+        message.ack();
     }
 
     /** Receives and acks until {@code count} distinct bodies arrived. */

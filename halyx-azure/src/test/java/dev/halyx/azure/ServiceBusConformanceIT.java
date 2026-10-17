@@ -25,6 +25,7 @@ import dev.halyx.messaging.OutgoingMessage;
 import dev.halyx.messaging.SubscriptionConfig;
 import dev.halyx.messaging.TopicConfig;
 import dev.halyx.storage.BlobStore;
+import dev.halyx.tck.CompletingThreads;
 import dev.halyx.tck.MessagingConformanceTest;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.Network;
@@ -36,6 +37,8 @@ import org.testcontainers.utility.DockerImageName;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -178,5 +181,17 @@ class ServiceBusConformanceIT extends MessagingConformanceTest {
         assertThat(message.attributes()).containsEntry("via", "queue");
         assertThat(message.deliveryAttempt()).isEqualTo(1);
         message.ack();
+    }
+
+    @Test
+    void asyncPublishesCompleteOnTheSdksNonBlockingClient() throws Exception {
+        CompletingThreads threads = new CompletingThreads();
+        Channel c = channel("tck-threads-" + UUID.randomUUID().toString().substring(0, 8), null);
+
+        threads.track(c.publisher().async().publish("one")).get(30, TimeUnit.SECONDS);
+        threads.track(c.publisher().async().publishAll(List.of(OutgoingMessage.of("two"), OutgoingMessage.of("three"))))
+                .get(30, TimeUnit.SECONDS);
+
+        threads.assertNonBlocking(2, Thread.currentThread());
     }
 }

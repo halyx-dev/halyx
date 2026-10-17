@@ -20,6 +20,7 @@ import com.azure.core.http.rest.PagedResponse;
 import com.azure.core.http.rest.Response;
 import com.azure.core.util.BinaryData;
 import com.azure.core.util.Context;
+import com.azure.storage.blob.BlobAsyncClient;
 import com.azure.storage.blob.BlobClient;
 import com.azure.storage.blob.BlobContainerAsyncClient;
 import com.azure.storage.blob.BlobContainerClient;
@@ -38,6 +39,7 @@ import com.azure.storage.blob.models.BlobProperties;
 import com.azure.storage.blob.models.BlobRange;
 import com.azure.storage.blob.models.BlobRequestConditions;
 import com.azure.storage.blob.models.BlobStorageException;
+import com.azure.storage.blob.models.BlockBlobItem;
 import com.azure.storage.blob.models.DeleteSnapshotsOptionType;
 import com.azure.storage.blob.models.DownloadRetryOptions;
 import com.azure.storage.blob.models.ListBlobsOptions;
@@ -52,6 +54,7 @@ import dev.halyx.capability.Capabilities;
 import dev.halyx.error.CloudException;
 import dev.halyx.error.InvalidArgumentException;
 import dev.halyx.error.PreconditionFailedException;
+import dev.halyx.interceptor.AsyncInvocation;
 import dev.halyx.storage.BatchDeleteResult;
 import dev.halyx.storage.Blob;
 import dev.halyx.storage.BlobContent;
@@ -92,6 +95,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.regex.Pattern;
 
 /** Blob storage on Azure Blob Storage. A Halyx bucket maps to a blob container. */
@@ -130,6 +135,27 @@ public final class AzureBlobStoreDriver extends AbstractBlobStoreDriver {
             case BlobContent.OfFile file -> BinaryData.fromFile(file.path());
             case BlobContent.OfStream stream -> BinaryData.fromStream(stream.stream(), stream.length());
         };
+        try {
+            var item = blob(key).uploadWithResponse(uploadOptions(data, options, expected), null, Context.NONE).getValue();
+            return putResult(key, content.length(), options, item);
+        } catch (BlobStorageException e) {
+            throw putFailure(key, options, e);
+        }
+    }
+
+    /** Non-blocking on the async client, which also sends large content as parallel staged blocks. */
+    @Override
+    public CompletableFuture<PutResult> putAsync(BlobKey key, BlobContent.OfBytes content, PutOptions options,
+                                                 Checksums expected, Executor blocking) {
+        requireValidMetadataNames(options.metadata());
+        return asyncBlob(key).uploadWithResponse(uploadOptions(BinaryData.fromBytes(content.bytes()), options, expected))
+                .toFuture()
+                .thenApply(response -> putResult(key, content.length(), options, response.getValue()))
+                .exceptionallyCompose(error -> CompletableFuture.failedFuture(
+                        AsyncInvocation.unwrap(error) instanceof BlobStorageException e ? putFailure(key, options, e) : error));
+    }
+
+    private static BlobParallelUploadOptions uploadOptions(BinaryData data, PutOptions options, Checksums expected) {
         // The SDK uploads large content as parallel staged blocks of the configured part size.
         var headers = httpHeaders(options.headers());
         // Stored as Content-MD5; on a single-shot upload Azure also rejects content that does not match.
@@ -146,20 +172,23 @@ public final class AzureBlobStoreDriver extends AbstractBlobStoreDriver {
             upload.setMetadata(options.metadata());
         }
         options.tier().ifPresent(tier -> upload.setTier(AzureTiers.toNative(tier)));
-        try {
-            var item = blob(key).uploadWithResponse(upload, null, Context.NONE).getValue();
-            // For a single-shot upload this is the service's MD5 of the stored content.
-            Checksums stored = item.getContentMd5() == null || content.length() > options.partSize()
-                    ? Checksums.none()
-                    : Checksums.of(null, Base64.getEncoder().encodeToString(item.getContentMd5()), null);
-            return new PutResult(key, new ETag(item.getETag()), stored);
-        } catch (BlobStorageException e) {
-            // A create-only write on an existing blob is reported as 409 BlobAlreadyExists, not 412.
-            if (options.ifNotExists() && BlobErrorCode.BLOB_ALREADY_EXISTS.equals(e.getErrorCode())) {
-                throw new PreconditionFailedException("Blob already exists: " + key, e, provider, e.getErrorCode().toString());
-            }
-            throw e;
+        return upload;
+    }
+
+    private static PutResult putResult(BlobKey key, long length, PutOptions options, BlockBlobItem item) {
+        // For a single-shot upload this is the service's MD5 of the stored content.
+        Checksums stored = item.getContentMd5() == null || length > options.partSize()
+                ? Checksums.none()
+                : Checksums.of(null, Base64.getEncoder().encodeToString(item.getContentMd5()), null);
+        return new PutResult(key, new ETag(item.getETag()), stored);
+    }
+
+    /** A create-only write on an existing blob is reported as 409 BlobAlreadyExists, not 412. */
+    private RuntimeException putFailure(BlobKey key, PutOptions options, BlobStorageException e) {
+        if (options.ifNotExists() && BlobErrorCode.BLOB_ALREADY_EXISTS.equals(e.getErrorCode())) {
+            return new PreconditionFailedException("Blob already exists: " + key, e, provider, e.getErrorCode().toString());
         }
+        return e;
     }
 
     /** Azure checks and stores Content-MD5 only. */
@@ -229,6 +258,21 @@ public final class AzureBlobStoreDriver extends AbstractBlobStoreDriver {
     }
 
     @Override
+    public CompletableFuture<Optional<BlobMetadata>> headAsync(BlobKey key, Executor blocking) {
+        return asyncBlob(key).getProperties().toFuture()
+                .thenApply(p -> Optional.of(toMetadata(key, p)))
+                .exceptionallyCompose(error -> AsyncInvocation.unwrap(error) instanceof BlobStorageException e
+                        && e.getStatusCode() == 404
+                        ? CompletableFuture.completedFuture(Optional.empty())
+                        : CompletableFuture.failedFuture(error));
+    }
+
+    @Override
+    public CompletableFuture<byte[]> getBytesAsync(BlobKey key, Executor blocking) {
+        return asyncBlob(key).downloadContent().toFuture().thenApply(BinaryData::toBytes);
+    }
+
+    @Override
     public void delete(BlobKey key, DeleteOptions options) {
         if (options.ifMatchETag().isEmpty()) {
             blob(key).deleteIfExists();
@@ -240,6 +284,18 @@ public final class AzureBlobStoreDriver extends AbstractBlobStoreDriver {
         } catch (BlobStorageException e) {
             throw conditionalNotFound(key, e);
         }
+    }
+
+    @Override
+    public CompletableFuture<Void> deleteAsync(BlobKey key, DeleteOptions options, Executor blocking) {
+        if (options.ifMatchETag().isEmpty()) {
+            return asyncBlob(key).deleteIfExists().toFuture().thenApply(deleted -> null);
+        }
+        var conditions = new BlobRequestConditions().setIfMatch(options.ifMatchETag().get().value());
+        return asyncBlob(key).deleteWithResponse(DeleteSnapshotsOptionType.INCLUDE, conditions).toFuture()
+                .<Void>thenApply(response -> null)
+                .exceptionallyCompose(error -> CompletableFuture.failedFuture(
+                        AsyncInvocation.unwrap(error) instanceof BlobStorageException e ? conditionalNotFound(key, e) : error));
     }
 
     @Override
@@ -311,13 +367,35 @@ public final class AzureBlobStoreDriver extends AbstractBlobStoreDriver {
 
     @Override
     public BlobPage list(ListOptions options) {
-        var query = new ListBlobsOptions().setMaxResultsPerPage(options.pageSize());
-        options.prefix().ifPresent(query::setPrefix);
+        ListBlobsOptions query = listQuery(options);
         String token = options.pageToken().orElse(null);
         var pages = options.delimiter().isPresent()
                 ? container.listBlobsByHierarchy(options.delimiter().get(), query, null).iterableByPage(token)
                 : container.listBlobs(query, token, null).iterableByPage();
-        try (PagedResponse<BlobItem> page = pages.iterator().next()) {
+        return toPage(pages.iterator().next());
+    }
+
+    @Override
+    public CompletableFuture<BlobPage> listAsync(ListOptions options, Executor blocking) {
+        ListBlobsOptions query = listQuery(options);
+        String token = options.pageToken().orElse(null);
+        var flux = options.delimiter().isPresent()
+                ? asyncContainer.listBlobsByHierarchy(options.delimiter().get(), query)
+                : asyncContainer.listBlobs(query);
+        // byPage(null) means "no more pages" on the async client, not "from the start" as on the blocking one.
+        var pages = token == null ? flux.byPage() : flux.byPage(token);
+        return pages.next().toFuture()
+                .thenApply(page -> page == null ? new BlobPage(List.of(), List.of(), Optional.empty()) : toPage(page));
+    }
+
+    private static ListBlobsOptions listQuery(ListOptions options) {
+        var query = new ListBlobsOptions().setMaxResultsPerPage(options.pageSize());
+        options.prefix().ifPresent(query::setPrefix);
+        return query;
+    }
+
+    private static BlobPage toPage(PagedResponse<BlobItem> response) {
+        try (PagedResponse<BlobItem> page = response) {
             List<BlobSummary> items = new ArrayList<>();
             List<String> prefixes = new ArrayList<>();
             for (BlobItem item : page.getValue()) {
@@ -431,6 +509,10 @@ public final class AzureBlobStoreDriver extends AbstractBlobStoreDriver {
 
     private BlobClient blob(BlobKey key) {
         return container.getBlobClient(key.value());
+    }
+
+    private BlobAsyncClient asyncBlob(BlobKey key) {
+        return asyncContainer.getBlobAsyncClient(key.value());
     }
 
     private static BlobMetadata toMetadata(BlobKey key, BlobProperties p) {

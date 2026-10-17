@@ -15,6 +15,7 @@
  */
 package dev.halyx.micrometer;
 
+import dev.halyx.events.AsyncEventPublisher;
 import dev.halyx.events.CloudEvent;
 import dev.halyx.events.EventPublisher;
 import io.micrometer.tracing.TraceContext;
@@ -25,6 +26,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.regex.Pattern;
 
 /**
@@ -65,6 +68,33 @@ public final class TracingEventPublisher implements EventPublisher {
     @Override
     public void publishAll(List<CloudEvent> events) {
         delegate.publishAll(events.stream().map(this::withTraceContext).toList());
+    }
+
+    /** The delegate's asynchronous view, with the trace context taken on the calling thread, where it is current. */
+    @Override
+    public AsyncEventPublisher async(Executor blocking) {
+        AsyncEventPublisher async = delegate.async(blocking);
+        return new AsyncEventPublisher() {
+            @Override
+            public String provider() {
+                return async.provider();
+            }
+
+            @Override
+            public String bus() {
+                return async.bus();
+            }
+
+            @Override
+            public CompletableFuture<Void> publishAll(List<CloudEvent> events) {
+                return async.publishAll(events.stream().map(TracingEventPublisher.this::withTraceContext).toList());
+            }
+
+            @Override
+            public EventPublisher blocking() {
+                return TracingEventPublisher.this;
+            }
+        };
     }
 
     private CloudEvent withTraceContext(CloudEvent event) {

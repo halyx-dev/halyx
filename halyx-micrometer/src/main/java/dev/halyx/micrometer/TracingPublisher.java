@@ -19,6 +19,7 @@ import io.micrometer.tracing.TraceContext;
 import io.micrometer.tracing.Tracer;
 import io.micrometer.tracing.propagation.Propagator;
 import dev.halyx.capability.Capabilities;
+import dev.halyx.messaging.AsyncPublisher;
 import dev.halyx.messaging.OutgoingMessage;
 import dev.halyx.messaging.PublishResult;
 import dev.halyx.messaging.Publisher;
@@ -26,6 +27,8 @@ import dev.halyx.messaging.Publisher;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 /**
  * Adds the current trace context to every published message as attributes (W3C {@code traceparent} and
@@ -66,6 +69,33 @@ public final class TracingPublisher implements Publisher {
     @Override
     public List<PublishResult> publishAll(List<OutgoingMessage> messages) {
         return delegate.publishAll(messages.stream().map(this::withTraceContext).toList());
+    }
+
+    /** The delegate's asynchronous view, with the trace context taken on the calling thread, where it is current. */
+    @Override
+    public AsyncPublisher async(Executor blocking) {
+        AsyncPublisher async = delegate.async(blocking);
+        return new AsyncPublisher() {
+            @Override
+            public String provider() {
+                return async.provider();
+            }
+
+            @Override
+            public String topic() {
+                return async.topic();
+            }
+
+            @Override
+            public CompletableFuture<List<PublishResult>> publishAll(List<OutgoingMessage> messages) {
+                return async.publishAll(messages.stream().map(TracingPublisher.this::withTraceContext).toList());
+            }
+
+            @Override
+            public Publisher blocking() {
+                return TracingPublisher.this;
+            }
+        };
     }
 
     private OutgoingMessage withTraceContext(OutgoingMessage message) {

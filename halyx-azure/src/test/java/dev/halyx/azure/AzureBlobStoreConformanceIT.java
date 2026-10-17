@@ -23,11 +23,14 @@ import dev.halyx.Halyx;
 import dev.halyx.config.Credentials;
 import dev.halyx.config.ProviderConfig;
 import dev.halyx.error.InvalidArgumentException;
+import dev.halyx.storage.AsyncBlobStore;
 import dev.halyx.storage.BlobContent;
 import dev.halyx.storage.BlobKey;
 import dev.halyx.storage.BlobStore;
+import dev.halyx.storage.ListOptions;
 import dev.halyx.storage.PutOptions;
 import dev.halyx.tck.BlobStoreConformanceTest;
+import dev.halyx.tck.CompletingThreads;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.junit.jupiter.Container;
@@ -36,6 +39,8 @@ import org.testcontainers.utility.DockerImageName;
 
 import java.net.URI;
 import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -106,5 +111,25 @@ class AzureBlobStoreConformanceIT extends BlobStoreConformanceTest {
     @Override
     protected BlobStore blobStore() {
         return halyx.provider("azure").blobStore(CONTAINER);
+    }
+
+    @Test
+    void asyncCallsCompleteOnTheSdksNonBlockingClient() throws Exception {
+        CompletingThreads threads = new CompletingThreads();
+        URI endpoint = URI.create("http://" + FLOCI.getHost() + ":" + FLOCI.getMappedPort(PORT) + "/" + ACCOUNT);
+        try (Halyx observed = Halyx.builder().interceptor(threads)
+                .register("azure", ProviderConfig.of("azure").endpoint(endpoint).credentials(Credentials.of(ACCOUNT, KEY)))
+                .build()) {
+            AsyncBlobStore async = observed.provider("azure").blobStore(CONTAINER).async();
+            BlobKey key = BlobKey.of("async-threads/" + UUID.randomUUID() + ".txt");
+
+            async.put(key, BlobContent.ofString("v")).get(30, TimeUnit.SECONDS);
+            async.getBytes(key).get(30, TimeUnit.SECONDS);
+            async.head(key).get(30, TimeUnit.SECONDS);
+            async.list(ListOptions.prefix(key.value())).get(30, TimeUnit.SECONDS);
+            async.delete(key).get(30, TimeUnit.SECONDS);
+        }
+
+        threads.assertNonBlocking(5, Thread.currentThread());
     }
 }

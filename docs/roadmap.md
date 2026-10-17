@@ -133,11 +133,19 @@ Project Reactor views of every service, on a scheduler the application chooses, 
   provider, whichever path it takes
 - [x] Amazon S3: `put` of content in memory, `getBytes`, `head`, `exists`, `delete` and `list` on
   `S3AsyncClient` (Netty), proven to complete on the SDK's threads on Floci
-- [ ] the next drivers, in order of payoff: Azure (its blocking clients wrap the async ones), DynamoDB, SQS and
-  SNS, then Lettuce caches and Kafka producers (already async inside); GCS streams have no clean async API and
-  keep the fallback
-- [ ] the other services' async views (`DocumentStore.async()`, `Publisher.async()` and so on), each with its
-  kit's async cases, as their drivers gain non-blocking paths
+- [x] Azure Blob Storage on the SDK's async client (its blocking client wraps it); proven on Floci-az
+- [x] `DocumentStore.async()` (get, put with the expired-item retry, update, delete, query, queryIndex), with the
+  document kit's async cases; non-blocking on DynamoDB, proven on Floci
+- [x] `Publisher.async()` (publish, publishAll, claim checks through the blob store's async view, traces taken on
+  the calling thread), with the messaging kit's async cases; non-blocking on SNS and SQS, proven on Floci
+- [x] `EventPublisher.async()`, with the event kit's async cases; non-blocking on EventBridge, Event Grid and
+  Eventarc
+- [x] the other clouds' publishers and documents: Service Bus and Pub/Sub publishes, Cosmos DB and Firestore (but
+  their read-then-write calls), each proven on its emulator to complete on the SDK's threads; Event Grid and
+  Eventarc, which have no emulator, on the real clouds
+- [ ] next: `Subscription.async()` receives (long polls without a waiting thread); Lettuce caches and Kafka
+  producers (already async inside); parameter stores. Cloud Storage has no asynchronous API and keeps the
+  blocking path
 
 ### Portable Spring Boot microservices
 

@@ -27,6 +27,7 @@ import com.google.cloud.firestore.FieldValue;
 import com.google.cloud.firestore.Firestore;
 import com.google.cloud.firestore.FirestoreException;
 import com.google.cloud.firestore.Precondition;
+import com.google.cloud.firestore.QueryDocumentSnapshot;
 import com.google.cloud.firestore.WriteBatch;
 import io.grpc.Status;
 import dev.halyx.error.AccessDeniedException;
@@ -38,7 +39,9 @@ import dev.halyx.error.ThrottledException;
 import dev.halyx.error.UnavailableException;
 import dev.halyx.error.UnknownCloudException;
 import dev.halyx.gcp.GcpErrors;
+import dev.halyx.gcp.GcpFutures;
 import dev.halyx.gcp.GcpProvider;
+import dev.halyx.interceptor.AsyncInvocation;
 import dev.halyx.nosql.Document;
 import dev.halyx.nosql.DocumentUpdate;
 import dev.halyx.nosql.Index;
@@ -64,7 +67,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
 
 /**
  * A Firestore collection. Without a sort key, each item is the document {@code <table>/<partition>}; with
@@ -223,7 +228,15 @@ public final class FirestoreDocumentStoreDriver extends AbstractDocumentStoreDri
 
     @Override
     public Optional<Item> get(Key key) {
-        DocumentSnapshot snapshot = await(ref(key).get());
+        return found(await(ref(key).get()));
+    }
+
+    @Override
+    public CompletableFuture<Optional<Item>> getAsync(Key key, Executor blocking) {
+        return GcpFutures.of(ref(key).get()).thenApply(this::found);
+    }
+
+    private Optional<Item> found(DocumentSnapshot snapshot) {
         return snapshot.exists() ? Optional.of(toItem(snapshot)) : Optional.empty();
     }
 
@@ -305,6 +318,53 @@ public final class FirestoreDocumentStoreDriver extends AbstractDocumentStoreDri
         return e;
     }
 
+    /** Plain and create-only writes without blocking; a versioned write runs its transaction on the blocking executor. */
+    @Override
+    public CompletableFuture<Version> putAsync(Key key, Document document, WriteCondition condition, Instant expiresAt,
+                                               Executor blocking) {
+        DocumentReference ref = ref(key);
+        return switch (condition) {
+            case WriteCondition.None ignored ->
+                    GcpFutures.of(ref.set(data(key, document, expiresAt))).thenApply(result -> version(result.getUpdateTime()));
+            case WriteCondition.NotExists ignored -> GcpFutures.of(ref.create(data(key, document, expiresAt)))
+                    .thenApply(result -> version(result.getUpdateTime()))
+                    .exceptionallyCompose(error -> CompletableFuture.failedFuture(
+                            codeOf(AsyncInvocation.unwrap(error)) == Status.Code.ALREADY_EXISTS
+                                    ? new PreconditionFailedException("Item exists: " + key, AsyncInvocation.unwrap(error),
+                                            GcpProvider.ID, "ALREADY_EXISTS")
+                                    : error));
+            case WriteCondition.IfVersion v -> super.putAsync(key, document, condition, expiresAt, blocking);
+        };
+    }
+
+    @Override
+    public CompletableFuture<Boolean> deleteAsync(Key key, Optional<Version> ifVersion, Executor blocking) {
+        DocumentReference ref = ref(key);
+        if (ifVersion.isPresent()) {
+            return GcpFutures.of(ref.delete(Precondition.updatedAt(timestamp(ifVersion.get())))).thenApply(result -> true)
+                    .exceptionallyCompose(error -> {
+                        Status.Code code = codeOf(AsyncInvocation.unwrap(error));
+                        return CompletableFuture.failedFuture(code == Status.Code.FAILED_PRECONDITION || code == Status.Code.NOT_FOUND
+                                ? new PreconditionFailedException("Item " + key + " is not at version " + ifVersion.get(),
+                                        AsyncInvocation.unwrap(error), GcpProvider.ID, code.name())
+                                : error);
+                    });
+        }
+        // As the blocking delete: read it, then delete that version, or whatever is there if it changed meanwhile.
+        return GcpFutures.of(ref.get()).thenCompose(current -> {
+            if (!current.exists()) {
+                return CompletableFuture.completedFuture(false);
+            }
+            return GcpFutures.of(ref.delete(Precondition.updatedAt(current.getUpdateTime()))).thenApply(result -> true)
+                    .exceptionallyCompose(error -> {
+                        Status.Code code = codeOf(AsyncInvocation.unwrap(error));
+                        return code == Status.Code.FAILED_PRECONDITION || code == Status.Code.NOT_FOUND
+                                ? GcpFutures.of(ref.delete()).thenApply(result -> true)
+                                : CompletableFuture.failedFuture(error);
+                    });
+        });
+    }
+
     @Override
     public boolean delete(Key key, Optional<Version> ifVersion) {
         DocumentReference ref = ref(key);
@@ -369,6 +429,15 @@ public final class FirestoreDocumentStoreDriver extends AbstractDocumentStoreDri
 
     @Override
     public QueryPage query(Query query) {
+        return toPage(query, await(firestoreQuery(query).get()).getDocuments());
+    }
+
+    @Override
+    public CompletableFuture<QueryPage> queryAsync(Query query, Executor blocking) {
+        return GcpFutures.of(firestoreQuery(query).get()).thenApply(result -> toPage(query, result.getDocuments()));
+    }
+
+    private com.google.cloud.firestore.Query firestoreQuery(Query query) {
         var direction = query.descending() ? com.google.cloud.firestore.Query.Direction.DESCENDING
                 : com.google.cloud.firestore.Query.Direction.ASCENDING;
         com.google.cloud.firestore.Query q = partitionItems(query.partitionKey()).orderBy(SORT, direction);
@@ -390,7 +459,10 @@ public final class FirestoreDocumentStoreDriver extends AbstractDocumentStoreDri
                     StandardCharsets.UTF_8));
         }
         // One extra tells whether another page follows.
-        var documents = await(q.limit(query.limit() + 1).get()).getDocuments();
+        return q.limit(query.limit() + 1);
+    }
+
+    private QueryPage toPage(Query query, List<QueryDocumentSnapshot> documents) {
         List<Item> page = new ArrayList<>();
         for (int i = 0; i < Math.min(query.limit(), documents.size()); i++) {
             page.add(toItem(documents.get(i)));
@@ -482,6 +554,16 @@ public final class FirestoreDocumentStoreDriver extends AbstractDocumentStoreDri
     /** A collection-group query on the items' collection id, ordered by the sort attribute, then the id. */
     @Override
     public QueryPage queryIndex(Index index, IndexQuery query) {
+        return toIndexPage(index, query, await(indexQuery(index, query).get()).getDocuments());
+    }
+
+    @Override
+    public CompletableFuture<QueryPage> queryIndexAsync(Index index, IndexQuery query, Executor blocking) {
+        return GcpFutures.of(indexQuery(index, query).get())
+                .thenApply(result -> toIndexPage(index, query, result.getDocuments()));
+    }
+
+    private com.google.cloud.firestore.Query indexQuery(Index index, IndexQuery query) {
         String group = table.hasSortKey() ? items : table.name();
         var direction = query.descending() ? com.google.cloud.firestore.Query.Direction.DESCENDING
                 : com.google.cloud.firestore.Query.Direction.ASCENDING;
@@ -510,7 +592,10 @@ public final class FirestoreDocumentStoreDriver extends AbstractDocumentStoreDri
             DocumentReference last = firestore.document(cursor[cursor.length - 1]);
             q = index.sortAttribute().isPresent() ? q.startAfter(cursor[0], last) : q.startAfter(last);
         }
-        var documents = await(q.limit(query.limit() + 1).get()).getDocuments();
+        return q.limit(query.limit() + 1);
+    }
+
+    private QueryPage toIndexPage(Index index, IndexQuery query, List<QueryDocumentSnapshot> documents) {
         List<Item> page = new ArrayList<>();
         for (int i = 0; i < Math.min(query.limit(), documents.size()); i++) {
             page.add(toItem(documents.get(i)));

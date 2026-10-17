@@ -44,6 +44,20 @@ orders.publishAll(List.of(OutgoingMessage.of(a), OutgoingMessage.of(b)));   // b
 Bodies are text (`builder(String)`) or binary (`builder(byte[])`). Attributes are string key-value
 pairs, delivered alongside the body.
 
+### Publishing without blocking
+
+`async()` gives the publisher's asynchronous view: `publish` and `publishAll` as `CompletableFuture`s, with the
+same checks (every message is checked before any is sent), claim checks (stored through the blob store's own
+asynchronous view) and errors. Batches are sent one after another, in order.
+
+```java
+events.async().publish(OutgoingMessage.of(json)).thenAccept(result -> log.info("sent {}", result.messageId()));
+```
+
+Publishes are non-blocking on SNS, SQS, Service Bus and Pub/Sub; on the memory provider the blocking call runs on
+a virtual thread, or on the executor given to `async(executor)`. With Micrometer Tracing, the trace is taken from
+the calling thread.
+
 ## Listening
 
 `listen` runs a consumer that pulls messages and hands each one to your handler:

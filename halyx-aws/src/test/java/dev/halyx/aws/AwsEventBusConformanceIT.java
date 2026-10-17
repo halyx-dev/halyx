@@ -18,11 +18,14 @@ package dev.halyx.aws;
 import dev.halyx.Halyx;
 import dev.halyx.config.Credentials;
 import dev.halyx.config.ProviderConfig;
+import dev.halyx.events.CloudEvent;
 import dev.halyx.events.EventPublisher;
 import dev.halyx.messaging.Subscription;
+import dev.halyx.tck.CompletingThreads;
 import dev.halyx.tck.EventBusConformanceTest;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.junit.jupiter.Container;
@@ -36,6 +39,9 @@ import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.QueueAttributeName;
 
 import java.net.URI;
+import java.util.concurrent.TimeUnit;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * The event bus kit on EventBridge emulated by Floci: an event bus with a rule that routes the kit's events (their
@@ -91,5 +97,15 @@ class AwsEventBusConformanceIT extends EventBusConformanceTest {
     @Override
     protected Subscription inbox() {
         return inbox;
+    }
+
+    @Test
+    void asyncPublishesCompleteOnTheSdksNonBlockingClient() throws Exception {
+        CompletingThreads threads = new CompletingThreads();
+
+        threads.track(publisher().async().publish(CloudEvent.builder("com.acme.threads", "/halyx-tck/threads").build()))
+                .get(30, TimeUnit.SECONDS);
+
+        threads.assertNonBlocking(1, Thread.currentThread());
     }
 }
