@@ -82,6 +82,12 @@ public interface ParameterStore {
      */
     AutoCloseable watch(String prefix, Duration interval, Consumer<ParameterChanges> listener);
 
+    /**
+     * Checks that the backend answers an authenticated read, failing if it doesn't. It always goes to the
+     * backend, past the read cache, so health checks see an outage.
+     */
+    void ping();
+
     /** Read and cache counters of this store instance. */
     ParameterStoreStatistics statistics();
 

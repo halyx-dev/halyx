@@ -47,7 +47,7 @@ that.
 | Abstract Factory | `ProviderConnection` creates the family of drivers for one account and region |
 | Registry, Facade | `Halyx` holds the named `CloudContext`s |
 | Gateway, Adapter | each driver wraps a native SDK client |
-| Template Method | `AbstractBlobStoreDriver` and friends (translation fallback, `unwrap`) |
+| Template Method | an `Abstract*Driver` base per SPI, which every driver extends: blob stores, document stores, publishers and subscriptions, event publishers, stream producers and consumers, caches and parameter stores (translation fallback, `unwrap`) |
 | Chain of Responsibility | `Interceptor` and `InterceptorChain` (`RetryInterceptor` included) |
 | Value Object | `BlobKey`, `ETag`, `Key`, `Version`, `ProviderConfig`: immutable |
 | Service Stub | the `memory` provider, for tests |
@@ -76,6 +76,7 @@ that.
 | `halyx-sql` | the shared HikariCP pool with per-connection credentials (passwords, cloud IAM tokens) |
 | `halyx-r2dbc` | pooled R2DBC connections with the same password and cloud IAM logins, for reactive code and Spring Data R2DBC |
 | `halyx-reactor` | Project Reactor views of every service on the application's scheduler: `Mono` and `Flux`, streams in and out, subscriptions and stream consumers as a `Flux` of deliveries |
+| `halyx-micrometer` | Micrometer observations of every operation, and trace context through messages, events and stream records, for any application; the starter applies them |
 | `halyx-kafka` | the shared Kafka stream driver, with password and cloud IAM login (SASL `OAUTHBEARER`), used by every provider |
 | `halyx-aws` | AWS SDK v2: S3, DynamoDB, SNS, SQS, EventBridge, SSM Parameter Store, Secrets Manager, ElastiCache and RDS IAM login |
 | `halyx-azure` | Azure SDK: Blob Storage, Cosmos DB, Service Bus, Event Grid namespaces, Key Vault, App Configuration, Entra ID login for caches and databases |
@@ -119,8 +120,8 @@ either portable or explicitly declared as a capability:
 | Event bus | 7 | every CloudEvent attribute through the router to its queue, text and binary data, events without data, batches across requests, republished ids, oversized events refused, listeners |
 | Messaging | 15 | round trips, binary bodies, ack and nack, lease expiry and extension, batches, listener retries and concurrency, claim checks, ordering, deduplication, delays |
 | Streams | 25 | keys, headers, partitions and offsets, order per key, committed positions, uncommitted records read again, groups sharing partitions, start positions, listener retries holding only their partition, dead letters, commits on close, claim checks, idempotence and transactions |
-| Cache | 49 | basic and bulk operations, cache-aside, atomic operations, counters, locks, namespaces, expiry (fail-open has its own test against an unreachable server) |
-| Parameter store | 22 | CRUD, versions, prefixes, caching, JSON fields, native names, watching |
+| Cache | 50 | ping, basic and bulk operations, cache-aside, atomic operations, counters, locks, namespaces, expiry (fail-open has its own test against an unreachable server) |
+| Parameter store | 23 | CRUD, ping past the cache, versions, prefixes, caching, JSON fields, native names, watching |
 
 ### Emulators
 
@@ -152,9 +153,12 @@ Pub/Sub ordering keys. See [Cloud testing](cloud-testing/index.md) for how the r
 
 ### Spring
 
-The Spring tests cover beans from properties, `@HalyxListener` with retries, claim checks, configuration
-import with live reload, health and metrics. They run on Spring Boot 3.5, and the same shared tests run
-again on Boot 4.1.
+The Spring tests cover beans from properties (with providers from customizers and cache codecs), `@HalyxListener`
+with retries and startup checks, claim checks, configuration import with live reload, health (including fail-open
+caches), metrics and tracing through messages, events and records. They run on Spring Boot 3.5, and the same shared
+tests run again on Boot 4.1. On the real clouds, Spring Boot 3 and 4 also run repositories, events, reactive beans,
+`@HalyxListener` with claim checks and configuration import in tier 1, R2DBC in tier 2, caches and `@Cacheable`
+in tier 3, and streams in tier 4.
 
 ## Benchmarks
 

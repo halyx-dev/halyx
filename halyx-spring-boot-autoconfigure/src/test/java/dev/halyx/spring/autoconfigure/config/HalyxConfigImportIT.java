@@ -169,6 +169,26 @@ class HalyxConfigImportIT {
     }
 
     @Test
+    void reloadAlsoRefreshesTheStoreBeansCache() throws Exception {
+        BlockingQueue<HalyxParametersChangedEvent> events = new LinkedBlockingQueue<>();
+        ParameterStore backend = vaultStore("orders-svc");
+        backend.put("shared/password", "before");
+        try (var context = start("halyx:app",
+                "halyx.parameter-stores.app.reload-interval=PT0.3S\nhalyx.parameter-stores.app.cache-ttl=PT1H", events::add)) {
+            ParameterStore bean = context.getBean("app", ParameterStore.class);
+            assertThat(bean.require("shared/password")).isEqualTo("before");
+
+            backend.put("shared/password", "after");
+
+            assertThat(events.poll(15, TimeUnit.SECONDS)).as("change event").isNotNull();
+            // The watch runs on the bean itself, so its hour-long cache follows the Environment.
+            assertThat(bean.require("shared/password")).isEqualTo("after");
+        } finally {
+            backend.delete("shared/password");
+        }
+    }
+
+    @Test
     void importCanBeNarrowedToAPrefix() throws Exception {
         try (var context = start("halyx:app/db")) {
             var env = context.getEnvironment();

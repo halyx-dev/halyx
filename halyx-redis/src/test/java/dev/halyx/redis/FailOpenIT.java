@@ -80,6 +80,7 @@ class FailOpenIT {
         assertThatThrownBy(() -> cache.putIfAbsent("k", "v")).isInstanceOf(UnavailableException.class);
         assertThatThrownBy(() -> cache.increment("k", 1)).isInstanceOf(UnavailableException.class);
         assertThatThrownBy(() -> cache.tryLock("l", Duration.ofSeconds(1))).isInstanceOf(UnavailableException.class);
+        assertThatThrownBy(cache::ping).isInstanceOf(UnavailableException.class);
     }
 
     @Test

@@ -36,19 +36,21 @@ public class HalyxR2dbcDatabases {
     }
 
     /** A pool with a fixed password or cloud IAM login; disposed of with the context. */
-    public ConnectionPool connectionFactory(String provider, String name, HalyxProperties.DatabaseProperties database) {
-        return connectionFactory(provider, name, database, null);
+    public ConnectionPool connectionFactory(String property, String provider, String name,
+                                            HalyxProperties.DatabaseProperties database) {
+        return connectionFactory(property, provider, name, database, null);
     }
 
     /** A pool whose password is read from {@code secrets} for every new connection. */
-    public ConnectionPool connectionFactoryWithSecret(String provider, String name,
+    public ConnectionPool connectionFactoryWithSecret(String property, String provider, String name,
                                                       HalyxProperties.DatabaseProperties database, ParameterStore secrets) {
-        return connectionFactory(provider, name, database, secrets);
+        return connectionFactory(property, provider, name, database, secrets);
     }
 
-    private ConnectionPool connectionFactory(String provider, String name, HalyxProperties.DatabaseProperties database,
-                                             ParameterStore secrets) {
-        var auth = HalyxBlobStores.resolveAuth(GROUP + "." + name + ".auth", database.auth(), secrets);
-        return R2dbcDatabases.connectionFactory(halyx.provider(provider), database.toSqlConfig(GROUP, name, auth));
+    private ConnectionPool connectionFactory(String property, String provider, String name,
+                                             HalyxProperties.DatabaseProperties database, ParameterStore secrets) {
+        var auth = HalyxBlobStores.resolveAuth(property + ".auth", database.auth(), secrets);
+        return R2dbcDatabases.connectionFactory(HalyxBlobStores.context(halyx, property, provider),
+                database.toSqlConfig(GROUP, name, auth));
     }
 }

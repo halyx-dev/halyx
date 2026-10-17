@@ -41,7 +41,7 @@ Halyx                                   one per application
 |---|---|
 | `Halyx` | The registry of named providers. Build it once, share it, and close it on shutdown. |
 | `ProviderConfig` | Which cloud (`aws`, `azure`, `gcp`, `vault`, `memory`), plus region, endpoint, credentials and provider properties. See [Provider configuration](../providers.md). |
-| `CloudContext` | One provider connection: an account and region with its credentials. It hands out services, which share its HTTP clients and connection pools. |
+| `CloudContext` | One provider connection: an account and region with its credentials. It hands out services, which share its HTTP clients and connection pools. Asking again with an equal configuration returns the same service (with its caches and statistics), except stream consumers and databases, which are new each time. |
 | Service interfaces | `BlobStore`, `DocumentStore`, `Publisher` and `Subscription`, `EventPublisher`, `StreamProducer` and `StreamConsumer`, `Database`, `Cache<V>`, `ParameterStore`. |
 
 ```java

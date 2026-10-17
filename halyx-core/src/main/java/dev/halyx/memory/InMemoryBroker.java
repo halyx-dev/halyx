@@ -21,8 +21,9 @@ import dev.halyx.messaging.MessagingCapability;
 import dev.halyx.messaging.OutgoingMessage;
 import dev.halyx.messaging.SubscriptionConfig;
 import dev.halyx.messaging.TopicConfig;
+import dev.halyx.messaging.spi.AbstractPublisherDriver;
+import dev.halyx.messaging.spi.AbstractSubscriptionDriver;
 import dev.halyx.messaging.spi.DriverMessage;
-import dev.halyx.messaging.spi.MessagingErrors;
 import dev.halyx.messaging.spi.PublisherDriver;
 import dev.halyx.messaging.spi.SubscriptionDriver;
 
@@ -176,16 +177,12 @@ final class InMemoryBroker {
         }
     }
 
-    private final class Publisher implements PublisherDriver {
+    private final class Publisher extends AbstractPublisherDriver {
         private final String topic;
 
         Publisher(String topic) {
+            super(InMemoryProvider.ID);
             this.topic = topic;
-        }
-
-        @Override
-        public String provider() {
-            return InMemoryProvider.ID;
         }
 
         @Override
@@ -226,30 +223,26 @@ final class InMemoryBroker {
         }
 
         @Override
-        public CloudException translate(Throwable error) {
-            return MessagingErrors.translate(error, InMemoryProvider.ID, e -> Optional.empty());
+        protected Optional<CloudException> translateNative(Throwable error) {
+            return Optional.empty();
         }
 
         @Override
-        public <T> T unwrap(Class<T> nativeType) {
-            return MessagingErrors.unwrap(nativeType, InMemoryProvider.ID, List.of());
+        protected List<Object> nativeClients() {
+            return List.of();
         }
     }
 
-    private static final class Subscriber implements SubscriptionDriver {
+    private static final class Subscriber extends AbstractSubscriptionDriver {
         private final String name;
         private final Queue queue;
         private final Duration lease;
 
         Subscriber(String name, Queue queue, Duration lease) {
+            super(InMemoryProvider.ID);
             this.name = name;
             this.queue = queue;
             this.lease = lease;
-        }
-
-        @Override
-        public String provider() {
-            return InMemoryProvider.ID;
         }
 
         @Override
@@ -293,13 +286,13 @@ final class InMemoryBroker {
         }
 
         @Override
-        public CloudException translate(Throwable error) {
-            return MessagingErrors.translate(error, InMemoryProvider.ID, e -> Optional.empty());
+        protected Optional<CloudException> translateNative(Throwable error) {
+            return Optional.empty();
         }
 
         @Override
-        public <T> T unwrap(Class<T> nativeType) {
-            return MessagingErrors.unwrap(nativeType, InMemoryProvider.ID, List.of());
+        protected List<Object> nativeClients() {
+            return List.of();
         }
     }
 }

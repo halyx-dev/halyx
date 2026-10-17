@@ -18,21 +18,21 @@ package dev.halyx.gcp.eventarc;
 import com.google.cloud.eventarc.publishing.v1.PublishRequest;
 import com.google.cloud.eventarc.publishing.v1.PublisherClient;
 import dev.halyx.error.CloudException;
-import dev.halyx.error.UnknownCloudException;
 import dev.halyx.events.CloudEvent;
 import dev.halyx.events.CloudEvents;
-import dev.halyx.events.spi.EventPublisherDriver;
+import dev.halyx.events.spi.AbstractEventPublisherDriver;
 import dev.halyx.gcp.GcpErrors;
 import dev.halyx.gcp.GcpProvider;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Publishes to an Eventarc Advanced message bus, one event per request in the CloudEvents JSON format. The bus's
  * enrollments and pipelines route events; a pipeline with a Pub/Sub destination delivers them to a topic, whose
  * subscriptions Halyx receives from.
  */
-public final class EventarcPublisherDriver implements EventPublisherDriver {
+public final class EventarcPublisherDriver extends AbstractEventPublisherDriver {
 
     /** Eventarc accepts messages up to 1 MB; the request needs some room besides the event. */
     static final long MAX_EVENT_BYTES = 1024 * 1024 - 4096;
@@ -42,13 +42,9 @@ public final class EventarcPublisherDriver implements EventPublisherDriver {
 
     /** @param bus the message bus's resource name, {@code projects/<p>/locations/<l>/messageBuses/<id>} */
     public EventarcPublisherDriver(PublisherClient client, String bus) {
+        super(GcpProvider.ID);
         this.client = client;
         this.bus = bus;
-    }
-
-    @Override
-    public String provider() {
-        return GcpProvider.ID;
     }
 
     @Override
@@ -74,19 +70,12 @@ public final class EventarcPublisherDriver implements EventPublisherDriver {
     }
 
     @Override
-    public CloudException translate(Throwable error) {
-        if (error instanceof CloudException cloud) {
-            return cloud;
-        }
-        return GcpErrors.translate(error).orElseGet(() -> new UnknownCloudException(error.getMessage(), error,
-                GcpProvider.ID, null));
+    protected Optional<CloudException> translateNative(Throwable error) {
+        return GcpErrors.translate(error);
     }
 
     @Override
-    public <T> T unwrap(Class<T> nativeType) {
-        if (nativeType.isInstance(client)) {
-            return nativeType.cast(client);
-        }
-        throw new IllegalArgumentException("Eventarc publishers unwrap to PublisherClient, not " + nativeType.getName());
+    protected List<Object> nativeClients() {
+        return List.of(client);
     }
 }

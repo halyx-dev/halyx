@@ -255,7 +255,20 @@ if [[ "$TIER" == 3 ]]; then
       -Dhalyx.real.aws.cache.name="$(terraform -chdir="$TF_DIR" output -raw cache_name)" \
       -Dhalyx.real.aws.cache.app-user="$(terraform -chdir="$TF_DIR" output -raw app_user)" \
       -Dhalyx.real.aws.cache.denied-user="$(terraform -chdir="$TF_DIR" output -raw denied_user)"
-  exit $?
+  status=$?
+  [[ -n "${IT_TEST:-}" ]] && exit $status
+  # Spring Boot 3 and 4: Cache beans and @Cacheable logging in with the cloud identity.
+  mvn -o -q install -DskipTests -pl halyx-spring-boot-autoconfigure -am || exit 1
+  for module in halyx-spring-boot-autoconfigure halyx-spring-boot4-tests; do
+    log "Running the Spring Boot cache test ($module) against real AWS"
+    mvn -o verify -pl "$module" -Dit.test=RealSpringCacheIT -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+        -DargLine="-Djdk.net.hosts.file=$WORK/hosts" \
+        -Dhalyx.real.spring.cache=true -Dhalyx.real.spring.provider=aws \
+        -Dhalyx.real.spring.cache-endpoint="rediss://$CACHE_HOST:$LOCAL_PORT" \
+        -Dhalyx.real.spring.cache-username="$(terraform -chdir="$TF_DIR" output -raw app_user)" \
+        -Dhalyx.real.spring.cache-properties="aws.elasticache.cache-name=$(terraform -chdir="$TF_DIR" output -raw cache_name),redis.dns-resolver=jdk" || status=1
+  done
+  exit $status
 fi
 BUCKET=$(terraform -chdir="$TF_DIR" output -raw bucket)
 ITEMS=$(terraform -chdir="$TF_DIR" output -raw items_table)
@@ -270,16 +283,20 @@ mvn -o verify -pl halyx-aws -Dit.test="${IT_TEST:-RealAwsIT}" -Dtest=none -Dsure
     -Dhalyx.real.aws.event-bus="$EVENT_BUS" -Dhalyx.real.aws.events-inbox="$EVENTS_INBOX"
 status=$?
 [[ -n "${IT_TEST:-}" ]] && exit $status
-# Spring Boot 3 and 4: an auto-configured repository on the run's table with a sort key, the event bus, and
-# halyx-reactor's WebFlux, reactive repository and event beans over the bucket, table and bus.
+# Spring Boot 3 and 4: an auto-configured repository on the run's table with a sort key, the event bus,
+# halyx-reactor's WebFlux, reactive repository and event beans over the bucket, table and bus, @HalyxListener on
+# the run's SNS topic and queue with a claim check, and spring.config.import from SSM and Secrets Manager.
 mvn -o -q install -DskipTests -pl halyx-spring-boot-autoconfigure -am || exit 1
 for module in halyx-spring-boot-autoconfigure halyx-spring-boot4-tests; do
   log "Running the Spring Boot repository, event and reactive tests ($module) against real AWS"
-  mvn -o verify -pl "$module" -Dit.test='RealSpringRepositoryIT,RealSpringEventIT,RealSpringReactiveIT' -Dtest=none \
+  mvn -o verify -pl "$module" -Dit.test='RealSpringRepositoryIT,RealSpringEventIT,RealSpringReactiveIT,RealSpringMessagingIT,RealSpringParametersIT' -Dtest=none \
       -Dsurefire.failIfNoSpecifiedTests=false \
       -Dhalyx.real.spring.repositories=true -Dhalyx.real.spring.events=true -Dhalyx.real.spring.reactive=true \
+      -Dhalyx.real.spring.messaging=true -Dhalyx.real.spring.parameters=true \
       -Dhalyx.real.spring.provider=aws -Dhalyx.real.spring.bucket="$BUCKET" \
       -Dhalyx.real.spring.table="$ITEMS_SORTED" \
-      -Dhalyx.real.spring.event-bus="$EVENT_BUS" -Dhalyx.real.spring.inbox="$EVENTS_INBOX" || status=1
+      -Dhalyx.real.spring.event-bus="$EVENT_BUS" -Dhalyx.real.spring.inbox="$EVENTS_INBOX" \
+      -Dhalyx.real.spring.topic="$(terraform -chdir="$TF_DIR" output -raw spring_topic)" \
+      -Dhalyx.real.spring.subscription="$(terraform -chdir="$TF_DIR" output -raw spring_queue)" || status=1
 done
 exit $status

@@ -20,9 +20,8 @@ import com.azure.messaging.servicebus.ServiceBusReceiverClient;
 import dev.halyx.azure.AzureProvider;
 import dev.halyx.capability.Capabilities;
 import dev.halyx.error.CloudException;
+import dev.halyx.messaging.spi.AbstractSubscriptionDriver;
 import dev.halyx.messaging.spi.DriverMessage;
-import dev.halyx.messaging.spi.MessagingErrors;
-import dev.halyx.messaging.spi.SubscriptionDriver;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -31,6 +30,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
@@ -45,7 +45,7 @@ import java.util.concurrent.TimeUnit;
  * until it has elapsed or the message is settled. The lease is measured from the locks the service grants. Repeatedly failing messages move to the entity's dead-letter queue after its max
  * delivery count.
  */
-public final class ServiceBusSubscriptionDriver implements SubscriptionDriver {
+public final class ServiceBusSubscriptionDriver extends AbstractSubscriptionDriver {
 
     /** Until a lock is seen; Service Bus' default lock duration is 60 seconds, and the minimum 5. */
     private static final Duration INITIAL_LEASE = Duration.ofSeconds(30);
@@ -61,13 +61,9 @@ public final class ServiceBusSubscriptionDriver implements SubscriptionDriver {
             Thread.ofPlatform().daemon().name("halyx-servicebus-renew").factory());
 
     public ServiceBusSubscriptionDriver(ServiceBusReceiverClient receiver, String name) {
+        super(AzureProvider.ID);
         this.receiver = receiver;
         this.name = name;
-    }
-
-    @Override
-    public String provider() {
-        return AzureProvider.ID;
     }
 
     @Override
@@ -174,13 +170,13 @@ public final class ServiceBusSubscriptionDriver implements SubscriptionDriver {
     }
 
     @Override
-    public CloudException translate(Throwable error) {
-        return MessagingErrors.translate(error, AzureProvider.ID, ServiceBusErrors::translate);
+    protected Optional<CloudException> translateNative(Throwable error) {
+        return ServiceBusErrors.translate(error);
     }
 
     @Override
-    public <T> T unwrap(Class<T> nativeType) {
-        return MessagingErrors.unwrap(nativeType, AzureProvider.ID, List.of(receiver));
+    protected List<Object> nativeClients() {
+        return List.of(receiver);
     }
 
     @Override

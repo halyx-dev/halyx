@@ -83,6 +83,21 @@ public final class TableConfig {
         return properties;
     }
 
+    /** Configurations with the same settings are equal, so contexts can share one client per configuration. */
+    @Override
+    public boolean equals(Object o) {
+        return o instanceof TableConfig other && Objects.equals(name, other.name)
+                && Objects.equals(partitionKey, other.partitionKey)
+                && Objects.equals(sortKey, other.sortKey)
+                && Objects.equals(indexes, other.indexes)
+                && Objects.equals(properties, other.properties);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(name, partitionKey, sortKey, indexes, properties);
+    }
+
     @Override
     public String toString() {
         return "TableConfig[" + name + ", pk=" + partitionKey + (sortKey == null ? "" : ", sk=" + sortKey) + "]";

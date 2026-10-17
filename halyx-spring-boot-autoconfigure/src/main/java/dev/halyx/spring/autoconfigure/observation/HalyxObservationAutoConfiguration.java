@@ -15,6 +15,7 @@
  */
 package dev.halyx.spring.autoconfigure.observation;
 
+import dev.halyx.micrometer.ObservationInterceptor;
 import io.micrometer.observation.ObservationRegistry;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;

@@ -61,6 +61,19 @@ public final class TopicConfig {
         return properties;
     }
 
+    /** Configurations with the same settings are equal, so contexts can share one client per configuration. */
+    @Override
+    public boolean equals(Object o) {
+        return o instanceof TopicConfig other && Objects.equals(name, other.name)
+                && Objects.equals(claimCheck, other.claimCheck)
+                && Objects.equals(properties, other.properties);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(name, claimCheck, properties);
+    }
+
     @Override
     public String toString() {
         return "TopicConfig[" + name + "]";

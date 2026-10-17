@@ -85,6 +85,22 @@ public final class StreamProducerConfig {
         return properties;
     }
 
+    /** Configurations with the same settings are equal, so contexts can share one client per configuration. */
+    @Override
+    public boolean equals(Object o) {
+        return o instanceof StreamProducerConfig other && Objects.equals(cluster, other.cluster)
+                && Objects.equals(topic, other.topic)
+                && Objects.equals(claimCheck, other.claimCheck)
+                && idempotent == other.idempotent
+                && transactional == other.transactional
+                && Objects.equals(properties, other.properties);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(cluster, topic, claimCheck, idempotent, transactional, properties);
+    }
+
     @Override
     public String toString() {
         return "StreamProducerConfig[topic=" + topic + ", cluster=" + cluster + "]";

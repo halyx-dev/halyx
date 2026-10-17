@@ -57,9 +57,8 @@ final class HalyxSpringKafkaLogin implements BeanPostProcessor {
             String name = BlobStoreBeanRegistrar.resolveCluster("halyx.spring-kafka", cluster.isBlank() ? null : cluster,
                     config.streamClusters());
             HalyxProperties.StreamClusterProperties clusterProperties = config.streamClusters().get(name);
-            String provider = BlobStoreBeanRegistrar.resolveProvider("halyx.stream-clusters." + name,
-                    clusterProperties.provider(), config.providers());
-            login = halyx.getObject().provider(provider).kafkaClientProperties(clusterProperties.toStreamConfig(name));
+            login = HalyxBlobStores.context(halyx.getObject(), "halyx.stream-clusters." + name, clusterProperties.provider())
+                    .kafkaClientProperties(clusterProperties.toStreamConfig(name));
         }
         return login;
     }

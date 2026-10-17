@@ -100,6 +100,22 @@ public final class ParameterStoreConfig {
         return properties;
     }
 
+    /** Configurations with the same settings are equal, so contexts can share one client per configuration. */
+    @Override
+    public boolean equals(Object o) {
+        return o instanceof ParameterStoreConfig other && Objects.equals(kind, other.kind)
+                && Objects.equals(location, other.location)
+                && Objects.equals(prefix, other.prefix)
+                && Objects.equals(cacheTtl, other.cacheTtl)
+                && nativeNames == other.nativeNames
+                && Objects.equals(properties, other.properties);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(kind, location, prefix, cacheTtl, nativeNames, properties);
+    }
+
     @Override
     public String toString() {
         return "ParameterStoreConfig[kind=" + kind + ", location=" + location + ", prefix=" + prefix + "]";

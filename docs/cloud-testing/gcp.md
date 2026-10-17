@@ -643,6 +643,10 @@ nothing to fix.
 | `r26101620472de5` | tier 1, plus the event bus kit and Spring Boot 3 and 4 | 185 passed, 3 failed, 3 skipped; Spring **4/4** | clean | Global endpoint and authenticated pipeline: Eventarc 5/6. Pub/Sub refused (400) the pipeline's publish of the event without data. Secret Manager read a previous value twice; the kit now allows for `latest` being eventually consistent. |
 | `r26101622034481` | tier 1, plus the event bus kit and Spring Boot 3 and 4 | **192 passed, 4 skipped**; Spring **4/4** | clean | Eventarc 6/7, with events without data declared a known gap. |
 | `r2610170214c74e` | tier 1, plus halyx-reactor and Spring Boot 3 and 4 | **202 passed, 4 skipped**; Spring **10/10** | clean | Latest tier 1 result, above. Reactive repositories 10/10 on Firestore; the reactive Spring test (WebFlux over the bucket, a reactive repository, events through the reactive beans) 3/3 on Boot 3.5 and 4. |
+| `r2610171333de9d` | tier 1, plus Spring Boot 3 and 4 | **205 passed, 4 skipped**; Spring **16/16** | clean | Latest tier 1 result, with the new Spring tests: `@HalyxListener` with a claim check (`RealSpringMessagingIT`) and `spring.config.import` with reload, health ping and the store bean's cache (`RealSpringParametersIT`) on Pub/Sub, Secret Manager and Parameter Manager. |
+| `r2610171412729c` | tier 2, plus Spring Boot 3 and 4 | **22/22**; Spring **2/2** | clean | Latest tier 2 result. |
+| `r261017143360ac` | tier 3, plus Spring Boot 3 and 4 | **55/55**; Spring **2/2** | clean | Latest tier 3 result: the cache kit with `ping`, then `Cache` beans with IAM over TLS (private CA), a JSON codec and `@Cacheable` on Boot 3.5 and 4. |
+| `r2610171453c670` | tier 4, plus Spring Boot 3 and 4 | **25/25**; Spring **2/2** | clean | Latest tier 4 result. |
 
 ## What real GCP found
 

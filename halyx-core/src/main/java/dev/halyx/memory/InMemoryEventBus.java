@@ -16,32 +16,28 @@
 package dev.halyx.memory;
 
 import dev.halyx.error.CloudException;
-import dev.halyx.error.UnknownCloudException;
 import dev.halyx.events.CloudEvent;
 import dev.halyx.events.CloudEvents;
-import dev.halyx.events.spi.EventPublisherDriver;
+import dev.halyx.events.spi.AbstractEventPublisherDriver;
 import dev.halyx.messaging.OutgoingMessage;
 import dev.halyx.messaging.spi.PublisherDriver;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * An event bus as an in-memory topic of the same name: each event is published as CloudEvents JSON, so
  * subscriptions on that topic receive it, as a router's rule delivers events to a queue.
  */
-final class InMemoryEventBus implements EventPublisherDriver {
+final class InMemoryEventBus extends AbstractEventPublisherDriver {
 
     private final String bus;
     private final PublisherDriver topic;
 
     InMemoryEventBus(String bus, PublisherDriver topic) {
+        super(InMemoryProvider.ID);
         this.bus = bus;
         this.topic = topic;
-    }
-
-    @Override
-    public String provider() {
-        return InMemoryProvider.ID;
     }
 
     @Override
@@ -68,12 +64,12 @@ final class InMemoryEventBus implements EventPublisherDriver {
     }
 
     @Override
-    public CloudException translate(Throwable error) {
-        return error instanceof CloudException c ? c : new UnknownCloudException(error.getMessage(), error, InMemoryProvider.ID, null);
+    protected Optional<CloudException> translateNative(Throwable error) {
+        return Optional.empty();
     }
 
     @Override
-    public <T> T unwrap(Class<T> nativeType) {
-        throw new UnsupportedOperationException("The in-memory provider has no native event client");
+    protected List<Object> nativeClients() {
+        return List.of();
     }
 }

@@ -515,6 +515,10 @@ take effect.
 | `r261016202476f2` | tier 1, plus the event bus kit and Spring Boot 3 and 4 | 171 passed, 1 error, 2 skipped; Spring **4/4** | clean | Event Grid 5/6: `textBinaryAndAbsentData` failed because Event Grid refuses `"data": null`, which the Azure SDK writes for an event without data. |
 | `r261016214897d6` | tier 1, Event Grid only (`IT_TEST='RealAzureIT$EventGrid'`) | **7/7** | clean | After the fix, and with the kit's data test split in two. |
 | `r26101702533254` | tier 1, plus halyx-reactor and Spring Boot 3 and 4 | **183 passed, 2 skipped**; Spring **10/10** | clean | Latest tier 1 result, above. Reactive repositories 10/10 on Cosmos DB; the reactive Spring test (WebFlux over the container, a reactive repository, events through the reactive beans) 3/3 on Boot 3.5 and 4, the latter on Reactor 3.8 with the Azure SDK's Reactor Netty 1.2. |
+| `r26101712284442` | tier 1, plus Spring Boot 3 and 4 | **185 passed, 2 skipped**; Spring **16/16** | clean | Latest tier 1 result, with the new Spring tests: `@HalyxListener` with a claim check (`RealSpringMessagingIT`) and `spring.config.import` with reload, health ping and the store bean's cache (`RealSpringParametersIT`) on Service Bus, Key Vault and App Configuration. |
+| `r2610171252db43` | tier 2, plus Spring Boot 3 and 4 | **13/13**; Spring **2/2** | clean | Latest tier 2 result. |
+| `r26101713052821` | tier 3, plus Spring Boot 3 and 4 | **53/53**; Spring **2/2** | clean | Latest tier 3 result: the cache kit with `ping`, then `Cache` beans with Entra ID, a JSON codec and `@Cacheable` on Boot 3.5 and 4. |
+| `r2610171320c3b7` | tier 4, plus Spring Boot 3 and 4 | **24 passed, 1 skipped**; Spring **2/2** | clean | Latest tier 4 result. |
 
 ## What real Azure found
 

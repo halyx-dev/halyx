@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package dev.halyx.spring.autoconfigure.observation;
+package dev.halyx.micrometer;
 
 import io.micrometer.observation.Observation;
 import io.micrometer.observation.ObservationRegistry;
@@ -28,6 +28,10 @@ import dev.halyx.interceptor.OperationContext;
  * <p>Low-cardinality keys (metric tags): {@code halyx.service}, {@code halyx.operation},
  * {@code halyx.provider}, plus {@code error} on failure. The resource ({@code bucket/key}) is a
  * high-cardinality key, attached to spans only.
+ *
+ * <p>Add it first, so the observation covers retries and every other interceptor:
+ * {@code Halyx.builder().interceptor(new ObservationInterceptor(registry))}. The Spring Boot starter does this for
+ * the application's {@code ObservationRegistry}.
  */
 public final class ObservationInterceptor implements Interceptor {
 

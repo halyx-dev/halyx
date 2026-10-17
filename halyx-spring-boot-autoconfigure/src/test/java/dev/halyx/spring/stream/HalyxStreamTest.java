@@ -23,6 +23,7 @@ import io.micrometer.tracing.Tracer;
 import io.micrometer.tracing.propagation.Propagator;
 import io.micrometer.tracing.test.simple.SimpleTracer;
 import org.junit.jupiter.api.Test;
+import dev.halyx.micrometer.TracingStreamProducer;
 import dev.halyx.spring.autoconfigure.HalyxAutoConfiguration;
 import dev.halyx.spring.autoconfigure.metrics.HalyxCacheMetricsAutoConfiguration;
 import dev.halyx.spring.autoconfigure.observation.HalyxMessagingTracingAutoConfiguration;
@@ -293,5 +294,36 @@ class HalyxStreamTest {
 
         assertThatThrownBy(() -> consumer.get().poll(Duration.ofMillis(10)))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("closed");
+    }
+
+    static class ConcurrentListener {
+        @HalyxListener(value = "orders", concurrency = 4)
+        void onOrder(String value) {
+        }
+    }
+
+    @Test
+    void concurrencyOnAStreamListenerFailsAtStartup() {
+        runner.withPropertyValues(MEMORY).withBean(ConcurrentListener.class, ConcurrentListener::new)
+                .run(context -> assertThat(context).hasFailed().getFailure()
+                        .hasStackTraceContaining("sets concurrency, which only subscriptions have"));
+    }
+
+    static class TwoListeners {
+        @HalyxListener("orders")
+        void bill(String value) {
+        }
+
+        @HalyxListener("orders")
+        void ship(byte[] value) {
+        }
+    }
+
+    @Test
+    void twoListenersOnOneStreamConsumerFailAtStartup() {
+        runner.withPropertyValues(MEMORY).withBean(TwoListeners.class, TwoListeners::new)
+                .run(context -> assertThat(context).hasFailed().getFailure()
+                        .hasStackTraceContaining("Stream consumer 'orders' has 2 @HalyxListener methods")
+                        .hasStackTraceContaining("configure another halyx.stream-consumers entry"));
     }
 }

@@ -13,31 +13,31 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package dev.halyx.spring.messaging;
+package dev.halyx.micrometer;
 
 import io.micrometer.tracing.TraceContext;
 import io.micrometer.tracing.Tracer;
 import io.micrometer.tracing.propagation.Propagator;
 import dev.halyx.capability.Capabilities;
-import dev.halyx.messaging.OutgoingMessage;
-import dev.halyx.messaging.PublishResult;
-import dev.halyx.messaging.Publisher;
+import dev.halyx.stream.OutgoingRecord;
+import dev.halyx.stream.SendResult;
+import dev.halyx.stream.StreamProducer;
 
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * Adds the current trace context to every published message as attributes (W3C {@code traceparent} and
- * {@code tracestate}, or B3, whatever the propagator writes), so consumers continue the same trace.
+ * Adds the current trace context to every record sent as headers (W3C {@code traceparent} and {@code tracestate},
+ * or B3, whatever the propagator writes), so consumers continue the same trace.
  */
-public final class TracingPublisher implements Publisher {
+public final class TracingStreamProducer implements StreamProducer {
 
-    private final Publisher delegate;
+    private final StreamProducer delegate;
     private final Tracer tracer;
     private final Propagator propagator;
 
-    public TracingPublisher(Publisher delegate, Tracer tracer, Propagator propagator) {
+    public TracingStreamProducer(StreamProducer delegate, Tracer tracer, Propagator propagator) {
         this.delegate = delegate;
         this.tracer = tracer;
         this.propagator = propagator;
@@ -59,24 +59,29 @@ public final class TracingPublisher implements Publisher {
     }
 
     @Override
-    public PublishResult publish(OutgoingMessage message) {
-        return delegate.publish(withTraceContext(message));
+    public SendResult send(OutgoingRecord record) {
+        return delegate.send(withTraceContext(record));
     }
 
     @Override
-    public List<PublishResult> publishAll(List<OutgoingMessage> messages) {
-        return delegate.publishAll(messages.stream().map(this::withTraceContext).toList());
+    public List<SendResult> sendAll(List<OutgoingRecord> records) {
+        return delegate.sendAll(records.stream().map(this::withTraceContext).toList());
     }
 
-    private OutgoingMessage withTraceContext(OutgoingMessage message) {
+    private OutgoingRecord withTraceContext(OutgoingRecord record) {
         TraceContext context = tracer.currentTraceContext().context();
         if (context == null) {
-            return message;
+            return record;
         }
         Map<String, String> headers = new LinkedHashMap<>();
         propagator.inject(context, headers, Map::put);
-        headers.keySet().removeAll(message.attributes().keySet()); // the caller's own attributes win
-        return headers.isEmpty() ? message : message.withBody(message.bodyUnsafe(), headers);
+        headers.keySet().removeAll(record.headers().keySet()); // the caller's own headers win
+        return headers.isEmpty() ? record : record.withValue(record.valueUnsafe(), headers);
+    }
+
+    @Override
+    public int partitionCount() {
+        return delegate.partitionCount();
     }
 
     @Override

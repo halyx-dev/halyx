@@ -30,6 +30,7 @@ import com.azure.cosmos.models.SqlParameter;
 import com.azure.cosmos.models.SqlQuerySpec;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import dev.halyx.azure.AzureErrors;
 import dev.halyx.azure.AzureProvider;
 import dev.halyx.error.AccessDeniedException;
 import dev.halyx.error.CloudException;
@@ -50,7 +51,7 @@ import dev.halyx.nosql.QueryPage;
 import dev.halyx.nosql.SortCondition;
 import dev.halyx.nosql.TableConfig;
 import dev.halyx.nosql.Version;
-import dev.halyx.nosql.spi.DocumentStoreDriver;
+import dev.halyx.nosql.spi.AbstractDocumentStoreDriver;
 import dev.halyx.nosql.spi.TransactionWrite;
 import dev.halyx.nosql.spi.WriteCondition;
 
@@ -73,7 +74,7 @@ import java.util.concurrent.Future;
  * version is the item's ETag. Expiry uses Cosmos' own {@code ttl}, so the container needs a default TTL
  * ({@code -1} turns TTL on without expiring other items); {@value #EXPIRES} keeps the exact time.
  */
-public final class CosmosDocumentStoreDriver implements DocumentStoreDriver {
+public final class CosmosDocumentStoreDriver extends AbstractDocumentStoreDriver {
 
     static final String EXPIRES = "halyx_expires";
     /** Written by transaction checks: Cosmos only enforces if-match on writes. */
@@ -84,13 +85,9 @@ public final class CosmosDocumentStoreDriver implements DocumentStoreDriver {
     private final TableConfig table;
 
     public CosmosDocumentStoreDriver(CosmosContainer container, TableConfig table) {
+        super(AzureProvider.ID);
         this.container = container;
         this.table = table;
-    }
-
-    @Override
-    public String provider() {
-        return AzureProvider.ID;
     }
 
     @Override
@@ -495,14 +492,11 @@ public final class CosmosDocumentStoreDriver implements DocumentStoreDriver {
     }
 
     @Override
-    public CloudException translate(Throwable error) {
-        if (error instanceof CloudException c) {
-            return c;
-        }
+    protected Optional<CloudException> translateNative(Throwable error) {
         if (error instanceof CosmosException e) {
             String code = String.valueOf(e.getStatusCode());
             String message = e.getShortMessage();
-            return switch (e.getStatusCode()) {
+            return Optional.of(switch (e.getStatusCode()) {
                 case 404 -> new NotFoundException(message, e, AzureProvider.ID, code);
                 case 409, 412 -> new PreconditionFailedException(message, e, AzureProvider.ID, code);
                 case 401, 403 -> new AccessDeniedException(message, e, AzureProvider.ID, code);
@@ -511,16 +505,14 @@ public final class CosmosDocumentStoreDriver implements DocumentStoreDriver {
                 default -> e.getStatusCode() >= 500 || e.getStatusCode() == 408
                         ? new UnavailableException(message, e, AzureProvider.ID, code)
                         : new UnknownCloudException(message, e, AzureProvider.ID, code);
-            };
+            });
         }
-        return new UnknownCloudException(error.getMessage(), error, AzureProvider.ID, null);
+        // Errors from outside Cosmos DB itself, such as Entra ID token requests and I/O failures.
+        return AzureErrors.translate(error);
     }
 
     @Override
-    public <T> T unwrap(Class<T> nativeType) {
-        if (nativeType.isInstance(container)) {
-            return nativeType.cast(container);
-        }
-        throw new IllegalArgumentException("No native client of type " + nativeType.getName());
+    protected List<Object> nativeClients() {
+        return List.of(container);
     }
 }

@@ -15,6 +15,7 @@
  */
 package dev.halyx.spring.reactive;
 
+import dev.halyx.Halyx;
 import dev.halyx.messaging.Publisher;
 import dev.halyx.messaging.Subscription;
 import dev.halyx.reactor.ReactiveBlobStore;
@@ -45,6 +46,7 @@ import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.ResolvableType;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
@@ -248,6 +250,35 @@ class HalyxReactorTest {
                     TestObservationRegistryAssert.assertThat(registry)
                             .hasObservationWithNameEqualTo("halyx.operation")
                             .that().hasParentObservationEqualTo(request);
+                });
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    static class OwnReactiveHalyx {
+        @Bean(destroyMethod = "close")
+        ReactiveHalyx myReactiveHalyx(Halyx halyx) {
+            return ReactiveHalyx.builder(halyx).scheduler(Schedulers.boundedElastic()).build();
+        }
+    }
+
+    @Test
+    void viewsUseTheApplicationsOwnReactiveHalyxWhateverItsName() {
+        runner.withPropertyValues(SERVICES).withUserConfiguration(OwnReactiveHalyx.class).run(context -> {
+            assertThat(context).hasNotFailed().doesNotHaveBean(HalyxReactorAutoConfiguration.REACTIVE_HALYX_BEAN);
+            ReactiveBlobStore invoices = context.getBean("invoicesReactive", ReactiveBlobStore.class);
+            invoices.put(BlobKey.of("k"), BlobContent.ofString("v")).block(Duration.ofSeconds(5));
+            assertThat(context.getBean("invoices", BlobStore.class).getBytes(BlobKey.of("k"))).asString().isEqualTo("v");
+        });
+    }
+
+    @Test
+    void aCachesReactiveViewHasItsCodecsValueType() {
+        runner.withPropertyValues("halyx.providers.local.type=memory",
+                        "halyx.caches.raw.endpoint=redis://localhost:6379", "halyx.caches.raw.codec=bytes")
+                .run(context -> {
+                    var view = context.getBeanProvider(ResolvableType.forClassWithGenerics(ReactiveCache.class, byte[].class))
+                            .getObject();
+                    assertThat(view).isSameAs(context.getBean("rawReactive"));
                 });
     }
 }

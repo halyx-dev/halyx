@@ -16,6 +16,7 @@
 package dev.halyx.spring.autoconfigure;
 
 import io.r2dbc.spi.ConnectionFactory;
+import org.springframework.beans.factory.config.ConstructorArgumentValues;
 import org.springframework.beans.factory.config.RuntimeBeanReference;
 import org.springframework.beans.factory.support.AbstractBeanDefinition;
 import org.springframework.beans.factory.support.BeanDefinitionRegistry;
@@ -36,8 +37,7 @@ final class R2dbcBeanRegistration {
     private R2dbcBeanRegistration() {
     }
 
-    static void register(Binder binder, BeanDefinitionRegistry registry, Map<String, HalyxProperties.Provider> providers,
-                         Set<String> parameterStores) {
+    static void register(Binder binder, BeanDefinitionRegistry registry, Set<String> parameterStores) {
         Map<String, HalyxProperties.DatabaseProperties> databases = binder
                 .bind(HalyxR2dbcDatabases.GROUP, Bindable.mapOf(String.class, HalyxProperties.DatabaseProperties.class))
                 .orElse(Map.of());
@@ -51,13 +51,14 @@ final class R2dbcBeanRegistration {
         }
         databases.forEach((name, database) -> {
             String property = HalyxR2dbcDatabases.GROUP + "." + name;
-            String provider = BlobStoreBeanRegistrar.resolveProvider(property, database.provider(), providers);
             RootBeanDefinition definition = new RootBeanDefinition(ConnectionFactory.class);
             definition.setFactoryBeanName(HalyxR2dbcDatabases.BEAN);
             var args = definition.getConstructorArgumentValues();
-            args.addIndexedArgumentValue(0, provider);
-            args.addIndexedArgumentValue(1, name);
-            args.addIndexedArgumentValue(2, database);
+            args.addIndexedArgumentValue(0, property);
+            args.addIndexedArgumentValue(1, new ConstructorArgumentValues.ValueHolder(database.provider(),
+                    String.class.getName()));
+            args.addIndexedArgumentValue(2, name);
+            args.addIndexedArgumentValue(3, database);
             var secret = database.auth().secret();
             if (secret != null) {
                 if (secret.store() == null || !parameterStores.contains(secret.store())) {
@@ -65,14 +66,14 @@ final class R2dbcBeanRegistration {
                             + parameterStores);
                 }
                 definition.setFactoryMethodName("connectionFactoryWithSecret");
-                args.addIndexedArgumentValue(3, new RuntimeBeanReference(secret.store()));
+                args.addIndexedArgumentValue(4, new RuntimeBeanReference(secret.store()));
             } else {
                 definition.setFactoryMethodName("connectionFactory");
             }
             definition.setTargetType(ConnectionFactory.class);
             definition.setDestroyMethodName("dispose");
             definition.setPrimary(databases.size() == 1 || database.primary());
-            definition.setDescription("Halyx R2DBC " + database.engine() + " database " + provider + "/"
+            definition.setDescription("Halyx R2DBC " + database.engine() + " database " + name + "/"
                     + database.database());
             registry.registerBeanDefinition(name, definition);
         });

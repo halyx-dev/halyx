@@ -589,6 +589,11 @@ The reports come back into each module's `target/failsafe-reports`.
 | `r26101622397240` | tier 1, EventBridge only (`IT_TEST='RealAwsIT$EventBridge'`) | **7/7** | clean | With the kit's data test split in two. |
 | `r2610170203d8cc` | tier 1, plus halyx-reactor and Spring Boot 3 and 4 | 196 passed, 1 failed, 2 skipped; Spring 4/10 | clean | Reactive repositories 10/10 on DynamoDB. The reactive Spring test failed to start on both Boots: the test gave its document store and event bus the same key, `orders`, so their beans clashed. SSM `watchReportsAddedUpdatedAndRemovedValues` failed again (see the roadmap). |
 | `r2610170316f538` | tier 1, plus halyx-reactor and Spring Boot 3 and 4 | **197 passed, 2 skipped**; Spring **10/10** | clean | Latest tier 1 result, above. The reactive Spring test (WebFlux over the bucket, a reactive repository, events through the reactive beans) 3/3 on Boot 3.5 and 4. |
+| `r261017114166f2` | tier 1, plus Spring Boot 3 and 4 | **201 passed, 2 skipped**; Spring 14/16 | clean | First run of the new Spring tests: `@HalyxListener` with a claim check (`RealSpringMessagingIT`) and `spring.config.import` with reload, health ping and the store bean's cache (`RealSpringParametersIT`). Secrets Manager refused the parameters test's writes: its names began `halyx-spring-`, outside the `tck-*` names the IAM policy allows. The test now uses `tck-spring-`. |
+| `r2610171157f534` | tier 2, plus Spring Boot 3 and 4 | **16/16**; Spring **2/2** | clean | |
+| `r26101712087b06` | tier 3, plus Spring Boot 3 and 4 | 53/54; Spring 0/2 | clean | The IAM user without `Connect` permission was still let in, as before. The new Spring cache test's own `@Bean` was named like its `halyx.caches` bean; renamed. |
+| `r26101715276919` | tier 1, plus Spring Boot 3 and 4 | **201 passed, 2 skipped**; Spring **16/16** | clean | Latest tier 1 result: events, reactive (3), repository, messaging and parameters (SSM and Secrets Manager) on Boot 3.5 and 4. |
+| `r261017153996fd` | tier 3, plus Spring Boot 3 and 4 | 53/54; Spring **2/2** | clean | Latest tier 3 result. `Cache` beans with IAM, a JSON codec and `@Cacheable` on Boot 3.5 and 4. The IAM user without `Connect` permission was still let in: the test IAM policy still needs checking. |
 
 ## What real AWS found
 

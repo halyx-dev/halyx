@@ -22,9 +22,8 @@ import dev.halyx.azure.AzureProvider;
 import dev.halyx.capability.Capabilities;
 import dev.halyx.error.CloudException;
 import dev.halyx.messaging.MessagingCapability;
+import dev.halyx.messaging.spi.AbstractSubscriptionDriver;
 import dev.halyx.messaging.spi.DriverMessage;
-import dev.halyx.messaging.spi.MessagingErrors;
-import dev.halyx.messaging.spi.SubscriptionDriver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,6 +34,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -50,7 +50,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * key) are delivered in order, one consumer at a time. A session is released once it has no messages left
  * and nothing in flight. Lease extension renews the session lock, which covers its messages.
  */
-public final class ServiceBusSessionSubscriptionDriver implements SubscriptionDriver {
+public final class ServiceBusSessionSubscriptionDriver extends AbstractSubscriptionDriver {
 
     private static final Logger LOG = LoggerFactory.getLogger(ServiceBusSessionSubscriptionDriver.class);
     private static final Duration SESSION_POLL = Duration.ofMillis(500);
@@ -77,14 +77,10 @@ public final class ServiceBusSessionSubscriptionDriver implements SubscriptionDr
     private volatile Duration lease = Duration.ofSeconds(30);
 
     public ServiceBusSessionSubscriptionDriver(ServiceBusSessionReceiverClient sessions, String name, int maxSessions) {
+        super(AzureProvider.ID);
         this.sessions = sessions;
         this.name = name;
         this.maxSessions = Math.max(1, maxSessions);
-    }
-
-    @Override
-    public String provider() {
-        return AzureProvider.ID;
     }
 
     @Override
@@ -229,13 +225,13 @@ public final class ServiceBusSessionSubscriptionDriver implements SubscriptionDr
     }
 
     @Override
-    public CloudException translate(Throwable error) {
-        return MessagingErrors.translate(error, AzureProvider.ID, ServiceBusErrors::translate);
+    protected Optional<CloudException> translateNative(Throwable error) {
+        return ServiceBusErrors.translate(error);
     }
 
     @Override
-    public <T> T unwrap(Class<T> nativeType) {
-        return MessagingErrors.unwrap(nativeType, AzureProvider.ID, List.of(sessions));
+    protected List<Object> nativeClients() {
+        return List.of(sessions);
     }
 
     @Override

@@ -21,9 +21,8 @@ import dev.halyx.capability.Capabilities;
 import dev.halyx.error.CloudException;
 import dev.halyx.json.Json;
 import dev.halyx.messaging.MessagingCapability;
+import dev.halyx.messaging.spi.AbstractSubscriptionDriver;
 import dev.halyx.messaging.spi.DriverMessage;
-import dev.halyx.messaging.spi.MessagingErrors;
-import dev.halyx.messaging.spi.SubscriptionDriver;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.DeleteMessageBatchRequestEntry;
 import software.amazon.awssdk.services.sqs.model.Message;
@@ -43,7 +42,7 @@ import java.util.Optional;
  * shortened with ChangeMessageVisibility. Messages an SNS topic delivered without raw message delivery
  * arrive in SNS' JSON envelope, which is unwrapped so the body and attributes match what was published.
  */
-public final class SqsSubscriptionDriver implements SubscriptionDriver {
+public final class SqsSubscriptionDriver extends AbstractSubscriptionDriver {
 
     /** SQS caps visibility at 12 hours. */
     private static final Duration MAX_VISIBILITY = Duration.ofHours(12);
@@ -54,6 +53,7 @@ public final class SqsSubscriptionDriver implements SubscriptionDriver {
     private final Duration lease;
 
     public SqsSubscriptionDriver(SqsClient sqs, String queue) {
+        super(AwsProvider.ID);
         this.sqs = sqs;
         this.queueUrl = resolve(sqs, queue);
         this.fifo = queueUrl.endsWith(".fifo");
@@ -77,11 +77,6 @@ public final class SqsSubscriptionDriver implements SubscriptionDriver {
         } catch (RuntimeException e) {
             throw AwsErrors.translate(e).orElseThrow(() -> e);
         }
-    }
-
-    @Override
-    public String provider() {
-        return AwsProvider.ID;
     }
 
     @Override
@@ -207,12 +202,12 @@ public final class SqsSubscriptionDriver implements SubscriptionDriver {
     }
 
     @Override
-    public CloudException translate(Throwable error) {
-        return MessagingErrors.translate(error, AwsProvider.ID, AwsErrors::translate);
+    protected Optional<CloudException> translateNative(Throwable error) {
+        return AwsErrors.translate(error);
     }
 
     @Override
-    public <T> T unwrap(Class<T> nativeType) {
-        return MessagingErrors.unwrap(nativeType, AwsProvider.ID, List.of(sqs));
+    protected List<Object> nativeClients() {
+        return List.of(sqs);
     }
 }

@@ -17,6 +17,7 @@ package dev.halyx.spring.autoconfigure.config;
 
 import dev.halyx.Halyx;
 import dev.halyx.parameters.ParameterStore;
+import dev.halyx.spring.autoconfigure.HalyxBlobStores;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationContext;
@@ -67,7 +68,12 @@ public class HalyxConfigReloader implements SmartLifecycle {
 
     private void watch(HalyxPropertySource imported) {
         HalyxConfigDataResource resource = imported.resource();
-        ParameterStore store = halyx.provider(resource.providerName()).parameterStore(resource.storeConfig());
+        // The halyx.parameter-stores bean itself, so a change the watch finds also refreshes what the bean reads.
+        ParameterStore store = context.containsBean(resource.storeName())
+                && context.isTypeMatch(resource.storeName(), ParameterStore.class)
+                ? context.getBean(resource.storeName(), ParameterStore.class)
+                : HalyxBlobStores.context(halyx, "halyx.parameter-stores." + resource.storeName(), resource.providerName())
+                        .parameterStore(resource.storeConfig());
         watches.add(store.watch(resource.subPrefix(), resource.reloadInterval().orElseThrow(), changes -> {
             Set<String> keys = imported.replace(HalyxPropertySource.load(store, resource));
             if (!keys.isEmpty()) {

@@ -22,8 +22,7 @@ import dev.halyx.error.CloudException;
 import dev.halyx.error.NotFoundException;
 import dev.halyx.messaging.MessagingCapability;
 import dev.halyx.messaging.OutgoingMessage;
-import dev.halyx.messaging.spi.MessagingErrors;
-import dev.halyx.messaging.spi.PublisherDriver;
+import dev.halyx.messaging.spi.AbstractPublisherDriver;
 import software.amazon.awssdk.services.sns.SnsClient;
 import software.amazon.awssdk.services.sns.model.MessageAttributeValue;
 import software.amazon.awssdk.services.sns.model.PublishBatchRequestEntry;
@@ -32,19 +31,21 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Publishes to an SNS topic, which fans out to its subscribed SQS queues. FIFO topics ({@code .fifo})
  * support ordering keys (message groups) and deduplication ids; standard topics support neither, and SNS
  * has no per-message delay. At most 10 message attributes, including Halyx' own.
  */
-public final class SnsPublisherDriver implements PublisherDriver {
+public final class SnsPublisherDriver extends AbstractPublisherDriver {
 
     private final SnsClient sns;
     private final String topicArn;
     private final boolean fifo;
 
     public SnsPublisherDriver(SnsClient sns, String topic) {
+        super(AwsProvider.ID);
         this.sns = sns;
         this.topicArn = topic.startsWith("arn:") ? topic : resolve(sns, topic);
         this.fifo = topicArn.endsWith(".fifo");
@@ -64,11 +65,6 @@ public final class SnsPublisherDriver implements PublisherDriver {
             throw AwsErrors.translate(e).orElseThrow(() -> e);
         }
         throw new NotFoundException("No SNS topic named " + name, null, AwsProvider.ID, "NotFound");
-    }
-
-    @Override
-    public String provider() {
-        return AwsProvider.ID;
     }
 
     @Override
@@ -124,12 +120,12 @@ public final class SnsPublisherDriver implements PublisherDriver {
     }
 
     @Override
-    public CloudException translate(Throwable error) {
-        return MessagingErrors.translate(error, AwsProvider.ID, AwsErrors::translate);
+    protected Optional<CloudException> translateNative(Throwable error) {
+        return AwsErrors.translate(error);
     }
 
     @Override
-    public <T> T unwrap(Class<T> nativeType) {
-        return MessagingErrors.unwrap(nativeType, AwsProvider.ID, List.of(sns));
+    protected List<Object> nativeClients() {
+        return List.of(sns);
     }
 }

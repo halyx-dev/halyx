@@ -26,16 +26,16 @@ and Azure services.
 
 | Cloud | Tier | Services | Latest result |
 |---|---|---|---|
-| [AWS](aws.md) | 1 | S3, DynamoDB, SSM Parameter Store, Secrets Manager, SNS, SQS, EventBridge; Spring Data repositories, Spring Boot and halyx-reactor | **197/199** passed, 2 skipped (expected); Spring **10/10** |
+| [AWS](aws.md) | 1 | S3, DynamoDB, SSM Parameter Store, Secrets Manager, SNS, SQS, EventBridge; Spring Data repositories, Spring Boot and halyx-reactor | **201/203** passed, 2 skipped (expected); Spring **16/16** |
 | [AWS](aws.md) | 2 | RDS for PostgreSQL and MySQL with IAM auth; R2DBC and Spring Data R2DBC | **16/16**; Spring **2/2** |
-| [AWS](aws.md) | 3 | ElastiCache for Valkey with IAM auth | 52/53: the test IAM policy still needs checking |
-| [GCP](gcp.md) | 1 | Cloud Storage, Firestore, Pub/Sub, Secret Manager, Parameter Manager, Eventarc Advanced; Spring Data repositories, Spring Boot and halyx-reactor | **202/206** passed, 4 skipped (expected); Spring **10/10** |
+| [AWS](aws.md) | 3 | ElastiCache for Valkey with IAM auth; Spring Boot cache beans and `@Cacheable` | 53/54: the test IAM policy still needs checking; Spring **2/2** |
+| [GCP](gcp.md) | 1 | Cloud Storage, Firestore, Pub/Sub, Secret Manager, Parameter Manager, Eventarc Advanced; Spring Data repositories, Spring Boot and halyx-reactor | **205/209** passed, 4 skipped (expected); Spring **16/16** |
 | [GCP](gcp.md) | 2 | Cloud SQL for PostgreSQL and MySQL with IAM auth, direct and through the Cloud SQL connector; R2DBC and Spring Data R2DBC | **22/22**; Spring **2/2** |
-| [GCP](gcp.md) | 3 | Memorystore for Valkey with IAM auth and TLS (private CA) | **54/54** |
+| [GCP](gcp.md) | 3 | Memorystore for Valkey with IAM auth and TLS (private CA); Spring Boot cache beans and `@Cacheable` | **55/55**; Spring **2/2** |
 | [GCP](gcp.md) | 4 | Managed Service for Apache Kafka with Google IAM, plus Spring Boot 3 and 4 | **25/25**; Spring **2/2** |
-| [Azure](azure.md) | 1 | Blob Storage, Cosmos DB, Service Bus, Key Vault, App Configuration, Event Grid namespaces (Entra ID only); Spring Data repositories, Spring Boot and halyx-reactor | **183/185** passed, 2 skipped (expected); Spring **10/10** |
+| [Azure](azure.md) | 1 | Blob Storage, Cosmos DB, Service Bus, Key Vault, App Configuration, Event Grid namespaces (Entra ID only); Spring Data repositories, Spring Boot and halyx-reactor | **185/187** passed, 2 skipped (expected); Spring **16/16** |
 | [Azure](azure.md) | 2 | Azure Database for PostgreSQL and Azure SQL with Entra ID login; R2DBC and Spring Data R2DBC | **13/13**; Spring **2/2** |
-| [Azure](azure.md) | 3 | Azure Managed Redis with Entra ID (access keys off) | **52/52** |
+| [Azure](azure.md) | 3 | Azure Managed Redis with Entra ID (access keys off); Spring Boot cache beans and `@Cacheable` | **53/53**; Spring **2/2** |
 | [Azure](azure.md) | 4 | Event Hubs through its Kafka endpoint, with Entra ID (shared access keys off), plus Spring Boot 3 and 4 | **24/25** passed, 1 skipped (expected); Spring **2/2** |
 
 The skipped tests are features a service doesn't offer, such as per-message delays on SNS or Pub/Sub,
@@ -48,9 +48,9 @@ to create, and by how they are reached.
 
 | Tier | What | Kits and tests | Reached through |
 |---|---|---|---|
-| **1** | Serverless services: object storage, document stores, messaging, parameters and secrets | the blob, document store, document repository, messaging and parameter store conformance kits, about 170 to 190 tests per cloud, then Spring Boot 3 and 4 with an auto-configured repository | public service endpoints |
+| **1** | Serverless services: object storage, document stores, messaging, parameters and secrets | the blob, document store, document repository, messaging and parameter store conformance kits, about 170 to 190 tests per cloud, then Spring Boot 3 and 4: an auto-configured repository, events, reactive beans, `@HalyxListener` with a claim check, and `spring.config.import` with reload | public service endpoints |
 | **2** | Managed SQL databases with IAM or Entra ID login | password and token logins over JDBC and R2DBC, TLS checked on the server side, pooled connections re-logging in with fresh tokens, rejected logins, login latency, then Spring Data R2DBC on Spring Boot 3 and 4 | a public endpoint restricted to the test machine's address |
-| **3** | Managed Redis and Valkey caches with IAM or Entra ID login | the cache conformance kit (49 tests) plus TLS and authentication checks | a bastion and SSH tunnel where the cache is VPC-only (ElastiCache, Memorystore), the public endpoint otherwise (Azure Managed Redis) |
+| **3** | Managed Redis and Valkey caches with IAM or Entra ID login | the cache conformance kit (50 tests) plus TLS and authentication checks, then Spring Boot 3 and 4: `Cache` beans and `@Cacheable` | a bastion and SSH tunnel where the cache is VPC-only (ElastiCache, Memorystore), the public endpoint otherwise (Azure Managed Redis) |
 | **4** | Streams on managed Kafka with IAM or Entra ID login | the stream conformance kit (25 tests), then Spring Boot 3 and 4: the starter's stream beans, and Spring for Apache Kafka through Halyx' login | the public Kafka endpoint (Event Hubs); a runner VM inside the VPC where the cluster is private only (Managed Service for Apache Kafka, MSK), since Kafka clients connect to each broker by name and a tunnel can't follow |
 
 The conformance kits are the same ones the emulator builds run. A real-cloud run doesn't relax them. Where

@@ -21,7 +21,6 @@ import dev.halyx.error.CloudException;
 import dev.halyx.error.NotFoundException;
 import dev.halyx.error.PreconditionFailedException;
 import dev.halyx.error.ThrottledException;
-import dev.halyx.error.UnknownCloudException;
 import dev.halyx.json.Json;
 import dev.halyx.nosql.Document;
 import dev.halyx.nosql.DocumentUpdate;
@@ -34,7 +33,7 @@ import dev.halyx.nosql.QueryPage;
 import dev.halyx.nosql.SortCondition;
 import dev.halyx.nosql.TableConfig;
 import dev.halyx.nosql.Version;
-import dev.halyx.nosql.spi.DocumentStoreDriver;
+import dev.halyx.nosql.spi.AbstractDocumentStoreDriver;
 import dev.halyx.nosql.spi.TransactionWrite;
 import dev.halyx.nosql.spi.WriteCondition;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
@@ -66,7 +65,7 @@ import java.util.UUID;
  * unless {@code aws.dynamodb.ttl-attribute} says otherwise): enable DynamoDB TTL on that attribute to have
  * expired items deleted. Reads and queries are strongly consistent.
  */
-public final class DynamoDocumentStoreDriver implements DocumentStoreDriver {
+public final class DynamoDocumentStoreDriver extends AbstractDocumentStoreDriver {
 
     static final String VERSION = "halyx_version";
     static final String DEFAULT_TTL_ATTRIBUTE = "halyx_expires";
@@ -77,14 +76,10 @@ public final class DynamoDocumentStoreDriver implements DocumentStoreDriver {
     private final String ttl;
 
     public DynamoDocumentStoreDriver(DynamoDbClient dynamo, TableConfig table) {
+        super(AwsProvider.ID);
         this.dynamo = dynamo;
         this.table = table;
         this.ttl = table.property(TTL_ATTRIBUTE).orElse(DEFAULT_TTL_ATTRIBUTE);
-    }
-
-    @Override
-    public String provider() {
-        return AwsProvider.ID;
     }
 
     @Override
@@ -482,18 +477,12 @@ public final class DynamoDocumentStoreDriver implements DocumentStoreDriver {
     }
 
     @Override
-    public CloudException translate(Throwable error) {
-        if (error instanceof CloudException c) {
-            return c;
-        }
-        return AwsErrors.translate(error).orElseGet(() -> new UnknownCloudException(error.getMessage(), error, AwsProvider.ID, null));
+    protected Optional<CloudException> translateNative(Throwable error) {
+        return AwsErrors.translate(error);
     }
 
     @Override
-    public <T> T unwrap(Class<T> nativeType) {
-        if (nativeType.isInstance(dynamo)) {
-            return nativeType.cast(dynamo);
-        }
-        throw new IllegalArgumentException("No native client of type " + nativeType.getName());
+    protected List<Object> nativeClients() {
+        return List.of(dynamo);
     }
 }

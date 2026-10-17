@@ -22,8 +22,6 @@ import org.springframework.boot.actuate.health.Health;
 /** UP when the store answers an authenticated read (of a probe name that need not exist). */
 public class ActuatorParameterStoreHealthIndicator extends AbstractHealthIndicator {
 
-    private static final String PROBE = "halyx-health-probe";
-
     private final ParameterStore store;
 
     public ActuatorParameterStoreHealthIndicator(ParameterStore store) {
@@ -34,7 +32,7 @@ public class ActuatorParameterStoreHealthIndicator extends AbstractHealthIndicat
     @Override
     protected void doHealthCheck(Health.Builder builder) {
         builder.withDetail("provider", store.provider()).withDetail("kind", store.kind().name().toLowerCase());
-        store.get(PROBE);
+        store.ping(); // past the read cache, so an outage shows at once
         builder.up();
     }
 }

@@ -49,7 +49,9 @@ public class HalyxReactiveRepositoryFactoryBean<R extends Repository<T, ID>, T, 
     protected RepositoryFactorySupport createRepositoryFactory() {
         ReactiveHalyx reactive = beans.getBeanProvider(ReactiveHalyx.class).getIfAvailable(() -> {
             throw new IllegalStateException("Reactive Halyx repositories need a ReactiveHalyx bean: Spring Boot "
-                    + "makes one with halyx-reactor on the classpath; otherwise declare ReactiveHalyx.of(halyx, scheduler)");
+                    + "makes one with halyx-reactor on the classpath, unless halyx.reactor.enabled=false (then turn the "
+                    + "repositories off too, with halyx.document-repositories.enabled=false); without Boot, declare "
+                    + "ReactiveHalyx.of(halyx, scheduler)");
         });
         return new HalyxReactiveRepositoryFactory(entity -> DocumentStores.forEntity(beans, entity), reactive);
     }

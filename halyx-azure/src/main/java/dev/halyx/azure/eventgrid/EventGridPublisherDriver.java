@@ -19,20 +19,20 @@ import com.azure.messaging.eventgrid.namespaces.EventGridSenderClient;
 import dev.halyx.azure.AzureErrors;
 import dev.halyx.azure.AzureProvider;
 import dev.halyx.error.CloudException;
-import dev.halyx.error.UnknownCloudException;
 import dev.halyx.events.CloudEvent;
 import dev.halyx.events.CloudEvents;
-import dev.halyx.events.spi.EventPublisherDriver;
+import dev.halyx.events.spi.AbstractEventPublisherDriver;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Publishes to an Event Grid namespace topic, natively in CloudEvents. Its subscriptions deliver the events, by
  * pull ({@link EventGridSubscriptionDriver}) or push.
  */
-public final class EventGridPublisherDriver implements EventPublisherDriver {
+public final class EventGridPublisherDriver extends AbstractEventPublisherDriver {
 
     /** Event Grid takes 1 MB per request and per event; the rest of the request needs some room. */
     static final long MAX_REQUEST_BYTES = 1024 * 1024;
@@ -42,13 +42,9 @@ public final class EventGridPublisherDriver implements EventPublisherDriver {
     private final String topic;
 
     public EventGridPublisherDriver(EventGridSenderClient client, String topic) {
+        super(AzureProvider.ID);
         this.client = client;
         this.topic = topic;
-    }
-
-    @Override
-    public String provider() {
-        return AzureProvider.ID;
     }
 
     @Override
@@ -86,19 +82,12 @@ public final class EventGridPublisherDriver implements EventPublisherDriver {
     }
 
     @Override
-    public CloudException translate(Throwable error) {
-        if (error instanceof CloudException cloud) {
-            return cloud;
-        }
-        return AzureErrors.translate(error).orElseGet(() -> new UnknownCloudException(error.getMessage(), error,
-                AzureProvider.ID, null));
+    protected Optional<CloudException> translateNative(Throwable error) {
+        return AzureErrors.translate(error);
     }
 
     @Override
-    public <T> T unwrap(Class<T> nativeType) {
-        if (nativeType.isInstance(client)) {
-            return nativeType.cast(client);
-        }
-        throw new IllegalArgumentException("Event Grid publishers unwrap to EventGridSenderClient, not " + nativeType.getName());
+    protected List<Object> nativeClients() {
+        return List.of(client);
     }
 }

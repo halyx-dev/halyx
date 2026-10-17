@@ -25,21 +25,21 @@ import dev.halyx.error.CloudException;
 import dev.halyx.gcp.GcpErrors;
 import dev.halyx.gcp.GcpProvider;
 import dev.halyx.messaging.MessagingCapability;
+import dev.halyx.messaging.spi.AbstractSubscriptionDriver;
 import dev.halyx.messaging.spi.DriverMessage;
-import dev.halyx.messaging.spi.MessagingErrors;
-import dev.halyx.messaging.spi.SubscriptionDriver;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Pulls from a Pub/Sub subscription. The lease is the subscription's ack deadline; nacks and extensions
  * set a new deadline with ModifyAckDeadline (a nack with a delay redelivers after it). The delivery attempt
  * is only reported when the subscription has a dead-letter policy, and is 0 otherwise.
  */
-public final class PubSubSubscriptionDriver implements SubscriptionDriver {
+public final class PubSubSubscriptionDriver extends AbstractSubscriptionDriver {
 
     /** Pub/Sub ack deadlines are at most 10 minutes. */
     private static final Duration MAX_DEADLINE = Duration.ofMinutes(10);
@@ -49,6 +49,7 @@ public final class PubSubSubscriptionDriver implements SubscriptionDriver {
     private final Duration lease;
 
     public PubSubSubscriptionDriver(SubscriptionAdminClient client, String subscription) {
+        super(GcpProvider.ID);
         this.client = client;
         this.subscription = subscription;
         int deadline;
@@ -58,11 +59,6 @@ public final class PubSubSubscriptionDriver implements SubscriptionDriver {
             throw GcpErrors.translate(e).orElseThrow(() -> e);
         }
         this.lease = Duration.ofSeconds(deadline > 0 ? deadline : 10);
-    }
-
-    @Override
-    public String provider() {
-        return GcpProvider.ID;
     }
 
     @Override
@@ -141,12 +137,12 @@ public final class PubSubSubscriptionDriver implements SubscriptionDriver {
     }
 
     @Override
-    public CloudException translate(Throwable error) {
-        return MessagingErrors.translate(error, GcpProvider.ID, GcpErrors::translate);
+    protected Optional<CloudException> translateNative(Throwable error) {
+        return GcpErrors.translate(error);
     }
 
     @Override
-    public <T> T unwrap(Class<T> nativeType) {
-        return MessagingErrors.unwrap(nativeType, GcpProvider.ID, List.of(client));
+    protected List<Object> nativeClients() {
+        return List.of(client);
     }
 }

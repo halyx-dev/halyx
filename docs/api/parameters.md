@@ -45,7 +45,7 @@ carries the `name`, `value`, `version` and `lastModified` time.
 | `ParameterStoreConfig` | Meaning |
 |---|---|
 | `prefix(...)` | a namespace for every name the store reads and writes |
-| `cacheTtl(duration)` | cache reads for this long; `refresh()` clears the cache |
+| `cacheTtl(duration)` | cache reads for this long; `refresh()` clears the cache. `ping()` always reads from the backend, for health checks |
 | `location(...)` | the Key Vault URL, the App Configuration endpoint, the Parameter Manager location, or the Vault KV mount (`secret` by default) |
 | `nativeNames(true)` | use the backend's own names as they are (see [native names](#native-names)) |
 | `property(name, value)` | backend settings such as `aws.ssm.secure`, `azure.appconfig.label` or `gcp.parametermanager.render` |

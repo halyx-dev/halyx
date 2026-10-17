@@ -49,7 +49,8 @@ public @interface HalyxListener {
 
     /**
      * Messages handled at once; overrides {@code halyx.subscriptions.<name>.listener.concurrency} when positive.
-     * Not used for stream consumers, which handle each partition in order.
+     * Subscriptions only: setting it on a stream consumer fails at startup, since a stream consumer handles each
+     * partition in order.
      */
     int concurrency() default -1;
 }

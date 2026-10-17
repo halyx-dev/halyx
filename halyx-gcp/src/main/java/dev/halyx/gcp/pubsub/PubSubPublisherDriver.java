@@ -24,32 +24,28 @@ import dev.halyx.gcp.GcpErrors;
 import dev.halyx.gcp.GcpProvider;
 import dev.halyx.messaging.MessagingCapability;
 import dev.halyx.messaging.OutgoingMessage;
-import dev.halyx.messaging.spi.MessagingErrors;
-import dev.halyx.messaging.spi.PublisherDriver;
+import dev.halyx.messaging.spi.AbstractPublisherDriver;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Publishes to a Pub/Sub topic with synchronous batch requests, so messages sharing an ordering key keep
  * their order within and across calls from one publisher. Ordering keys need a subscription with message
  * ordering enabled; Pub/Sub has no publish-time deduplication or delay.
  */
-public final class PubSubPublisherDriver implements PublisherDriver {
+public final class PubSubPublisherDriver extends AbstractPublisherDriver {
 
     private final TopicAdminClient client;
     private final String topic;
 
     public PubSubPublisherDriver(TopicAdminClient client, String topic) {
+        super(GcpProvider.ID);
         this.client = client;
         this.topic = topic;
-    }
-
-    @Override
-    public String provider() {
-        return GcpProvider.ID;
     }
 
     @Override
@@ -103,12 +99,12 @@ public final class PubSubPublisherDriver implements PublisherDriver {
     }
 
     @Override
-    public CloudException translate(Throwable error) {
-        return MessagingErrors.translate(error, GcpProvider.ID, GcpErrors::translate);
+    protected Optional<CloudException> translateNative(Throwable error) {
+        return GcpErrors.translate(error);
     }
 
     @Override
-    public <T> T unwrap(Class<T> nativeType) {
-        return MessagingErrors.unwrap(nativeType, GcpProvider.ID, List.of(client));
+    protected List<Object> nativeClients() {
+        return List.of(client);
     }
 }

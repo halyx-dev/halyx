@@ -18,6 +18,7 @@ package dev.halyx.spring.autoconfigure;
 import dev.halyx.Halyx;
 import dev.halyx.interceptor.Interceptor;
 import dev.halyx.interceptor.RetryInterceptor;
+import org.springframework.beans.factory.BeanFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -71,6 +72,12 @@ public class HalyxAutoConfiguration {
         return new HalyxConfigReloader(environment, halyx, context);
     }
 
+    /** Types {@code halyx.caches} beans by their {@code Codec} bean's value type; static, as a post-processor must be. */
+    @Bean
+    static CacheCodecTypes halyxCacheCodecTypes() {
+        return new CacheCodecTypes();
+    }
+
     /** Runs {@code @HalyxListener} methods; static, as a post-processor must be. */
     @Bean
     @ConditionalOnMissingBean
@@ -82,7 +89,7 @@ public class HalyxAutoConfiguration {
 
     @Bean(BlobStoreBeanRegistrar.FACTORY_BEAN)
     @ConditionalOnMissingBean
-    public HalyxBlobStores halyxBlobStores(Halyx halyx) {
-        return new HalyxBlobStores(halyx);
+    public HalyxBlobStores halyxBlobStores(Halyx halyx, BeanFactory beans) {
+        return new HalyxBlobStores(halyx, beans);
     }
 }

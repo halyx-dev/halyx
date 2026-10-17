@@ -166,6 +166,19 @@ resource "google_eventarc_enrollment" "events" {
   cel_match     = "true"
 }
 
+# --- Messaging for the Spring Boot test ---------------------------------------------------------------
+
+resource "google_pubsub_topic" "spring" {
+  name = "halyx-${var.run_id}-spring"
+}
+
+resource "google_pubsub_subscription" "spring" {
+  name                       = "halyx-${var.run_id}-spring"
+  topic                      = google_pubsub_topic.spring.id
+  ack_deadline_seconds       = 20
+  message_retention_duration = "3600s"
+}
+
 output "bucket" {
   value = google_storage_bucket.blobs.name
 }
@@ -180,4 +193,12 @@ output "message_bus" {
 
 output "events_inbox" {
   value = google_pubsub_subscription.events_inbox.name
+}
+
+output "spring_topic" {
+  value = google_pubsub_topic.spring.name
+}
+
+output "spring_subscription" {
+  value = google_pubsub_subscription.spring.name
 }

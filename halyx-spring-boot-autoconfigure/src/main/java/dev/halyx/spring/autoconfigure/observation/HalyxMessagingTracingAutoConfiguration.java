@@ -15,17 +15,20 @@
  */
 package dev.halyx.spring.autoconfigure.observation;
 
-import io.micrometer.tracing.Tracer;
-import io.micrometer.tracing.propagation.Propagator;
+import dev.halyx.events.EventPublisher;
 import dev.halyx.messaging.Publisher;
+import dev.halyx.micrometer.HalyxTracing;
+import dev.halyx.micrometer.TracingEventPublisher;
+import dev.halyx.micrometer.TracingPublisher;
+import dev.halyx.micrometer.TracingStreamProducer;
 import dev.halyx.spring.autoconfigure.HalyxAutoConfiguration;
 import dev.halyx.spring.messaging.MessageListenerDecorator;
 import dev.halyx.spring.messaging.TracingListenerDecorator;
-import dev.halyx.spring.messaging.TracingPublisher;
 import dev.halyx.spring.stream.RecordListenerDecorator;
 import dev.halyx.spring.stream.TracingRecordListenerDecorator;
-import dev.halyx.spring.stream.TracingStreamProducer;
 import dev.halyx.stream.StreamProducer;
+import io.micrometer.tracing.Tracer;
+import io.micrometer.tracing.propagation.Propagator;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -35,15 +38,16 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 
 /**
- * Carries trace context through messages and stream records when the application uses Micrometer Tracing:
- * publishers and stream producers add it to attributes and headers, and {@code @HalyxListener} methods continue it. Disable with
+ * Carries trace context through messages, events and stream records when the application uses Micrometer Tracing:
+ * publishers, event publishers and stream producers add it to attributes, extensions and headers, and
+ * {@code @HalyxListener} methods continue it, all through {@link HalyxTracing}. Disable with
  * {@code halyx.observations.enabled=false}.
  */
 @AutoConfiguration(after = HalyxAutoConfiguration.class, afterName = {
         "org.springframework.boot.actuate.autoconfigure.tracing.MicrometerTracingAutoConfiguration", // Boot 3
         "org.springframework.boot.micrometer.tracing.autoconfigure.MicrometerTracingAutoConfiguration" // Boot 4
 })
-@ConditionalOnClass({Tracer.class, Publisher.class})
+@ConditionalOnClass({Tracer.class, Publisher.class, HalyxTracing.class})
 @ConditionalOnBean({Tracer.class, Propagator.class})
 @ConditionalOnProperty(prefix = "halyx.observations", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class HalyxMessagingTracingAutoConfiguration {
@@ -58,40 +62,33 @@ public class HalyxMessagingTracingAutoConfiguration {
         return new TracingRecordListenerDecorator(tracer, propagator);
     }
 
-    /** Wraps every {@code StreamProducer} bean; the tracer is looked up when the first producer is created. */
+    /**
+     * Wraps every {@code Publisher}, {@code EventPublisher} and {@code StreamProducer} bean; the tracer is looked up
+     * when the first of them is created.
+     */
     @Bean
-    public static BeanPostProcessor halyxTracingStreamProducerPostProcessor(ObjectProvider<Tracer> tracer,
-                                                                            ObjectProvider<Propagator> propagator) {
+    public static BeanPostProcessor halyxTracingPostProcessor(ObjectProvider<Tracer> tracer,
+                                                              ObjectProvider<Propagator> propagator) {
         return new BeanPostProcessor() {
             @Override
             public Object postProcessAfterInitialization(Object bean, String beanName) {
-                if (bean instanceof StreamProducer producer && !(bean instanceof TracingStreamProducer)) {
-                    Tracer t = tracer.getIfAvailable();
-                    Propagator p = propagator.getIfAvailable();
-                    if (t != null && p != null) {
-                        return new TracingStreamProducer(producer, t, p);
-                    }
+                if (!(bean instanceof Publisher || bean instanceof EventPublisher || bean instanceof StreamProducer)
+                        || bean instanceof TracingPublisher || bean instanceof TracingEventPublisher
+                        || bean instanceof TracingStreamProducer) {
+                    return bean;
                 }
-                return bean;
-            }
-        };
-    }
-
-    /** Wraps every {@code Publisher} bean; the tracer is looked up when the first publisher is created. */
-    @Bean
-    public static BeanPostProcessor halyxTracingPublisherPostProcessor(ObjectProvider<Tracer> tracer,
-                                                                        ObjectProvider<Propagator> propagator) {
-        return new BeanPostProcessor() {
-            @Override
-            public Object postProcessAfterInitialization(Object bean, String beanName) {
-                if (bean instanceof Publisher publisher && !(bean instanceof TracingPublisher)) {
-                    Tracer t = tracer.getIfAvailable();
-                    Propagator p = propagator.getIfAvailable();
-                    if (t != null && p != null) {
-                        return new TracingPublisher(publisher, t, p);
-                    }
+                Tracer t = tracer.getIfAvailable();
+                Propagator p = propagator.getIfAvailable();
+                if (t == null || p == null) {
+                    return bean;
                 }
-                return bean;
+                HalyxTracing tracing = new HalyxTracing(t, p);
+                return switch (bean) {
+                    case Publisher publisher -> tracing.publisher(publisher);
+                    case EventPublisher publisher -> tracing.eventPublisher(publisher);
+                    case StreamProducer producer -> tracing.streamProducer(producer);
+                    default -> bean;
+                };
             }
         };
     }

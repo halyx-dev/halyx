@@ -18,6 +18,7 @@ package dev.halyx.spring.autoconfigure.cache;
 import dev.halyx.Halyx;
 import dev.halyx.cache.Codec;
 import dev.halyx.spring.autoconfigure.HalyxAutoConfiguration;
+import dev.halyx.spring.autoconfigure.HalyxBlobStores;
 import dev.halyx.spring.autoconfigure.HalyxProperties;
 import org.springframework.beans.factory.BeanFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -57,14 +58,7 @@ public class HalyxCacheManagerAutoConfiguration {
     public HalyxCacheManager cacheManager(Halyx halyx, HalyxProperties properties,
                                             ObjectProvider<Codec<Object>> codec, BeanFactory beans) {
         var manager = properties.cacheManager();
-        String provider = manager.provider();
-        if (provider == null) {
-            if (properties.providers().size() != 1) {
-                throw new IllegalStateException("halyx.cache-manager.provider is required when "
-                        + properties.providers().size() + " providers are configured " + properties.providers().keySet());
-            }
-            provider = properties.providers().keySet().iterator().next();
-        }
+        String provider = HalyxBlobStores.context(halyx, "halyx.cache-manager", manager.provider()).name();
         Codec<Object> valueCodec = codec.getIfAvailable(() -> {
             throw new IllegalStateException("halyx.cache-manager.codec=json needs Jackson (3 on Boot 4, 2 on Boot 3) "
                     + "on the classpath");

@@ -100,6 +100,23 @@ public final class CacheConfig {
         return properties;
     }
 
+    /** Configurations with the same settings are equal, so contexts can share one client per configuration. */
+    @Override
+    public boolean equals(Object o) {
+        return o instanceof CacheConfig other && Objects.equals(endpoint, other.endpoint)
+                && Objects.equals(namespace, other.namespace)
+                && Objects.equals(defaultTtl, other.defaultTtl)
+                && cluster == other.cluster
+                && Objects.equals(auth, other.auth)
+                && failOpen == other.failOpen
+                && Objects.equals(properties, other.properties);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(endpoint, namespace, defaultTtl, cluster, auth, failOpen, properties);
+    }
+
     @Override
     public String toString() {
         return "CacheConfig[endpoint=" + endpoint + ", namespace=" + namespace + ", cluster=" + cluster

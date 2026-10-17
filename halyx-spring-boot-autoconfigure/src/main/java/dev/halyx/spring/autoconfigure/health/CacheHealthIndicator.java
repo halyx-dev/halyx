@@ -22,8 +22,6 @@ import org.springframework.boot.health.contributor.Health;
 /** UP when the cache server answers an authenticated command. */
 public class CacheHealthIndicator extends AbstractHealthIndicator {
 
-    private static final String PROBE_KEY = "halyx:health-probe";
-
     private final Cache<?> cache;
 
     public CacheHealthIndicator(Cache<?> cache) {
@@ -34,7 +32,7 @@ public class CacheHealthIndicator extends AbstractHealthIndicator {
     @Override
     protected void doHealthCheck(Health.Builder builder) {
         builder.withDetail("provider", cache.provider()).withDetail("namespace", cache.namespace());
-        cache.exists(PROBE_KEY);
+        cache.ping(); // fails on an outage even when the cache is fail-open
         builder.up();
     }
 }

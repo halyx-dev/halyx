@@ -41,7 +41,8 @@ import java.util.TreeMap;
 
 /**
  * Spring Boot 3 ({@code org.springframework.boot.actuate.health}): a {@code halyx} health
- * contributor with one entry per {@link BlobStore} and {@link Cache} bean. Boot 4 removed that package, so on Boot 4
+ * contributor with one entry per blob store, cache, parameter store, document store and stream producer bean,
+ * plus the {@code messaging} and {@code streams} listeners. Boot 4 removed that package, so on Boot 4
  * this stays inactive and {@code health.HalyxHealthContributorAutoConfiguration} applies instead.
  * Disable with {@code management.health.halyx.enabled=false}.
  */
@@ -67,11 +68,21 @@ public class HalyxActuatorHealthContributorAutoConfiguration {
         documentStores.forEach((name, store) -> contributors.put(name, new ActuatorDocumentStoreHealthIndicator(store)));
         streamProducers.forEach((name, producer) -> contributors.put(name, new ActuatorStreamProducerHealthIndicator(producer)));
         if (!streamConsumers.isEmpty()) {
-            listeners.ifAvailable(registrar -> contributors.put("streams", new ActuatorStreamListenersHealthIndicator(registrar)));
+            listeners.ifAvailable(registrar -> putListenerEntry(contributors, "streams", new ActuatorStreamListenersHealthIndicator(registrar)));
         }
         if (!subscriptions.isEmpty()) {
-            listeners.ifAvailable(registrar -> contributors.put("messaging", new ActuatorMessageConsumersHealthIndicator(registrar)));
+            listeners.ifAvailable(registrar -> putListenerEntry(contributors, "messaging", new ActuatorMessageConsumersHealthIndicator(registrar)));
         }
         return CompositeHealthContributor.fromMap(contributors);
+    }
+
+    /** The listener entries share the contributor with the beans, so a bean of the same name would hide one. */
+    private static void putListenerEntry(Map<String, HealthContributor> contributors, String name,
+                                         HealthContributor indicator) {
+        if (contributors.containsKey(name)) {
+            throw new IllegalStateException("The Halyx bean '" + name + "' clashes with the halyx health entry of the "
+                    + "same name, which reports the " + name + " listeners: rename the bean");
+        }
+        contributors.put(name, indicator);
     }
 }

@@ -50,6 +50,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Supplier;
 
 /**
  * Finds {@link HalyxListener} methods and runs a consumer for each while the application runs. Consumers
@@ -109,47 +110,84 @@ public class HalyxListenerRegistrar implements BeanPostProcessor, SmartLifecycle
 
     @Override
     public void start() {
+        List<Supplier<AutoCloseable>> starts = new ArrayList<>();
         synchronized (endpoints) {
+            // Check every listener before starting any, so a mistake starts nothing.
+            Map<String, List<Endpoint>> perStreamConsumer = new LinkedHashMap<>();
             for (Endpoint endpoint : endpoints) {
                 if (isStream(endpoint)) {
-                    startStream(endpoint);
-                    continue;
+                    perStreamConsumer.computeIfAbsent(endpoint.subscription(), k -> new ArrayList<>()).add(endpoint);
+                    starts.add(prepareStream(endpoint));
+                } else {
+                    starts.add(prepareSubscription(endpoint));
                 }
-                if (endpoint.method().getParameterTypes()[0] == ReceivedRecord.class) {
-                    throw new IllegalStateException("@HalyxListener(\"" + endpoint.subscription() + "\") on "
-                            + endpoint.method() + " takes a ReceivedRecord but refers to no stream consumer; configure "
-                            + "halyx.stream-consumers." + endpoint.subscription());
-                }
-                Subscription subscription;
-                try {
-                    subscription = beanFactory.getBean(endpoint.subscription(), Subscription.class);
-                } catch (NoSuchBeanDefinitionException e) {
-                    throw new IllegalStateException("@HalyxListener(\"" + endpoint.subscription() + "\") on "
-                            + endpoint.method() + " refers to no subscription or stream consumer; configure halyx.subscriptions."
-                            + endpoint.subscription() + " or halyx.stream-consumers." + endpoint.subscription(), e);
-                }
-                HalyxProperties bound = properties.getIfAvailable();
-                var config = bound == null ? null : bound.subscriptions().get(endpoint.subscription());
-                ConsumerOptions options = config == null
-                        ? (endpoint.concurrency() > 0 ? ConsumerOptions.DEFAULTS.withConcurrency(endpoint.concurrency())
-                        : ConsumerOptions.DEFAULTS)
-                        : config.listener().toConsumerOptions(endpoint.concurrency());
-                MessageListener listener = message -> invoke(endpoint, message);
-                for (MessageListenerDecorator decorator : decorators.orderedStream().toList()) {
-                    listener = decorator.decorate(endpoint.subscription(), listener);
-                }
-                consumers.put(endpoint.key(), subscription.listen(listener, options));
             }
+            perStreamConsumer.forEach((consumer, listeners) -> {
+                if (listeners.size() > 1) {
+                    throw new IllegalStateException("Stream consumer '" + consumer + "' has " + listeners.size()
+                            + " @HalyxListener methods " + listeners.stream().map(Endpoint::key).toList() + ", but a "
+                            + "stream consumer is one consumer group member and runs one listener; configure another "
+                            + "halyx.stream-consumers entry, with its own group, for each further listener");
+                }
+            });
+        }
+        List<AutoCloseable> started = new ArrayList<>();
+        try {
+            for (Supplier<AutoCloseable> start : starts) {
+                started.add(start.get());
+            }
+        } catch (RuntimeException e) {
+            closeAll(started);
+            consumers.clear();
+            streamListeners.clear();
+            throw e;
         }
         running = true;
     }
 
-    private void startStream(Endpoint endpoint) {
+    private Supplier<AutoCloseable> prepareSubscription(Endpoint endpoint) {
+        if (endpoint.method().getParameterTypes()[0] == ReceivedRecord.class) {
+            throw new IllegalStateException("@HalyxListener(\"" + endpoint.subscription() + "\") on "
+                    + endpoint.method() + " takes a ReceivedRecord but refers to no stream consumer; configure "
+                    + "halyx.stream-consumers." + endpoint.subscription());
+        }
+        Subscription subscription;
+        try {
+            subscription = beanFactory.getBean(endpoint.subscription(), Subscription.class);
+        } catch (NoSuchBeanDefinitionException e) {
+            throw new IllegalStateException("@HalyxListener(\"" + endpoint.subscription() + "\") on "
+                    + endpoint.method() + " refers to no subscription or stream consumer; configure halyx.subscriptions."
+                    + endpoint.subscription() + " or halyx.stream-consumers." + endpoint.subscription(), e);
+        }
+        HalyxProperties bound = properties.getIfAvailable();
+        var config = bound == null ? null : bound.subscriptions().get(endpoint.subscription());
+        ConsumerOptions options = config == null
+                ? (endpoint.concurrency() > 0 ? ConsumerOptions.DEFAULTS.withConcurrency(endpoint.concurrency())
+                : ConsumerOptions.DEFAULTS)
+                : config.listener().toConsumerOptions(endpoint.concurrency());
+        MessageListener listener = message -> invoke(endpoint, message);
+        for (MessageListenerDecorator decorator : decorators.orderedStream().toList()) {
+            listener = decorator.decorate(endpoint.subscription(), listener);
+        }
+        MessageListener decorated = listener;
+        return () -> {
+            MessageConsumer consumer = subscription.listen(decorated, options);
+            consumers.put(endpoint.key(), consumer);
+            return consumer;
+        };
+    }
+
+    private Supplier<AutoCloseable> prepareStream(Endpoint endpoint) {
         String name = endpoint.subscription();
         Class<?> parameter = endpoint.method().getParameterTypes()[0];
         if (parameter == ReceivedMessage.class || parameter == CloudEvent.class) {
             throw new IllegalStateException("@HalyxListener(\"" + name + "\") on " + endpoint.method()
                     + " refers to a stream consumer, whose methods take a ReceivedRecord, String or byte[]");
+        }
+        if (endpoint.concurrency() > 0) {
+            throw new IllegalStateException("@HalyxListener(\"" + name + "\") on " + endpoint.method()
+                    + " sets concurrency, which only subscriptions have: a stream consumer runs each partition's "
+                    + "records in order, one at a time, so its parallelism is its partitions and group members");
         }
         StreamConsumer consumer = beanFactory.getBean(name, StreamConsumer.class);
         HalyxProperties bound = properties.getIfAvailable();
@@ -171,7 +209,13 @@ public class HalyxListenerRegistrar implements BeanPostProcessor, SmartLifecycle
         for (RecordListenerDecorator decorator : recordDecorators.orderedStream().toList()) {
             listener = decorator.decorate(name, listener);
         }
-        streamListeners.put(endpoint.key(), consumer.listen(listener, options));
+        RecordListener decorated = listener;
+        ListenerOptions resolved = options;
+        return () -> {
+            StreamListener running = consumer.listen(decorated, resolved);
+            streamListeners.put(endpoint.key(), running);
+            return running;
+        };
     }
 
     private static void invoke(Endpoint endpoint, ReceivedMessage message) throws Exception {
@@ -215,7 +259,11 @@ public class HalyxListenerRegistrar implements BeanPostProcessor, SmartLifecycle
             toClose.addAll(streamListeners.values());
             streamListeners.clear();
         }
-        // Close in parallel: each waits for its own running handlers.
+        closeAll(toClose);
+    }
+
+    /** Closes in parallel: each waits for its own running handlers. */
+    private static void closeAll(List<AutoCloseable> toClose) {
         List<Thread> closing = new ArrayList<>();
         for (AutoCloseable consumer : toClose) {
             closing.add(Thread.ofVirtual().start(() -> {

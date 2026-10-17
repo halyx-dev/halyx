@@ -119,6 +119,12 @@ public interface Cache<V> {
     /** Waits up to {@code wait} for the lock {@code name}, retrying with backoff. */
     Optional<CacheLock> lock(String name, Duration lease, Duration wait);
 
+    /**
+     * Checks that the server answers an authenticated command, failing if it doesn't. Unlike the other
+     * reads, it ignores {@link CacheConfig#failOpen() fail-open}, so health checks see an outage.
+     */
+    void ping();
+
     /** Hit, miss and load counters for this cache instance. */
     CacheStatistics statistics();
 

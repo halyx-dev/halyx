@@ -25,7 +25,9 @@ import dev.halyx.storage.BlobStore;
 import dev.halyx.stream.StreamConfig;
 import dev.halyx.stream.StreamConsumer;
 import dev.halyx.stream.StreamProducer;
+import org.springframework.beans.factory.BeanClassLoaderAware;
 import org.springframework.beans.factory.support.AbstractBeanDefinition;
+import org.springframework.beans.factory.config.ConstructorArgumentValues;
 import org.springframework.beans.factory.config.RuntimeBeanReference;
 import org.springframework.beans.factory.support.BeanDefinitionRegistry;
 import org.springframework.beans.factory.support.RootBeanDefinition;
@@ -43,22 +45,30 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Registers one {@link BlobStore} bean per {@code halyx.blob-stores.<name>} entry, one
- * {@code Cache<String>} bean per {@code halyx.caches.<name>} entry and one {@code DataSource} bean per
- * {@code halyx.databases.<name>} entry, each named {@code <name>}, and likewise for document stores, topics,
- * subscriptions and stream producers and consumers, so
- * they can be injected by type or with {@code @Qualifier("<name>")}. Configuration mistakes fail at
+ * Registers one {@link BlobStore} bean per {@code halyx.blob-stores.<name>} entry, one {@code Cache} bean per
+ * {@code halyx.caches.<name>} entry and one {@code DataSource} bean per {@code halyx.databases.<name>} entry, each
+ * named {@code <name>}, and likewise for document stores, topics, event buses, subscriptions and stream producers and
+ * consumers, so they can be injected by type or with {@code @Qualifier("<name>")}. Configuration mistakes fail at
  * startup with the offending property named.
+ *
+ * <p>Providers are resolved when each bean is created, against the {@code Halyx} bean, so resources can use
+ * providers that a {@code HalyxBuilderCustomizer} or an application's own {@code Halyx} bean registers.
  */
-class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, EnvironmentAware {
+class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, EnvironmentAware, BeanClassLoaderAware {
 
     static final String FACTORY_BEAN = HalyxBlobStores.BEAN_NAME;
 
     private Environment environment;
+    private ClassLoader classLoader = BlobStoreBeanRegistrar.class.getClassLoader();
 
     @Override
     public void setEnvironment(Environment environment) {
         this.environment = environment;
+    }
+
+    @Override
+    public void setBeanClassLoader(ClassLoader classLoader) {
+        this.classLoader = classLoader;
     }
 
     @Override
@@ -67,34 +77,16 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
         Map<String, HalyxProperties.BlobStoreProperties> stores = binder
                 .bind("halyx.blob-stores", Bindable.mapOf(String.class, HalyxProperties.BlobStoreProperties.class))
                 .orElse(Map.of());
-        Map<String, HalyxProperties.Provider> providers = binder
-                .bind("halyx.providers", Bindable.mapOf(String.class, HalyxProperties.Provider.class))
-                .orElse(Map.of());
-        Map<String, HalyxProperties.CacheProperties> caches = binder
-                .bind("halyx.caches", Bindable.mapOf(String.class, HalyxProperties.CacheProperties.class))
-                .orElse(Map.of());
-        caches.forEach((name, cache) -> {
-            String provider = resolveProvider("halyx.caches." + name, cache.provider(), providers);
-            RootBeanDefinition definition = new RootBeanDefinition(Cache.class);
-            definition.setFactoryBeanName(FACTORY_BEAN);
-            definition.setFactoryMethodName("cache");
-            definition.getConstructorArgumentValues().addIndexedArgumentValue(0, provider);
-            definition.getConstructorArgumentValues().addIndexedArgumentValue(1, cache.toCacheConfig(name));
-            definition.setTargetType(ResolvableType.forClassWithGenerics(Cache.class, String.class));
-            definition.setDescription("Halyx cache " + provider + " " + cache.endpoint());
-            registry.registerBeanDefinition(name, definition);
-        });
+        binder.bind("halyx.caches", Bindable.mapOf(String.class, HalyxProperties.CacheProperties.class))
+                .orElse(Map.of())
+                .forEach((name, cache) -> registry.registerBeanDefinition(name, cacheBean(name, cache)));
         binder.bind("halyx.parameter-stores", Bindable.mapOf(String.class, HalyxProperties.ParameterStoreProperties.class))
                 .orElse(Map.of())
                 .forEach((name, store) -> {
-                    String provider = resolveProvider("halyx.parameter-stores." + name, store.provider(), providers);
-                    RootBeanDefinition definition = new RootBeanDefinition(ParameterStore.class);
-                    definition.setFactoryBeanName(FACTORY_BEAN);
-                    definition.setFactoryMethodName("parameterStore");
-                    definition.getConstructorArgumentValues().addIndexedArgumentValue(0, provider);
-                    definition.getConstructorArgumentValues().addIndexedArgumentValue(1, store.toStoreConfig());
-                    definition.setTargetType(ParameterStore.class);
-                    definition.setDescription("Halyx " + store.kind().name().toLowerCase() + " store " + provider);
+                    RootBeanDefinition definition = serviceBean(ParameterStore.class, "parameterStore",
+                            "halyx.parameter-stores." + name, store.provider());
+                    definition.getConstructorArgumentValues().addIndexedArgumentValue(2, store.toStoreConfig());
+                    definition.setDescription("Halyx " + store.kind().name().toLowerCase() + " store " + name);
                     registry.registerBeanDefinition(name, definition);
                 });
         Map<String, HalyxProperties.DatabaseProperties> databases = binder
@@ -105,13 +97,10 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
                 .orElse(Map.of()).keySet();
         databases.forEach((name, database) -> {
             String property = "halyx.databases." + name;
-            String provider = resolveProvider(property, database.provider(), providers);
-            RootBeanDefinition definition = new RootBeanDefinition(DataSource.class);
-            definition.setFactoryBeanName(FACTORY_BEAN);
+            RootBeanDefinition definition = serviceBean(DataSource.class, "dataSource", property, database.provider());
             var args = definition.getConstructorArgumentValues();
-            args.addIndexedArgumentValue(0, provider);
-            args.addIndexedArgumentValue(1, name);
-            args.addIndexedArgumentValue(2, database);
+            args.addIndexedArgumentValue(2, name);
+            args.addIndexedArgumentValue(3, database);
             var secret = database.auth().secret();
             if (secret != null) {
                 if (secret.store() == null || !parameterStores.contains(secret.store())) {
@@ -119,57 +108,55 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
                             + parameterStores);
                 }
                 definition.setFactoryMethodName("dataSourceWithSecret");
-                args.addIndexedArgumentValue(3, new RuntimeBeanReference(secret.store()));
-            } else {
-                definition.setFactoryMethodName("dataSource");
+                args.addIndexedArgumentValue(4, new RuntimeBeanReference(secret.store()));
             }
-            definition.setTargetType(DataSource.class);
             definition.setPrimary(databases.size() == 1 || database.primary());
-            definition.setDescription("Halyx " + database.engine() + " database " + provider + "/" + database.database());
+            definition.setDescription("Halyx " + database.engine() + " database " + name + "/" + database.database());
             registry.registerBeanDefinition(name, definition);
         });
-        if (ClassUtils.isPresent("dev.halyx.r2dbc.R2dbcDatabases", BlobStoreBeanRegistrar.class.getClassLoader())) {
-            R2dbcBeanRegistration.register(binder, registry, providers, parameterStores);
+        boolean r2dbcConfigured = !binder.bind(HalyxR2dbcDatabases.GROUP,
+                Bindable.mapOf(String.class, HalyxProperties.DatabaseProperties.class)).orElse(Map.of()).isEmpty();
+        if (ClassUtils.isPresent("dev.halyx.r2dbc.R2dbcDatabases", classLoader)) {
+            R2dbcBeanRegistration.register(binder, registry, parameterStores);
+        } else if (r2dbcConfigured) {
+            throw new IllegalStateException(HalyxR2dbcDatabases.GROUP + " is configured, but halyx-r2dbc is not on the "
+                    + "classpath: add the dev.halyx:halyx-r2dbc dependency and an R2DBC driver");
+        }
+        if (environment.containsProperty("halyx.spring-kafka.cluster")
+                && !ClassUtils.isPresent("org.springframework.kafka.core.DefaultKafkaProducerFactory", classLoader)) {
+            throw new IllegalStateException("halyx.spring-kafka.cluster is set, but Spring for Apache Kafka is not on "
+                    + "the classpath: add org.springframework.kafka:spring-kafka (spring-boot-starter-kafka on Boot 4)");
         }
         binder.bind("halyx.document-stores", Bindable.mapOf(String.class, HalyxProperties.DocumentStoreProperties.class))
                 .orElse(Map.of())
                 .forEach((name, store) -> {
-                    String provider = resolveProvider("halyx.document-stores." + name, store.provider(), providers);
-                    RootBeanDefinition definition = new RootBeanDefinition(DocumentStore.class);
-                    definition.setFactoryBeanName(FACTORY_BEAN);
-                    definition.setFactoryMethodName("documentStore");
-                    definition.getConstructorArgumentValues().addIndexedArgumentValue(0, provider);
-                    definition.getConstructorArgumentValues().addIndexedArgumentValue(1, name);
-                    definition.getConstructorArgumentValues().addIndexedArgumentValue(2, store);
-                    definition.setTargetType(DocumentStore.class);
-                    definition.setDescription("Halyx document store " + provider + "/" + store.toTableConfig(name).name());
+                    RootBeanDefinition definition = serviceBean(DocumentStore.class, "documentStore",
+                            "halyx.document-stores." + name, store.provider());
+                    definition.getConstructorArgumentValues().addIndexedArgumentValue(2, name);
+                    definition.getConstructorArgumentValues().addIndexedArgumentValue(3, store);
+                    definition.setDescription("Halyx document store " + store.toTableConfig(name).name());
                     registry.registerBeanDefinition(name, definition);
                 });
         binder.bind("halyx.topics", Bindable.mapOf(String.class, HalyxProperties.TopicProperties.class))
                 .orElse(Map.of())
                 .forEach((name, topic) -> registry.registerBeanDefinition(name, messagingBean(Publisher.class,
                         "halyx.topics." + name, name, topic.provider(), topic, topic.claimCheck(), "publisher",
-                        providers, stores.keySet())));
+                        stores.keySet())));
         binder.bind("halyx.event-buses", Bindable.mapOf(String.class, HalyxProperties.EventBusProperties.class))
                 .orElse(Map.of())
                 .forEach((name, bus) -> {
-                    String provider = resolveProvider("halyx.event-buses." + name, bus.provider(), providers);
-                    RootBeanDefinition definition = new RootBeanDefinition(EventPublisher.class);
-                    definition.setFactoryBeanName(FACTORY_BEAN);
-                    definition.setFactoryMethodName("eventPublisher");
-                    var args = definition.getConstructorArgumentValues();
-                    args.addIndexedArgumentValue(0, provider);
-                    args.addIndexedArgumentValue(1, name);
-                    args.addIndexedArgumentValue(2, bus);
-                    definition.setTargetType(EventPublisher.class);
-                    definition.setDescription("Halyx event bus " + provider + "/" + name);
+                    RootBeanDefinition definition = serviceBean(EventPublisher.class, "eventPublisher",
+                            "halyx.event-buses." + name, bus.provider());
+                    definition.getConstructorArgumentValues().addIndexedArgumentValue(2, name);
+                    definition.getConstructorArgumentValues().addIndexedArgumentValue(3, bus);
+                    definition.setDescription("Halyx event bus " + name);
                     registry.registerBeanDefinition(name, definition);
                 });
         binder.bind("halyx.subscriptions", Bindable.mapOf(String.class, HalyxProperties.SubscriptionProperties.class))
                 .orElse(Map.of())
                 .forEach((name, subscription) -> registry.registerBeanDefinition(name, messagingBean(Subscription.class,
                         "halyx.subscriptions." + name, name, subscription.provider(), subscription,
-                        subscription.claimCheck(), "subscription", providers, stores.keySet())));
+                        subscription.claimCheck(), "subscription", stores.keySet())));
         Map<String, HalyxProperties.StreamClusterProperties> clusters = binder
                 .bind("halyx.stream-clusters", Bindable.mapOf(String.class, HalyxProperties.StreamClusterProperties.class))
                 .orElse(Map.of());
@@ -177,55 +164,90 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
                 .orElse(Map.of())
                 .forEach((name, producer) -> registry.registerBeanDefinition(name, streamBean(StreamProducer.class,
                         "halyx.stream-producers." + name, name, producer.cluster(), producer, producer.claimCheck(),
-                        "streamProducer", clusters, providers, stores.keySet())));
+                        "streamProducer", clusters, stores.keySet())));
         binder.bind("halyx.stream-consumers", Bindable.mapOf(String.class, HalyxProperties.StreamConsumerProperties.class))
                 .orElse(Map.of())
                 .forEach((name, consumer) -> {
                     RootBeanDefinition definition = streamBean(StreamConsumer.class, "halyx.stream-consumers." + name,
                             name, consumer.cluster(), consumer, consumer.claimCheck(), "streamConsumer", clusters,
-                            providers, stores.keySet());
+                            stores.keySet());
                     // Closing leaves the consumer group, handing its partitions to the other members.
                     definition.setDestroyMethodName(AbstractBeanDefinition.INFER_METHOD);
                     registry.registerBeanDefinition(name, definition);
                 });
         stores.forEach((name, store) -> {
-            String provider = resolveProvider("halyx.blob-stores." + name, store.provider(), providers);
             String bucket = store.bucket() == null || store.bucket().isBlank() ? name : store.bucket();
-            RootBeanDefinition definition = new RootBeanDefinition(BlobStore.class);
-            definition.setFactoryBeanName(FACTORY_BEAN);
-            definition.setFactoryMethodName("blobStore");
-            definition.getConstructorArgumentValues().addIndexedArgumentValue(0, provider);
-            definition.getConstructorArgumentValues().addIndexedArgumentValue(1, bucket);
-            definition.setTargetType(BlobStore.class);
-            definition.setDescription("Halyx blob store " + provider + "/" + bucket);
+            RootBeanDefinition definition = serviceBean(BlobStore.class, "blobStore", "halyx.blob-stores." + name,
+                    store.provider());
+            definition.getConstructorArgumentValues().addIndexedArgumentValue(2, bucket);
+            definition.setDescription("Halyx blob store " + bucket);
             registry.registerBeanDefinition(name, definition);
         });
+    }
+
+    /**
+     * A bean made by {@code factoryMethod} of {@link HalyxBlobStores}, whose first arguments are the configuring
+     * property and its provider (null when omitted), resolved when the bean is created.
+     */
+    static RootBeanDefinition serviceBean(Class<?> type, String factoryMethod, String property, String provider) {
+        RootBeanDefinition definition = new RootBeanDefinition(type);
+        definition.setFactoryBeanName(FACTORY_BEAN);
+        definition.setFactoryMethodName(factoryMethod);
+        definition.setTargetType(type);
+        ConstructorArgumentValues args = definition.getConstructorArgumentValues();
+        args.addIndexedArgumentValue(0, property);
+        args.addIndexedArgumentValue(1, new ConstructorArgumentValues.ValueHolder(provider, String.class.getName()));
+        return definition;
+    }
+
+    /** A {@code Cache} whose value type follows its codec: strings, bytes, objects, or a {@code Codec} bean's type. */
+    private static RootBeanDefinition cacheBean(String name, HalyxProperties.CacheProperties cache) {
+        String property = "halyx.caches." + name;
+        String codec = cache.codec() == null || cache.codec().isBlank() ? "string" : cache.codec();
+        RootBeanDefinition definition = serviceBean(Cache.class, "cache", property, cache.provider());
+        var args = definition.getConstructorArgumentValues();
+        args.addIndexedArgumentValue(2, cache.toCacheConfig(name));
+        switch (codec) {
+            case "string" -> definition.setTargetType(ResolvableType.forClassWithGenerics(Cache.class, String.class));
+            case "bytes" -> {
+                definition.setFactoryMethodName("bytesCache");
+                definition.setTargetType(ResolvableType.forClassWithGenerics(Cache.class, byte[].class));
+            }
+            case "jdk", "json" -> {
+                definition.setFactoryMethodName("objectCache");
+                args.addIndexedArgumentValue(3, codec);
+                args.addIndexedArgumentValue(4, cache.trustedPackages());
+                definition.setTargetType(ResolvableType.forClassWithGenerics(Cache.class, Object.class));
+            }
+            default -> {
+                // The name of a Codec bean: the value type is the codec's, known once the bean exists.
+                definition.setFactoryMethodName("cacheWithCodec");
+                args.addIndexedArgumentValue(3, new RuntimeBeanReference(codec));
+                definition.setTargetType(Cache.class);
+                definition.setAttribute(CacheCodecTypes.CODEC_BEAN, codec);
+            }
+        }
+        definition.setDescription("Halyx cache " + cache.endpoint() + " (" + codec + ")");
+        return definition;
     }
 
     /** A Publisher or Subscription bean; with a claim check, its blob store bean is injected too. */
     private static RootBeanDefinition messagingBean(Class<?> type, String property, String name, String provider,
                                                     Object properties, HalyxProperties.ClaimCheckProperties claimCheck,
-                                                    String factoryMethod, Map<String, HalyxProperties.Provider> providers,
-                                                    Set<String> blobStores) {
-        String resolved = resolveProvider(property, provider, providers);
-        RootBeanDefinition definition = new RootBeanDefinition(type);
-        definition.setFactoryBeanName(FACTORY_BEAN);
+                                                    String factoryMethod, Set<String> blobStores) {
+        RootBeanDefinition definition = serviceBean(type, factoryMethod, property, provider);
         var args = definition.getConstructorArgumentValues();
-        args.addIndexedArgumentValue(0, resolved);
-        args.addIndexedArgumentValue(1, name);
-        args.addIndexedArgumentValue(2, properties);
+        args.addIndexedArgumentValue(2, name);
+        args.addIndexedArgumentValue(3, properties);
         if (claimCheck != null) {
             if (claimCheck.blobStore() == null || !blobStores.contains(claimCheck.blobStore())) {
                 throw new IllegalStateException(property + ".claim-check.blob-store must name one of halyx.blob-stores "
                         + blobStores);
             }
             definition.setFactoryMethodName(factoryMethod + "WithClaimCheck");
-            args.addIndexedArgumentValue(3, new RuntimeBeanReference(claimCheck.blobStore()));
-        } else {
-            definition.setFactoryMethodName(factoryMethod);
+            args.addIndexedArgumentValue(4, new RuntimeBeanReference(claimCheck.blobStore()));
         }
-        definition.setTargetType(type);
-        definition.setDescription("Halyx " + factoryMethod + " " + resolved + "/" + name);
+        definition.setDescription("Halyx " + factoryMethod + " " + name);
         return definition;
     }
 
@@ -234,30 +256,25 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
                                                  Object properties, HalyxProperties.ClaimCheckProperties claimCheck,
                                                  String factoryMethod,
                                                  Map<String, HalyxProperties.StreamClusterProperties> clusters,
-                                                 Map<String, HalyxProperties.Provider> providers, Set<String> blobStores) {
+                                                 Set<String> blobStores) {
         String clusterName = resolveCluster(property, cluster, clusters);
         HalyxProperties.StreamClusterProperties clusterProperties = clusters.get(clusterName);
-        String provider = resolveProvider("halyx.stream-clusters." + clusterName, clusterProperties.provider(), providers);
         StreamConfig streamConfig = clusterProperties.toStreamConfig(clusterName);
-        RootBeanDefinition definition = new RootBeanDefinition(type);
-        definition.setFactoryBeanName(FACTORY_BEAN);
+        RootBeanDefinition definition = serviceBean(type, factoryMethod, "halyx.stream-clusters." + clusterName,
+                clusterProperties.provider());
         var args = definition.getConstructorArgumentValues();
-        args.addIndexedArgumentValue(0, provider);
-        args.addIndexedArgumentValue(1, name);
-        args.addIndexedArgumentValue(2, properties);
-        args.addIndexedArgumentValue(3, streamConfig);
+        args.addIndexedArgumentValue(2, name);
+        args.addIndexedArgumentValue(3, properties);
+        args.addIndexedArgumentValue(4, streamConfig);
         if (claimCheck != null) {
             if (claimCheck.blobStore() == null || !blobStores.contains(claimCheck.blobStore())) {
                 throw new IllegalStateException(property + ".claim-check.blob-store must name one of halyx.blob-stores "
                         + blobStores);
             }
             definition.setFactoryMethodName(factoryMethod + "WithClaimCheck");
-            args.addIndexedArgumentValue(4, new RuntimeBeanReference(claimCheck.blobStore()));
-        } else {
-            definition.setFactoryMethodName(factoryMethod);
+            args.addIndexedArgumentValue(5, new RuntimeBeanReference(claimCheck.blobStore()));
         }
-        definition.setTargetType(type);
-        definition.setDescription("Halyx " + factoryMethod + " " + provider + "/" + clusterName + "/" + name);
+        definition.setDescription("Halyx " + factoryMethod + " " + clusterName + "/" + name);
         return definition;
     }
 
@@ -275,21 +292,5 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
                     + "'. Configured clusters: " + clusters.keySet());
         }
         return cluster;
-    }
-
-    static String resolveProvider(String property, String provider,
-                                          Map<String, HalyxProperties.Provider> providers) {
-        if (provider == null) {
-            if (providers.size() == 1) {
-                return providers.keySet().iterator().next();
-            }
-            throw new IllegalStateException(property + ".provider is required when "
-                    + providers.size() + " providers are configured " + providers.keySet());
-        }
-        if (!providers.containsKey(provider)) {
-            throw new IllegalStateException(property + ".provider refers to unknown provider '"
-                    + provider + "'. Configured providers: " + providers.keySet());
-        }
-        return provider;
     }
 }

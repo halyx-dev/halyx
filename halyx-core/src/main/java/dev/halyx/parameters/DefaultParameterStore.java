@@ -55,6 +55,8 @@ public final class DefaultParameterStore implements ParameterStore {
         return thread;
     });
 
+    private static final String PING_NAME = "halyx-ping";
+
     private record Cached<T>(T value, long expiresAtNanos) {
     }
 
@@ -134,6 +136,12 @@ public final class DefaultParameterStore implements ParameterStore {
     @Override
     public void refresh() {
         cache.clear();
+    }
+
+    @Override
+    public void ping() {
+        String full = full(PING_NAME);
+        execute("ping", full, () -> driver.get(full));
     }
 
     @Override

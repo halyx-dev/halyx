@@ -50,7 +50,7 @@ import dev.halyx.nosql.QueryPage;
 import dev.halyx.nosql.SortCondition;
 import dev.halyx.nosql.TableConfig;
 import dev.halyx.nosql.Version;
-import dev.halyx.nosql.spi.DocumentStoreDriver;
+import dev.halyx.nosql.spi.AbstractDocumentStoreDriver;
 import dev.halyx.nosql.spi.TransactionWrite;
 import dev.halyx.nosql.spi.WriteCondition;
 
@@ -76,7 +76,7 @@ import java.util.concurrent.ExecutionException;
  * version is the document's update time. Expiry is the Timestamp field {@value #EXPIRES}: give the collection
  * group a TTL policy on it to have expired items deleted. Decimals are stored as doubles.
  */
-public final class FirestoreDocumentStoreDriver implements DocumentStoreDriver {
+public final class FirestoreDocumentStoreDriver extends AbstractDocumentStoreDriver {
 
     static final String EXPIRES = "halyx_expires";
     static final String SORT = "halyx_sort";
@@ -88,15 +88,11 @@ public final class FirestoreDocumentStoreDriver implements DocumentStoreDriver {
     private final String items;
 
     public FirestoreDocumentStoreDriver(Firestore firestore, TableConfig table) {
+        super(GcpProvider.ID);
         this.firestore = firestore;
         this.table = table;
         // The subcollection shares the table's name, so a collection-group query by that name sees this table only.
         this.items = table.property(ITEMS_COLLECTION).orElse(table.name());
-    }
-
-    @Override
-    public String provider() {
-        return GcpProvider.ID;
     }
 
     @Override
@@ -545,15 +541,12 @@ public final class FirestoreDocumentStoreDriver implements DocumentStoreDriver {
     }
 
     @Override
-    public CloudException translate(Throwable error) {
-        if (error instanceof CloudException c) {
-            return c;
-        }
+    protected Optional<CloudException> translateNative(Throwable error) {
         Status.Code status = codeOf(error);
         if (status != Status.Code.UNKNOWN) {
             String code = status.name();
             String message = error.getMessage();
-            return switch (status) {
+            return Optional.of(switch (status) {
                 case NOT_FOUND -> new NotFoundException(message, error, GcpProvider.ID, code);
                 case ALREADY_EXISTS, FAILED_PRECONDITION, ABORTED -> new PreconditionFailedException(message, error, GcpProvider.ID, code);
                 case PERMISSION_DENIED, UNAUTHENTICATED -> new AccessDeniedException(message, error, GcpProvider.ID, code);
@@ -561,16 +554,13 @@ public final class FirestoreDocumentStoreDriver implements DocumentStoreDriver {
                 case RESOURCE_EXHAUSTED -> new ThrottledException(message, error, GcpProvider.ID, code);
                 case UNAVAILABLE, DEADLINE_EXCEEDED, INTERNAL -> new UnavailableException(message, error, GcpProvider.ID, code);
                 default -> new UnknownCloudException(message, error, GcpProvider.ID, code);
-            };
+            });
         }
-        return GcpErrors.translate(error).orElseGet(() -> new UnknownCloudException(error.getMessage(), error, GcpProvider.ID, null));
+        return GcpErrors.translate(error);
     }
 
     @Override
-    public <T> T unwrap(Class<T> nativeType) {
-        if (nativeType.isInstance(firestore)) {
-            return nativeType.cast(firestore);
-        }
-        throw new IllegalArgumentException("No native client of type " + nativeType.getName());
+    protected List<Object> nativeClients() {
+        return List.of(firestore);
     }
 }

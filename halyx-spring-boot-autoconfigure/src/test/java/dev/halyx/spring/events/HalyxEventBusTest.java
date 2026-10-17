@@ -17,7 +17,9 @@ package dev.halyx.spring.events;
 
 import dev.halyx.events.CloudEvent;
 import dev.halyx.events.EventPublisher;
+import dev.halyx.micrometer.TracingEventPublisher;
 import dev.halyx.spring.autoconfigure.HalyxAutoConfiguration;
+import dev.halyx.spring.autoconfigure.observation.HalyxMessagingTracingAutoConfiguration;
 import dev.halyx.spring.messaging.HalyxListener;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -29,6 +31,11 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.TraceContext;
+import io.micrometer.tracing.Tracer;
+import io.micrometer.tracing.propagation.Propagator;
+import io.micrometer.tracing.test.simple.SimpleTracer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -79,5 +86,80 @@ class HalyxEventBusTest {
             }
             assertThat(billing.received).containsEntry(placed.id(), placed).containsEntry(shipped.id(), shipped);
         });
+    }
+
+    /** Carries the trace and span ids in one {@code traceparent} field, which can travel as a CloudEvent extension. */
+    static final class TraceparentPropagator implements Propagator {
+        private final SimpleTracer tracer;
+
+        TraceparentPropagator(SimpleTracer tracer) {
+            this.tracer = tracer;
+        }
+
+        @Override
+        public List<String> fields() {
+            return List.of("traceparent");
+        }
+
+        @Override
+        public <C> void inject(TraceContext context, C carrier, Setter<C> setter) {
+            setter.set(carrier, "traceparent", context.traceId() + "-" + context.spanId());
+        }
+
+        @Override
+        public <C> Span.Builder extract(C carrier, Getter<C> getter) {
+            String value = getter.get(carrier, "traceparent");
+            if (value == null) {
+                return tracer.spanBuilder();
+            }
+            String[] ids = value.split("-");
+            return tracer.spanBuilder().setParent(tracer.traceContextBuilder().traceId(ids[0]).spanId(ids[1]).build());
+        }
+    }
+
+    static class TracedBilling {
+        final SimpleTracer tracer;
+        final Map<String, String> traceIds = new ConcurrentHashMap<>();
+
+        TracedBilling(SimpleTracer tracer) {
+            this.tracer = tracer;
+        }
+
+        @HalyxListener("billing")
+        void onOrderEvent(CloudEvent event) {
+            traceIds.put(event.id(), tracer.currentSpan().context().traceId());
+        }
+    }
+
+    @Test
+    void eventsCarryTheTraceToCloudEventListeners() {
+        SimpleTracer tracer = new SimpleTracer();
+        new ApplicationContextRunner()
+                .withConfiguration(AutoConfigurations.of(HalyxAutoConfiguration.class,
+                        HalyxMessagingTracingAutoConfiguration.class))
+                .withPropertyValues("halyx.providers.local.type=memory", "halyx.event-buses.orders.name=order-events",
+                        "halyx.subscriptions.billing.topic=order-events")
+                .withBean(Tracer.class, () -> tracer)
+                .withBean(Propagator.class, () -> new TraceparentPropagator(tracer))
+                .withBean(TracedBilling.class, () -> new TracedBilling(tracer))
+                .run(context -> {
+                    EventPublisher orders = context.getBean("orders", EventPublisher.class);
+                    assertThat(orders).isInstanceOf(TracingEventPublisher.class);
+                    CloudEvent placed = CloudEvent.builder("com.acme.order.placed", "/orders").build();
+
+                    Span request = tracer.nextSpan().name("http request").start();
+                    try (Tracer.SpanInScope ignored = tracer.withSpan(request)) {
+                        orders.publish(placed);
+                    } finally {
+                        request.end();
+                    }
+
+                    TracedBilling billing = context.getBean(TracedBilling.class);
+                    Instant deadline = Instant.now().plusSeconds(10);
+                    while (billing.traceIds.isEmpty() && Instant.now().isBefore(deadline)) {
+                        Thread.sleep(50);
+                    }
+                    assertThat(billing.traceIds).containsEntry(placed.id(), request.context().traceId());
+                });
     }
 }

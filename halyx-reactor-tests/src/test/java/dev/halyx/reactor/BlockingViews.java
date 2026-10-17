@@ -243,6 +243,7 @@ final class BlockingViews {
             public long clear() { return await(rx.clear()); }
             public Optional<CacheLock> tryLock(String name, Duration lease) { return awaitOptional(rx.tryLock(name, lease)); }
             public Optional<CacheLock> lock(String name, Duration lease, Duration wait) { return awaitOptional(rx.lock(name, lease, wait)); }
+            public void ping() { await(rx.ping()); }
             public CacheStatistics statistics() { return rx.statistics(); }
             public <T> T unwrap(Class<T> nativeType) { return rx.unwrap(nativeType); }
         };
@@ -260,6 +261,7 @@ final class BlockingViews {
             public Parameter put(String name, String value) { return await(rx.put(name, value)); }
             public void delete(String name) { await(rx.delete(name)); }
             public void refresh() { await(rx.refresh()); }
+            public void ping() { await(rx.ping()); }
             public AutoCloseable watch(String prefix, Duration interval, Consumer<ParameterChanges> listener) {
                 Disposable watching = rx.watch(prefix, interval).subscribe(listener);
                 return watching::dispose;

@@ -140,7 +140,7 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
 
         public ProviderConfig toProviderConfig(String name) {
             if (type == null || type.isBlank()) {
-                throw new IllegalStateException("halyx.providers." + name + ".type is required (aws, azure, gcp or memory)");
+                throw new IllegalStateException("halyx.providers." + name + ".type is required (aws, azure, gcp, vault or memory)");
             }
             ProviderConfig config = ProviderConfig.of(type).credentials(credentials.toCredentials(name));
             if (region != null) {
@@ -187,13 +187,6 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
     }
 
     /**
-     * @param enabled        whether to retry throttled and transiently failing idempotent operations
-     * @param maxAttempts    total attempts including the first
-     * @param initialBackoff upper bound of the randomised delay before the first retry
-     * @param maxBackoff     cap on the delay between attempts
-     * @param multiplier     growth factor of the delay bound per attempt
-     */
-    /**
      * @param provider   the provider name; may be omitted when exactly one provider is configured
      * @param endpoint   {@code redis://host:port}, or {@code rediss://host:port} for TLS
      * @param namespace  key prefix ({@code namespace:key}); defaults to the bean name, empty for none
@@ -202,13 +195,20 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
      * @param failOpen   treat the cache as best effort when the server is unavailable (see {@code CacheConfig.failOpen})
      * @param auth       how to log in
      * @param properties provider-specific settings, such as {@code aws.elasticache.cache-name}
+     * @param codec      how values are stored, and so the bean's type: {@code string} (default, {@code Cache<String>}),
+     *                   {@code bytes} ({@code Cache<byte[]>}), {@code jdk} or {@code json} ({@code Cache<Object>}), or
+     *                   the name of a {@code Codec} bean of yours
+     * @param trustedPackages for {@code jdk} and {@code json}: the packages whose types may be read back, besides
+     *                   {@code java.*}
      */
     public record CacheProperties(String provider, URI endpoint, String namespace, Duration defaultTtl,
                                   @DefaultValue("false") boolean cluster, @DefaultValue("false") boolean failOpen,
-                                  @DefaultValue CacheAuthProperties auth, Map<String, String> properties) {
+                                  @DefaultValue CacheAuthProperties auth, Map<String, String> properties,
+                                  @DefaultValue("string") String codec, List<String> trustedPackages) {
 
         public CacheProperties {
             properties = ordered(properties);
+            trustedPackages = trustedPackages == null ? List.of() : List.copyOf(trustedPackages);
         }
 
         CacheConfig toCacheConfig(String name) {
@@ -219,7 +219,7 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
                     .namespace(namespace == null ? name : namespace)
                     .cluster(cluster)
                     .failOpen(failOpen)
-                    .auth(auth.toCacheAuth(name));
+                    .auth(auth.toCacheAuth("halyx.caches." + name + ".auth"));
             if (defaultTtl != null) {
                 config.defaultTtl(defaultTtl);
             }
@@ -238,13 +238,14 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
 
         public enum Type { NONE, PASSWORD, IAM }
 
-        CacheAuth toCacheAuth(String cache) {
+        /** The login; {@code property} is where it is configured, for error messages. */
+        CacheAuth toCacheAuth(String property) {
             return switch (type) {
                 case NONE -> CacheAuth.none();
                 case IAM -> username == null ? CacheAuth.iam() : CacheAuth.iam(username);
                 case PASSWORD -> {
                     if (password == null) {
-                        throw new IllegalStateException("halyx.caches." + cache + ".auth.password is required for password auth");
+                        throw new IllegalStateException(property + ".password is required for password auth");
                     }
                     yield username == null ? CacheAuth.password(password) : CacheAuth.password(username, password);
                 }
@@ -683,7 +684,7 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
                     .namespace(namespacePrefix + cacheName)
                     .cluster(cluster)
                     .failOpen(failOpen)
-                    .auth(auth.toCacheAuth("cache-manager"));
+                    .auth(auth.toCacheAuth("halyx.cache-manager.auth"));
             Duration expiry = ttl.getOrDefault(cacheName, defaultTtl);
             if (expiry != null) {
                 config.defaultTtl(expiry);
@@ -730,6 +731,13 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
         }
     }
 
+    /**
+     * @param enabled        whether to retry throttled and transiently failing idempotent operations
+     * @param maxAttempts    total attempts including the first
+     * @param initialBackoff upper bound of the randomised delay before the first retry
+     * @param maxBackoff     cap on the delay between attempts
+     * @param multiplier     growth factor of the delay bound per attempt
+     */
     public record Retry(@DefaultValue("false") boolean enabled, @DefaultValue("3") int maxAttempts,
                         @DefaultValue("100ms") Duration initialBackoff, @DefaultValue("2s") Duration maxBackoff,
                         @DefaultValue("2.0") double multiplier) {

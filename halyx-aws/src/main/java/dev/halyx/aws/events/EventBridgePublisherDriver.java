@@ -21,7 +21,7 @@ import dev.halyx.error.CloudException;
 import dev.halyx.error.UnknownCloudException;
 import dev.halyx.events.CloudEvent;
 import dev.halyx.events.CloudEvents;
-import dev.halyx.events.spi.EventPublisherDriver;
+import dev.halyx.events.spi.AbstractEventPublisherDriver;
 import software.amazon.awssdk.services.eventbridge.EventBridgeClient;
 import software.amazon.awssdk.services.eventbridge.model.PutEventsRequestEntry;
 import software.amazon.awssdk.services.eventbridge.model.PutEventsResponse;
@@ -30,6 +30,7 @@ import software.amazon.awssdk.services.eventbridge.model.PutEventsResultEntry;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Publishes to an EventBridge event bus with {@code PutEvents}: the CloudEvent's {@code source} and {@code type}
@@ -37,7 +38,7 @@ import java.util.List;
  * CloudEvents JSON format is the {@code Detail}. A rule targeting an SQS queue delivers the EventBridge envelope,
  * which {@link CloudEvents#decode} turns back into the event.
  */
-public final class EventBridgePublisherDriver implements EventPublisherDriver {
+public final class EventBridgePublisherDriver extends AbstractEventPublisherDriver {
 
     /** EventBridge accepts 256 KB per request, all entries together; the rest of an entry needs some room. */
     static final long MAX_REQUEST_BYTES = 256 * 1024;
@@ -47,13 +48,9 @@ public final class EventBridgePublisherDriver implements EventPublisherDriver {
     private final String bus;
 
     public EventBridgePublisherDriver(EventBridgeClient client, String bus) {
+        super(AwsProvider.ID);
         this.client = client;
         this.bus = bus;
-    }
-
-    @Override
-    public String provider() {
-        return AwsProvider.ID;
     }
 
     @Override
@@ -123,19 +120,12 @@ public final class EventBridgePublisherDriver implements EventPublisherDriver {
     }
 
     @Override
-    public CloudException translate(Throwable error) {
-        if (error instanceof CloudException cloud) {
-            return cloud;
-        }
-        return AwsErrors.translate(error).orElseGet(() -> new UnknownCloudException(error.getMessage(), error,
-                AwsProvider.ID, null));
+    protected Optional<CloudException> translateNative(Throwable error) {
+        return AwsErrors.translate(error);
     }
 
     @Override
-    public <T> T unwrap(Class<T> nativeType) {
-        if (nativeType.isInstance(client)) {
-            return nativeType.cast(client);
-        }
-        throw new IllegalArgumentException("EventBridge publishers unwrap to EventBridgeClient, not " + nativeType.getName());
+    protected List<Object> nativeClients() {
+        return List.of(client);
     }
 }

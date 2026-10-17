@@ -18,7 +18,6 @@ package dev.halyx.memory;
 import dev.halyx.error.CloudException;
 import dev.halyx.error.NotFoundException;
 import dev.halyx.error.PreconditionFailedException;
-import dev.halyx.error.UnknownCloudException;
 import dev.halyx.nosql.Document;
 import dev.halyx.nosql.DocumentUpdate;
 import dev.halyx.nosql.Index;
@@ -29,7 +28,7 @@ import dev.halyx.nosql.Query;
 import dev.halyx.nosql.QueryPage;
 import dev.halyx.nosql.TableConfig;
 import dev.halyx.nosql.Version;
-import dev.halyx.nosql.spi.DocumentStoreDriver;
+import dev.halyx.nosql.spi.AbstractDocumentStoreDriver;
 import dev.halyx.nosql.spi.TransactionWrite;
 import dev.halyx.nosql.spi.WriteCondition;
 
@@ -47,7 +46,7 @@ import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 /** Tables in memory: partitions of items sorted by sort key, with versions from a counter. */
-final class InMemoryDocumentStoreDriver implements DocumentStoreDriver {
+final class InMemoryDocumentStoreDriver extends AbstractDocumentStoreDriver {
 
     /** Rows of a table: partition key, then sort key ("" when the table has none). */
     static final class Table {
@@ -59,13 +58,9 @@ final class InMemoryDocumentStoreDriver implements DocumentStoreDriver {
     private final Table table;
 
     InMemoryDocumentStoreDriver(TableConfig config, Table table) {
+        super(InMemoryProvider.ID);
         this.config = config;
         this.table = table;
-    }
-
-    @Override
-    public String provider() {
-        return InMemoryProvider.ID;
     }
 
     @Override
@@ -272,13 +267,12 @@ final class InMemoryDocumentStoreDriver implements DocumentStoreDriver {
     }
 
     @Override
-    public CloudException translate(Throwable error) {
-        return error instanceof CloudException c ? c
-                : new UnknownCloudException(error.getMessage(), error, InMemoryProvider.ID, null);
+    protected Optional<CloudException> translateNative(Throwable error) {
+        return Optional.empty();
     }
 
     @Override
-    public <T> T unwrap(Class<T> nativeType) {
-        throw new IllegalArgumentException("The memory provider has no native client");
+    protected List<Object> nativeClients() {
+        return List.of();
     }
 }

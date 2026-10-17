@@ -96,6 +96,7 @@ import java.util.Optional;
 final class AzureConnection implements ProviderConnection {
 
     private final ProviderConfig config;
+    private TokenCredential defaultCredential;
     private HttpClient http;
     private JdbcDatabases databases;
     private ServiceBusClientBuilder serviceBus;
@@ -130,7 +131,7 @@ final class AzureConnection implements ProviderConnection {
         if (blobService == null) {
             var builder = new BlobServiceClientBuilder().endpoint(blobEndpoint()).httpClient(http());
             switch (config.credentials()) {
-                case Credentials.DefaultChain ignored -> builder.credential(new DefaultAzureCredentialBuilder().build());
+                case Credentials.DefaultChain ignored -> builder.credential(defaultCredential());
                 case Credentials.Static s -> builder.credential(new StorageSharedKeyCredential(s.id(), s.secret()));
                 case Credentials.Anonymous ignored -> { }
             }
@@ -183,10 +184,18 @@ final class AzureConnection implements ProviderConnection {
         };
     }
 
+    /** The default Entra ID credential chain, made once and shared by every client, so tokens are cached once. */
+    private synchronized TokenCredential defaultCredential() {
+        if (defaultCredential == null) {
+            defaultCredential = new DefaultAzureCredentialBuilder().build();
+        }
+        return defaultCredential;
+    }
+
     /** Entra ID through the default chain; emulators accept any bearer token. */
     private TokenCredential tokenCredential(boolean emulator) {
         if (config.credentials() instanceof Credentials.DefaultChain) {
-            return new DefaultAzureCredentialBuilder().build();
+            return defaultCredential();
         }
         if (emulator && config.credentials() instanceof Credentials.Anonymous) {
             return request -> Mono.just(new AccessToken("emulator", OffsetDateTime.now().plusHours(1)));
@@ -244,7 +253,7 @@ final class AzureConnection implements ProviderConnection {
             }
             String scope = cluster.property(AzureProperties.EVENT_HUBS_SCOPE)
                     .orElseGet(() -> EventHubsEntraTokens.scope(cluster.bootstrapServerList().getFirst()));
-            return new EventHubsEntraTokens(new DefaultAzureCredentialBuilder().build(), scope);
+            return new EventHubsEntraTokens(defaultCredential(), scope);
         });
     }
 
@@ -253,7 +262,7 @@ final class AzureConnection implements ProviderConnection {
             throw new IllegalArgumentException("Entra ID cache authentication uses the default Azure credential chain; "
                     + "configure the provider with Credentials.defaultChain()");
         }
-        return new EntraIdRedisTokens(new DefaultAzureCredentialBuilder().build(), iam.username());
+        return new EntraIdRedisTokens(defaultCredential(), iam.username());
     }
 
     private String blobEndpoint() {
@@ -278,7 +287,7 @@ final class AzureConnection implements ProviderConnection {
             if (key.isPresent()) {
                 builder.key(key.get());
             } else {
-                builder.credential(new DefaultAzureCredentialBuilder().build());
+                builder.credential(defaultCredential());
             }
             cosmos = builder.buildClient();
         }
@@ -368,7 +377,7 @@ final class AzureConnection implements ProviderConnection {
                 String namespace = config.property(AzureProperties.SERVICE_BUS_NAMESPACE).orElseThrow(() ->
                         new IllegalArgumentException("Service Bus needs '" + AzureProperties.SERVICE_BUS_CONNECTION_STRING
                                 + "' or '" + AzureProperties.SERVICE_BUS_NAMESPACE + "'"));
-                builder.fullyQualifiedNamespace(namespace).credential(new DefaultAzureCredentialBuilder().build());
+                builder.fullyQualifiedNamespace(namespace).credential(defaultCredential());
             }
             serviceBus = builder;
         }
@@ -405,7 +414,7 @@ final class AzureConnection implements ProviderConnection {
             throw new IllegalArgumentException("Entra ID database login needs an identity "
                     + "(Credentials.defaultChain()), not a storage shared key");
         }
-        return new EntraIdSqlTokens(new DefaultAzureCredentialBuilder().build(), sql.engine(), iam.username().orElse(null));
+        return new EntraIdSqlTokens(defaultCredential(), sql.engine(), iam.username().orElse(null));
     }
 
     @Override

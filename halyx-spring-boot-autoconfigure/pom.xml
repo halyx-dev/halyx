@@ -74,6 +74,11 @@
             <groupId>dev.halyx</groupId>
             <artifactId>halyx-core</artifactId>
         </dependency>
+        <!-- Observations and trace propagation; the Micrometer libraries themselves stay optional -->
+        <dependency>
+            <groupId>dev.halyx</groupId>
+            <artifactId>halyx-micrometer</artifactId>
+        </dependency>
         <!-- The application's Boot BOM chooses the actual version. -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

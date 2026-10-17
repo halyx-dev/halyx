@@ -109,6 +109,11 @@ public abstract class CacheConformanceTest {
     }
 
     @Test
+    void pingAnswers() {
+        cache().ping();
+    }
+
+    @Test
     void missingKeyIsEmpty() {
         assertThat(cache().get("missing")).isEmpty();
         assertThat(cache().exists("missing")).isFalse();

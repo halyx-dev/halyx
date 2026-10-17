@@ -45,6 +45,7 @@
         <module>halyx-sql</module>
         <module>halyx-r2dbc</module>
         <module>halyx-reactor</module>
+        <module>halyx-micrometer</module>
         <module>halyx-kafka</module>
         <module>halyx-aws</module>
         <module>halyx-azure</module>
@@ -163,6 +164,11 @@
             <dependency>
                 <groupId>dev.halyx</groupId>
                 <artifactId>halyx-kafka</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>dev.halyx</groupId>
+                <artifactId>halyx-micrometer</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

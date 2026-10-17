@@ -198,6 +198,16 @@ public abstract class ParameterStoreConformanceTest {
     }
 
     @Test
+    void pingAnswersPastTheCache() {
+        ParameterStore store = cachingStore(Duration.ofMinutes(5));
+
+        store.ping();
+        store.ping();
+
+        assertThat(store.statistics().cacheHits()).isZero();
+    }
+
+    @Test
     void missingIsEmptyAndRequireFails() {
         assertThat(store().get("missing")).isEmpty();
         assertThatThrownBy(() -> store().require("missing")).isInstanceOf(NotFoundException.class);
@@ -377,7 +387,8 @@ public abstract class ParameterStoreConformanceTest {
         store().put("watched/a", "1");
         listed(store(), "watched", "watched/a");
         BlockingQueue<ParameterChanges> events = new LinkedBlockingQueue<>();
-        try (AutoCloseable watch = store().watch("watched", Duration.ofMillis(200), events::add)) {
+        ParameterStore watching = store();
+        try (AutoCloseable watch = watching.watch("watched", Duration.ofMillis(200), events::add)) {
             store().put("watched/b", "2");
             assertThat(poll(events).added()).containsOnlyKeys("watched/b");
 
@@ -389,7 +400,8 @@ public abstract class ParameterStoreConformanceTest {
             store().delete("watched/b");
             assertThat(poll(events).removed()).containsExactly("watched/b");
         }
-        assertThat(store().statistics().changesDetected()).isZero(); // counted on the watching instance
+        // added, updated and removed, counted on the watching instance
+        assertThat(watching.statistics().changesDetected()).isGreaterThanOrEqualTo(3);
     }
 
     private ParameterChanges poll(BlockingQueue<ParameterChanges> events) throws InterruptedException {

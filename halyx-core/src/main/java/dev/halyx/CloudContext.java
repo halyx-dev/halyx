@@ -67,6 +67,13 @@ public final class CloudContext implements AutoCloseable {
     private final CloudProvider provider;
     private final InterceptorChain interceptors;
     private final Map<String, BlobStore> blobStores = new ConcurrentHashMap<>();
+    private final Map<CacheKey, Cache<?>> caches = new ConcurrentHashMap<>();
+    private final Map<ParameterStoreConfig, ParameterStore> parameterStores = new ConcurrentHashMap<>();
+    private final Map<TableConfig, DocumentStore> documentStores = new ConcurrentHashMap<>();
+    private final Map<TopicConfig, Publisher> publishers = new ConcurrentHashMap<>();
+    private final Map<SubscriptionConfig, Subscription> subscriptions = new ConcurrentHashMap<>();
+    private final Map<EventBusConfig, EventPublisher> eventPublishers = new ConcurrentHashMap<>();
+    private final Map<StreamProducerConfig, StreamProducer> streamProducers = new ConcurrentHashMap<>();
     private volatile ProviderConnection connection;
     private volatile boolean closed;
 
@@ -97,10 +104,13 @@ public final class CloudContext implements AutoCloseable {
 
     /**
      * A portable cache over the Redis-compatible server described by {@code config}. Caches on the
-     * same endpoint share one connection.
+     * same endpoint share one connection, and asking again with an equal configuration and the same codec
+     * returns the same cache, with its statistics and circuit breaker.
      */
+    @SuppressWarnings("unchecked")
     public <V> Cache<V> cache(CacheConfig config, Codec<V> codec) {
-        return new DefaultCache<>(provider.id(), config, codec, connection().cache(config), interceptors);
+        return (Cache<V>) caches.computeIfAbsent(new CacheKey(config, codec),
+                k -> new DefaultCache<>(provider.id(), config, codec, connection().cache(config), interceptors));
     }
 
     /** A cache of strings. */
@@ -108,28 +118,43 @@ public final class CloudContext implements AutoCloseable {
         return cache(config, Codec.string());
     }
 
-    /** A portable parameter or secret store. */
+    /**
+     * A portable parameter or secret store. Asking again with an equal configuration returns the same store, so
+     * its read cache is shared.
+     */
     public ParameterStore parameterStore(ParameterStoreConfig config) {
-        return new DefaultParameterStore(provider.id(), config, connection().parameterStore(config), interceptors);
+        return parameterStores.computeIfAbsent(config,
+                c -> new DefaultParameterStore(provider.id(), c, connection().parameterStore(c), interceptors));
     }
 
-    /** A portable document store over an existing table, container or collection. Share one per table. */
+    /**
+     * A portable document store over an existing table, container or collection. Asking again with an equal
+     * configuration returns the same store.
+     */
     public DocumentStore documentStore(TableConfig config) {
-        return new DefaultDocumentStore(connection().documentStore(config), interceptors);
+        return documentStores.computeIfAbsent(config,
+                c -> new DefaultDocumentStore(connection().documentStore(c), interceptors));
     }
 
-    /** A publisher to an existing topic or queue. Cheap to keep: create one per topic and share it. */
+    /**
+     * A publisher to an existing topic or queue. Asking again with an equal configuration returns the same
+     * publisher.
+     */
     public Publisher publisher(TopicConfig config) {
-        return new DefaultPublisher(connection().publisher(config), config, interceptors);
+        return publishers.computeIfAbsent(config, c -> new DefaultPublisher(connection().publisher(c), c, interceptors));
     }
 
     public Publisher publisher(String topic) {
         return publisher(TopicConfig.of(topic));
     }
 
-    /** A consumer of an existing subscription or queue: pull with {@code receive} or run {@code listen}. */
+    /**
+     * A consumer of an existing subscription or queue: pull with {@code receive} or run {@code listen}. Asking
+     * again with an equal configuration returns the same subscription.
+     */
     public Subscription subscription(SubscriptionConfig config) {
-        return new DefaultSubscription(connection().subscription(config), config, interceptors);
+        return subscriptions.computeIfAbsent(config,
+                c -> new DefaultSubscription(connection().subscription(c), c, interceptors));
     }
 
     public Subscription subscription(String name) {
@@ -138,10 +163,12 @@ public final class CloudContext implements AutoCloseable {
 
     /**
      * A publisher of CloudEvents to an event bus: an EventBridge event bus, an Event Grid namespace topic, or an
-     * Eventarc Advanced message bus. Receive the events from the queue the router delivers them to.
+     * Eventarc Advanced message bus. Receive the events from the queue the router delivers them to. Asking again
+     * with an equal configuration returns the same publisher.
      */
     public EventPublisher eventPublisher(EventBusConfig config) {
-        return new DefaultEventPublisher(connection().eventPublisher(config), interceptors);
+        return eventPublishers.computeIfAbsent(config,
+                c -> new DefaultEventPublisher(connection().eventPublisher(c), interceptors));
     }
 
     public EventPublisher eventPublisher(String bus) {
@@ -150,10 +177,11 @@ public final class CloudContext implements AutoCloseable {
 
     /**
      * A producer for an existing stream topic: Amazon MSK, Azure Event Hubs or Google Cloud Managed Service for
-     * Apache Kafka. Thread-safe and cheap to keep: create one per topic and share it.
+     * Apache Kafka. Thread-safe: asking again with an equal configuration returns the same producer.
      */
     public StreamProducer streamProducer(StreamProducerConfig config) {
-        return new DefaultStreamProducer(connection().streamProducer(config), config, interceptors);
+        return streamProducers.computeIfAbsent(config,
+                c -> new DefaultStreamProducer(connection().streamProducer(c), c, interceptors));
     }
 
     /**
@@ -210,13 +238,28 @@ public final class CloudContext implements AutoCloseable {
     }
 
     @Override
-    public synchronized void close() {
-        closed = true;
-        blobStores.clear();
-        if (connection != null) {
-            connection.close();
+    public void close() {
+        ProviderConnection open;
+        synchronized (this) {
+            closed = true;
+            open = connection;
             connection = null;
         }
+        // Outside the lock: a client being created holds its map entry while it waits for the lock in connection().
+        blobStores.clear();
+        caches.clear();
+        parameterStores.clear();
+        documentStores.clear();
+        publishers.clear();
+        subscriptions.clear();
+        eventPublishers.clear();
+        streamProducers.clear();
+        if (open != null) {
+            open.close();
+        }
+    }
+
+    private record CacheKey(CacheConfig config, Codec<?> codec) {
     }
 
     @Override

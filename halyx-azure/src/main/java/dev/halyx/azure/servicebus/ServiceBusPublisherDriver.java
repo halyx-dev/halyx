@@ -25,12 +25,12 @@ import dev.halyx.error.CloudException;
 import dev.halyx.error.InvalidArgumentException;
 import dev.halyx.messaging.MessagingCapability;
 import dev.halyx.messaging.OutgoingMessage;
-import dev.halyx.messaging.spi.MessagingErrors;
-import dev.halyx.messaging.spi.PublisherDriver;
+import dev.halyx.messaging.spi.AbstractPublisherDriver;
 
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -39,7 +39,7 @@ import java.util.UUID;
  * Delays become scheduled enqueue times. On session-enabled entities ({@code sessions}), ordering keys become
  * session ids, and messages without one get a unique session id, since such entities require one.
  */
-public final class ServiceBusPublisherDriver implements PublisherDriver {
+public final class ServiceBusPublisherDriver extends AbstractPublisherDriver {
 
     private final ServiceBusSenderClient sender;
     private final String entity;
@@ -47,15 +47,11 @@ public final class ServiceBusPublisherDriver implements PublisherDriver {
     private final boolean sessions;
 
     public ServiceBusPublisherDriver(ServiceBusSenderClient sender, String entity, long maxMessageBytes, boolean sessions) {
+        super(AzureProvider.ID);
         this.sender = sender;
         this.entity = entity;
         this.maxMessageBytes = maxMessageBytes;
         this.sessions = sessions;
-    }
-
-    @Override
-    public String provider() {
-        return AzureProvider.ID;
     }
 
     @Override
@@ -121,13 +117,13 @@ public final class ServiceBusPublisherDriver implements PublisherDriver {
     }
 
     @Override
-    public CloudException translate(Throwable error) {
-        return MessagingErrors.translate(error, AzureProvider.ID, ServiceBusErrors::translate);
+    protected Optional<CloudException> translateNative(Throwable error) {
+        return ServiceBusErrors.translate(error);
     }
 
     @Override
-    public <T> T unwrap(Class<T> nativeType) {
-        return MessagingErrors.unwrap(nativeType, AzureProvider.ID, List.of(sender));
+    protected List<Object> nativeClients() {
+        return List.of(sender);
     }
 
     @Override

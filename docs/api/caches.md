@@ -128,6 +128,9 @@ doesn't add a timeout to every request. Operations whose result matters (`putIfA
 retried, so an application starts even while its cache is down. The default command timeout is 2
 seconds (`redis.command-timeout`).
 
+`ping()` checks that the server answers an authenticated command and ignores fail-open, so it fails during an
+outage. Spring Boot's health check uses it.
+
 ## Implementation
 
 The shared `halyx-redis` module uses Lettuce 6.8, which stays on Netty 4.1 like the AWS and Azure SDKs.

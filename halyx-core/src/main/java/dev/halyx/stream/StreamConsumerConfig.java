@@ -94,6 +94,23 @@ public final class StreamConsumerConfig {
         return properties;
     }
 
+    /** Configurations with the same settings are equal, so contexts can share one client per configuration. */
+    @Override
+    public boolean equals(Object o) {
+        return o instanceof StreamConsumerConfig other && Objects.equals(cluster, other.cluster)
+                && Objects.equals(topic, other.topic)
+                && Objects.equals(group, other.group)
+                && Objects.equals(startPosition, other.startPosition)
+                && readCommitted == other.readCommitted
+                && Objects.equals(claimCheck, other.claimCheck)
+                && Objects.equals(properties, other.properties);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(cluster, topic, group, startPosition, readCommitted, claimCheck, properties);
+    }
+
     @Override
     public String toString() {
         return "StreamConsumerConfig[topic=" + topic + ", group=" + group + ", cluster=" + cluster + "]";

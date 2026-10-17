@@ -68,6 +68,7 @@ import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
 import software.amazon.awssdk.core.retry.RetryMode;
+import software.amazon.awssdk.utils.SdkAutoCloseable;
 import software.amazon.awssdk.http.SdkHttpClient;
 import software.amazon.awssdk.http.apache5.Apache5HttpClient;
 import software.amazon.awssdk.regions.Region;
@@ -104,6 +105,7 @@ final class AwsConnection implements ProviderConnection {
     private KafkaStreamClients streams;
     private SsmClient ssm;
     private SecretsManagerClient secretsManager;
+    private AwsCredentialsProvider credentials;
 
     AwsConnection(ProviderConfig config) {
         this.config = config;
@@ -180,12 +182,16 @@ final class AwsConnection implements ProviderConnection {
         return config.region().map(Region::of).orElseGet(() -> DefaultAwsRegionProviderChain.builder().build().getRegion());
     }
 
-    private AwsCredentialsProvider credentials() {
-        return switch (config.credentials()) {
-            case Credentials.DefaultChain ignored -> DefaultCredentialsProvider.builder().build();
-            case Credentials.Static s -> StaticCredentialsProvider.create(AwsBasicCredentials.create(s.id(), s.secret()));
-            case Credentials.Anonymous ignored -> AnonymousCredentialsProvider.create();
-        };
+    /** Made once and shared by every client, so the default chain resolves and refreshes credentials once. */
+    private synchronized AwsCredentialsProvider credentials() {
+        if (credentials == null) {
+            credentials = switch (config.credentials()) {
+                case Credentials.DefaultChain ignored -> DefaultCredentialsProvider.builder().build();
+                case Credentials.Static s -> StaticCredentialsProvider.create(AwsBasicCredentials.create(s.id(), s.secret()));
+                case Credentials.Anonymous ignored -> AnonymousCredentialsProvider.create();
+            };
+        }
+        return credentials;
     }
 
     /** A DynamoDB table. */
@@ -396,5 +402,10 @@ final class AwsConnection implements ProviderConnection {
             http.close();
             http = null;
         }
+        // Nor the credentials provider they were given.
+        if (credentials instanceof SdkAutoCloseable closeable) {
+            closeable.close();
+        }
+        credentials = null;
     }
 }

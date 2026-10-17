@@ -67,6 +67,11 @@ public final class ReactiveCache<V> {
         return calls.mono(() -> cache.getAll(keys));
     }
 
+    /** Completes when the server answers, even on a fail-open cache; see {@link Cache#ping()}. */
+    public Mono<Void> ping() {
+        return calls.run(cache::ping);
+    }
+
     public Mono<Void> put(String key, V value) {
         return calls.run(() -> cache.put(key, value));
     }

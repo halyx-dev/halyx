@@ -186,7 +186,17 @@ if [[ "$TIER" == 3 ]]; then
       -Dhalyx.real.azure.cache=true -Dhalyx.real.azure.run="$RUN" \
       -Dhalyx.real.azure.cache.host="$(terraform -chdir="$TF_DIR" output -raw cache_host)" \
       -Dhalyx.real.azure.cache.port="$(terraform -chdir="$TF_DIR" output -raw cache_port)"
-  exit $?
+  status=$?
+  [[ -n "${IT_TEST:-}" ]] && exit $status
+  # Spring Boot 3 and 4: Cache beans and @Cacheable logging in with the cloud identity.
+  mvn -o -q install -DskipTests -pl halyx-spring-boot-autoconfigure -am || exit 1
+  for module in halyx-spring-boot-autoconfigure halyx-spring-boot4-tests; do
+    log "Running the Spring Boot cache test ($module) against real Azure"
+    mvn -o verify -pl "$module" -Dit.test=RealSpringCacheIT -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+        -Dhalyx.real.spring.cache=true -Dhalyx.real.spring.provider=azure \
+        -Dhalyx.real.spring.cache-endpoint="rediss://$(terraform -chdir="$TF_DIR" output -raw cache_host):$(terraform -chdir="$TF_DIR" output -raw cache_port)" || status=1
+  done
+  exit $status
 fi
 
 if [[ "$TIER" == 4 ]]; then
@@ -239,18 +249,25 @@ mvn -o verify -pl halyx-azure -Dit.test="${IT_TEST:-RealAzureIT}" -Dtest=none -D
     -Dhalyx.real.azure.eventgrid-subscription="$EVENT_GRID_SUBSCRIPTION"
 status=$?
 [[ -n "${IT_TEST:-}" ]] && exit $status
-# Spring Boot 3 and 4: an auto-configured repository on the run's table with a sort key.
+# Spring Boot 3 and 4: an auto-configured repository on the run's table with a sort key, the event bus, the
+# reactive beans, @HalyxListener on the run's Service Bus topic with a claim check, and spring.config.import from
+# Key Vault and App Configuration.
 mvn -o -q install -DskipTests -pl halyx-spring-boot-autoconfigure -am || exit 1
 for module in halyx-spring-boot-autoconfigure halyx-spring-boot4-tests; do
   log "Running the Spring Boot repository, event and reactive tests ($module) against real Azure"
-  mvn -o verify -pl "$module" -Dit.test='RealSpringRepositoryIT,RealSpringEventIT,RealSpringReactiveIT' -Dtest=none \
+  mvn -o verify -pl "$module" -Dit.test='RealSpringRepositoryIT,RealSpringEventIT,RealSpringReactiveIT,RealSpringMessagingIT,RealSpringParametersIT' -Dtest=none \
       -Dsurefire.failIfNoSpecifiedTests=false \
       -Dhalyx.real.spring.repositories=true -Dhalyx.real.spring.events=true -Dhalyx.real.spring.reactive=true \
+      -Dhalyx.real.spring.messaging=true -Dhalyx.real.spring.parameters=true \
       -Dhalyx.real.spring.provider=azure -Dhalyx.real.spring.bucket="$CONTAINER" \
       -Dhalyx.real.spring.table="items-sorted" \
-      -Dhalyx.real.spring.provider-properties="azure.cosmos.endpoint=$(terraform -chdir="$TF_DIR" output -raw cosmos_endpoint),azure.cosmos.database=halyx,azure.storage.account=$STORAGE" \
+      -Dhalyx.real.spring.provider-properties="azure.cosmos.endpoint=$(terraform -chdir="$TF_DIR" output -raw cosmos_endpoint),azure.cosmos.database=halyx,azure.storage.account=$STORAGE,azure.servicebus.namespace=$(terraform -chdir="$TF_DIR" output -raw servicebus_namespace)" \
       -Dhalyx.real.spring.event-bus="$EVENT_GRID_TOPIC" -Dhalyx.real.spring.event-bus-properties="azure.eventgrid.endpoint=$EVENT_GRID" \
       -Dhalyx.real.spring.inbox="$EVENT_GRID_SUBSCRIPTION" -Dhalyx.real.spring.inbox-topic="$EVENT_GRID_TOPIC" \
-      -Dhalyx.real.spring.inbox-properties="azure.eventgrid.endpoint=$EVENT_GRID" || status=1
+      -Dhalyx.real.spring.inbox-properties="azure.eventgrid.endpoint=$EVENT_GRID" \
+      -Dhalyx.real.spring.topic="$(terraform -chdir="$TF_DIR" output -raw spring_topic)" \
+      -Dhalyx.real.spring.subscription="$(terraform -chdir="$TF_DIR" output -raw spring_subscription)" \
+      -Dhalyx.real.spring.secrets-location="$(terraform -chdir="$TF_DIR" output -raw key_vault_url)" \
+      -Dhalyx.real.spring.parameters-location="$(terraform -chdir="$TF_DIR" output -raw appconfig_endpoint)" || status=1
 done
 exit $status

@@ -152,3 +152,30 @@ run in registration order, outermost first. Errors reaching an interceptor are a
 
 In Spring Boot, every `Interceptor` bean is applied in `@Order` order, and Micrometer observations are
 added for you. See [Spring Boot](../spring-boot.md#observability).
+
+## Observations and tracing
+
+`halyx-micrometer` brings Micrometer to any application, with or without Spring. Add it first, so it observes
+retries and every other interceptor:
+
+```java
+Halyx halyx = Halyx.builder()
+        .register("aws", ProviderConfig.of("aws"))
+        .interceptor(new ObservationInterceptor(observationRegistry))   // a halyx.operation timer and span per call
+        .interceptor(new RetryInterceptor(RetryPolicy.defaults()))
+        .build();
+```
+
+With Micrometer Tracing, `HalyxTracing` carries the trace from senders to listeners: publishers add it to message
+attributes, event publishers to the CloudEvents `traceparent` and `tracestate` extensions, and stream producers to
+record headers. Wrapped listeners run each delivery in a consumer span that continues it:
+
+```java
+HalyxTracing tracing = new HalyxTracing(tracer, propagator);
+Publisher orders = tracing.publisher(context.publisher("orders"));
+EventPublisher events = tracing.eventPublisher(context.eventPublisher("orders"));
+subscription.listen(tracing.listener("billing", message -> bill(message)), ConsumerOptions.DEFAULTS);
+consumer.listen(tracing.recordListener("ledger", record -> post(record)), ListenerOptions.DEFAULTS);
+```
+
+The Spring Boot starter applies all of these to its beans and `@HalyxListener` methods.

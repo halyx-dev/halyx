@@ -20,6 +20,7 @@ import io.micrometer.observation.tck.TestObservationRegistryAssert;
 import org.junit.jupiter.api.Test;
 import dev.halyx.Halyx;
 import dev.halyx.cache.Cache;
+import dev.halyx.cache.Codec;
 import dev.halyx.parameters.ParameterKind;
 import dev.halyx.parameters.ParameterStore;
 import dev.halyx.config.ProviderConfig;
@@ -27,15 +28,21 @@ import dev.halyx.error.ThrottledException;
 import dev.halyx.interceptor.Interceptor;
 import dev.halyx.interceptor.Invocation;
 import dev.halyx.interceptor.OperationContext;
-import dev.halyx.spring.autoconfigure.observation.ObservationInterceptor;
+import dev.halyx.micrometer.ObservationInterceptor;
 import dev.halyx.spring.autoconfigure.observation.HalyxObservationAutoConfiguration;
 import dev.halyx.storage.BlobContent;
 import dev.halyx.storage.BlobKey;
 import dev.halyx.storage.BlobStore;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.test.context.FilteredClassLoader;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.core.ResolvableType;
 import org.springframework.core.annotation.Order;
 
+import java.io.Serializable;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -298,5 +305,130 @@ class HalyxAutoConfigurationTest {
         FirstRecording(List<String> calls) {
             super("first", calls);
         }
+    }
+
+    // --- providers the Halyx bean registers --------------------------------------------------------
+
+    @Test
+    void resourcesUseProvidersACustomizerRegisters() {
+        runner.withPropertyValues("halyx.providers.local.type=memory",
+                        "halyx.blob-stores.archive.provider=archive", "halyx.blob-stores.archive.bucket=a",
+                        "halyx.blob-stores.docs.provider=local")
+                .withBean(HalyxBuilderCustomizer.class, () -> builder -> builder.register("archive", ProviderConfig.of("memory")))
+                .run(context -> {
+                    Halyx halyx = context.getBean(Halyx.class);
+                    assertThat(context.getBean("archive", BlobStore.class)).isSameAs(halyx.provider("archive").blobStore("a"));
+                    assertThat(context.getBean("docs", BlobStore.class)).isSameAs(halyx.provider("local").blobStore("docs"));
+                });
+    }
+
+    @Test
+    void theOnlyProviderACustomizerRegistersNeedsNoName() {
+        runner.withPropertyValues("halyx.blob-stores.x.bucket=b")
+                .withBean(HalyxBuilderCustomizer.class, () -> builder -> builder.register("only", ProviderConfig.of("memory")))
+                .run(context -> assertThat(context.getBean("x", BlobStore.class).provider()).isEqualTo("memory"));
+    }
+
+    @Test
+    void resourcesUseTheApplicationsOwnHalyxBean() {
+        runner.withPropertyValues("halyx.blob-stores.x.provider=mine", "halyx.blob-stores.x.bucket=b")
+                .withBean(Halyx.class, () -> Halyx.builder().register("mine", ProviderConfig.of("memory")).build())
+                .run(context -> assertThat(context.getBean("x", BlobStore.class))
+                        .isSameAs(context.getBean(Halyx.class).provider("mine").blobStore("b")));
+    }
+
+    @Test
+    void anUnknownProviderListsTheRegisteredOnes() {
+        runner.withPropertyValues("halyx.providers.local.type=memory", "halyx.blob-stores.x.provider=missing")
+                .withBean(HalyxBuilderCustomizer.class, () -> builder -> builder.register("extra", ProviderConfig.of("memory")))
+                .run(context -> assertThat(context).hasFailed().getFailure()
+                        .hasStackTraceContaining("halyx.blob-stores.x.provider refers to unknown provider 'missing'")
+                        .hasStackTraceContaining("Registered providers: [local, extra]"));
+    }
+
+    // --- missing modules ---------------------------------------------------------------------------
+
+    @Test
+    void r2dbcDatabasesWithoutHalyxR2dbcFailAtStartup() {
+        runner.withClassLoader(new FilteredClassLoader("dev.halyx.r2dbc"))
+                .withPropertyValues("halyx.providers.local.type=memory", "halyx.r2dbc-databases.orders.engine=postgresql",
+                        "halyx.r2dbc-databases.orders.host=db", "halyx.r2dbc-databases.orders.database=orders",
+                        "halyx.r2dbc-databases.orders.auth.username=app", "halyx.r2dbc-databases.orders.auth.password=p")
+                .run(context -> assertThat(context).hasFailed().getFailure().hasStackTraceContaining(
+                        "halyx.r2dbc-databases is configured, but halyx-r2dbc is not on the classpath"));
+    }
+
+    @Test
+    void aSpringKafkaClusterWithoutSpringKafkaFailsAtStartup() {
+        runner.withClassLoader(new FilteredClassLoader("org.springframework.kafka"))
+                .withPropertyValues("halyx.providers.local.type=memory", "halyx.spring-kafka.cluster=events")
+                .run(context -> assertThat(context).hasFailed().getFailure().hasStackTraceContaining(
+                        "halyx.spring-kafka.cluster is set, but Spring for Apache Kafka is not on the classpath"));
+    }
+
+    // --- cache codecs --------------------------------------------------------------------------------
+
+    public record Purchase(String id, int items) implements Serializable {
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    static class PurchaseCodec {
+        @Bean
+        Codec<Purchase> orderCodec() {
+            return Codec.of(order -> (order.id() + ":" + order.items()).getBytes(StandardCharsets.UTF_8), bytes -> {
+                String[] parts = new String(bytes, StandardCharsets.UTF_8).split(":");
+                return new Purchase(parts[0], Integer.parseInt(parts[1]));
+            });
+        }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void cachesStoreWhatTheirCodecSays() {
+        String endpoint = "=redis://localhost:6379";
+        runner.withUserConfiguration(PurchaseCodec.class)
+                .withPropertyValues("halyx.providers.local.type=memory",
+                        "halyx.caches.text.endpoint" + endpoint,
+                        "halyx.caches.raw.endpoint" + endpoint, "halyx.caches.raw.codec=bytes",
+                        "halyx.caches.serialized.endpoint" + endpoint, "halyx.caches.serialized.codec=jdk",
+                        "halyx.caches.serialized.trusted-packages=dev.halyx.spring",
+                        "halyx.caches.json.endpoint" + endpoint, "halyx.caches.json.codec=json",
+                        "halyx.caches.json.trusted-packages=dev.halyx.spring",
+                        "halyx.caches.orders.endpoint" + endpoint, "halyx.caches.orders.codec=orderCodec")
+                .run(context -> {
+                    Purchase order = new Purchase("o-1", 3);
+                    context.getBean("text", Cache.class).put("k", "v");
+                    assertThat(context.getBean("text", Cache.class).get("k")).hasValue("v");
+                    Cache<byte[]> raw = context.getBean("raw", Cache.class);
+                    raw.put("k", new byte[] {1, 2});
+                    assertThat(raw.get("k")).hasValueSatisfying(v -> assertThat(v).containsExactly(1, 2));
+                    for (String name : List.of("serialized", "json", "orders")) {
+                        Cache<Object> cache = context.getBean(name, Cache.class);
+                        cache.put("k", order);
+                        assertThat(cache.get("k")).as(name).hasValue(order);
+                    }
+                    // A Codec bean's value type is the cache bean's, so Cache<Purchase> injects by type alone.
+                    Cache<Purchase> byType = (Cache<Purchase>) context.getBeanProvider(
+                            ResolvableType.forClassWithGenerics(Cache.class, Purchase.class)).getObject();
+                    assertThat(byType).isSameAs(context.getBean("orders"));
+                    assertThat(context.getBeanProvider(ResolvableType.forClassWithGenerics(Cache.class, String.class))
+                            .getObject()).isSameAs(context.getBean("text"));
+                });
+    }
+
+    @Test
+    void jsonCachesNeedTrustedPackages() {
+        runner.withPropertyValues("halyx.providers.local.type=memory",
+                        "halyx.caches.objects.endpoint=redis://localhost:6379", "halyx.caches.objects.codec=json")
+                .run(context -> assertThat(context).hasFailed().getFailure().hasStackTraceContaining(
+                        "halyx.caches.objects.trusted-packages is required with codec=json"));
+    }
+
+    @Test
+    void cachePasswordErrorsNameTheirProperty() {
+        runner.withPropertyValues("halyx.providers.local.type=memory",
+                        "halyx.caches.sessions.endpoint=redis://localhost:6379", "halyx.caches.sessions.auth.type=password")
+                .run(context -> assertThat(context).hasFailed().getFailure().hasStackTraceContaining(
+                        "halyx.caches.sessions.auth.password is required for password auth"));
     }
 }

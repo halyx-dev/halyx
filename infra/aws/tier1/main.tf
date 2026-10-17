@@ -173,6 +173,41 @@ resource "aws_sqs_queue_policy" "events_inbox" {
   })
 }
 
+# --- Messaging for the Spring Boot test: a topic delivering raw messages to a queue ---------------------
+
+resource "aws_sns_topic" "spring" {
+  name = "halyx-${var.run_id}-spring"
+}
+
+resource "aws_sqs_queue" "spring" {
+  name                       = "halyx-${var.run_id}-spring"
+  visibility_timeout_seconds = 10
+  message_retention_seconds  = 3600
+}
+
+# SNS may send to the queue only from this topic.
+resource "aws_sqs_queue_policy" "spring" {
+  queue_url = aws_sqs_queue.spring.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "sns.amazonaws.com" }
+      Action    = "sqs:SendMessage"
+      Resource  = aws_sqs_queue.spring.arn
+      Condition = { ArnEquals = { "aws:SourceArn" = aws_sns_topic.spring.arn } }
+    }]
+  })
+}
+
+resource "aws_sns_topic_subscription" "spring" {
+  topic_arn            = aws_sns_topic.spring.arn
+  protocol             = "sqs"
+  endpoint             = aws_sqs_queue.spring.arn
+  raw_message_delivery = true
+  depends_on           = [aws_sqs_queue_policy.spring]
+}
+
 output "event_bus" {
   value = aws_cloudwatch_event_bus.events.name
 }
@@ -191,4 +226,12 @@ output "items_table" {
 
 output "items_sorted_table" {
   value = aws_dynamodb_table.items_sorted.name
+}
+
+output "spring_topic" {
+  value = aws_sns_topic.spring.arn
+}
+
+output "spring_queue" {
+  value = aws_sqs_queue.spring.url
 }

@@ -15,6 +15,7 @@
  */
 package dev.halyx.azure;
 
+import com.azure.core.exception.ClientAuthenticationException;
 import com.azure.core.exception.HttpResponseException;
 import com.azure.core.http.HttpHeaderName;
 import com.azure.core.http.HttpResponse;
@@ -59,6 +60,10 @@ public final class AzureErrors {
                 default -> e.getResponse().getStatusCode() >= 500 ? new UnavailableException(message, e, provider, code) : null;
             };
             return Optional.ofNullable(mapped);
+        }
+        // An Entra ID token request that failed before any service call, such as a missing managed identity.
+        if (error instanceof ClientAuthenticationException) {
+            return Optional.of(new AccessDeniedException(error.getMessage(), error, provider, null));
         }
         if (error instanceof UncheckedIOException || error.getCause() instanceof IOException) {
             return Optional.of(new UnavailableException(error.getMessage(), error, provider, null));

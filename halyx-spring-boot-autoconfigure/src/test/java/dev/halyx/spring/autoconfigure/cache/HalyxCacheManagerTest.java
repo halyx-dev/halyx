@@ -264,4 +264,11 @@ class HalyxCacheManagerTest {
                     assertThat(registry.get("cache.loads").tags("cache", "users", "result", "success").functionCounter()).isNotNull();
                 });
     }
+
+    @Test
+    void passwordErrorsNameTheCacheManagersProperty() {
+        runner.withPropertyValues("halyx.cache-manager.auth.type=password", "halyx.cache-manager.cache-names=users")
+                .run(context -> assertThat(context).hasFailed().getFailure().hasStackTraceContaining(
+                        "halyx.cache-manager.auth.password is required for password auth"));
+    }
 }

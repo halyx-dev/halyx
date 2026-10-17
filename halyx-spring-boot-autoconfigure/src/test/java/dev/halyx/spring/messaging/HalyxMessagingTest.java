@@ -23,10 +23,12 @@ import io.micrometer.tracing.Tracer;
 import io.micrometer.tracing.propagation.Propagator;
 import io.micrometer.tracing.test.simple.SimpleTracer;
 import org.junit.jupiter.api.Test;
+import dev.halyx.messaging.MessageConsumer;
 import dev.halyx.messaging.OutgoingMessage;
 import dev.halyx.messaging.Publisher;
 import dev.halyx.messaging.ReceivedMessage;
 import dev.halyx.messaging.Subscription;
+import dev.halyx.micrometer.TracingPublisher;
 import dev.halyx.spring.autoconfigure.HalyxAutoConfiguration;
 import dev.halyx.spring.autoconfigure.metrics.HalyxCacheMetricsAutoConfiguration;
 import dev.halyx.spring.autoconfigure.observation.HalyxMessagingTracingAutoConfiguration;
@@ -35,6 +37,7 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.lang.reflect.Proxy;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
@@ -42,6 +45,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -225,6 +229,73 @@ class HalyxMessagingTest {
                     assertThat(orders.latch.await(15, TimeUnit.SECONDS)).isTrue();
                     assertThat(orders.traceIds).isNotEmpty().allMatch(id -> id.equals(request.context().traceId()));
                     assertThat(tracer.getSpans()).anyMatch(s -> s.getName().equals("halyx.message orders"));
+                });
+    }
+
+    /** A subscription whose {@code listen} is counted, and returns a consumer recording its close, or fails. */
+    static Subscription subscription(AtomicInteger listens, AtomicBoolean closed, boolean fails) {
+        return (Subscription) Proxy.newProxyInstance(Subscription.class.getClassLoader(), new Class<?>[] {Subscription.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "listen" -> {
+                        listens.incrementAndGet();
+                        if (fails) {
+                            throw new IllegalStateException("cannot listen");
+                        }
+                        yield Proxy.newProxyInstance(MessageConsumer.class.getClassLoader(),
+                                new Class<?>[] {MessageConsumer.class}, (p, m, a) -> {
+                                    if (m.getName().equals("close")) {
+                                        closed.set(true);
+                                    }
+                                    return m.getName().equals("toString") ? "consumer" : null;
+                                });
+                    }
+                    case "toString" -> "subscription";
+                    case "hashCode" -> System.identityHashCode(proxy);
+                    case "equals" -> proxy == args[0];
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
+    }
+
+    static class GoodListener {
+        @HalyxListener("good")
+        void on(String body) {
+        }
+    }
+
+    static class MistakenListener {
+        @HalyxListener("missing")
+        void on(String body) {
+        }
+    }
+
+    static class BrokenListener {
+        @HalyxListener("broken")
+        void on(String body) {
+        }
+    }
+
+    @Test
+    void aMistakeInAnyListenerStartsNone() {
+        AtomicInteger listens = new AtomicInteger();
+        runner.withBean("good", Subscription.class, () -> subscription(listens, new AtomicBoolean(), false))
+                .withBean(GoodListener.class, GoodListener::new)
+                .withBean(MistakenListener.class, MistakenListener::new)
+                .run(context -> {
+                    assertThat(context).hasFailed().getFailure().hasStackTraceContaining("refers to no subscription");
+                    assertThat(listens).hasValue(0);
+                });
+    }
+
+    @Test
+    void listenersStartedBeforeAFailureAreClosed() {
+        AtomicBoolean closed = new AtomicBoolean();
+        runner.withBean("good", Subscription.class, () -> subscription(new AtomicInteger(), closed, false))
+                .withBean("broken", Subscription.class, () -> subscription(new AtomicInteger(), new AtomicBoolean(), true))
+                .withBean(GoodListener.class, GoodListener::new)
+                .withBean(BrokenListener.class, BrokenListener::new)
+                .run(context -> {
+                    assertThat(context).hasFailed().getFailure().hasStackTraceContaining("cannot listen");
+                    assertThat(closed).isTrue();
                 });
     }
 }

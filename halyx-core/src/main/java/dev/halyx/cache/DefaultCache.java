@@ -47,6 +47,7 @@ public final class DefaultCache<V> implements Cache<V> {
 
     private static final Logger LOG = LoggerFactory.getLogger(DefaultCache.class);
     private static final String SERVICE = "cache";
+    private static final String PING_KEY = "halyx:ping";
     private static final int BREAKER_THRESHOLD = 5;
     private static final Duration BREAKER_OPEN_FOR = Duration.ofSeconds(10);
 
@@ -128,6 +129,12 @@ public final class DefaultCache<V> implements Cache<V> {
     public boolean exists(String key) {
         String full = fullKey(key);
         return execute("exists", key, true, Mode.BEST_EFFORT, () -> false, () -> driver.exists(full));
+    }
+
+    @Override
+    public void ping() {
+        String full = fullKey(PING_KEY);
+        execute("ping", PING_KEY, true, Mode.STRICT, null, () -> driver.exists(full));
     }
 
     @Override

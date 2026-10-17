@@ -92,8 +92,11 @@ halyx:
 ```
 
 Each entry is a named provider, like `Halyx.builder().register(name, config)`. When only one provider is
-configured, resources use it without saying so; with several, each resource names its `provider`. See
-[Provider configuration](providers.md) for every property.
+registered, resources use it without saying so; with several, each resource names its `provider`. Resources can
+also name providers that a `HalyxBuilderCustomizer` registers, or your own `Halyx` bean has: names are resolved
+against the `Halyx` bean when each resource bean is created. (`spring.config.import` runs before any bean exists, so
+the stores it imports need their provider under `halyx.providers`.) See [Provider configuration](providers.md) for
+every property.
 
 ## Object storage
 
@@ -183,6 +186,8 @@ halyx:
 `@HalyxListener("<subscription bean>")` methods take a `String` body, a `byte[]` body, a `CloudEvent` or the whole
 `ReceivedMessage`. Returning acks the message; throwing nacks it for redelivery with backoff. Override
 the subscription's concurrency per listener with `@HalyxListener(value = "billing", concurrency = 8)`.
+Every listener is checked before any starts, so a mistake, such as a listener naming no subscription, fails startup
+with nothing consuming; and if one fails to start, those already started are stopped.
 
 Listeners start once the application is ready, and stop first on shutdown, letting running handlers
 finish. Each consumer reports metrics and appears under the `messaging` health entry. Wrap every
@@ -237,7 +242,10 @@ halyx:
 `cluster` may be omitted on producers and consumers when only one stream cluster is configured.
 `@HalyxListener("<stream consumer bean>")` methods take a `String` value, a `byte[]` value or the whole
 `ReceivedRecord`. Returning commits the record; throwing retries it with backoff, holding back the rest of its
-partition, until `max-attempts` sends it to the `dead-letter` producer. Stream consumers leave their group when
+partition, until `max-attempts` sends it to the `dead-letter` producer. A stream consumer is one consumer group
+member, so it runs one listener, without `concurrency`: its parallelism is its partitions. Startup fails if two
+methods name the same consumer, or one sets `concurrency`; give each further listener its own
+`halyx.stream-consumers` entry and group. Stream consumers leave their group when
 the application stops. Each listener reports metrics and appears under the `streams` health entry, and each
 producer has its own health indicator. Wrap every stream listener with a `RecordListenerDecorator` bean.
 
@@ -325,7 +333,17 @@ halyx:
       default-ttl: 30m
       auth: { type: iam, username: sessions-app }      # none | password | iam
       properties: { aws.elasticache.cache-name: sessions }
+    quotes:
+      endpoint: rediss://master.sessions.abc123.euw2.cache.amazonaws.com:6379
+      codec: json                  # a Cache<Object>; see below
+      trusted-packages: com.example.quotes
 ```
+
+`codec` decides how values are stored, and so the bean's type: `string` (the default, a `Cache<String>`), `bytes`
+(a `Cache<byte[]>`), `jdk` or `json` (a `Cache<Object>` that reads back only `java.*` types and those in
+`trusted-packages`, as for [`@Cacheable`](#springs-cacheable)), or the name of a `Codec<V>` bean of yours, which
+makes a `Cache<V>` that injects by its type. The health check pings the server even when the cache is
+`fail-open`, so an outage shows as DOWN.
 
 ### Spring's `@Cacheable`
 
@@ -467,19 +485,19 @@ reports in reactive applications as in servlet ones.
 | Feature | Details |
 |---|---|
 | Observations | With Micrometer, every operation records a `halyx.operation` observation (a timer and a span) tagged with `halyx.service`, `halyx.operation`, `halyx.provider` and `error`. Turn off with `halyx.observations.enabled=false`. |
-| Health | A `halyx` health contributor with one indicator per blob store (lists one item), cache (runs an authenticated command), parameter store (an authenticated read), document store and stream producer (reads the topic's partitions), plus the `messaging` consumers and `streams` listeners. Turn off with `management.health.halyx.enabled=false`. |
+| Health | A `halyx` health contributor with one indicator per blob store (lists one item), cache (runs an authenticated command, even when fail-open), parameter store (an authenticated read, past its cache), document store and stream producer (reads the topic's partitions), plus the `messaging` consumers and `streams` listeners. Turn off with `management.health.halyx.enabled=false`. |
 | Cache metrics | Micrometer's standard `cache.gets{result=hit\|miss}`, `cache.puts` and `cache.evictions`, plus `cache.loads{result}` and `cache.fail.open`, tagged `cache=<name>`, for `Cache` beans and `CacheManager` caches. |
 | Messaging metrics | `halyx.messaging.messages{subscription, listener, result}`, `halyx.messaging.in.flight` and `halyx.messaging.receive.errors`. |
 | Stream metrics | `halyx.stream.records{consumer, listener, result=received\|handled\|failed\|dead-lettered}`, `halyx.stream.poll.errors`, `halyx.stream.in.flight` and `halyx.stream.assigned.partitions`. |
 | Parameter metrics | `halyx.parameters.reads{store, source=cache\|backend}`, `halyx.parameters.changes{store}` and `halyx.parameters.watch.failures{store}`. |
-| Tracing | With Micrometer Tracing, publishers and stream producers add the current trace context to message attributes and record headers, and each listener invocation runs in a consumer span that continues the trace. |
+| Tracing | With Micrometer Tracing, publishers, event publishers and stream producers add the current trace context to message attributes, CloudEvent extensions (`traceparent`, `tracestate`) and record headers, and each listener invocation runs in a consumer span that continues the trace. Without Spring, `halyx-micrometer` does the same: see [Observations and tracing](api/errors.md#observations-and-tracing). |
 
 ## Customising
 
 | Extension | Use it to |
 |---|---|
 | your own `Halyx` bean | replace the auto-configured one entirely |
-| `HalyxBuilderCustomizer` beans | add plugins, interceptors or registrations to the builder |
+| `HalyxBuilderCustomizer` beans | add plugins, interceptors or registrations to the builder; `halyx.*` resources can use the providers they register |
 | `Interceptor` beans | wrap every operation; applied in `@Order` order. Order, outermost first: observations, your interceptors, retries |
 | `MessageListenerDecorator` beans | wrap every `@HalyxListener` |
 | `halyx.retry.*` | uniform retries (`enabled`, `max-attempts`, `initial-backoff`, `max-backoff`, `multiplier`); off by default, since the SDKs already retry |
@@ -492,7 +510,12 @@ databases and your own beans, so keep them distinct.
 Startup fails with a message naming the property for:
 - an unknown provider type, with the module to add
 - an unknown or ambiguous `provider` reference
-- incomplete static credentials
+- incomplete static credentials, or a password login without its password
+- a `json` cache without `trusted-packages`
+- `halyx.r2dbc-databases` without `halyx-r2dbc`, or `halyx.spring-kafka.cluster` without Spring for Apache Kafka
+- a `@HalyxListener` naming no subscription or stream consumer, a second listener on one stream consumer, or
+  `concurrency` on a stream consumer's listener
+- a bean named `messaging` or `streams`, which would hide a health entry of the same name
 
 Configuration metadata is generated, so IDEs autocomplete `halyx.*` keys.
 

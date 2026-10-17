@@ -98,6 +98,11 @@ public final class ReactiveParameterStore {
         return calls.run(store::refresh);
     }
 
+    /** Completes when the backend answers an authenticated read, past the cache; see {@link ParameterStore#ping()}. */
+    public Mono<Void> ping() {
+        return calls.run(store::ping);
+    }
+
     /**
      * Changes under {@code prefix}, checked every {@code interval} by the store's watch, from when the subscriber
      * arrives; the watch stops when it goes away.

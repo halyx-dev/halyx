@@ -22,8 +22,7 @@ import dev.halyx.error.CloudException;
 import dev.halyx.error.InvalidArgumentException;
 import dev.halyx.messaging.MessagingCapability;
 import dev.halyx.messaging.OutgoingMessage;
-import dev.halyx.messaging.spi.MessagingErrors;
-import dev.halyx.messaging.spi.PublisherDriver;
+import dev.halyx.messaging.spi.AbstractPublisherDriver;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.MessageAttributeValue;
 import software.amazon.awssdk.services.sqs.model.SendMessageBatchRequestEntry;
@@ -33,12 +32,13 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Sends straight to an SQS queue (point to point, no topic). Standard queues support per-message delays up
  * to 15 minutes; FIFO queues support ordering keys and deduplication ids but only queue-level delays.
  */
-public final class SqsPublisherDriver implements PublisherDriver {
+public final class SqsPublisherDriver extends AbstractPublisherDriver {
 
     static final Duration MAX_DELAY = Duration.ofMinutes(15);
 
@@ -47,14 +47,10 @@ public final class SqsPublisherDriver implements PublisherDriver {
     private final boolean fifo;
 
     public SqsPublisherDriver(SqsClient sqs, String queue) {
+        super(AwsProvider.ID);
         this.sqs = sqs;
         this.queueUrl = SqsSubscriptionDriver.resolve(sqs, queue);
         this.fifo = queueUrl.endsWith(".fifo");
-    }
-
-    @Override
-    public String provider() {
-        return AwsProvider.ID;
     }
 
     @Override
@@ -119,12 +115,12 @@ public final class SqsPublisherDriver implements PublisherDriver {
     }
 
     @Override
-    public CloudException translate(Throwable error) {
-        return MessagingErrors.translate(error, AwsProvider.ID, AwsErrors::translate);
+    protected Optional<CloudException> translateNative(Throwable error) {
+        return AwsErrors.translate(error);
     }
 
     @Override
-    public <T> T unwrap(Class<T> nativeType) {
-        return MessagingErrors.unwrap(nativeType, AwsProvider.ID, List.of(sqs));
+    protected List<Object> nativeClients() {
+        return List.of(sqs);
     }
 }

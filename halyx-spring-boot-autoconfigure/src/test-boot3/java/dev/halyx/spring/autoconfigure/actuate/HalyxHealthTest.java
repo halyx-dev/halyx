@@ -137,6 +137,52 @@ class HalyxHealthTest {
     }
 
     @Test
+    void aFailOpenCacheIsDownWhileItsServerIs() {
+        TestProviders.Down provider = new TestProviders.Down();
+        runner.withPropertyValues("halyx.providers.p.type=down",
+                        "halyx.caches.sessions.endpoint=redis://localhost:6379", "halyx.caches.sessions.fail-open=true")
+                .withBean(HalyxBuilderCustomizer.class, () -> builder -> builder.plugin(provider))
+                .run(context -> {
+                    var composite = context.getBean("halyxHealthContributor", CompositeHealthContributor.class);
+                    var sessions = (HealthIndicator) composite.getContributor("sessions");
+                    assertThat(sessions.health().getStatus()).isEqualTo(Status.UP);
+
+                    provider.down.set(true);
+
+                    assertThat(context.getBean("sessions", dev.halyx.cache.Cache.class).get("k")).isEmpty();
+                    assertThat(sessions.health().getStatus()).isEqualTo(Status.DOWN);
+                });
+    }
+
+    @Test
+    void parameterStoreHealthReadsPastTheCache() {
+        TestProviders.Down provider = new TestProviders.Down();
+        runner.withPropertyValues("halyx.providers.p.type=down", "halyx.parameter-stores.secrets.prefix=app",
+                        "halyx.parameter-stores.secrets.cache-ttl=1h")
+                .withBean(HalyxBuilderCustomizer.class, () -> builder -> builder.plugin(provider))
+                .run(context -> {
+                    var composite = context.getBean("halyxHealthContributor", CompositeHealthContributor.class);
+                    var secrets = (HealthIndicator) composite.getContributor("secrets");
+                    assertThat(secrets.health().getStatus()).isEqualTo(Status.UP);
+                    assertThat(secrets.health().getStatus()).isEqualTo(Status.UP);
+                    assertThat(provider.parameterReads).hasValue(2);
+
+                    provider.down.set(true);
+
+                    assertThat(secrets.health().getStatus()).isEqualTo(Status.DOWN);
+                });
+    }
+
+    @Test
+    void aBeanNamedLikeAListenerEntryFailsAtStartup() {
+        runner.withPropertyValues("halyx.providers.local.type=memory", "halyx.subscriptions.events.topic=events",
+                        "halyx.blob-stores.messaging.bucket=m")
+                .withBean(Listener.class, Listener::new)
+                .run(context -> assertThat(context).hasFailed().getFailure()
+                        .hasStackTraceContaining("The Halyx bean 'messaging' clashes with the halyx health entry"));
+    }
+
+    @Test
     void cachesAloneEnableHealth() {
         runner.withPropertyValues("halyx.providers.local.type=memory",
                         "halyx.caches.sessions.endpoint=redis://localhost:6379")

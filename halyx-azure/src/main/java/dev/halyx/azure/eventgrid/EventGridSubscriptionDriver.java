@@ -24,18 +24,18 @@ import dev.halyx.azure.AzureProvider;
 import dev.halyx.capability.Capabilities;
 import dev.halyx.error.CloudException;
 import dev.halyx.error.NotFoundException;
-import dev.halyx.error.UnknownCloudException;
 import dev.halyx.events.CloudEvent;
 import dev.halyx.events.CloudEvents;
 import dev.halyx.messaging.MessagingCapability;
+import dev.halyx.messaging.spi.AbstractSubscriptionDriver;
 import dev.halyx.messaging.spi.DriverMessage;
-import dev.halyx.messaging.spi.SubscriptionDriver;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Receives from an Event Grid namespace topic's pull subscription. Each event arrives as a message holding the
@@ -43,7 +43,7 @@ import java.util.Map;
  * nack releases the event after the longest delay Event Grid offers that isn't longer than asked for (none, 10s,
  * 1m, 10m or 1h), and extending the lease renews the lock for the subscription's lock duration.
  */
-public final class EventGridSubscriptionDriver implements SubscriptionDriver {
+public final class EventGridSubscriptionDriver extends AbstractSubscriptionDriver {
 
     /** Event Grid waits at least 10 and at most 120 seconds for events to arrive. */
     static final Duration MIN_WAIT = Duration.ofSeconds(10);
@@ -63,14 +63,10 @@ public final class EventGridSubscriptionDriver implements SubscriptionDriver {
      * @param lockDuration the subscription's lock duration (Event Grid's default is 60 seconds)
      */
     public EventGridSubscriptionDriver(EventGridReceiverClient client, String name, Duration lockDuration) {
+        super(AzureProvider.ID);
         this.client = client;
         this.name = name;
         this.lockDuration = lockDuration;
-    }
-
-    @Override
-    public String provider() {
-        return AzureProvider.ID;
     }
 
     @Override
@@ -151,20 +147,12 @@ public final class EventGridSubscriptionDriver implements SubscriptionDriver {
     }
 
     @Override
-    public CloudException translate(Throwable error) {
-        if (error instanceof CloudException cloud) {
-            return cloud;
-        }
-        return AzureErrors.translate(error).orElseGet(() -> new UnknownCloudException(error.getMessage(), error,
-                AzureProvider.ID, null));
+    protected Optional<CloudException> translateNative(Throwable error) {
+        return AzureErrors.translate(error);
     }
 
     @Override
-    public <T> T unwrap(Class<T> nativeType) {
-        if (nativeType.isInstance(client)) {
-            return nativeType.cast(client);
-        }
-        throw new IllegalArgumentException("Event Grid subscriptions unwrap to EventGridReceiverClient, not "
-                + nativeType.getName());
+    protected List<Object> nativeClients() {
+        return List.of(client);
     }
 }

@@ -114,6 +114,21 @@ resource "azurerm_role_assignment" "bus" {
   principal_id         = local.me
 }
 
+# A topic and subscription for the Spring Boot messaging test.
+resource "azurerm_servicebus_topic" "spring" {
+  name                = "spring"
+  namespace_id        = azurerm_servicebus_namespace.bus.id
+  default_message_ttl = "PT1H"
+}
+
+resource "azurerm_servicebus_subscription" "spring" {
+  name                = "billing"
+  topic_id            = azurerm_servicebus_topic.spring.id
+  max_delivery_count  = 10
+  lock_duration       = "PT10S"
+  default_message_ttl = "PT1H"
+}
+
 # --- Cosmos DB (NoSQL API, serverless) -----------------------------------------------------------------
 
 resource "azurerm_cosmosdb_account" "docs" {
@@ -291,4 +306,12 @@ output "eventgrid_topic" {
 
 output "eventgrid_subscription" {
   value = azapi_resource.events_inbox.name
+}
+
+output "spring_topic" {
+  value = azurerm_servicebus_topic.spring.name
+}
+
+output "spring_subscription" {
+  value = "${azurerm_servicebus_topic.spring.name}/subscriptions/${azurerm_servicebus_subscription.spring.name}"
 }
