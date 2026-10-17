@@ -23,6 +23,8 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.concurrent.Semaphore;
 import java.util.function.Function;
 import java.util.stream.Stream;
@@ -123,6 +125,47 @@ final class Calls {
         return Flux.<T>from(items)
                 .bufferTimeout(batchSize, maxWait, true)
                 .concatMap(batch -> mono(send.apply(batch)).flatMapIterable(results -> results), 0);
+    }
+
+    /**
+     * An asynchronous call: started when subscribed, with the subscriber's context restored while it starts (so its
+     * observation and trace follow it), and cancelled with the subscription. No thread waits for the result. The call
+     * gets an executor for any blocking work it can't avoid: the scheduler, with the same context restored. The result
+     * is delivered on the scheduler. With a concurrency limit, the permit is taken on the scheduler and released when
+     * the call ends.
+     */
+    <T> Mono<T> future(Function<Executor, CompletableFuture<T>> call) {
+        return Mono.deferContextual(subscriberContext -> {
+            Object snapshot = context.capture(subscriberContext);
+            Executor blocking = task -> scheduler.schedule(() -> {
+                try {
+                    context.call(snapshot, () -> {
+                        task.run();
+                        return null;
+                    });
+                } catch (RuntimeException | Error e) {
+                    throw e;
+                } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                }
+            });
+            Mono<T> started = Mono.fromFuture(() -> {
+                try {
+                    return context.call(snapshot, () -> call.apply(blocking));
+                } catch (Exception e) {
+                    return CompletableFuture.failedFuture(e);
+                }
+            });
+            // Results are delivered on the scheduler, as for every other call: never on an SDK's network threads,
+            // which the subscriber's own work would hold up, nor on the subscriber's thread when the call was quick.
+            if (limit == null) {
+                return started.publishOn(scheduler);
+            }
+            return Mono.using(() -> {
+                limit.acquire();
+                return limit;
+            }, permit -> started, Semaphore::release).subscribeOn(scheduler).publishOn(scheduler);
+        });
     }
 
     private <T> T limited(Callable<T> call) throws Exception {

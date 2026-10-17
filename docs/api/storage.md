@@ -317,6 +317,30 @@ increase the load on a new bucket over minutes, not seconds.
 
 See [benchmarks](../design.md#benchmarks) for what parallel transfers, batching and prefetching gain.
 
+## Asynchronous calls
+
+`async()` gives a store's asynchronous view: the same operations as `CompletableFuture`s, for code that
+mustn't wait, without Reactor.
+
+```java
+AsyncBlobStore async = invoices.async();
+
+async.put(BlobKey.of("a.pdf"), BlobContent.ofBytes(pdf))
+        .thenCompose(put -> async.head(BlobKey.of("a.pdf")))
+        .thenAccept(head -> log.info("stored {} bytes", head.orElseThrow().size()));
+```
+
+| | |
+|---|---|
+| Operations | `put` (content in memory is sent without blocking; files and streams are read on a virtual thread), `getBytes`, `head`, `exists`, `delete` and `list`. `blocking()` returns the store for the rest |
+| Non-blocking on | Amazon S3 (`S3AsyncClient` over Netty, created on the first asynchronous call). Elsewhere the blocking call runs on a virtual thread, with the same results |
+| Your own threads | `async(executor)` runs any blocking work (a call without a non-blocking path, a blocking interceptor, reading a file) on your executor instead; the reactive views pass their scheduler, with the subscriber's context restored |
+| Same as blocking | argument and capability checks, interceptors, error translation: a failed future holds the `CloudException` the blocking call would throw |
+| Retries | `RetryInterceptor` waits on a timer, not a thread; cancelling the future stops retrying |
+| Your interceptors | apply as they are: one that only implements `intercept` runs on a virtual thread around the call. Override `interceptAsync` to stay off threads too |
+
+The reactive views use it, so a `ReactiveBlobStore` is non-blocking for these calls where the provider is.
+
 ## Capabilities and native clients
 
 All three clouds support every `StorageCapability`. Where support depends on credentials, as with

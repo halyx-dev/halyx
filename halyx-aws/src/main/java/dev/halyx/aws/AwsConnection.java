@@ -74,6 +74,9 @@ import software.amazon.awssdk.http.apache5.Apache5HttpClient;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.regions.providers.DefaultAwsRegionProviderChain;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
+import software.amazon.awssdk.http.async.SdkAsyncHttpClient;
+import software.amazon.awssdk.http.nio.netty.NettyNioAsyncHttpClient;
+import software.amazon.awssdk.services.s3.S3AsyncClient;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
 import software.amazon.awssdk.services.sns.SnsClient;
@@ -101,6 +104,8 @@ final class AwsConnection implements ProviderConnection {
     private EventBridgeClient eventBridge;
     private S3Client s3;
     private S3Presigner presigner;
+    private S3AsyncClient s3Async;
+    private SdkAsyncHttpClient nettyHttp;
     private RedisCaches caches;
     private KafkaStreamClients streams;
     private SsmClient ssm;
@@ -131,7 +136,28 @@ final class AwsConnection implements ProviderConnection {
         }
         long threshold = config.property(AwsProperties.S3_MULTIPART_THRESHOLD).map(Long::parseLong)
                 .orElse(AwsProperties.DEFAULT_MULTIPART_THRESHOLD);
-        return new S3BlobStoreDriver(bucket, s3, presigner, threshold);
+        return new S3BlobStoreDriver(bucket, s3, presigner, threshold, this::s3Async);
+    }
+
+    /** The non-blocking S3 client, made on the first asynchronous call, on its own Netty connection pool. */
+    private synchronized S3AsyncClient s3Async() {
+        if (s3Async == null) {
+            HttpSettings settings = HttpSettings.from(config);
+            nettyHttp = NettyNioAsyncHttpClient.builder()
+                    .maxConcurrency(settings.maxConnections())
+                    .connectionTimeout(settings.connectTimeout())
+                    .readTimeout(settings.readTimeout())
+                    .connectionMaxIdleTime(settings.idleTimeout())
+                    .connectionAcquisitionTimeout(settings.acquireTimeout())
+                    .build();
+            var client = S3AsyncClient.builder().region(region()).credentialsProvider(credentials())
+                    .forcePathStyle(config.booleanProperty(AwsProperties.S3_PATH_STYLE, false))
+                    .httpClient(nettyHttp)
+                    .overrideConfiguration(overrides());
+            config.endpoint().ifPresent(client::endpointOverride);
+            s3Async = client.build();
+        }
+        return s3Async;
     }
 
     @Override
@@ -390,6 +416,12 @@ final class AwsConnection implements ProviderConnection {
         if (secretsManager != null) {
             secretsManager.close();
             secretsManager = null;
+        }
+        if (s3Async != null) {
+            s3Async.close();
+            nettyHttp.close(); // clients never close an HTTP client they were given
+            s3Async = null;
+            nettyHttp = null;
         }
         if (s3 != null) {
             s3.close();

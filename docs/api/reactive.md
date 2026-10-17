@@ -27,8 +27,12 @@ methods that return a `Mono`; see [Spring Boot](../spring-boot.md#reactive-appli
 </dependency>
 ```
 
-It needs Reactor 3.7 or later (Spring Boot 3.5 and 4 manage 3.7 and 3.8). Calls still block underneath, on the
-scheduler's threads: virtual threads make that cheap, but it isn't non-blocking I/O.
+It needs Reactor 3.7 or later (Spring Boot 3.5 and 4 manage 3.7 and 3.8). Most calls block underneath, on the
+scheduler's threads: virtual threads make that cheap, but it isn't non-blocking I/O. Where a driver has a
+non-blocking path, the reactive view uses it through the service's asynchronous view, and no thread waits: today
+that is Amazon S3's `put` of content in memory, `getBytes`, `head`, `exists`, `delete` and `list` (see
+[asynchronous calls](storage.md#asynchronous-calls)). On other providers those calls take the blocking path as
+before, with the same results.
 
 ## Getting the reactive services
 

@@ -46,6 +46,8 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 /**
  * Provider SPI for blob storage, the implementor side of the Bridge.
@@ -130,6 +132,38 @@ public interface BlobStoreDriver {
     PutResult copy(BlobKey source, BlobKey target);
 
     PresignedUrl presign(BlobKey key, PresignRequest request);
+
+    // --- asynchronous calls ------------------------------------------------------------------------
+    // Each defaults to its blocking call on the blocking executor (virtual threads). A driver whose SDK has
+    // non-blocking clients overrides the ones worth it; the API layer, the interceptors and the reactive views use
+    // these whichever it does. Failures may be returned or thrown; the API layer translates both.
+
+    /** {@link #put} of content already in memory. */
+    default CompletableFuture<PutResult> putAsync(BlobKey key, BlobContent.OfBytes content, PutOptions options,
+                                                  Checksums expected, Executor blocking) {
+        return CompletableFuture.supplyAsync(() -> put(key, content, options, expected), blocking);
+    }
+
+    /** The whole blob's content, without checksum validation. */
+    default CompletableFuture<byte[]> getBytesAsync(BlobKey key, Executor blocking) {
+        return CompletableFuture.supplyAsync(() -> {
+            try (Blob blob = get(key, GetOptions.defaults())) {
+                return blob.readAllBytes();
+            }
+        }, blocking);
+    }
+
+    default CompletableFuture<Optional<BlobMetadata>> headAsync(BlobKey key, Executor blocking) {
+        return CompletableFuture.supplyAsync(() -> head(key), blocking);
+    }
+
+    default CompletableFuture<Void> deleteAsync(BlobKey key, DeleteOptions options, Executor blocking) {
+        return CompletableFuture.runAsync(() -> delete(key, options), blocking);
+    }
+
+    default CompletableFuture<BlobPage> listAsync(ListOptions options, Executor blocking) {
+        return CompletableFuture.supplyAsync(() -> list(options), blocking);
+    }
 
     Capabilities capabilities();
 

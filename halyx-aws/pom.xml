@@ -45,6 +45,11 @@
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>apache5-client</artifactId>
         </dependency>
+        <!-- Non-blocking S3 calls (BlobStore.async() and halyx-reactor): the SDK's Netty client, created on first use -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>netty-nio-client</artifactId>
+        </dependency>
         <!-- Caches: shared Redis driver plus SigV4 signing for ElastiCache IAM tokens -->
         <dependency>
             <groupId>dev.halyx</groupId>

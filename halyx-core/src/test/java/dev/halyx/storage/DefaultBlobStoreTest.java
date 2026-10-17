@@ -20,10 +20,17 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import dev.halyx.Halyx;
 import dev.halyx.config.ProviderConfig;
+import dev.halyx.error.NotFoundException;
 import dev.halyx.error.UnsupportedFeatureException;
+import dev.halyx.interceptor.Interceptor;
+import dev.halyx.interceptor.Invocation;
+import dev.halyx.interceptor.OperationContext;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -100,5 +107,37 @@ class DefaultBlobStoreTest {
     void conflictingPutConditionsAreRejected() {
         assertThatThrownBy(() -> PutOptions.builder().ifNotExists().ifMatch(ETag.of("x")).build())
                 .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void theAsyncViewGoesThroughTheSameInterceptors() throws Exception {
+        List<String> operations = new CopyOnWriteArrayList<>();
+        Interceptor recording = new Interceptor() {
+            @Override
+            public <T> T intercept(OperationContext context, Invocation<T> next) {
+                operations.add(context.operation() + " " + context.resource());
+                return next.proceed();
+            }
+        };
+        try (Halyx recorded = Halyx.builder().interceptor(recording).register("local", ProviderConfig.of("memory")).build()) {
+            AsyncBlobStore async = recorded.provider("local").blobStore("bucket").async();
+
+            async.put(BlobKey.of("k"), BlobContent.ofString("v")).get(5, TimeUnit.SECONDS);
+            assertThat(async.getBytes(BlobKey.of("k")).get(5, TimeUnit.SECONDS)).asString().isEqualTo("v");
+            assertThat(async.exists(BlobKey.of("k")).get(5, TimeUnit.SECONDS)).isTrue();
+            async.delete(BlobKey.of("k")).get(5, TimeUnit.SECONDS);
+            async.list(ListOptions.prefix("")).get(5, TimeUnit.SECONDS);
+
+            assertThat(operations).containsExactly("put bucket/k", "get bucket/k", "head bucket/k", "delete bucket/k",
+                    "list bucket/");
+        }
+    }
+
+    @Test
+    void theAsyncViewChecksArgumentsAndCapabilitiesLikeTheBlockingCalls() {
+        assertThat(store.async().put(null, BlobContent.ofString("v"))).isCompletedExceptionally();
+        assertThat(store.async().getBytes(BlobKey.of("missing")))
+                .failsWithin(5, TimeUnit.SECONDS).withThrowableThat().havingCause().isInstanceOf(NotFoundException.class);
+        assertThat(store.async()).isSameAs(store.async());
     }
 }

@@ -81,6 +81,29 @@ class HalyxTracingTest {
     }
 
     @Test
+    void theInterceptorObservesAsyncOperationsUntilTheyComplete() throws Exception {
+        TestObservationRegistry registry = TestObservationRegistry.create();
+        halyx = Halyx.builder().interceptor(new ObservationInterceptor(registry))
+                .register("local", ProviderConfig.of("memory")).build();
+
+        halyx.provider("local").blobStore("docs").async().put(BlobKey.of("k"), BlobContent.ofString("v"))
+                .get(5, java.util.concurrent.TimeUnit.SECONDS);
+        assertThat(halyx.provider("local").blobStore("docs").async().getBytes(BlobKey.of("missing")))
+                .failsWithin(5, java.util.concurrent.TimeUnit.SECONDS);
+
+        TestObservationRegistryAssert.assertThat(registry)
+                .hasObservationWithNameEqualTo(ObservationInterceptor.OBSERVATION_NAME)
+                .that()
+                .hasLowCardinalityKeyValue("halyx.operation", "put")
+                .hasBeenStopped();
+        TestObservationRegistryAssert.assertThat(registry)
+                .hasNumberOfObservationsWithNameEqualTo(ObservationInterceptor.OBSERVATION_NAME, 2)
+                .hasAnObservation(observation -> observation.hasNameEqualTo(ObservationInterceptor.OBSERVATION_NAME)
+                        .hasLowCardinalityKeyValue("halyx.operation", "get")
+                        .hasError());
+    }
+
+    @Test
     void messagesCarryTheTraceToTheListener() throws Exception {
         CloudContext context = memory();
         Subscription billing = context.subscription(SubscriptionConfig.builder("billing").topic("orders").build());

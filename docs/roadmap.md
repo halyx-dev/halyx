@@ -125,8 +125,19 @@ Project Reactor views of every service, on a scheduler the application chooses, 
 - [x] a benchmark of the adapters' overhead against blocking calls: about 5 µs per call on virtual threads,
   within the noise of a 5 ms call, so non-blocking drivers aren't needed for throughput
 - [ ] Kotlin coroutines (`suspend` listeners, coroutine repositories), tested
-- [ ] non-blocking drivers on the clouds' async SDK clients: not planned unless a workload shows the blocking
-  path on virtual threads to be the bottleneck
+- [x] non-blocking I/O without a second SPI: each driver interface gets `*Async` default methods that run the
+  blocking call on virtual threads, and a driver overrides those its SDK's async client does well. The API layer
+  keeps one path for checks and translation (`BlobStore.async()`, an `AsyncBlobStore` of `CompletableFuture`s),
+  interceptors get `interceptAsync` (blocking ones still apply, on a virtual thread; retries wait on a timer,
+  observations span the whole call), and the reactive views use it. The blob kit's async cases run on every
+  provider, whichever path it takes
+- [x] Amazon S3: `put` of content in memory, `getBytes`, `head`, `exists`, `delete` and `list` on
+  `S3AsyncClient` (Netty), proven to complete on the SDK's threads on Floci
+- [ ] the next drivers, in order of payoff: Azure (its blocking clients wrap the async ones), DynamoDB, SQS and
+  SNS, then Lettuce caches and Kafka producers (already async inside); GCS streams have no clean async API and
+  keep the fallback
+- [ ] the other services' async views (`DocumentStore.async()`, `Publisher.async()` and so on), each with its
+  kit's async cases, as their drivers gain non-blocking paths
 
 ### Portable Spring Boot microservices
 

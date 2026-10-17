@@ -19,7 +19,10 @@ import dev.halyx.error.CloudException;
 import dev.halyx.error.ThrottledException;
 
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Retries idempotent operations that fail with a {@linkplain CloudException#isRetryable() retryable}
@@ -48,21 +51,62 @@ public final class RetryInterceptor implements Interceptor {
             try {
                 return next.proceed();
             } catch (CloudException e) {
-                if (!context.idempotent() || !e.isRetryable() || attempt >= policy.maxAttempts()) {
+                long backoff = backoff(context, e, attempt);
+                if (backoff < 0) {
                     throw e;
-                }
-                long backoff = jittered(policy.backoffBound(attempt).toMillis());
-                if (e instanceof ThrottledException throttled && throttled.retryAfter().isPresent()) {
-                    long asked = throttled.retryAfter().get().toMillis();
-                    if (asked > policy.maxBackoff().toMillis()) {
-                        throw e;
-                    }
-                    backoff = Math.max(backoff, asked);
                 }
                 sleep(backoff, e);
                 attempt++;
             }
         }
+    }
+
+    /** Retries after a timed delay rather than a sleeping thread. Cancelling the returned future stops retrying. */
+    @Override
+    public <T> CompletableFuture<T> interceptAsync(OperationContext context, AsyncInvocation<T> next, Executor blocking) {
+        CompletableFuture<T> result = new CompletableFuture<>();
+        attempt(context, next, 1, result, blocking);
+        return result;
+    }
+
+    private <T> void attempt(OperationContext context, AsyncInvocation<T> next, int attempt, CompletableFuture<T> result,
+                             Executor blocking) {
+        CompletableFuture<T> call;
+        try {
+            call = next.proceed();
+        } catch (RuntimeException | Error e) {
+            call = CompletableFuture.failedFuture(e);
+        }
+        call.whenComplete((value, error) -> {
+            if (error == null) {
+                result.complete(value);
+                return;
+            }
+            Throwable cause = AsyncInvocation.unwrap(error);
+            long backoff = cause instanceof CloudException e ? backoff(context, e, attempt) : -1;
+            if (backoff < 0 || result.isDone()) {
+                result.completeExceptionally(cause);
+                return;
+            }
+            CompletableFuture.delayedExecutor(backoff, TimeUnit.MILLISECONDS, blocking)
+                    .execute(() -> attempt(context, next, attempt + 1, result, blocking));
+        });
+    }
+
+    /** The delay before retrying after {@code attempt} failed with {@code e}, or -1 not to retry. */
+    private long backoff(OperationContext context, CloudException e, int attempt) {
+        if (!context.idempotent() || !e.isRetryable() || attempt >= policy.maxAttempts()) {
+            return -1;
+        }
+        long backoff = jittered(policy.backoffBound(attempt).toMillis());
+        if (e instanceof ThrottledException throttled && throttled.retryAfter().isPresent()) {
+            long asked = throttled.retryAfter().get().toMillis();
+            if (asked > policy.maxBackoff().toMillis()) {
+                return -1;
+            }
+            backoff = Math.max(backoff, asked);
+        }
+        return backoff;
     }
 
     /** Full jitter: a random delay up to the bound, so throttled clients don't retry in lockstep. */

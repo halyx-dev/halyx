@@ -17,9 +17,13 @@ package dev.halyx.micrometer;
 
 import io.micrometer.observation.Observation;
 import io.micrometer.observation.ObservationRegistry;
+import dev.halyx.interceptor.AsyncInvocation;
 import dev.halyx.interceptor.Interceptor;
 import dev.halyx.interceptor.Invocation;
 import dev.halyx.interceptor.OperationContext;
+
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 /**
  * Records every Halyx operation as a Micrometer {@link Observation} named {@code halyx.operation},
@@ -45,12 +49,35 @@ public final class ObservationInterceptor implements Interceptor {
 
     @Override
     public <T> T intercept(OperationContext context, Invocation<T> next) {
+        return observation(context).observe(next::proceed);
+    }
+
+    /** Observes from the call until its future completes, with no thread waiting in between. */
+    @Override
+    public <T> CompletableFuture<T> interceptAsync(OperationContext context, AsyncInvocation<T> next, Executor blocking) {
+        Observation observation = observation(context).start();
+        CompletableFuture<T> call;
+        try (Observation.Scope ignored = observation.openScope()) {
+            call = next.proceed();
+        } catch (RuntimeException | Error e) {
+            observation.error(e);
+            observation.stop();
+            throw e;
+        }
+        return call.whenComplete((value, error) -> {
+            if (error != null) {
+                observation.error(AsyncInvocation.unwrap(error));
+            }
+            observation.stop();
+        });
+    }
+
+    private Observation observation(OperationContext context) {
         return Observation.createNotStarted(OBSERVATION_NAME, registry)
                 .contextualName(context.service() + " " + context.operation())
                 .lowCardinalityKeyValue("halyx.service", context.service())
                 .lowCardinalityKeyValue("halyx.operation", context.operation())
                 .lowCardinalityKeyValue("halyx.provider", context.provider())
-                .highCardinalityKeyValue("halyx.resource", context.resource())
-                .observe(next::proceed);
+                .highCardinalityKeyValue("halyx.resource", context.resource());
     }
 }

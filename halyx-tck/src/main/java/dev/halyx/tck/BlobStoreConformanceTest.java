@@ -24,6 +24,7 @@ import dev.halyx.error.InvalidArgumentException;
 import dev.halyx.error.NotFoundException;
 import dev.halyx.error.PreconditionFailedException;
 import dev.halyx.error.UnsupportedFeatureException;
+import dev.halyx.storage.AsyncBlobStore;
 import dev.halyx.storage.BatchDeleteResult;
 import dev.halyx.storage.Blob;
 import dev.halyx.storage.BlobContent;
@@ -65,6 +66,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
@@ -1115,4 +1119,94 @@ public abstract class BlobStoreConformanceTest {
                 .isInstanceOf(UnsupportedFeatureException.class);
     }
 
+
+    // --- the asynchronous view -------------------------------------------------------------------
+    // Non-blocking where the driver has a path for it (Amazon S3), the blocking call on a virtual thread elsewhere:
+    // either way, the same results and the same CloudExceptions as the blocking calls.
+
+    private static <T> T await(CompletableFuture<T> future) throws Exception {
+        try {
+            return future.get(60, TimeUnit.SECONDS);
+        } catch (ExecutionException e) {
+            if (e.getCause() instanceof Exception cause) {
+                throw cause;
+            }
+            throw e;
+        }
+    }
+
+    @Test
+    void asyncRoundTripMatchesTheBlockingCalls() throws Exception {
+        AsyncBlobStore async = blobStore().async();
+        BlobKey key = key("async/a.txt");
+        byte[] content = "async content".getBytes(StandardCharsets.UTF_8);
+
+        PutOptions.Builder options = PutOptions.builder().contentType("text/plain");
+        if (blobStore().capabilities().supports(StorageCapability.USER_METADATA)) {
+            options.metadata(Map.of("origin", "async"));
+        }
+        PutResult put = await(async.put(key, BlobContent.ofBytes(content), options.build()));
+
+        assertThat(await(async.getBytes(key))).isEqualTo(content);
+        assertThat(blobStore().getBytes(key)).isEqualTo(content);
+        BlobMetadata head = await(async.head(key)).orElseThrow();
+        assertThat(head.etag()).isEqualTo(put.etag());
+        assertThat(head.size()).isEqualTo(content.length);
+        if (blobStore().capabilities().supports(StorageCapability.USER_METADATA)) {
+            assertThat(head.userMetadata()).containsEntry("origin", "async");
+        }
+        assertThat(await(async.exists(key))).isTrue();
+        assertThat(await(async.list(ListOptions.prefix(prefix + "async/"))).items())
+                .extracting(BlobSummary::key).containsExactly(key);
+
+        await(async.delete(key));
+
+        assertThat(await(async.head(key))).isEmpty();
+        assertThat(await(async.exists(key))).isFalse();
+        await(async.delete(key)); // idempotent, as the blocking delete is
+    }
+
+    @Test
+    void asyncGetOfMissingBlobFailsWithNotFound() {
+        assertThatThrownBy(() -> await(blobStore().async().getBytes(key("async/missing.txt"))))
+                .isInstanceOf(NotFoundException.class);
+    }
+
+    @Test
+    void asyncConditionalPutFailsOnAnExistingBlob() throws Exception {
+        assumeCapability(StorageCapability.CONDITIONAL_WRITE);
+        BlobKey key = key("async/once.txt");
+        putText(key, "first");
+
+        assertThatThrownBy(() -> await(blobStore().async().put(key, BlobContent.ofString("second"),
+                PutOptions.builder().ifNotExists().build())))
+                .isInstanceOf(PreconditionFailedException.class);
+        assertThat(readText(key)).isEqualTo("first");
+    }
+
+    @Test
+    void asyncConditionalDeleteWithStaleETagFails() throws Exception {
+        assumeCapability(StorageCapability.CONDITIONAL_DELETE);
+        BlobKey key = key("async/cond-delete.txt");
+        PutResult v1 = putText(key, "v1");
+        putText(key, "v2");
+
+        assertThatThrownBy(() -> await(blobStore().async().delete(key, DeleteOptions.ifMatch(v1.etag()))))
+                .isInstanceOf(PreconditionFailedException.class);
+        assertThat(readText(key)).isEqualTo("v2");
+    }
+
+    @Test
+    void asyncPutWithChecksumValidationStoresTheChecksum() throws Exception {
+        assumeCapability(StorageCapability.CHECKSUM);
+        BlobKey key = key("async/checked.txt");
+
+        await(blobStore().async().put(key, BlobContent.ofString("checked"),
+                PutOptions.builder().validateChecksum().build()));
+
+        assertThat(blobStore().head(key).orElseThrow().checksums().isEmpty()).isFalse();
+        try (Blob blob = blobStore().get(key, GetOptions.builder().validateChecksum().build())) {
+            assertThat(blob.readAllBytes()).asString(StandardCharsets.UTF_8).isEqualTo("checked");
+        }
+    }
 }

@@ -15,6 +15,8 @@
  */
 package dev.halyx.storage;
 
+import dev.halyx.interceptor.InterceptorChain;
+
 import dev.halyx.capability.Capabilities;
 
 import java.nio.file.Path;
@@ -24,6 +26,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Spliterator;
 import java.util.Spliterators;
+import java.util.concurrent.Executor;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
@@ -40,6 +43,22 @@ public interface BlobStore {
     String provider();
 
     String bucket();
+
+    /**
+     * The asynchronous view of this store, whose calls return {@code CompletableFuture}s; non-blocking where the
+     * provider's driver has a non-blocking path. Cheap to call: Halyx' stores keep one.
+     */
+    default AsyncBlobStore async() {
+        return async(InterceptorChain.blocking());
+    }
+
+    /**
+     * The asynchronous view, running any blocking work (a call without a non-blocking path, a blocking interceptor,
+     * reading a file) on {@code blocking}, such as an application's own scheduler, instead of Halyx' virtual threads.
+     */
+    default AsyncBlobStore async(Executor blocking) {
+        return AsyncBlobStore.onExecutor(this, blocking);
+    }
 
     default PutResult put(BlobKey key, BlobContent content) {
         return put(key, content, PutOptions.defaults());

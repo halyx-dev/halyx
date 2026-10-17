@@ -15,6 +15,9 @@
  */
 package dev.halyx.interceptor;
 
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+
 /**
  * Cross-cutting behaviour (retry, metrics, tracing, logging) applied around every operation of every
  * portable client, on every provider. Implementations call {@code next.proceed()} to continue.
@@ -25,4 +28,13 @@ package dev.halyx.interceptor;
 public interface Interceptor {
 
     <T> T intercept(OperationContext context, Invocation<T> next);
+
+    /**
+     * The same around an asynchronous operation. By default, {@link #intercept} runs on {@code blocking} (virtual
+     * threads), waiting there for the rest of the chain, so every interceptor applies to asynchronous calls without
+     * change; override it, as the retry and observation interceptors do, to avoid holding a thread.
+     */
+    default <T> CompletableFuture<T> interceptAsync(OperationContext context, AsyncInvocation<T> next, Executor blocking) {
+        return CompletableFuture.supplyAsync(() -> intercept(context, () -> AsyncInvocation.join(next.proceed())), blocking);
+    }
 }

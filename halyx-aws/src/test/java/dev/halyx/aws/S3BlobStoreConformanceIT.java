@@ -20,8 +20,17 @@ import org.junit.jupiter.api.BeforeAll;
 import dev.halyx.Halyx;
 import dev.halyx.config.Credentials;
 import dev.halyx.config.ProviderConfig;
+import dev.halyx.interceptor.AsyncInvocation;
+import dev.halyx.interceptor.Interceptor;
+import dev.halyx.interceptor.Invocation;
+import dev.halyx.interceptor.OperationContext;
+import dev.halyx.storage.AsyncBlobStore;
+import dev.halyx.storage.BlobContent;
+import dev.halyx.storage.BlobKey;
 import dev.halyx.storage.BlobStore;
+import dev.halyx.storage.ListOptions;
 import dev.halyx.tck.BlobStoreConformanceTest;
+import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.junit.jupiter.Container;
@@ -30,9 +39,16 @@ import org.testcontainers.utility.DockerImageName;
 import software.amazon.awssdk.services.s3.S3Client;
 
 import java.net.URI;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
 
 /** Runs the storage TCK against S3 emulated by Floci. */
+import static org.assertj.core.api.Assertions.assertThat;
+
 @Testcontainers(disabledWithoutDocker = true)
 class S3BlobStoreConformanceIT extends BlobStoreConformanceTest {
 
@@ -77,5 +93,43 @@ class S3BlobStoreConformanceIT extends BlobStoreConformanceTest {
     @Override
     protected BlobStore blobStore() {
         return halyx.provider("aws").blobStore(BUCKET);
+    }
+
+    /** Records which thread completes each asynchronous call, attached while the request is still in flight. */
+    static final class CompletingThreads implements Interceptor {
+        final List<String> names = new CopyOnWriteArrayList<>();
+
+        @Override
+        public <T> T intercept(OperationContext context, Invocation<T> next) {
+            return next.proceed();
+        }
+
+        @Override
+        public <T> CompletableFuture<T> interceptAsync(OperationContext context, AsyncInvocation<T> next, Executor blocking) {
+            return next.proceed().whenComplete((value, error) -> names.add(Thread.currentThread().getName()));
+        }
+    }
+
+    @Test
+    void asyncCallsCompleteOnTheSdksNonBlockingClient() throws Exception {
+        CompletingThreads threads = new CompletingThreads();
+        URI endpoint = URI.create("http://" + FLOCI.getHost() + ":" + FLOCI.getMappedPort(PORT));
+        try (Halyx observed = Halyx.builder().interceptor(threads)
+                .register("aws", ProviderConfig.of("aws").region("us-east-1").endpoint(endpoint)
+                        .credentials(Credentials.of("test", "test")).property(AwsProperties.S3_PATH_STYLE, "true"))
+                .build()) {
+            AsyncBlobStore async = observed.provider("aws").blobStore(BUCKET).async();
+            BlobKey key = key("async/threads.txt");
+
+            async.put(key, BlobContent.ofString("v")).get(30, TimeUnit.SECONDS);
+            async.getBytes(key).get(30, TimeUnit.SECONDS);
+            async.head(key).get(30, TimeUnit.SECONDS);
+            async.list(ListOptions.prefix(key.value())).get(30, TimeUnit.SECONDS);
+            async.delete(key).get(30, TimeUnit.SECONDS);
+        }
+
+        // Neither a virtual thread running the blocking call, nor the caller: the SDK's response threads.
+        assertThat(threads.names).hasSize(5).allSatisfy(name -> assertThat(name)
+                .doesNotStartWith("halyx-async-").isNotEqualTo(Thread.currentThread().getName()));
     }
 }

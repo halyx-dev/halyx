@@ -22,6 +22,7 @@ import dev.halyx.error.CloudException;
 import dev.halyx.error.InvalidArgumentException;
 import dev.halyx.error.NotFoundException;
 import dev.halyx.error.PreconditionFailedException;
+import dev.halyx.interceptor.AsyncInvocation;
 import dev.halyx.storage.BatchDeleteResult;
 import dev.halyx.storage.Blob;
 import dev.halyx.storage.BlobContent;
@@ -49,8 +50,12 @@ import dev.halyx.storage.spi.BufferPool;
 import dev.halyx.storage.spi.MultipartUploadSession;
 import dev.halyx.storage.spi.PartUploader;
 import software.amazon.awssdk.awscore.presigner.PresignedRequest;
+import software.amazon.awssdk.core.ResponseBytes;
 import software.amazon.awssdk.core.ResponseInputStream;
+import software.amazon.awssdk.core.async.AsyncRequestBody;
+import software.amazon.awssdk.core.async.AsyncResponseTransformer;
 import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.services.s3.S3AsyncClient;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.ChecksumMode;
 import software.amazon.awssdk.services.s3.model.CommonPrefix;
@@ -59,12 +64,14 @@ import software.amazon.awssdk.services.s3.model.CopyObjectRequest;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
+import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
 import software.amazon.awssdk.services.s3.model.MetadataDirective;
 import software.amazon.awssdk.services.s3.model.ObjectIdentifier;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.PutObjectResponse;
 import software.amazon.awssdk.services.s3.model.S3Error;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
@@ -79,7 +86,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 /** Blob storage on Amazon S3. */
 public final class S3BlobStoreDriver extends AbstractBlobStoreDriver {
@@ -90,16 +100,20 @@ public final class S3BlobStoreDriver extends AbstractBlobStoreDriver {
     private final S3Client s3;
     private final S3Presigner presigner;
     private final long multipartThreshold;
+    private final Supplier<S3AsyncClient> s3Async;
 
     /**
      * @param multipartThreshold content longer than this is uploaded with a multipart upload (a single
      *                           S3 PUT is limited to 5 GiB)
+     * @param s3Async            the non-blocking client for asynchronous calls, made when first asked for
      */
-    public S3BlobStoreDriver(String bucket, S3Client s3, S3Presigner presigner, long multipartThreshold) {
+    public S3BlobStoreDriver(String bucket, S3Client s3, S3Presigner presigner, long multipartThreshold,
+                             Supplier<S3AsyncClient> s3Async) {
         super(AwsProvider.ID, bucket, Capabilities.of(StorageCapability.values()));
         this.s3 = s3;
         this.presigner = presigner;
         this.multipartThreshold = multipartThreshold;
+        this.s3Async = s3Async;
     }
 
     @Override
@@ -107,7 +121,27 @@ public final class S3BlobStoreDriver extends AbstractBlobStoreDriver {
         if (content.length() > multipartThreshold) {
             return putInParts(key, content, options, expected);
         }
-        var request = PutObjectRequest.builder().bucket(bucket).key(key.value()).contentLength(content.length());
+        RequestBody body = switch (content) {
+            case BlobContent.OfBytes bytes -> RequestBody.fromBytes(bytes.bytes());
+            case BlobContent.OfFile file -> RequestBody.fromFile(file.path());
+            case BlobContent.OfStream stream -> RequestBody.fromInputStream(stream.stream(), stream.length());
+        };
+        return putResult(key, s3.putObject(putRequest(key, content.length(), options, expected), body));
+    }
+
+    /** Non-blocking for content in memory up to the multipart threshold; larger content in parts, on a virtual thread. */
+    @Override
+    public CompletableFuture<PutResult> putAsync(BlobKey key, BlobContent.OfBytes content, PutOptions options,
+                                                 Checksums expected, Executor blocking) {
+        if (content.length() > multipartThreshold) {
+            return super.putAsync(key, content, options, expected, blocking);
+        }
+        return s3Async.get().putObject(putRequest(key, content.length(), options, expected),
+                AsyncRequestBody.fromBytes(content.bytes())).thenApply(response -> putResult(key, response));
+    }
+
+    private PutObjectRequest putRequest(BlobKey key, long length, PutOptions options, Checksums expected) {
+        var request = PutObjectRequest.builder().bucket(bucket).key(key.value()).contentLength(length);
         var headers = options.headers();
         headers.contentType().ifPresent(request::contentType);
         headers.contentEncoding().ifPresent(request::contentEncoding);
@@ -124,12 +158,10 @@ public final class S3BlobStoreDriver extends AbstractBlobStoreDriver {
         }
         // S3 rejects the upload if the content does not match, and stores the checksum.
         expected.crc32c().ifPresent(request::checksumCRC32C);
-        RequestBody body = switch (content) {
-            case BlobContent.OfBytes bytes -> RequestBody.fromBytes(bytes.bytes());
-            case BlobContent.OfFile file -> RequestBody.fromFile(file.path());
-            case BlobContent.OfStream stream -> RequestBody.fromInputStream(stream.stream(), stream.length());
-        };
-        var response = s3.putObject(request.build(), body);
+        return request.build();
+    }
+
+    private static PutResult putResult(BlobKey key, PutObjectResponse response) {
         return new PutResult(key, new ETag(response.eTag()),
                 checksums(response.checksumCRC32C(), response.checksumCRC32()));
     }
@@ -186,10 +218,15 @@ public final class S3BlobStoreDriver extends AbstractBlobStoreDriver {
     }
 
     @Override
+    public CompletableFuture<byte[]> getBytesAsync(BlobKey key, Executor blocking) {
+        return s3Async.get().getObject(GetObjectRequest.builder().bucket(bucket).key(key.value()).build(),
+                AsyncResponseTransformer.toBytes()).thenApply(ResponseBytes::asByteArray);
+    }
+
+    @Override
     public Optional<BlobMetadata> head(BlobKey key) {
         try {
-            HeadObjectResponse r = s3.headObject(b -> b.bucket(bucket).key(key.value()).checksumMode(ChecksumMode.ENABLED));
-            return Optional.of(toMetadata(key, r));
+            return Optional.of(toMetadata(key, s3.headObject(headRequest(key))));
         } catch (S3Exception e) {
             if (e.statusCode() == 404) {
                 return Optional.empty();
@@ -199,18 +236,48 @@ public final class S3BlobStoreDriver extends AbstractBlobStoreDriver {
     }
 
     @Override
+    public CompletableFuture<Optional<BlobMetadata>> headAsync(BlobKey key, Executor blocking) {
+        return s3Async.get().headObject(headRequest(key))
+                .thenApply(r -> Optional.of(toMetadata(key, r)))
+                .exceptionallyCompose(error -> AsyncInvocation.unwrap(error) instanceof S3Exception e && e.statusCode() == 404
+                        ? CompletableFuture.completedFuture(Optional.empty())
+                        : CompletableFuture.failedFuture(error));
+    }
+
+    private HeadObjectRequest headRequest(BlobKey key) {
+        return HeadObjectRequest.builder().bucket(bucket).key(key.value()).checksumMode(ChecksumMode.ENABLED).build();
+    }
+
+    @Override
     public void delete(BlobKey key, DeleteOptions options) {
+        try {
+            s3.deleteObject(deleteRequest(key, options));
+        } catch (S3Exception e) {
+            throw deleteFailure(key, options, e);
+        }
+    }
+
+    @Override
+    public CompletableFuture<Void> deleteAsync(BlobKey key, DeleteOptions options, Executor blocking) {
+        return s3Async.get().deleteObject(deleteRequest(key, options))
+                .<Void>thenApply(response -> null)
+                .exceptionallyCompose(error -> CompletableFuture.failedFuture(
+                        AsyncInvocation.unwrap(error) instanceof S3Exception e ? deleteFailure(key, options, e) : error));
+    }
+
+    private DeleteObjectRequest deleteRequest(BlobKey key, DeleteOptions options) {
         var request = DeleteObjectRequest.builder().bucket(bucket).key(key.value());
         options.ifMatchETag().ifPresent(etag -> request.ifMatch(etag.value()));
-        try {
-            s3.deleteObject(request.build());
-        } catch (S3Exception e) {
-            if (options.isConditional() && e.statusCode() == 404) {
-                throw new PreconditionFailedException("No blob " + bucket + "/" + key + " to delete conditionally",
-                        e, provider, "NoSuchKey");
-            }
-            throw e;
+        return request.build();
+    }
+
+    /** A conditional delete of a missing blob is a failed precondition; anything else is S3's own error. */
+    private RuntimeException deleteFailure(BlobKey key, DeleteOptions options, S3Exception e) {
+        if (options.isConditional() && e.statusCode() == 404) {
+            return new PreconditionFailedException("No blob " + bucket + "/" + key + " to delete conditionally",
+                    e, provider, "NoSuchKey");
         }
+        return e;
     }
 
     @Override
@@ -308,11 +375,23 @@ public final class S3BlobStoreDriver extends AbstractBlobStoreDriver {
 
     @Override
     public BlobPage list(ListOptions options) {
+        return toPage(s3.listObjectsV2(listRequest(options)));
+    }
+
+    @Override
+    public CompletableFuture<BlobPage> listAsync(ListOptions options, Executor blocking) {
+        return s3Async.get().listObjectsV2(listRequest(options)).thenApply(S3BlobStoreDriver::toPage);
+    }
+
+    private ListObjectsV2Request listRequest(ListOptions options) {
         var request = ListObjectsV2Request.builder().bucket(bucket).maxKeys(options.pageSize());
         options.prefix().ifPresent(request::prefix);
         options.delimiter().ifPresent(request::delimiter);
         options.pageToken().ifPresent(request::continuationToken);
-        ListObjectsV2Response r = s3.listObjectsV2(request.build());
+        return request.build();
+    }
+
+    private static BlobPage toPage(ListObjectsV2Response r) {
         List<BlobSummary> items = r.contents().stream()
                 .map(o -> new BlobSummary(BlobKey.of(o.key()), o.size(), new ETag(o.eTag()), o.lastModified(),
                         S3Tiers.fromNative(o.storageClassAsString())))

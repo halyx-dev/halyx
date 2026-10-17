@@ -23,6 +23,7 @@ import dev.halyx.nosql.DocumentStore;
 import dev.halyx.nosql.Key;
 import dev.halyx.nosql.Query;
 import dev.halyx.nosql.TableConfig;
+import dev.halyx.storage.AsyncBlobStore;
 import dev.halyx.storage.BlobContent;
 import dev.halyx.storage.BlobKey;
 import dev.halyx.storage.BlobStore;
@@ -80,6 +81,10 @@ class ReactiveHalyxTest {
     private BlobStore counted(BlobStore store) {
         return (BlobStore) Proxy.newProxyInstance(getClass().getClassLoader(), new Class<?>[] {BlobStore.class},
                 (proxy, method, args) -> {
+                    if (method.getName().equals("async")) {
+                        // Its asynchronous view calls back through this proxy, so every call is counted.
+                        return AsyncBlobStore.onExecutor((BlobStore) proxy, (java.util.concurrent.Executor) args[0]);
+                    }
                     calls.computeIfAbsent(method.getName(), n -> new AtomicInteger()).incrementAndGet();
                     try {
                         return method.invoke(store, args);

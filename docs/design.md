@@ -113,7 +113,7 @@ either portable or explicitly declared as a capability:
 
 | Kit | Tests | What it covers |
 |---|---|---|
-| Blob store | 75 | round trips, streams, parallel transfers, listing and pagination, conditional writes and deletes, batch delete, copy, metadata, checksums, tiers, presigned URLs and multipart |
+| Blob store | 80 | round trips, the asynchronous view, streams, parallel transfers, listing and pagination, conditional writes and deletes, batch delete, copy, metadata, checksums, tiers, presigned URLs and multipart |
 | Document repositories | 10 | Spring Data repositories on the document store kit's tables: CRUD with records, `UUID` keys, optimistic locking and taken ids, batched saves, partition queries both ways with sort-key conditions and limits, windows, streams, index queries with and without a sort attribute |
 | Reactive document repositories | 10 | the document repository cases through `ReactiveDocumentRepository`: `Mono` and `Flux` results, saves from a `Publisher`, `Mono<Window>` scrolling, and `Flux` queries that stop early |
 | Document store | 23 | every value type, versions and conditions, partial updates with concurrent increments, batches beyond provider limits, sort-key queries both ways with paging, secondary indexes, transactions with rollback, keys with `/ ? # % \`, expiry |

@@ -22,6 +22,7 @@ import dev.halyx.error.InvalidArgumentException;
 import dev.halyx.error.NotFoundException;
 import dev.halyx.error.PreconditionFailedException;
 import dev.halyx.error.UnsupportedFeatureException;
+import dev.halyx.interceptor.AsyncInvocation;
 import dev.halyx.interceptor.InterceptorChain;
 import dev.halyx.interceptor.OperationContext;
 import dev.halyx.storage.spi.BlobStoreDriver;
@@ -47,6 +48,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -65,6 +69,8 @@ public final class DefaultBlobStore implements BlobStore {
     private final BlobStoreDriver driver;
     private final InterceptorChain interceptors;
 
+    private final AsyncBlobStore async = new Async(InterceptorChain.blocking());
+
     public DefaultBlobStore(String provider, String bucket, BlobStoreDriver driver, InterceptorChain interceptors) {
         this.provider = Objects.requireNonNull(provider, "provider");
         this.bucket = Objects.requireNonNull(bucket, "bucket");
@@ -81,6 +87,16 @@ public final class DefaultBlobStore implements BlobStore {
     static final int DELETE_BATCH_CONCURRENCY = 4;
     /** Single deletes {@link #deleteAll} keeps in flight on providers without a batch API. */
     static final int DELETE_CONCURRENCY = 16;
+
+    @Override
+    public AsyncBlobStore async() {
+        return async;
+    }
+
+    @Override
+    public AsyncBlobStore async(Executor blocking) {
+        return blocking == InterceptorChain.blocking() ? async : new Async(Objects.requireNonNull(blocking, "blocking"));
+    }
 
     @Override
     public String bucket() {
@@ -503,6 +519,123 @@ public final class DefaultBlobStore implements BlobStore {
     private <T> T execute(String operation, BlobKey key, boolean idempotent, Supplier<T> call) {
         OperationContext context = new OperationContext(SERVICE, operation, provider, bucket + "/" + key, idempotent);
         return interceptors.execute(context, () -> translated(call));
+    }
+
+    /** The asynchronous {@link #execute}: the driver's future, through the interceptors, translated. */
+    private <T> CompletableFuture<T> executeAsync(String operation, BlobKey key, boolean idempotent, Executor blocking,
+                                                  Function<Executor, CompletableFuture<T>> call) {
+        OperationContext context = new OperationContext(SERVICE, operation, provider, bucket + "/" + key, idempotent);
+        return interceptors.executeAsync(context, () -> translatedAsync(blocking, call), blocking);
+    }
+
+    /** Translates a failure, thrown or returned, before interceptors see it, as {@link #translated} does. */
+    private <T> CompletableFuture<T> translatedAsync(Executor blocking, Function<Executor, CompletableFuture<T>> call) {
+        CompletableFuture<T> future;
+        try {
+            future = call.apply(blocking);
+        } catch (RuntimeException e) {
+            return CompletableFuture.failedFuture(driver.translate(e));
+        }
+        return future.exceptionallyCompose(error -> {
+            Throwable cause = AsyncInvocation.unwrap(error);
+            return CompletableFuture.failedFuture(cause instanceof RuntimeException runtime ? driver.translate(runtime) : cause);
+        });
+    }
+
+    /**
+     * The asynchronous view: the same checks as the blocking calls, then the driver's non-blocking path where it has
+     * one. Calls this view doesn't make non-blocking run the blocking call on a virtual thread.
+     */
+    private final class Async implements AsyncBlobStore {
+
+        /** Where blocking work runs: a driver call without a non-blocking path, a blocking interceptor, a file read. */
+        private final Executor blocking;
+
+        Async(Executor blocking) {
+            this.blocking = blocking;
+        }
+
+        @Override
+        public String provider() {
+            return provider;
+        }
+
+        @Override
+        public String bucket() {
+            return bucket;
+        }
+
+        @Override
+        public CompletableFuture<PutResult> put(BlobKey key, BlobContent content, PutOptions options) {
+            try {
+                Objects.requireNonNull(key, "key");
+                Objects.requireNonNull(content, "content");
+                checkWrite(options);
+            } catch (RuntimeException e) {
+                return CompletableFuture.failedFuture(e);
+            }
+            if (!(content instanceof BlobContent.OfBytes bytes)) {
+                // Files and streams are read with blocking I/O: on a virtual thread, as a whole put.
+                return CompletableFuture.supplyAsync(() -> DefaultBlobStore.this.put(key, content, options), blocking);
+            }
+            Checksums expected = options.validateChecksum() ? checksumsOf(bytes) : Checksums.none();
+            CompletableFuture<PutResult> put = executeAsync("put", key, true, blocking,
+                    executor -> driver.putAsync(key, bytes, options, expected, executor));
+            // Verifying is a comparison, unless a mismatch has to be cleaned up, which deletes on a virtual thread.
+            return expected.isEmpty() ? put
+                    : put.thenApplyAsync(result -> verifyWrite(driver, key, result, expected), blocking);
+        }
+
+        @Override
+        public CompletableFuture<byte[]> getBytes(BlobKey key) {
+            if (key == null) {
+                return CompletableFuture.failedFuture(new NullPointerException("key"));
+            }
+            return executeAsync("get", key, true, blocking, executor -> driver.getBytesAsync(key, executor));
+        }
+
+        @Override
+        public CompletableFuture<Optional<BlobMetadata>> head(BlobKey key) {
+            if (key == null) {
+                return CompletableFuture.failedFuture(new NullPointerException("key"));
+            }
+            return executeAsync("head", key, true, blocking, executor -> driver.headAsync(key, executor));
+        }
+
+        @Override
+        public CompletableFuture<Void> delete(BlobKey key, DeleteOptions options) {
+            try {
+                Objects.requireNonNull(key, "key");
+                Objects.requireNonNull(options, "options");
+                if (options.isConditional()) {
+                    require(StorageCapability.CONDITIONAL_DELETE);
+                }
+            } catch (RuntimeException e) {
+                return CompletableFuture.failedFuture(e);
+            }
+            return executeAsync("delete", key, true, blocking, executor -> driver.deleteAsync(key, options, executor));
+        }
+
+        @Override
+        public CompletableFuture<BlobPage> list(ListOptions options) {
+            if (options == null) {
+                return CompletableFuture.failedFuture(new NullPointerException("options"));
+            }
+            OperationContext context = new OperationContext(SERVICE, "list", provider,
+                    bucket + "/" + options.prefix().orElse(""), true);
+            return interceptors.executeAsync(context,
+                    () -> translatedAsync(blocking, executor -> driver.listAsync(options, executor)), blocking);
+        }
+
+        @Override
+        public BlobStore blocking() {
+            return DefaultBlobStore.this;
+        }
+
+        @Override
+        public String toString() {
+            return "Async" + DefaultBlobStore.this;
+        }
     }
 
     /** Translates native errors before interceptors see them, so they stay provider-neutral. */

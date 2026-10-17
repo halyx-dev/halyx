@@ -16,6 +16,7 @@
 package dev.halyx.reactor;
 
 import dev.halyx.capability.Capabilities;
+import dev.halyx.storage.AsyncBlobStore;
 import dev.halyx.storage.BatchDeleteResult;
 import dev.halyx.storage.Blob;
 import dev.halyx.storage.BlobContent;
@@ -50,10 +51,13 @@ import java.time.Duration;
 import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.Executor;
 
 /**
- * A {@link BlobStore} as {@code Mono} and {@code Flux}: each call runs when subscribed, once per subscription,
- * on the scheduler of the {@link ReactiveHalyx} that made it. Errors are the blocking API's
+ * A {@link BlobStore} as {@code Mono} and {@code Flux}: each call runs when subscribed, once per subscription.
+ * {@code put} of content in memory, {@code getBytes}, {@code head}, {@code exists}, {@code delete} and {@code list}
+ * use the store's {@link BlobStore#async() asynchronous view}, non-blocking where the provider allows it and on the
+ * scheduler where it doesn't; the other calls run on the scheduler of the {@link ReactiveHalyx} that made it. Errors are the blocking API's
  * {@code CloudException}s; a missing blob is an empty {@code Mono} where the blocking API returns an empty
  * {@code Optional}.
  */
@@ -87,12 +91,24 @@ public final class ReactiveBlobStore {
         return store;
     }
 
+    /**
+     * The store's asynchronous view for one call, whose blocking work (where the driver has no non-blocking path) runs
+     * on {@code blocking}: the scheduler, with the subscriber's context restored.
+     */
+    private AsyncBlobStore async(Executor blocking) {
+        AsyncBlobStore view = store.async(blocking);
+        return view != null ? view : AsyncBlobStore.onExecutor(store, blocking); // a mock or proxy without one
+    }
+
+    /** Content in memory is sent without blocking where the provider allows it (Amazon S3 does). */
     public Mono<PutResult> put(BlobKey key, BlobContent content) {
-        return calls.mono(() -> store.put(key, content));
+        return put(key, content, PutOptions.defaults());
     }
 
     public Mono<PutResult> put(BlobKey key, BlobContent content, PutOptions options) {
-        return calls.mono(() -> store.put(key, content, options));
+        return content instanceof BlobContent.OfBytes
+                ? calls.future(blocking -> async(blocking).put(key, content, options))
+                : calls.mono(() -> store.put(key, content, options));
     }
 
     /** Streams the content through {@code sink}, as {@link BlobStore#write} does; the sink runs on the scheduler. */
@@ -150,7 +166,7 @@ public final class ReactiveBlobStore {
 
     /** The whole content; for large blobs, prefer {@link #getBody} or {@link #download}. */
     public Mono<byte[]> getBytes(BlobKey key) {
-        return calls.mono(() -> store.getBytes(key));
+        return calls.future(blocking -> async(blocking).getBytes(key));
     }
 
     public Mono<BlobMetadata> download(BlobKey key, Path target) {
@@ -163,19 +179,19 @@ public final class ReactiveBlobStore {
 
     /** The blob's metadata, or empty if it doesn't exist. */
     public Mono<BlobMetadata> head(BlobKey key) {
-        return calls.optional(() -> store.head(key));
+        return calls.future(blocking -> async(blocking).head(key)).flatMap(Mono::justOrEmpty);
     }
 
     public Mono<Boolean> exists(BlobKey key) {
-        return calls.mono(() -> store.exists(key));
+        return calls.future(blocking -> async(blocking).exists(key));
     }
 
     public Mono<Void> delete(BlobKey key) {
-        return calls.run(() -> store.delete(key));
+        return delete(key, DeleteOptions.defaults());
     }
 
     public Mono<Void> delete(BlobKey key, DeleteOptions options) {
-        return calls.run(() -> store.delete(key, options));
+        return calls.future(blocking -> async(blocking).delete(key, options));
     }
 
     public Mono<BatchDeleteResult> deleteAll(Collection<BlobKey> keys) {
@@ -192,7 +208,7 @@ public final class ReactiveBlobStore {
 
     /** One page of a listing. */
     public Mono<BlobPage> list(ListOptions options) {
-        return calls.mono(() -> store.list(options));
+        return calls.future(blocking -> async(blocking).list(options));
     }
 
     /**

@@ -150,6 +150,11 @@ Halyx halyx = Halyx.builder()
 run in registration order, outermost first. Errors reaching an interceptor are already translated into
 `CloudException`s.
 
+Asynchronous calls, such as `BlobStore.async()` and the reactive views, go through the same interceptors.
+`interceptAsync` defaults to running `intercept` on a virtual thread around the call, so every interceptor applies
+unchanged; override it to wrap the returned `CompletableFuture` instead, as `RetryInterceptor` (retrying on a timer)
+and `ObservationInterceptor` (observing until the future completes) do.
+
 In Spring Boot, every `Interceptor` bean is applied in `@Order` order, and Micrometer observations are
 added for you. See [Spring Boot](../spring-boot.md#observability).
 
