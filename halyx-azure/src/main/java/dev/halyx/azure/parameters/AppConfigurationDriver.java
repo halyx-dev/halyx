@@ -120,7 +120,9 @@ public final class AppConfigurationDriver extends AbstractParameterDriver {
 
     @Override
     public CompletableFuture<Void> deleteAsync(String name, Executor blocking) {
-        return asyncClient.deleteConfigurationSetting(name, label).toFuture().<Void>thenApply(deleted -> null)
+        // With the response: deleting a missing key answers 204 with no setting, which the plain call can't map.
+        return asyncClient.deleteConfigurationSettingWithResponse(new ConfigurationSetting().setKey(name).setLabel(label), false)
+                .toFuture().<Void>thenApply(response -> null)
                 .exceptionallyCompose(error -> notFound(error) ? CompletableFuture.completedFuture(null)
                         : CompletableFuture.failedFuture(error));
     }
