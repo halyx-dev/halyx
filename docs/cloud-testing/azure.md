@@ -522,6 +522,8 @@ take effect.
 | `r2610172037dfd5` | tier 1, plus Spring Boot 3 and 4 | **198 passed, 2 skipped**; Spring **16/16** | clean | Latest tier 1 result, with the asynchronous views (blob, document, messaging and event kits) on every service, non-blocking where the driver has a path: Blob Storage, Cosmos DB, Service Bus and Event Grid. |
 | `r2610172250c1a2` | tier 1, plus Spring Boot 3 and 4 | 198 passed, 3 failed, 2 skipped; Spring **16/16** | clean | The network stalled for minutes at a time during the run: a blob range read failed with an I/O error, a Cosmos DB read timed out, and a Service Bus message's extended lease ran out while its test was stalled. Rerun below. |
 | `r2610180340666a` | tier 1, plus Spring Boot 3 and 4 | **201 passed, 2 skipped**; Spring **16/16** | clean | Latest tier 1 result, with asynchronous receives and settlement in the messaging kit, non-blocking on Event Grid. |
+| `r26101816546ecc` | tier 1, plus Spring Boot 3 and 4 | 204 passed, 1 failed, 1 error, 1 skipped; Spring **16/16** | clean | The asynchronous parameter store. App Configuration answers a delete of a missing key with 204 and no setting, which the async client's plain delete cannot map (the emulator answers 404): fixed in `7bb6d6e`. A Service Bus extended lease ran out while the network stalled. Rerun below. |
+| `r26101819374e4d` | tier 1: App Configuration and Service Bus | **47 passed, 1 skipped** | clean | The two failed suites again, with the fix: latest tier 1 result for them. Key Vault (async, deletes on a blocking thread) passed in the run above. |
 
 ## What real Azure found
 

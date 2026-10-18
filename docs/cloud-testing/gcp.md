@@ -649,6 +649,7 @@ nothing to fix.
 | `r2610171453c670` | tier 4, plus Spring Boot 3 and 4 | **25/25**; Spring **2/2** | clean | Latest tier 4 result. |
 | `r26101721004590` | tier 1, plus Spring Boot 3 and 4 | **218 passed, 4 skipped**; Spring **16/16** | clean | Latest tier 1 result, with the asynchronous views (blob, document, messaging and event kits) on every service, non-blocking where the driver has a path: Firestore, Pub/Sub and Eventarc. |
 | `r26101802235ad4` | tier 1, plus Spring Boot 3 and 4 | **221 passed, 4 skipped**; Spring **16/16** | clean | Latest tier 1 result, with asynchronous receives and settlement in the messaging kit, non-blocking on Pub/Sub. |
+| `r2610181923c397` | tier 1, plus Spring Boot 3 and 4 | **230 passed, 4 skipped**; Spring **16/16** | clean | Latest tier 1 result, with the asynchronous parameter store: Secret Manager and Parameter Manager (global and regional) non-blocking, proven with a counting executor. |
 
 ## What real GCP found
 
