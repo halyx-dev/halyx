@@ -19,6 +19,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInfo;
 import dev.halyx.CloudContext;
+import dev.halyx.cache.AsyncCache;
 import dev.halyx.cache.Cache;
 import dev.halyx.cache.CacheConfig;
 import dev.halyx.cache.CacheLock;
@@ -36,10 +37,12 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -106,6 +109,45 @@ public abstract class CacheConformanceTest {
         cache().put("greeting", "hello");
 
         assertThat(cache().get("greeting")).hasValue("hello");
+    }
+
+    @Test
+    void asyncCacheAsideMatchesTheBlockingCalls() throws Exception {
+        AsyncCache<String> async = cache().async();
+        var timeout = TimeUnit.SECONDS;
+
+        async.put("a", "1").get(30, timeout);
+        async.put("b", "2", Duration.ofMinutes(5)).get(30, timeout);
+
+        assertThat(async.get("a").get(30, timeout)).hasValue("1");
+        assertThat(cache().get("b")).hasValue("2");
+        assertThat(async.getAll(List.of("a", "b", "missing")).get(30, timeout)).containsOnlyKeys("a", "b");
+        assertThat(async.exists("a").get(30, timeout)).isTrue();
+        assertThat(async.delete("a").get(30, timeout)).isTrue();
+        assertThat(async.delete("a").get(30, timeout)).isFalse();
+        assertThat(async.get("a").get(30, timeout)).isEmpty();
+    }
+
+    @Test
+    void asyncGetOrLoadLoadsOnceForConcurrentCallers() throws Exception {
+        AsyncCache<String> async = cache().async();
+        java.util.concurrent.atomic.AtomicInteger loads = new AtomicInteger();
+        CompletableFuture<String> slow = new CompletableFuture<>();
+
+        var first = async.getOrLoad("loaded", () -> {
+            loads.incrementAndGet();
+            return slow;
+        });
+        var second = async.getOrLoad("loaded", () -> {
+            loads.incrementAndGet();
+            return CompletableFuture.completedFuture("other");
+        });
+        slow.complete("value");
+
+        assertThat(first.get(30, TimeUnit.SECONDS)).isEqualTo("value");
+        assertThat(second.get(30, TimeUnit.SECONDS)).isEqualTo("value");
+        assertThat(loads).hasValue(1);
+        assertThat(cache().get("loaded")).hasValue("value");
     }
 
     @Test

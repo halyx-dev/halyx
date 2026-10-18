@@ -197,6 +197,7 @@ class RealSpringStreamIT {
             StreamProducer producer = context.getBean("orders-out", StreamProducer.class);
             producer.sendAll(List.of(OutgoingRecord.of("a", "h1"), OutgoingRecord.of("b", "h2"),
                     OutgoingRecord.of("c", "h3")));
+            producer.async().send("d", "h4").get(60, TimeUnit.SECONDS);
 
             @SuppressWarnings("unchecked")
             KafkaTemplate<String, String> template = context.getBean(KafkaTemplate.class);
@@ -204,9 +205,9 @@ class RealSpringStreamIT {
                 template.send(KAFKA_TOPIC, value, value).get(60, TimeUnit.SECONDS);
             }
 
-            await(handlers.halyx, 3);
+            await(handlers.halyx, 4);
             await(handlers.kafka, 3);
-            assertThat(handlers.halyx).containsExactlyInAnyOrder("h1", "h2", "h3");
+            assertThat(handlers.halyx).containsExactlyInAnyOrder("h1", "h2", "h3", "h4");
             assertThat(handlers.kafka).containsExactlyInAnyOrder("k1", "k2", "k3");
         });
     }

@@ -22,6 +22,7 @@ import io.lettuce.core.ScanArgs;
 import io.lettuce.core.ScanIterator;
 import io.lettuce.core.ScriptOutputType;
 import io.lettuce.core.SetArgs;
+import io.lettuce.core.api.async.RedisKeyAsyncCommands;
 import io.lettuce.core.api.async.RedisStringAsyncCommands;
 import io.lettuce.core.api.sync.RedisKeyCommands;
 import io.lettuce.core.api.sync.RedisScriptingCommands;
@@ -36,6 +37,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -47,6 +50,7 @@ final class RedisCacheDriver extends AbstractCacheDriver {
     private final RedisStringCommands<byte[], byte[]> strings;
     private final RedisKeyCommands<byte[], byte[]> keys;
     private final RedisStringAsyncCommands<byte[], byte[]> asyncStrings;
+    private final RedisKeyAsyncCommands<byte[], byte[]> asyncKeys;
     private final RedisScriptingCommands<byte[], byte[]> scripts;
     private final Duration timeout;
     private final List<Object> nativeClients;
@@ -64,12 +68,13 @@ final class RedisCacheDriver extends AbstractCacheDriver {
     private static final int SCAN_BATCH = 500;
 
     RedisCacheDriver(String provider, RedisStringCommands<byte[], byte[]> strings, RedisKeyCommands<byte[], byte[]> keys,
-                     RedisStringAsyncCommands<byte[], byte[]> asyncStrings, RedisScriptingCommands<byte[], byte[]> scripts,
-                     Duration timeout, List<Object> nativeClients) {
+                     RedisStringAsyncCommands<byte[], byte[]> asyncStrings, RedisKeyAsyncCommands<byte[], byte[]> asyncKeys,
+                     RedisScriptingCommands<byte[], byte[]> scripts, Duration timeout, List<Object> nativeClients) {
         super(provider);
         this.strings = strings;
         this.keys = keys;
         this.asyncStrings = asyncStrings;
+        this.asyncKeys = asyncKeys;
         this.scripts = scripts;
         this.timeout = timeout;
         this.nativeClients = nativeClients;
@@ -80,9 +85,42 @@ final class RedisCacheDriver extends AbstractCacheDriver {
         return Optional.ofNullable(strings.get(bytes(key)));
     }
 
+    // Lettuce's asynchronous commands, which the command timeout bounds as it does the blocking ones.
+
+    @Override
+    public CompletableFuture<Optional<byte[]>> getAsync(String key, Executor blocking) {
+        return asyncStrings.get(bytes(key)).toCompletableFuture().thenApply(Optional::ofNullable);
+    }
+
+    @Override
+    public CompletableFuture<Map<String, byte[]>> getAllAsync(List<String> keyList, Executor blocking) {
+        return asyncStrings.mget(keyList.stream().map(RedisCacheDriver::bytes).toArray(byte[][]::new))
+                .toCompletableFuture().thenApply(RedisCacheDriver::found);
+    }
+
+    @Override
+    public CompletableFuture<Void> setAsync(String key, byte[] value, Optional<Duration> ttl, Executor blocking) {
+        var set = ttl.isPresent() ? asyncStrings.set(bytes(key), value, SetArgs.Builder.px(ttl.get().toMillis()))
+                : asyncStrings.set(bytes(key), value);
+        return set.toCompletableFuture().thenApply(ok -> null);
+    }
+
+    @Override
+    public CompletableFuture<Long> deleteAsync(List<String> keyList, Executor blocking) {
+        return asyncKeys.del(keyList.stream().map(RedisCacheDriver::bytes).toArray(byte[][]::new)).toCompletableFuture();
+    }
+
+    @Override
+    public CompletableFuture<Boolean> existsAsync(String key, Executor blocking) {
+        return asyncKeys.exists(bytes(key)).toCompletableFuture().thenApply(count -> count > 0);
+    }
+
     @Override
     public Map<String, byte[]> getAll(List<String> keyList) {
-        List<KeyValue<byte[], byte[]>> values = strings.mget(keyList.stream().map(RedisCacheDriver::bytes).toArray(byte[][]::new));
+        return found(strings.mget(keyList.stream().map(RedisCacheDriver::bytes).toArray(byte[][]::new)));
+    }
+
+    private static Map<String, byte[]> found(List<KeyValue<byte[], byte[]>> values) {
         Map<String, byte[]> found = new LinkedHashMap<>();
         for (KeyValue<byte[], byte[]> kv : values) {
             if (kv.hasValue()) {

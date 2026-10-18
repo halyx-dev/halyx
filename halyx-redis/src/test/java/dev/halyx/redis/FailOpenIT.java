@@ -29,6 +29,8 @@ import java.net.ServerSocket;
 import java.net.URI;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -70,6 +72,18 @@ class FailOpenIT {
         cache.put("k", "v");
         cache.delete("k");
         assertThat(cache.exists("k")).isFalse();
+        assertThat(cache.statistics().failOpenSkips()).isPositive();
+    }
+
+    @Test
+    void asyncCallsFailOpenToo() throws Exception {
+        Cache<String> cache = halyx.provider("redis").cache(config(deadEndpoint).namespace("d").failOpen(true).build());
+        var timeout = TimeUnit.SECONDS;
+
+        assertThat(cache.async().get("k").get(10, timeout)).isEmpty();
+        cache.async().put("k", "v").get(10, timeout);
+        assertThat(cache.async().getOrLoad("k", () -> CompletableFuture.completedFuture("loaded"))
+                .get(10, timeout)).isEqualTo("loaded");
         assertThat(cache.statistics().failOpenSkips()).isPositive();
     }
 

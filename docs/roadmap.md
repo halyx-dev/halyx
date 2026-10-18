@@ -146,8 +146,16 @@ Project Reactor views of every service, on a scheduler the application chooses, 
 - [x] `Subscription.async()` receives and `ackAsync`, `nackAsync` and `extendLeaseAsync`, with claim-checked bodies
   fetched asynchronously and the messaging kit's async receive cases; non-blocking on SQS, Pub/Sub and Event Grid.
   Service Bus receives stay blocking: its async receiver is a prefetching stream that alone can settle its messages
-- [ ] next: Lettuce caches and Kafka producers (already async inside); parameter stores. Cloud Storage has no
-  asynchronous API and keeps the blocking path
+- [x] `Cache.async()` (get, getAll, put, delete, exists, and getOrLoad sharing the blocking calls' single
+  flight) on Lettuce's asynchronous commands, with fail-open and the breaker as before; `StreamProducer.async()`
+  completing from Kafka's send callbacks. Each kit has async cases, and on Valkey and Kafka a counting executor
+  proves the calls need no blocking thread
+- [x] `ParameterStore.async()` through the store's read cache, non-blocking on every backend (SSM, Secrets
+  Manager, App Configuration, Key Vault, Secret Manager, Parameter Manager, Vault) but Key Vault deletes and
+  Vault logins; `StreamConsumer.async()` polls and commits, run one at a time per consumer on virtual threads,
+  since Kafka's consumer takes one call at a time. The parameter kit's counting executor proves each backend
+- [ ] still blocking underneath, on a virtual thread: Google Cloud Storage (GCP), which has no asynchronous Java
+  API; Service Bus receives; Cosmos DB and Firestore read-then-write calls
 
 ### Portable Spring Boot microservices
 

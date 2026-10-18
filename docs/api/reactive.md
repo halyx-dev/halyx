@@ -34,8 +34,9 @@ blob `put` of content in memory, `getBytes`, `head`, `exists`, `delete` and `lis
 ([asynchronous calls](storage.md#asynchronous-calls)); document `get`, `put`, `delete` and queries on DynamoDB,
 Cosmos DB and Firestore ([asynchronous calls](nosql.md#asynchronous-calls)); message publishes on SNS, SQS,
 Service Bus and Pub/Sub; message receives and their acks, nacks and lease extensions on SQS, Pub/Sub and Event
-Grid; and event publishes on EventBridge, Event Grid and Eventarc. Other calls, and Cloud
-Storage, whose library has no asynchronous API, take the blocking path on the scheduler, with the same results.
+Grid; event publishes on EventBridge, Event Grid and Eventarc; cache `get`, `getAll`, `put`, `delete`, `exists` and
+`getOrLoad` on Redis and Valkey; parameter and secret `get`, `require`, `getAll`, `put`, `delete` and `ping` on
+every parameter store; and stream sends on Kafka. Other calls, and Cloud Storage, whose library has no asynchronous API, take the blocking path on the scheduler, with the same results.
 
 ## Getting the reactive services
 

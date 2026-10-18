@@ -31,6 +31,8 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -126,6 +128,11 @@ class RealSpringCacheIT {
                 sessions.ping();
                 sessions.put("s-1", "alice");
                 assertThat(sessions.get("s-1")).hasValue("alice");
+                sessions.async().put("s-2", "bob").get(60, TimeUnit.SECONDS);
+                assertThat(sessions.async().get("s-2").get(60, TimeUnit.SECONDS)).hasValue("bob");
+                assertThat(sessions.async().getOrLoad("s-3", () -> CompletableFuture.completedFuture("carol"))
+                        .get(60, TimeUnit.SECONDS)).isEqualTo("carol");
+                assertThat(sessions.get("s-3")).as("loaded asynchronously, read blocking").hasValue("carol");
 
                 Quote quote = new Quote("ACME", 4_200);
                 quotes.put("ACME", quote);

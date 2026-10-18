@@ -16,6 +16,7 @@
 package dev.halyx.parameters;
 
 import dev.halyx.capability.Capabilities;
+import dev.halyx.interceptor.AsyncInvocation;
 import dev.halyx.interceptor.InterceptorChain;
 import dev.halyx.interceptor.OperationContext;
 import dev.halyx.parameters.spi.ParameterDriver;
@@ -31,12 +32,15 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -66,6 +70,7 @@ public final class DefaultParameterStore implements ParameterStore {
     private final InterceptorChain interceptors;
     private final Map<String, Cached<?>> cache = new ConcurrentHashMap<>();
     private final ParameterStoreStatistics statistics = new ParameterStoreStatistics();
+    private final Async async = new Async(InterceptorChain.blocking());
 
     public DefaultParameterStore(String provider, ParameterStoreConfig config, ParameterDriver driver,
                                  InterceptorChain interceptors) {
@@ -103,15 +108,24 @@ public final class DefaultParameterStore implements ParameterStore {
 
     @Override
     public Map<String, Parameter> getAll(String prefix) {
-        Objects.requireNonNull(prefix, "prefix");
-        String full = prefix.isEmpty() ? config.prefix() : full(prefix);
-        Map<String, Parameter> found = cached("list:" + full, () -> execute("getAll", full, () -> driver.list(full)));
+        String full = fullPrefix(prefix);
+        return relativeAll(cached("list:" + full, () -> execute("getAll", full, () -> driver.list(full))));
+    }
+
+    /** A listing by relative names, sorted. */
+    private Map<String, Parameter> relativeAll(Map<String, Parameter> found) {
         Map<String, Parameter> relative = new TreeMap<>();
         found.forEach((name, parameter) -> {
             String rel = relative(name);
             relative.put(rel, parameter.rename(rel));
         });
         return new LinkedHashMap<>(relative);
+    }
+
+    /** The full name of a listing's prefix: the store's own prefix for "". */
+    private String fullPrefix(String prefix) {
+        Objects.requireNonNull(prefix, "prefix");
+        return prefix.isEmpty() ? config.prefix() : full(prefix);
     }
 
     @Override
@@ -134,6 +148,16 @@ public final class DefaultParameterStore implements ParameterStore {
     }
 
     @Override
+    public AsyncParameterStore async() {
+        return async;
+    }
+
+    @Override
+    public AsyncParameterStore async(Executor blocking) {
+        return blocking == InterceptorChain.blocking() ? async : new Async(Objects.requireNonNull(blocking, "blocking"));
+    }
+
+    @Override
     public void refresh() {
         cache.clear();
     }
@@ -151,12 +175,11 @@ public final class DefaultParameterStore implements ParameterStore {
 
     @Override
     public AutoCloseable watch(String prefix, Duration interval, Consumer<ParameterChanges> listener) {
-        Objects.requireNonNull(prefix, "prefix");
         Objects.requireNonNull(listener, "listener");
         if (interval.isNegative() || interval.isZero()) {
             throw new IllegalArgumentException("Watch interval must be positive");
         }
-        String full = prefix.isEmpty() ? config.prefix() : full(prefix);
+        String full = fullPrefix(prefix);
         Map<String, Parameter> reported = new LinkedHashMap<>(poll(full));
         ScheduledFuture<?> task = WATCHERS.scheduleWithFixedDelay(() -> {
             ParameterChanges changes;
@@ -314,5 +337,130 @@ public final class DefaultParameterStore implements ParameterStore {
                 throw driver.translate(e);
             }
         });
+    }
+
+    /** The asynchronous {@link #cached}: a fresh hit completes at once, without the backend. */
+    @SuppressWarnings("unchecked")
+    private <T> CompletableFuture<T> cachedAsync(String key, Supplier<CompletableFuture<T>> load) {
+        if (config.cacheTtl().isZero()) {
+            statistics.backendRead();
+            return load.get();
+        }
+        long now = System.nanoTime();
+        Cached<?> hit = cache.get(key);
+        if (hit != null && now - hit.expiresAtNanos() < 0) {
+            statistics.cacheHit();
+            return CompletableFuture.completedFuture((T) hit.value());
+        }
+        statistics.backendRead();
+        return load.get().thenApply(value -> {
+            cache.put(key, new Cached<>(value, now + config.cacheTtl().toNanos()));
+            return value;
+        });
+    }
+
+    /** The asynchronous {@link #execute}: a failure, thrown or returned, comes back translated in the future. */
+    private <T> CompletableFuture<T> executeAsync(String operation, String name, Executor blocking,
+                                                  Function<Executor, CompletableFuture<T>> call) {
+        OperationContext context = new OperationContext(SERVICE, operation, provider, name, !"put".equals(operation));
+        return interceptors.executeAsync(context, () -> {
+            CompletableFuture<T> future;
+            try {
+                future = call.apply(blocking);
+            } catch (RuntimeException e) {
+                return CompletableFuture.failedFuture(driver.translate(e));
+            }
+            return future.exceptionallyCompose(error -> {
+                Throwable cause = AsyncInvocation.unwrap(error);
+                return CompletableFuture.failedFuture(cause instanceof RuntimeException r ? driver.translate(r) : cause);
+            });
+        }, blocking);
+    }
+
+    /** A failed future for an argument check that throws, so async callers see one kind of failure. */
+    private static <K, T> CompletableFuture<T> checked(Supplier<K> check, Function<K, CompletableFuture<T>> call) {
+        K checked;
+        try {
+            checked = check.get();
+        } catch (RuntimeException e) {
+            return CompletableFuture.failedFuture(e);
+        }
+        return call.apply(checked);
+    }
+
+    /** The asynchronous view: the same cache, statistics and interceptors over the driver's asynchronous calls. */
+    private final class Async implements AsyncParameterStore {
+
+        private final Executor blocking;
+
+        Async(Executor blocking) {
+            this.blocking = blocking;
+        }
+
+        @Override
+        public String provider() {
+            return provider;
+        }
+
+        @Override
+        public ParameterKind kind() {
+            return config.kind();
+        }
+
+        @Override
+        public CompletableFuture<Optional<Parameter>> get(String name) {
+            return checked(() -> full(name), full -> cachedAsync("get:" + full,
+                    () -> executeAsync("get", full, blocking, executor -> driver.getAsync(full, executor)))
+                    .thenApply(found -> found.map(p -> p.rename(name))));
+        }
+
+        @Override
+        public CompletableFuture<Optional<Parameter>> get(String name, String version) {
+            return checked(() -> {
+                String full = full(name);
+                Objects.requireNonNull(version, "version");
+                capabilities().require(ParameterCapability.VERSIONS, provider);
+                return full;
+            }, full -> cachedAsync("version:" + full + "@" + version,
+                    () -> executeAsync("getVersion", full, blocking, executor -> driver.getAsync(full, version, executor)))
+                    .thenApply(found -> found.map(p -> p.rename(name))));
+        }
+
+        @Override
+        public CompletableFuture<Map<String, Parameter>> getAll(String prefix) {
+            return checked(() -> fullPrefix(prefix), full -> cachedAsync("list:" + full,
+                    () -> executeAsync("getAll", full, blocking, executor -> driver.listAsync(full, executor)))
+                    .thenApply(DefaultParameterStore.this::relativeAll));
+        }
+
+        @Override
+        public CompletableFuture<Parameter> put(String name, String value) {
+            return checked(() -> {
+                String full = full(name);
+                Objects.requireNonNull(value, "value");
+                return full;
+            }, full -> executeAsync("put", full, blocking, executor -> driver.putAsync(full, value, executor))
+                    .thenApply(stored -> {
+                        cache.clear();
+                        return stored.rename(name);
+                    }));
+        }
+
+        @Override
+        public CompletableFuture<Void> delete(String name) {
+            return checked(() -> full(name), full -> executeAsync("delete", full, blocking,
+                    executor -> driver.deleteAsync(full, executor)).thenRun(cache::clear));
+        }
+
+        @Override
+        public CompletableFuture<Void> ping() {
+            String full = full(PING_NAME);
+            return executeAsync("ping", full, blocking, executor -> driver.getAsync(full, executor)).thenApply(found -> null);
+        }
+
+        @Override
+        public ParameterStore blocking() {
+            return DefaultParameterStore.this;
+        }
     }
 }

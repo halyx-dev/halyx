@@ -21,6 +21,8 @@ import dev.halyx.stream.OutgoingRecord;
 import dev.halyx.stream.SendResult;
 
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 /**
  * Sends to one topic. Core checks capabilities, sizes and reserved headers. Must be thread-safe; a
@@ -42,6 +44,14 @@ public interface ProducerDriver extends AutoCloseable {
 
     /** Largest value the cluster accepts. */
     long maxRecordBytes();
+
+    /**
+     * {@link #send} completing when the broker acknowledges, without a thread waiting; by default the blocking call on
+     * the blocking executor. Failures may be returned or thrown; the API layer translates both.
+     */
+    default CompletableFuture<List<SendResult>> sendAsync(List<OutgoingRecord> records, Executor blocking) {
+        return CompletableFuture.supplyAsync(() -> send(records), blocking);
+    }
 
     CloudException translate(Throwable error);
 

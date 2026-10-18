@@ -30,7 +30,9 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
 import java.util.concurrent.Future;
 import java.util.function.Supplier;
 
@@ -101,16 +103,51 @@ final class KafkaProducerDriver extends AbstractProducerDriver {
         return p;
     }
 
+    /**
+     * Completes from Kafka's send callbacks, when the broker acknowledges each record, with no thread waiting. The
+     * producer is made off the caller's thread on first use. A transaction runs on the blocking executor, as a whole.
+     */
+    @Override
+    public CompletableFuture<List<SendResult>> sendAsync(List<OutgoingRecord> records, Executor blocking) {
+        if (transactional) {
+            return super.sendAsync(records, blocking);
+        }
+        Producer<byte[], byte[]> p = producer;
+        CompletableFuture<Producer<byte[], byte[]>> ready = p != null ? CompletableFuture.completedFuture(p)
+                : CompletableFuture.supplyAsync(this::producer, blocking);
+        return ready.thenCompose(producer -> {
+            List<CompletableFuture<SendResult>> sent = new ArrayList<>(records.size());
+            for (OutgoingRecord record : records) {
+                CompletableFuture<SendResult> result = new CompletableFuture<>();
+                producer.send(toKafka(record), (metadata, error) -> {
+                    if (error != null) {
+                        result.completeExceptionally(error);
+                    } else {
+                        result.complete(new SendResult(metadata.topic(), metadata.partition(), metadata.offset(),
+                                Instant.ofEpochMilli(metadata.timestamp())));
+                    }
+                });
+                sent.add(result);
+            }
+            return CompletableFuture.allOf(sent.toArray(CompletableFuture[]::new))
+                    .thenApply(done -> sent.stream().map(CompletableFuture::join).toList());
+        });
+    }
+
     private List<Future<RecordMetadata>> sendEach(Producer<byte[], byte[]> producer, List<OutgoingRecord> records) {
         List<Future<RecordMetadata>> sent = new ArrayList<>(records.size());
         for (OutgoingRecord record : records) {
-            ProducerRecord<byte[], byte[]> kafkaRecord = new ProducerRecord<>(topic, null,
-                    record.key().map(k -> k.getBytes(StandardCharsets.UTF_8)).orElse(null), record.valueUnsafe());
-            record.headers().forEach((name, value) ->
-                    kafkaRecord.headers().add(new RecordHeader(name, value.getBytes(StandardCharsets.UTF_8))));
-            sent.add(producer.send(kafkaRecord));
+            sent.add(producer.send(toKafka(record)));
         }
         return sent;
+    }
+
+    private ProducerRecord<byte[], byte[]> toKafka(OutgoingRecord record) {
+        ProducerRecord<byte[], byte[]> kafkaRecord = new ProducerRecord<>(topic, null,
+                record.key().map(k -> k.getBytes(StandardCharsets.UTF_8)).orElse(null), record.valueUnsafe());
+        record.headers().forEach((name, value) ->
+                kafkaRecord.headers().add(new RecordHeader(name, value.getBytes(StandardCharsets.UTF_8))));
+        return kafkaRecord;
     }
 
     private List<SendResult> await(List<Future<RecordMetadata>> sent) {

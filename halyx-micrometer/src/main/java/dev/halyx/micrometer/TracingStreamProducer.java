@@ -19,6 +19,7 @@ import io.micrometer.tracing.TraceContext;
 import io.micrometer.tracing.Tracer;
 import io.micrometer.tracing.propagation.Propagator;
 import dev.halyx.capability.Capabilities;
+import dev.halyx.stream.AsyncStreamProducer;
 import dev.halyx.stream.OutgoingRecord;
 import dev.halyx.stream.SendResult;
 import dev.halyx.stream.StreamProducer;
@@ -26,6 +27,8 @@ import dev.halyx.stream.StreamProducer;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 /**
  * Adds the current trace context to every record sent as headers (W3C {@code traceparent} and {@code tracestate},
@@ -66,6 +69,33 @@ public final class TracingStreamProducer implements StreamProducer {
     @Override
     public List<SendResult> sendAll(List<OutgoingRecord> records) {
         return delegate.sendAll(records.stream().map(this::withTraceContext).toList());
+    }
+
+    /** The delegate's asynchronous view, with the trace context taken on the calling thread, where it is current. */
+    @Override
+    public AsyncStreamProducer async(Executor blocking) {
+        AsyncStreamProducer async = delegate.async(blocking);
+        return new AsyncStreamProducer() {
+            @Override
+            public String provider() {
+                return async.provider();
+            }
+
+            @Override
+            public String topic() {
+                return async.topic();
+            }
+
+            @Override
+            public CompletableFuture<List<SendResult>> sendAll(List<OutgoingRecord> records) {
+                return async.sendAll(records.stream().map(TracingStreamProducer.this::withTraceContext).toList());
+            }
+
+            @Override
+            public StreamProducer blocking() {
+                return TracingStreamProducer.this;
+            }
+        };
     }
 
     private OutgoingRecord withTraceContext(OutgoingRecord record) {

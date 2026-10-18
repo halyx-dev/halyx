@@ -21,6 +21,8 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 /**
  * Provider SPI for caches. Works on full keys (namespace already applied) and raw bytes; the
@@ -69,6 +71,30 @@ public interface CacheDriver {
 
     /** Deletes every key starting with {@code prefix} (non-empty) and returns how many. */
     long deleteByPrefix(String prefix);
+
+    // --- asynchronous calls ------------------------------------------------------------------------
+    // Each defaults to its blocking call on the blocking executor; a driver whose client is non-blocking overrides
+    // them. Failures may be returned or thrown; the API layer translates both.
+
+    default CompletableFuture<Optional<byte[]>> getAsync(String key, Executor blocking) {
+        return CompletableFuture.supplyAsync(() -> get(key), blocking);
+    }
+
+    default CompletableFuture<Map<String, byte[]>> getAllAsync(List<String> keys, Executor blocking) {
+        return CompletableFuture.supplyAsync(() -> getAll(keys), blocking);
+    }
+
+    default CompletableFuture<Void> setAsync(String key, byte[] value, Optional<Duration> ttl, Executor blocking) {
+        return CompletableFuture.runAsync(() -> set(key, value, ttl), blocking);
+    }
+
+    default CompletableFuture<Long> deleteAsync(List<String> keys, Executor blocking) {
+        return CompletableFuture.supplyAsync(() -> delete(keys), blocking);
+    }
+
+    default CompletableFuture<Boolean> existsAsync(String key, Executor blocking) {
+        return CompletableFuture.supplyAsync(() -> exists(key), blocking);
+    }
 
     CloudException translate(Throwable error);
 

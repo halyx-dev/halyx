@@ -24,6 +24,8 @@ import dev.halyx.error.InvalidArgumentException;
 import dev.halyx.error.UnsupportedFeatureException;
 import dev.halyx.messaging.ClaimCheck;
 import dev.halyx.storage.BlobStore;
+import dev.halyx.stream.AsyncStreamConsumer;
+import dev.halyx.stream.AsyncStreamProducer;
 import dev.halyx.stream.ListenerOptions;
 import dev.halyx.stream.OutgoingRecord;
 import dev.halyx.stream.ReceivedRecord;
@@ -48,8 +50,10 @@ import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
@@ -332,6 +336,37 @@ public abstract class StreamConformanceTest {
     }
 
     @Test
+    void asyncSendsArriveLikeBlockingOnes() throws Exception {
+        AsyncStreamProducer async = producer().async();
+        List<OutgoingRecord> batch = List.of(OutgoingRecord.of("k", "a1"), OutgoingRecord.of("k", "a2"),
+                OutgoingRecord.builder("a3").key("k").header("type", "async").build());
+
+        List<SendResult> results = async.sendAll(batch).get(60, TimeUnit.SECONDS);
+        SendResult single = async.send("k", "a4").get(60, TimeUnit.SECONDS);
+
+        assertThat(results).hasSize(3).allSatisfy(result -> assertThat(result.topic()).isEqualTo(topic));
+        assertThat(single.offset()).isGreaterThan(results.getLast().offset());
+        assertThat(pollAtLeast(consumer(group()), 4)).extracting(ReceivedRecord::valueAsString)
+                .containsExactly("a1", "a2", "a3", "a4");
+    }
+
+    @Test
+    void asyncLargeValuesTravelThroughAClaimCheck() throws Exception {
+        BlobStore store = claimCheckStore();
+        assumeTrue(store != null, "no claim-check store");
+        ClaimCheck claims = new ClaimCheck(store, 1024, "tck-claims/" + topic + "/async/");
+        byte[] value = new byte[256 * 1024];
+        new Random(9).nextBytes(value);
+
+        producer(topic, b -> b.claimCheck(claims)).async().send(OutgoingRecord.builder(value).key("big").build())
+                .get(60, TimeUnit.SECONDS);
+        ReceivedRecord record = pollAtLeast(consumer(group(), b -> b.startPosition(StartPosition.EARLIEST)
+                .claimCheck(claims)), 1).getFirst();
+
+        assertThat(record.value()).isEqualTo(value);
+    }
+
+    @Test
     void idempotentProducersNeedTheCapability() {
         StreamProducer plain = producer();
         if (plain.capabilities().supports(StreamCapability.IDEMPOTENCE)) {
@@ -382,6 +417,32 @@ public abstract class StreamConformanceTest {
         resumed.addAll(pollFor(consumers.getLast(), Duration.ofSeconds(1)));
 
         assertThat(values(resumed)).containsExactlyInAnyOrder("second-0", "second-1", "second-2");
+    }
+
+    @Test
+    void asyncPollsAndCommitsRunInOrder() throws Exception {
+        producer().sendAll(List.of(OutgoingRecord.of("k", "p1"), OutgoingRecord.of("k", "p2"), OutgoingRecord.of("k", "p3")));
+        String group = group();
+        StreamConsumer first = consumer(group);
+        AsyncStreamConsumer async = first.async();
+
+        List<ReceivedRecord> records = new ArrayList<>();
+        Instant deadline = Instant.now().plus(timeout());
+        while (records.size() < 3) {
+            assertThat(Instant.now()).as("%d of 3 records arrived", records.size()).isBefore(deadline);
+            // queued together: each runs once the one before has finished, never two at once on the consumer
+            CompletableFuture<List<ReceivedRecord>> one = async.poll(Duration.ofMillis(250));
+            CompletableFuture<List<ReceivedRecord>> two = async.poll(Duration.ofMillis(250));
+            records.addAll(one.get(60, TimeUnit.SECONDS));
+            records.addAll(two.get(60, TimeUnit.SECONDS));
+        }
+        async.commit().get(60, TimeUnit.SECONDS);
+        first.close();
+        producer().send("k", "p4");
+
+        assertThat(values(records)).containsExactly("p1", "p2", "p3");
+        assertThat(values(pollAtLeast(consumer(group), 1))).as("the group resumes after the async commit")
+                .containsExactly("p4");
     }
 
     @Test

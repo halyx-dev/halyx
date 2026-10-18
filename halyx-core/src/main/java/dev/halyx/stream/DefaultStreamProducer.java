@@ -17,6 +17,7 @@ package dev.halyx.stream;
 
 import dev.halyx.capability.Capabilities;
 import dev.halyx.error.InvalidArgumentException;
+import dev.halyx.interceptor.AsyncInvocation;
 import dev.halyx.interceptor.InterceptorChain;
 import dev.halyx.interceptor.OperationContext;
 import dev.halyx.messaging.ClaimCheck;
@@ -30,6 +31,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.function.Supplier;
 
 /** The portable stream producer: validation, capability checks, claim checks and interceptors over a driver. */
@@ -46,6 +49,7 @@ public final class DefaultStreamProducer implements StreamProducer {
     private final ProducerDriver driver;
     private final StreamProducerConfig config;
     private final InterceptorChain interceptors;
+    private final AsyncStreamProducer async = new Async(InterceptorChain.blocking());
 
     public DefaultStreamProducer(ProducerDriver driver, StreamProducerConfig config, InterceptorChain interceptors) {
         this.driver = Objects.requireNonNull(driver, "driver");
@@ -93,17 +97,29 @@ public final class DefaultStreamProducer implements StreamProducer {
     }
 
     private OutgoingRecord prepare(OutgoingRecord record) {
+        check(record);
+        var claimCheck = config.claimCheck();
+        if (claimCheck.isPresent() && record.size() > claimCheck.get().thresholdBytes()) {
+            String key = claimCheck.get().prefix() + UUID.randomUUID();
+            claimCheck.get().store().put(BlobKey.of(key), BlobContent.ofBytes(record.valueUnsafe()));
+            return claimed(record, key);
+        }
+        return withinLimit(record);
+    }
+
+    private void check(OutgoingRecord record) {
         for (String name : record.headers().keySet()) {
             if (name.startsWith(RESERVED_PREFIX) && !name.startsWith(DEAD_LETTER_PREFIX)) {
                 throw new IllegalArgumentException("Header names starting with '" + RESERVED_PREFIX + "' are reserved: " + name);
             }
         }
-        var claimCheck = config.claimCheck();
-        if (claimCheck.isPresent() && record.size() > claimCheck.get().thresholdBytes()) {
-            String key = claimCheck.get().prefix() + UUID.randomUUID();
-            claimCheck.get().store().put(BlobKey.of(key), BlobContent.ofBytes(record.valueUnsafe()));
-            return record.withValue(key.getBytes(StandardCharsets.UTF_8), Map.of(ClaimCheck.ATTRIBUTE, key));
-        }
+    }
+
+    private static OutgoingRecord claimed(OutgoingRecord record, String key) {
+        return record.withValue(key.getBytes(StandardCharsets.UTF_8), Map.of(ClaimCheck.ATTRIBUTE, key));
+    }
+
+    private OutgoingRecord withinLimit(OutgoingRecord record) {
         if (record.size() > driver.maxRecordBytes()) {
             throw new InvalidArgumentException("Record of " + record.size() + " bytes exceeds the " + driver.maxRecordBytes()
                     + "-byte limit of " + provider() + "; configure a ClaimCheck to send large values through a blob store",
@@ -126,6 +142,89 @@ public final class DefaultStreamProducer implements StreamProducer {
                 throw driver.translate(e);
             }
         });
+    }
+
+    @Override
+    public AsyncStreamProducer async() {
+        return async;
+    }
+
+    @Override
+    public AsyncStreamProducer async(Executor blocking) {
+        return blocking == InterceptorChain.blocking() ? async : new Async(Objects.requireNonNull(blocking, "blocking"));
+    }
+
+    /** The asynchronous view: the same checks, claim checks through the blob store's async view, then the driver. */
+    private final class Async implements AsyncStreamProducer {
+
+        private final Executor blocking;
+
+        Async(Executor blocking) {
+            this.blocking = blocking;
+        }
+
+        @Override
+        public String provider() {
+            return DefaultStreamProducer.this.provider();
+        }
+
+        @Override
+        public String topic() {
+            return DefaultStreamProducer.this.topic();
+        }
+
+        @Override
+        public CompletableFuture<List<SendResult>> sendAll(List<OutgoingRecord> records) {
+            List<CompletableFuture<OutgoingRecord>> prepared = new ArrayList<>();
+            try {
+                Objects.requireNonNull(records, "records");
+                records.forEach(record -> check(Objects.requireNonNull(record, "record")));
+                for (OutgoingRecord record : records) {
+                    prepared.add(prepare(record));
+                }
+            } catch (RuntimeException e) {
+                return CompletableFuture.failedFuture(e);
+            }
+            if (prepared.isEmpty()) {
+                return CompletableFuture.completedFuture(List.of());
+            }
+            return CompletableFuture.allOf(prepared.toArray(CompletableFuture[]::new)).thenCompose(ready -> {
+                List<OutgoingRecord> batch = prepared.stream().map(CompletableFuture::join).toList();
+                OperationContext context = new OperationContext(SERVICE, "send", provider(), topic(), config.idempotent());
+                return interceptors.executeAsync(context, () -> {
+                    CompletableFuture<List<SendResult>> sent;
+                    try {
+                        sent = driver.sendAsync(batch, blocking);
+                    } catch (RuntimeException e) {
+                        return CompletableFuture.failedFuture(driver.translate(e));
+                    }
+                    return sent.exceptionallyCompose(error -> {
+                        Throwable cause = AsyncInvocation.unwrap(error);
+                        return CompletableFuture.failedFuture(cause instanceof RuntimeException r ? driver.translate(r) : cause);
+                    });
+                }, blocking);
+            });
+        }
+
+        private CompletableFuture<OutgoingRecord> prepare(OutgoingRecord record) {
+            var claimCheck = config.claimCheck();
+            if (claimCheck.isPresent() && record.size() > claimCheck.get().thresholdBytes()) {
+                String key = claimCheck.get().prefix() + UUID.randomUUID();
+                return claimCheck.get().store().async(blocking).put(BlobKey.of(key), BlobContent.ofBytes(record.valueUnsafe()))
+                        .thenApply(stored -> claimed(record, key));
+            }
+            return CompletableFuture.completedFuture(withinLimit(record));
+        }
+
+        @Override
+        public StreamProducer blocking() {
+            return DefaultStreamProducer.this;
+        }
+
+        @Override
+        public String toString() {
+            return "Async" + DefaultStreamProducer.this;
+        }
     }
 
     @Override

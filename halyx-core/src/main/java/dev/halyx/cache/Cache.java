@@ -15,10 +15,13 @@
  */
 package dev.halyx.cache;
 
+import dev.halyx.interceptor.InterceptorChain;
+
 import java.time.Duration;
 import java.util.Collection;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.Executor;
 import java.util.function.Supplier;
 
 /**
@@ -124,6 +127,19 @@ public interface Cache<V> {
      * reads, it ignores {@link CacheConfig#failOpen() fail-open}, so health checks see an outage.
      */
     void ping();
+
+    /**
+     * The asynchronous view of this cache, whose calls return {@code CompletableFuture}s; non-blocking where the
+     * provider's driver is (the Redis and Valkey driver is). Cheap to call.
+     */
+    default AsyncCache<V> async() {
+        return async(InterceptorChain.blocking());
+    }
+
+    /** The asynchronous view, running any blocking work on {@code blocking}, such as an application's scheduler. */
+    default AsyncCache<V> async(Executor blocking) {
+        return AsyncCache.onExecutor(this, blocking);
+    }
 
     /** Hit, miss and load counters for this cache instance. */
     CacheStatistics statistics();

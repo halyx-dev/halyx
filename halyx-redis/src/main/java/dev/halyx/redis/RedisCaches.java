@@ -214,7 +214,7 @@ public final class RedisCaches implements AutoCloseable {
                         .build());
                 StatefulRedisClusterConnection<byte[], byte[]> connection = client.connect(ByteArrayCodec.INSTANCE);
                 RedisCacheDriver driver = new RedisCacheDriver(provider, connection.sync(), connection.sync(),
-                        connection.async(), connection.sync(), timeout, List.of(connection, client));
+                        connection.async(), connection.async(), connection.sync(), timeout, List.of(connection, client));
                 return new Opened(driver, connection, client::shutdown, credentials);
             }
             RedisClient client = RedisClient.create(resources, redisUri);
@@ -225,7 +225,7 @@ public final class RedisCaches implements AutoCloseable {
                     .build());
             StatefulRedisConnection<byte[], byte[]> connection = client.connect(ByteArrayCodec.INSTANCE);
             RedisCacheDriver driver = new RedisCacheDriver(provider, connection.sync(), connection.sync(),
-                    connection.async(), connection.sync(), timeout, List.of(connection, client));
+                    connection.async(), connection.async(), connection.sync(), timeout, List.of(connection, client));
             return new Opened(driver, connection, client::shutdown, credentials);
         } catch (RuntimeException e) {
             if (credentials != null) {

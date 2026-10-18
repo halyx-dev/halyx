@@ -45,6 +45,7 @@ import java.io.Serializable;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -145,6 +146,8 @@ class HalyxAutoConfigurationTest {
             assertThat(secrets.kind()).isEqualTo(ParameterKind.SECRETS);
             assertThat(secrets.require("db/password")).isEqualTo("pw");
             assertThat(context.getBean("app-config", ParameterStore.class).kind()).isEqualTo(ParameterKind.PARAMETERS);
+            secrets.async().put("db/user", "app").get(15, TimeUnit.SECONDS);
+            assertThat(secrets.async().getAll("db").get(15, TimeUnit.SECONDS)).containsOnlyKeys("db/password", "db/user");
         });
     }
 

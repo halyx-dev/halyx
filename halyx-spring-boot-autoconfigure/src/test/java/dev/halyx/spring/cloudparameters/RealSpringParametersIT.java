@@ -174,6 +174,8 @@ class RealSpringParametersIT {
                 ParameterStore bean = context.getBean("app", ParameterStore.class);
                 bean.ping();
                 assertThat(bean.require("db/password")).isEqualTo("before");
+                bean.async().ping().get(60, TimeUnit.SECONDS);
+                assertThat(bean.async().require("db/password").get(60, TimeUnit.SECONDS)).isEqualTo("before");
 
                 backend.put("db/password", "after");
 
@@ -183,6 +185,7 @@ class RealSpringParametersIT {
                     events.poll(5, TimeUnit.SECONDS);
                 }
                 assertThat(bean.require("db/password")).isEqualTo("after");
+                assertThat(bean.async().require("db/password").get(60, TimeUnit.SECONDS)).isEqualTo("after");
             }
         } finally {
             backend.delete("db/password");

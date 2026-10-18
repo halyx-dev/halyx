@@ -15,6 +15,7 @@
  */
 package dev.halyx.reactor;
 
+import dev.halyx.cache.AsyncCache;
 import dev.halyx.cache.Cache;
 import dev.halyx.cache.CacheLock;
 import dev.halyx.cache.CacheStatistics;
@@ -24,6 +25,7 @@ import java.time.Duration;
 import java.util.Collection;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.Executor;
 import java.util.function.Function;
 
 /**
@@ -59,12 +61,21 @@ public final class ReactiveCache<V> {
         return cache;
     }
 
+    /**
+     * The cache's asynchronous view for one call, whose blocking work (where the driver has no non-blocking path)
+     * runs on {@code blocking}: the scheduler, with the subscriber's context restored.
+     */
+    private AsyncCache<V> async(Executor blocking) {
+        AsyncCache<V> view = cache.async(blocking);
+        return view != null ? view : AsyncCache.onExecutor(cache, blocking); // a mock or proxy without one
+    }
+
     public Mono<V> get(String key) {
-        return calls.optional(() -> cache.get(key));
+        return calls.future(blocking -> async(blocking).get(key)).flatMap(Mono::justOrEmpty);
     }
 
     public Mono<Map<String, V>> getAll(Collection<String> keys) {
-        return calls.mono(() -> cache.getAll(keys));
+        return calls.future(blocking -> async(blocking).getAll(keys));
     }
 
     /** Completes when the server answers, even on a fail-open cache; see {@link Cache#ping()}. */
@@ -73,11 +84,11 @@ public final class ReactiveCache<V> {
     }
 
     public Mono<Void> put(String key, V value) {
-        return calls.run(() -> cache.put(key, value));
+        return calls.future(blocking -> async(blocking).put(key, value)).then();
     }
 
     public Mono<Void> put(String key, V value, Duration ttl) {
-        return calls.run(() -> cache.put(key, value, ttl));
+        return calls.future(blocking -> async(blocking).put(key, value, ttl)).then();
     }
 
     public Mono<Boolean> putIfAbsent(String key, V value) {
@@ -98,19 +109,19 @@ public final class ReactiveCache<V> {
 
     /**
      * The cached value, or {@code loader}'s, stored for next time; concurrent loads of one key in this JVM
-     * share one, as {@link Cache#getOrLoad} does. The loader is subscribed on the scheduler's thread and waited
-     * for there. A loader that completes empty gives an empty result, and nothing is cached.
+     * share one, as {@link Cache#getOrLoad} does. The loader is subscribed when needed, and nothing waits for it.
+     * A loader that completes empty gives an empty result, and nothing is cached.
      */
     public Mono<V> getOrLoad(String key, Mono<? extends V> loader) {
-        return calls.mono(() -> cache.getOrLoad(key, loader::block));
+        return calls.future(blocking -> async(blocking).getOrLoad(key, loader::toFuture));
     }
 
     public Mono<V> getOrLoad(String key, Duration ttl, Mono<? extends V> loader) {
-        return calls.mono(() -> cache.getOrLoad(key, ttl, loader::block));
+        return calls.future(blocking -> async(blocking).getOrLoad(key, ttl, loader::toFuture));
     }
 
     public Mono<Boolean> delete(String key) {
-        return calls.mono(() -> cache.delete(key));
+        return calls.future(blocking -> async(blocking).delete(key));
     }
 
     public Mono<Long> deleteAll(Collection<String> keys) {
@@ -118,7 +129,7 @@ public final class ReactiveCache<V> {
     }
 
     public Mono<Boolean> exists(String key) {
-        return calls.mono(() -> cache.exists(key));
+        return calls.future(blocking -> async(blocking).exists(key));
     }
 
     /** The remaining time to live, or empty if the key is missing or never expires. */

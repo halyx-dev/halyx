@@ -21,6 +21,8 @@ import dev.halyx.parameters.Parameter;
 
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 /**
  * Provider SPI for parameter stores. Names are full portable names (store prefix applied, validated);
@@ -41,6 +43,29 @@ public interface ParameterDriver {
     Parameter put(String name, String value);
 
     void delete(String name);
+
+    // Each defaults to its blocking call on the blocking executor; a driver whose client is non-blocking overrides
+    // them. Failures may be native: the store translates them.
+
+    default CompletableFuture<Optional<Parameter>> getAsync(String name, Executor blocking) {
+        return CompletableFuture.supplyAsync(() -> get(name), blocking);
+    }
+
+    default CompletableFuture<Optional<Parameter>> getAsync(String name, String version, Executor blocking) {
+        return CompletableFuture.supplyAsync(() -> get(name, version), blocking);
+    }
+
+    default CompletableFuture<Map<String, Parameter>> listAsync(String prefix, Executor blocking) {
+        return CompletableFuture.supplyAsync(() -> list(prefix), blocking);
+    }
+
+    default CompletableFuture<Parameter> putAsync(String name, String value, Executor blocking) {
+        return CompletableFuture.supplyAsync(() -> put(name, value), blocking);
+    }
+
+    default CompletableFuture<Void> deleteAsync(String name, Executor blocking) {
+        return CompletableFuture.runAsync(() -> delete(name), blocking);
+    }
 
     Capabilities capabilities();
 

@@ -17,10 +17,12 @@ package dev.halyx.parameters;
 
 import dev.halyx.capability.Capabilities;
 import dev.halyx.error.NotFoundException;
+import dev.halyx.interceptor.InterceptorChain;
 
 import java.time.Duration;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -87,6 +89,19 @@ public interface ParameterStore {
      * backend, past the read cache, so health checks see an outage.
      */
     void ping();
+
+    /**
+     * The asynchronous view of this store, whose calls return {@code CompletableFuture}s; non-blocking where the
+     * provider's driver is. Cheap to call.
+     */
+    default AsyncParameterStore async() {
+        return async(InterceptorChain.blocking());
+    }
+
+    /** The asynchronous view, running any blocking work on {@code blocking}, such as an application's scheduler. */
+    default AsyncParameterStore async(Executor blocking) {
+        return AsyncParameterStore.onExecutor(this, blocking);
+    }
 
     /** Read and cache counters of this store instance. */
     ParameterStoreStatistics statistics();

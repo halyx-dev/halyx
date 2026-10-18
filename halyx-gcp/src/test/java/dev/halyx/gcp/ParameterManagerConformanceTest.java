@@ -65,6 +65,11 @@ class ParameterManagerConformanceTest {
     @Nested
     class Global extends ParameterStoreConformanceTest {
         @Override
+        protected boolean nonBlockingAsync() {
+            return true;
+        }
+
+        @Override
         protected CloudContext context() {
             return halyx.provider("gcp");
         }
@@ -82,6 +87,11 @@ class ParameterManagerConformanceTest {
 
     @Nested
     class Regional extends ParameterStoreConformanceTest {
+        @Override
+        protected boolean nonBlockingAsync() {
+            return true;
+        }
+
         @Override
         protected CloudContext context() {
             return halyx.provider("gcp");

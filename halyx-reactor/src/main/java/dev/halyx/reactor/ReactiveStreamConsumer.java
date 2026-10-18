@@ -16,6 +16,7 @@
 package dev.halyx.reactor;
 
 import dev.halyx.capability.Capabilities;
+import dev.halyx.stream.AsyncStreamConsumer;
 import dev.halyx.stream.ListenerOptions;
 import dev.halyx.stream.ReceivedRecord;
 import dev.halyx.stream.StreamConsumer;
@@ -26,6 +27,7 @@ import reactor.core.publisher.Mono;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.Executor;
 import java.util.function.Function;
 
 /**
@@ -53,6 +55,12 @@ public final class ReactiveStreamConsumer {
     ReactiveStreamConsumer(StreamConsumer consumer, Calls calls) {
         this.consumer = Objects.requireNonNull(consumer, "consumer");
         this.calls = calls;
+    }
+
+    /** The consumer's asynchronous view for one call, running on {@code blocking}: the scheduler, context restored. */
+    private AsyncStreamConsumer async(Executor blocking) {
+        AsyncStreamConsumer view = consumer.async(blocking);
+        return view != null ? view : AsyncStreamConsumer.onExecutor(consumer, blocking); // a mock or proxy without one
     }
 
     public String provider() {
@@ -97,12 +105,12 @@ public final class ReactiveStreamConsumer {
 
     /** Records read within {@code wait}, for consumers driven by hand; commit with {@link #commit()}. */
     public Mono<List<ReceivedRecord>> poll(Duration wait) {
-        return calls.mono(() -> consumer.poll(wait));
+        return calls.future(blocking -> async(blocking).poll(wait));
     }
 
     /** Commits the positions of the records polled so far. */
     public Mono<Void> commit() {
-        return calls.run(consumer::commit);
+        return calls.future(blocking -> async(blocking).commit()).then();
     }
 
     /** Stops any listener or {@code Flux} and leaves the group, so other members take over its partitions. */

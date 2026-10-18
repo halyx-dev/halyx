@@ -21,17 +21,25 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import dev.halyx.CloudContext;
 import dev.halyx.Halyx;
+import dev.halyx.cache.AsyncCache;
+import dev.halyx.cache.Cache;
 import dev.halyx.cache.CacheAuth;
 import dev.halyx.cache.CacheConfig;
 import dev.halyx.config.ProviderConfig;
 import dev.halyx.error.AccessDeniedException;
 import dev.halyx.tck.CacheConformanceTest;
+import dev.halyx.tck.CountingExecutor;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import java.net.URI;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -65,6 +73,23 @@ class ValkeyCacheConformanceIT {
 
     static URI endpoint(GenericContainer<?> container) {
         return URI.create("redis://" + container.getHost() + ":" + container.getMappedPort(6379));
+    }
+
+    @Test
+    void asyncCallsNeedNoBlockingThread() throws Exception {
+        CountingExecutor blocking = new CountingExecutor();
+        Cache<String> cache = halyx.provider("redis").cache(CacheConfig.builder(endpoint(OPEN))
+                .namespace("threads-" + UUID.randomUUID()).build());
+        cache.ping(); // connected first: the lazy connection is made on the blocking executor
+        AsyncCache<String> async = cache.async(blocking);
+
+        async.put("k", "v").get(30, TimeUnit.SECONDS);
+        assertThat(async.get("k").get(30, TimeUnit.SECONDS)).hasValue("v");
+        async.getAll(List.of("k")).get(30, TimeUnit.SECONDS);
+        async.exists("k").get(30, TimeUnit.SECONDS);
+        async.delete("k").get(30, TimeUnit.SECONDS);
+
+        blocking.assertUnused();
     }
 
     @Nested

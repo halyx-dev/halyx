@@ -165,7 +165,7 @@ final class AzureConnection implements ProviderConnection {
                 if (insecureHttp) {
                     builder.addPolicy(new ForceHttpPolicy()).disableChallengeResourceVerification();
                 }
-                yield new KeyVaultSecretDriver(builder.buildClient(), storeConfig.nativeNames());
+                yield new KeyVaultSecretDriver(builder.buildClient(), builder.buildAsyncClient(), storeConfig.nativeNames());
             }
             case PARAMETERS -> {
                 var builder = new ConfigurationClientBuilder().httpClient(http());
@@ -181,7 +181,7 @@ final class AzureConnection implements ProviderConnection {
                 if (insecureHttp) {
                     builder.addPolicy(new ForceHttpPolicy());
                 }
-                yield new AppConfigurationDriver(builder.buildClient(),
+                yield new AppConfigurationDriver(builder.buildClient(), builder.buildAsyncClient(),
                         storeConfig.property(AzureParameterProperties.APPCONFIG_LABEL).orElse(null), storeConfig.nativeNames());
             }
         };

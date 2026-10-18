@@ -115,6 +115,19 @@ long-lived connections survive token rotation.
 Untrusted certificates are reported as `AccessDeniedException`: a configuration error, never treated as
 a miss under fail-open.
 
+## Asynchronous calls
+
+`async()` gives the cache's asynchronous view: `get`, `getAll`, `put`, `delete`, `exists` and a cache-aside
+`getOrLoad` whose loader returns a `CompletableFuture`, with no thread waiting for the server (the Redis and Valkey
+driver uses Lettuce's asynchronous commands). Fail-open, statistics and the circuit breaker are the same as for the
+blocking calls, and concurrent loads of one key share one loader, whether they came through the blocking or the
+asynchronous calls. Atomic operations, counters and locks are on `blocking()`.
+
+```java
+sessions.async().getOrLoad(id, () -> repository.findAsync(id))
+        .thenAccept(session -> ...);
+```
+
 ## Fail-open
 
 With `failOpen(true)`, an unavailable server (connection failure, timeout or throttling):

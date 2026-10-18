@@ -15,6 +15,7 @@
  */
 package dev.halyx.vault;
 
+import dev.halyx.interceptor.AsyncInvocation;
 import dev.halyx.json.Json;
 
 import javax.net.ssl.SSLContext;
@@ -36,6 +37,8 @@ import java.security.cert.CertificateFactory;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 /**
  * Minimal Vault HTTP API client. Holds the current token, logs in again shortly before it expires,
@@ -117,30 +120,75 @@ final class VaultClient implements AutoCloseable {
         return token.token();
     }
 
+    /**
+     * The asynchronous {@link #call}, on the HTTP client's own threads. Only logging in, when the token is missing or
+     * about to expire, runs on {@code blocking}.
+     */
+    CompletableFuture<Object> callAsync(String method, String path, Object body, Executor blocking) {
+        return tokenAsync(blocking).thenCompose(vaultToken -> sendAsync(method, path, body, vaultToken))
+                .exceptionallyCompose(error -> {
+                    if (AsyncInvocation.unwrap(error) instanceof VaultHttpException e && e.status() == 403 && login.renewable()) {
+                        synchronized (this) {
+                            token = null;
+                        }
+                        return tokenAsync(blocking).thenCompose(vaultToken -> sendAsync(method, path, body, vaultToken));
+                    }
+                    return CompletableFuture.failedFuture(AsyncInvocation.unwrap(error));
+                });
+    }
+
+    private CompletableFuture<String> tokenAsync(Executor blocking) {
+        synchronized (this) {
+            if (token != null && !token.expiringSoon(Instant.now())) {
+                return CompletableFuture.completedFuture(token.token());
+            }
+        }
+        return CompletableFuture.supplyAsync(this::currentToken, blocking);
+    }
+
+    private CompletableFuture<Object> sendAsync(String method, String path, Object body, String vaultToken) {
+        return http.sendAsync(request(method, path, body, vaultToken), HttpResponse.BodyHandlers.ofByteArray())
+                .exceptionallyCompose(error -> CompletableFuture.failedFuture(
+                        AsyncInvocation.unwrap(error) instanceof IOException e ? unreachable(e) : AsyncInvocation.unwrap(error)))
+                .thenApply(VaultClient::parse);
+    }
+
+    private HttpRequest request(String method, String path, Object body, String vaultToken) {
+        HttpRequest.Builder request = HttpRequest.newBuilder(address.resolve("v1/" + path))
+                .timeout(TIMEOUT)
+                .method(method, body == null ? HttpRequest.BodyPublishers.noBody()
+                        : HttpRequest.BodyPublishers.ofString(Json.write(body)));
+        if (body != null) {
+            request.header("Content-Type", "application/json");
+        }
+        if (vaultToken != null) {
+            request.header("X-Vault-Token", vaultToken);
+        }
+        namespace.ifPresent(ns -> request.header("X-Vault-Namespace", ns));
+        return request.build();
+    }
+
+    /** The parsed JSON; null for 404 and empty responses. */
+    private static Object parse(HttpResponse<byte[]> response) {
+        int status = response.statusCode();
+        if (status == 404) {
+            return null;
+        }
+        if (status >= 300) {
+            throw new VaultHttpException(status, new String(response.body()));
+        }
+        return response.body().length == 0 ? null : Json.parse(new String(response.body(), StandardCharsets.UTF_8));
+    }
+
+    private UncheckedIOException unreachable(IOException e) {
+        return new UncheckedIOException("Cannot reach Vault at " + address + ": " + e.getMessage(), e);
+    }
+
     private Object send(String method, String path, Object body, String vaultToken) {
         try {
-            HttpRequest.Builder request = HttpRequest.newBuilder(address.resolve("v1/" + path))
-                    .timeout(TIMEOUT)
-                    .method(method, body == null ? HttpRequest.BodyPublishers.noBody()
-                            : HttpRequest.BodyPublishers.ofString(Json.write(body)));
-            if (body != null) {
-                request.header("Content-Type", "application/json");
-            }
-            if (vaultToken != null) {
-                request.header("X-Vault-Token", vaultToken);
-            }
-            namespace.ifPresent(ns -> request.header("X-Vault-Namespace", ns));
-            HttpResponse<byte[]> response = http.send(request.build(), HttpResponse.BodyHandlers.ofByteArray());
-            int status = response.statusCode();
-            if (status == 404) {
-                return null;
-            }
-            if (status >= 300) {
-                throw new VaultHttpException(status, new String(response.body()));
-            }
-            return response.body().length == 0 ? null : Json.parse(new String(response.body(), StandardCharsets.UTF_8));
+            return parse(http.send(request(method, path, body, vaultToken), HttpResponse.BodyHandlers.ofByteArray()));
         } catch (IOException e) {
-            throw new UncheckedIOException("Cannot reach Vault at " + address + ": " + e.getMessage(), e);
+            throw unreachable(e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Interrupted calling Vault", e);

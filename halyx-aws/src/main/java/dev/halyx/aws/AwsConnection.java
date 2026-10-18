@@ -82,10 +82,12 @@ import software.amazon.awssdk.http.async.SdkAsyncHttpClient;
 import software.amazon.awssdk.http.nio.netty.NettyNioAsyncHttpClient;
 import software.amazon.awssdk.services.s3.S3AsyncClient;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.secretsmanager.SecretsManagerAsyncClient;
 import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
 import software.amazon.awssdk.services.sns.SnsClient;
 import software.amazon.awssdk.services.eventbridge.EventBridgeClient;
 import software.amazon.awssdk.services.sqs.SqsClient;
+import software.amazon.awssdk.services.ssm.SsmAsyncClient;
 import software.amazon.awssdk.services.ssm.SsmClient;
 import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
@@ -118,6 +120,8 @@ final class AwsConnection implements ProviderConnection {
     private KafkaStreamClients streams;
     private SsmClient ssm;
     private SecretsManagerClient secretsManager;
+    private SsmAsyncClient ssmAsync;
+    private SecretsManagerAsyncClient secretsManagerAsync;
     private AwsCredentialsProvider credentials;
 
     AwsConnection(ProviderConfig config) {
@@ -204,6 +208,28 @@ final class AwsConnection implements ProviderConnection {
         return eventBridgeAsync;
     }
 
+    /** The non-blocking SSM client, made on the first asynchronous call. */
+    private synchronized SsmAsyncClient ssmAsync() {
+        if (ssmAsync == null) {
+            var builder = SsmAsyncClient.builder().region(region()).credentialsProvider(credentials())
+                    .httpClient(nettyHttp()).overrideConfiguration(overrides());
+            config.endpoint().ifPresent(builder::endpointOverride);
+            ssmAsync = builder.build();
+        }
+        return ssmAsync;
+    }
+
+    /** The non-blocking Secrets Manager client, made on the first asynchronous call. */
+    private synchronized SecretsManagerAsyncClient secretsManagerAsync() {
+        if (secretsManagerAsync == null) {
+            var builder = SecretsManagerAsyncClient.builder().region(region()).credentialsProvider(credentials())
+                    .httpClient(nettyHttp()).overrideConfiguration(overrides());
+            config.endpoint().ifPresent(builder::endpointOverride);
+            secretsManagerAsync = builder.build();
+        }
+        return secretsManagerAsync;
+    }
+
     /** One Netty connection pool for every non-blocking client, tuned by {@link HttpSettings} as the blocking one is. */
     private synchronized SdkAsyncHttpClient nettyHttp() {
         if (nettyHttp == null) {
@@ -239,7 +265,7 @@ final class AwsConnection implements ProviderConnection {
                 }
                 yield new SsmParameterDriver(ssm,
                         Boolean.parseBoolean(storeConfig.property(SsmParameterDriver.SECURE).orElse("false")),
-                        storeConfig.nativeNames());
+                        storeConfig.nativeNames(), this::ssmAsync);
             }
             case SECRETS -> {
                 if (secretsManager == null) {
@@ -248,7 +274,7 @@ final class AwsConnection implements ProviderConnection {
                     config.endpoint().ifPresent(builder::endpointOverride);
                     secretsManager = builder.build();
                 }
-                yield new SecretsManagerDriver(secretsManager, storeConfig.nativeNames());
+                yield new SecretsManagerDriver(secretsManager, storeConfig.nativeNames(), this::secretsManagerAsync);
             }
         };
     }
@@ -475,6 +501,14 @@ final class AwsConnection implements ProviderConnection {
         if (secretsManager != null) {
             secretsManager.close();
             secretsManager = null;
+        }
+        if (ssmAsync != null) {
+            ssmAsync.close();
+            ssmAsync = null;
+        }
+        if (secretsManagerAsync != null) {
+            secretsManagerAsync.close();
+            secretsManagerAsync = null;
         }
         if (s3Async != null) {
             s3Async.close();

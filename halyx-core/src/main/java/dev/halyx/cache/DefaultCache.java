@@ -17,6 +17,7 @@ package dev.halyx.cache;
 
 import dev.halyx.cache.spi.CacheDriver;
 import dev.halyx.error.CloudException;
+import dev.halyx.interceptor.AsyncInvocation;
 import dev.halyx.interceptor.InterceptorChain;
 import dev.halyx.interceptor.OperationContext;
 import org.slf4j.Logger;
@@ -33,10 +34,13 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -68,6 +72,7 @@ public final class DefaultCache<V> implements Cache<V> {
     private final CacheStatistics statistics = new CacheStatistics();
     private final CircuitBreaker breaker = new CircuitBreaker(BREAKER_THRESHOLD, BREAKER_OPEN_FOR);
     private final ConcurrentMap<String, CompletableFuture<V>> loading = new ConcurrentHashMap<>();
+    private final AsyncCache<V> async = new Async(InterceptorChain.blocking());
 
     public DefaultCache(String provider, CacheConfig config, Codec<V> codec, CacheDriver driver,
                         InterceptorChain interceptors) {
@@ -505,6 +510,257 @@ public final class DefaultCache<V> implements Cache<V> {
             statistics.failOpenSkip();
             LOG.debug("Cache {} unavailable for {} (fail-open): {}", config.endpoint(), operation, e.getMessage());
             return fallback.get();
+        }
+    }
+
+    @Override
+    public AsyncCache<V> async() {
+        return async;
+    }
+
+    @Override
+    public AsyncCache<V> async(Executor blocking) {
+        return blocking == InterceptorChain.blocking() ? async : new Async(Objects.requireNonNull(blocking, "blocking"));
+    }
+
+    /**
+     * The asynchronous view: the same keys, codec, statistics and fail-open as the blocking calls, on the driver's
+     * non-blocking path. Every call is best effort, as its blocking twin is.
+     */
+    private final class Async implements AsyncCache<V> {
+
+        private final Executor blocking;
+
+        Async(Executor blocking) {
+            this.blocking = blocking;
+        }
+
+        @Override
+        public String provider() {
+            return provider;
+        }
+
+        @Override
+        public String namespace() {
+            return config.namespace();
+        }
+
+        @Override
+        public CompletableFuture<Optional<V>> get(String key) {
+            return checked(() -> fullKey(key), full -> executeAsync("get", key, Optional::empty,
+                    executor -> driver.getAsync(full, executor)).thenApply(value -> {
+                        countLookup(value.isPresent());
+                        return value.map(codec::decode);
+                    }));
+        }
+
+        @Override
+        public CompletableFuture<Map<String, V>> getAll(Collection<String> keys) {
+            List<String> unique;
+            List<String> full;
+            try {
+                unique = keys.stream().distinct().toList();
+                full = unique.stream().map(DefaultCache.this::fullKey).toList();
+            } catch (RuntimeException e) {
+                return CompletableFuture.failedFuture(e);
+            }
+            if (unique.isEmpty()) {
+                return CompletableFuture.completedFuture(Map.of());
+            }
+            return executeAsync("getAll", "[" + unique.size() + " keys]", Map::of,
+                    executor -> driver.getAllAsync(full, executor)).thenApply(found -> {
+                        Map<String, V> result = new LinkedHashMap<>();
+                        for (String key : unique) {
+                            byte[] value = found.get(prefix + key);
+                            if (value != null) {
+                                result.put(key, codec.decode(value));
+                            }
+                        }
+                        statistics.hit(result.size());
+                        statistics.miss(unique.size() - result.size());
+                        return result;
+                    });
+        }
+
+        @Override
+        public CompletableFuture<Void> put(String key, V value) {
+            return write(key, value, config.defaultTtl());
+        }
+
+        @Override
+        public CompletableFuture<Void> put(String key, V value, Duration ttl) {
+            Optional<Duration> resolved;
+            try {
+                resolved = Optional.of(requirePositive(ttl));
+            } catch (RuntimeException e) {
+                return CompletableFuture.failedFuture(e);
+            }
+            return write(key, value, resolved);
+        }
+
+        private CompletableFuture<Void> write(String key, V value, Optional<Duration> ttl) {
+            String full;
+            byte[] bytes;
+            try {
+                full = fullKey(key);
+                bytes = encode(value);
+            } catch (RuntimeException e) {
+                return CompletableFuture.failedFuture(e);
+            }
+            return executeAsync("put", key, () -> null, executor -> driver.setAsync(full, bytes, ttl, executor)
+                    .thenApply(done -> {
+                        statistics.put(1);
+                        return null;
+                    }));
+        }
+
+        @Override
+        public CompletableFuture<Boolean> delete(String key) {
+            return checked(() -> fullKey(key), full -> executeAsync("delete", key, () -> 0L,
+                    executor -> driver.deleteAsync(List.of(full), executor)).thenApply(removed -> {
+                        statistics.evicted(removed);
+                        return removed > 0;
+                    }));
+        }
+
+        @Override
+        public CompletableFuture<Boolean> exists(String key) {
+            return checked(() -> fullKey(key), full -> executeAsync("exists", key, () -> false,
+                    executor -> driver.existsAsync(full, executor)));
+        }
+
+        @Override
+        public CompletableFuture<V> getOrLoad(String key, Supplier<? extends CompletableFuture<? extends V>> loader) {
+            return getOrLoad(key, config.defaultTtl(), loader);
+        }
+
+        @Override
+        public CompletableFuture<V> getOrLoad(String key, Duration ttl,
+                                              Supplier<? extends CompletableFuture<? extends V>> loader) {
+            Optional<Duration> resolved;
+            try {
+                resolved = Optional.of(requirePositive(ttl));
+            } catch (RuntimeException e) {
+                return CompletableFuture.failedFuture(e);
+            }
+            return getOrLoad(key, resolved, loader);
+        }
+
+        /**
+         * As the blocking getOrLoad, sharing its map of loads in flight, so the two never load a key twice. The call
+         * claims the key before it reads, so calls made one after another share one load even before the first
+         * read has answered.
+         */
+        private CompletableFuture<V> getOrLoad(String key, Optional<Duration> ttl,
+                                               Supplier<? extends CompletableFuture<? extends V>> loader) {
+            if (loader == null) {
+                return CompletableFuture.failedFuture(new NullPointerException("loader"));
+            }
+            CompletableFuture<V> mine = new CompletableFuture<>();
+            CompletableFuture<V> inFlight;
+            try {
+                fullKey(key);
+                inFlight = loading.putIfAbsent(key, mine);
+            } catch (RuntimeException e) {
+                return CompletableFuture.failedFuture(e);
+            }
+            if (inFlight != null) {
+                statistics.miss(1); // as a blocking caller that finds the load under way
+                return inFlight.copy();
+            }
+            get(key).thenCompose(cached -> cached.isPresent()
+                            ? CompletableFuture.completedFuture(cached.get()) : load(key, ttl, loader))
+                    .whenComplete((value, error) -> {
+                        loading.remove(key, mine);
+                        if (error != null) {
+                            mine.completeExceptionally(AsyncInvocation.unwrap(error));
+                        } else {
+                            mine.complete(value);
+                        }
+                    });
+            return mine.copy();
+        }
+
+        private CompletableFuture<V> load(String key, Optional<Duration> ttl,
+                                          Supplier<? extends CompletableFuture<? extends V>> loader) {
+            CompletableFuture<? extends V> loaded;
+            try {
+                loaded = Objects.requireNonNull(loader.get(), "the loader returned no future");
+            } catch (RuntimeException | Error e) {
+                statistics.loadFailed();
+                return CompletableFuture.failedFuture(e);
+            }
+            return loaded.<V>handle((value, error) -> {
+                if (error != null) {
+                    statistics.loadFailed();
+                    throw error instanceof RuntimeException r ? r : new CompletionException(error);
+                }
+                statistics.loaded();
+                return value;
+            }).thenCompose(value -> value == null ? CompletableFuture.completedFuture(null)
+                    : write(key, value, ttl).thenApply(done -> value));
+        }
+
+        /**
+         * The asynchronous {@link #execute}, always best effort: on a fail-open cache, a retryable failure (or an
+         * open breaker) gives {@code fallback} instead.
+         */
+        private <T> CompletableFuture<T> executeAsync(String operation, String key, Supplier<T> fallback,
+                                                      Function<Executor, CompletableFuture<T>> call) {
+            boolean degradable = config.failOpen();
+            if (degradable && !breaker.allowsCall()) {
+                statistics.failOpenSkip();
+                return CompletableFuture.completedFuture(fallback.get());
+            }
+            OperationContext context = new OperationContext(SERVICE, operation, provider, prefix + key, true);
+            return interceptors.executeAsync(context, () -> {
+                CompletableFuture<T> future;
+                try {
+                    future = call.apply(blocking);
+                } catch (RuntimeException e) {
+                    return CompletableFuture.failedFuture(driver.translate(e));
+                }
+                return future.exceptionallyCompose(error -> {
+                    Throwable cause = AsyncInvocation.unwrap(error);
+                    return CompletableFuture.failedFuture(cause instanceof RuntimeException r ? driver.translate(r) : cause);
+                });
+            }, blocking).handle((value, error) -> {
+                if (error == null) {
+                    breaker.onSuccess();
+                    return CompletableFuture.completedFuture(value);
+                }
+                Throwable cause = AsyncInvocation.unwrap(error);
+                if (!(cause instanceof CloudException cloud) || !cloud.isRetryable()) {
+                    return CompletableFuture.<T>failedFuture(cause);
+                }
+                breaker.onFailure();
+                if (!degradable) {
+                    return CompletableFuture.<T>failedFuture(cause);
+                }
+                statistics.failOpenSkip();
+                LOG.debug("Cache {} unavailable for {} (fail-open): {}", config.endpoint(), operation, cause.getMessage());
+                return CompletableFuture.completedFuture(fallback.get());
+            }).thenCompose(Function.identity());
+        }
+
+        private <K, T> CompletableFuture<T> checked(Supplier<K> check, Function<K, CompletableFuture<T>> call) {
+            K checked;
+            try {
+                checked = check.get();
+            } catch (RuntimeException e) {
+                return CompletableFuture.failedFuture(e);
+            }
+            return call.apply(checked);
+        }
+
+        @Override
+        public Cache<V> blocking() {
+            return DefaultCache.this;
+        }
+
+        @Override
+        public String toString() {
+            return "Async" + DefaultCache.this;
         }
     }
 }

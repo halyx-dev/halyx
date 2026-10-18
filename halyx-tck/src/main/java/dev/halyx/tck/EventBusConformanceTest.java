@@ -37,6 +37,7 @@ import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -170,7 +171,7 @@ public abstract class EventBusConformanceTest {
         List<CloudEvent> events = IntStream.range(0, 12)
                 .mapToObj(i -> event("async").subject("item-" + i).json("{\"i\":" + i + "}").build()).toList();
 
-        publisher().async().publishAll(events).get(60, java.util.concurrent.TimeUnit.SECONDS);
+        publisher().async().publishAll(events).get(60, TimeUnit.SECONDS);
 
         assertThat(awaitEvents(12).keySet()).containsAll(events.stream().map(CloudEvent::id).toList());
     }
@@ -179,7 +180,7 @@ public abstract class EventBusConformanceTest {
     void asyncOversizedEventsAreRefusedBeforeSending() {
         CloudEvent huge = event("huge").data("application/octet-stream", new byte[2 * 1024 * 1024]).build();
 
-        assertThat(publisher().async().publish(huge)).failsWithin(10, java.util.concurrent.TimeUnit.SECONDS)
+        assertThat(publisher().async().publish(huge)).failsWithin(10, TimeUnit.SECONDS)
                 .withThrowableThat().havingCause().isInstanceOf(InvalidArgumentException.class);
     }
 

@@ -119,9 +119,9 @@ either portable or explicitly declared as a capability:
 | Document store | 26 | the asynchronous view, every value type, versions and conditions, partial updates with concurrent increments, batches beyond provider limits, sort-key queries both ways with paging, secondary indexes, transactions with rollback, keys with `/ ? # % \`, expiry |
 | Event bus | 9 | asynchronous publishes, every CloudEvent attribute through the router to its queue, text and binary data, events without data, batches across requests, republished ids, oversized events refused, listeners |
 | Messaging | 21 | round trips, asynchronous publishes and receives, binary bodies, ack and nack, lease expiry and extension, batches, listener retries and concurrency, claim checks, ordering, deduplication, delays |
-| Streams | 25 | keys, headers, partitions and offsets, order per key, committed positions, uncommitted records read again, groups sharing partitions, start positions, listener retries holding only their partition, dead letters, commits on close, claim checks, idempotence and transactions |
-| Cache | 50 | ping, basic and bulk operations, cache-aside, atomic operations, counters, locks, namespaces, expiry (fail-open has its own test against an unreachable server) |
-| Parameter store | 23 | CRUD, ping past the cache, versions, prefixes, caching, JSON fields, native names, watching |
+| Streams | 28 | asynchronous sends and polls, keys, headers, partitions and offsets, order per key, committed positions, uncommitted records read again, groups sharing partitions, start positions, listener retries holding only their partition, dead letters, commits on close, claim checks, idempotence and transactions |
+| Cache | 52 | ping, the asynchronous view, basic and bulk operations, cache-aside, atomic operations, counters, locks, namespaces, expiry (fail-open has its own test against an unreachable server) |
+| Parameter store | 26 | CRUD, the asynchronous view, ping past the cache, versions, prefixes, caching, JSON fields, native names, watching |
 
 ### Emulators
 

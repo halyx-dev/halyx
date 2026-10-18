@@ -43,6 +43,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -526,9 +528,9 @@ public abstract class DocumentStoreConformanceTest {
     // Non-blocking where the driver has a path for it (DynamoDB), the blocking call on a virtual thread elsewhere:
     // either way, the same results and the same CloudExceptions as the blocking calls.
 
-    private static <T> T await(java.util.concurrent.CompletableFuture<T> future) throws Exception {
+    private static <T> T await(CompletableFuture<T> future) throws Exception {
         try {
-            return future.get(60, java.util.concurrent.TimeUnit.SECONDS);
+            return future.get(60, TimeUnit.SECONDS);
         } catch (java.util.concurrent.ExecutionException e) {
             if (e.getCause() instanceof Exception cause) {
                 throw cause;

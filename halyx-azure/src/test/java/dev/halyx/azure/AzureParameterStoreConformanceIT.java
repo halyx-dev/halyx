@@ -87,6 +87,16 @@ class AzureParameterStoreConformanceIT {
     @Nested
     class KeyVault extends ParameterStoreConformanceTest {
         @Override
+        protected boolean nonBlockingAsync() {
+            return true;
+        }
+
+        @Override
+        protected boolean nonBlockingAsyncDelete() {
+            return false; // Key Vault starts deletes through a poller
+        }
+
+        @Override
         protected CloudContext context() {
             return halyx.provider("azure");
         }
@@ -116,6 +126,11 @@ class AzureParameterStoreConformanceIT {
 
     @Nested
     class AppConfiguration extends ParameterStoreConformanceTest {
+        @Override
+        protected boolean nonBlockingAsync() {
+            return true;
+        }
+
         @Override
         protected CloudContext context() {
             return halyx.provider("azure");

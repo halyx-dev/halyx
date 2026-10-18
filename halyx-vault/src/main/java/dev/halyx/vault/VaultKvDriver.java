@@ -35,6 +35,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 /**
  * Parameters and secrets on Vault's KV v2 engine. Each portable name is a secret path; the value is
@@ -115,6 +117,75 @@ final class VaultKvDriver extends AbstractParameterDriver {
     @Override
     public void delete(String name) {
         client.call("DELETE", mount + "/metadata/" + name, null);
+    }
+
+    @Override
+    public CompletableFuture<Optional<Parameter>> getAsync(String name, Executor blocking) {
+        return client.callAsync("GET", mount + "/data/" + name, null, blocking).thenApply(response -> read(name, response));
+    }
+
+    @Override
+    public CompletableFuture<Optional<Parameter>> getAsync(String name, String version, Executor blocking) {
+        return client.callAsync("GET", mount + "/data/" + name + "?version=" + version, null, blocking)
+                .thenApply(response -> read(name, response));
+    }
+
+    @Override
+    public CompletableFuture<Map<String, Parameter>> listAsync(String prefix, Executor blocking) {
+        if (nativeNames) {
+            return collectAsync(prefix.substring(0, prefix.lastIndexOf('/') + 1), blocking).thenApply(found -> {
+                found.keySet().removeIf(name -> !name.startsWith(prefix));
+                return found;
+            });
+        }
+        CompletableFuture<Map<String, Parameter>> itself = prefix.isEmpty()
+                ? CompletableFuture.completedFuture(new LinkedHashMap<>())
+                : getAsync(prefix, blocking).thenApply(p -> {
+                    Map<String, Parameter> found = new LinkedHashMap<>();
+                    p.ifPresent(parameter -> found.put(parameter.name(), parameter));
+                    return found;
+                });
+        return itself.thenCombine(collectAsync(prefix.isEmpty() ? "" : prefix + "/", blocking), (found, below) -> {
+            found.putAll(below);
+            return found;
+        });
+    }
+
+    /** Every secret in {@code folder} and its subfolders, read at once, in listing order. */
+    private CompletableFuture<Map<String, Parameter>> collectAsync(String folder, Executor blocking) {
+        return client.callAsync("GET", mount + "/metadata/" + folder + "?list=true", null, blocking).thenCompose(listing -> {
+            if (!(Json.at(listing, "data", "keys") instanceof List<?> keys)) {
+                return CompletableFuture.completedFuture(new LinkedHashMap<>());
+            }
+            List<CompletableFuture<Map<String, Parameter>>> entries = keys.stream().map(key -> {
+                String entry = String.valueOf(key);
+                if (entry.endsWith("/")) {
+                    return collectAsync(folder + entry, blocking);
+                }
+                String name = folder + entry;
+                return getAsync(name, blocking).thenApply(p -> {
+                    Map<String, Parameter> one = new LinkedHashMap<>();
+                    p.ifPresent(parameter -> one.put(name, parameter));
+                    return one;
+                });
+            }).toList();
+            return CompletableFuture.allOf(entries.toArray(CompletableFuture[]::new)).thenApply(all -> {
+                Map<String, Parameter> found = new LinkedHashMap<>();
+                entries.forEach(entry -> found.putAll(entry.join()));
+                return found;
+            });
+        });
+    }
+
+    @Override
+    public CompletableFuture<Parameter> putAsync(String name, String value, Executor blocking) {
+        return client.callAsync("POST", mount + "/data/" + name, Map.of("data", Map.of(FIELD, value)), blocking)
+                .thenApply(response -> new Parameter(name, value, String.valueOf(Json.at(response, "data", "version")), null));
+    }
+
+    @Override
+    public CompletableFuture<Void> deleteAsync(String name, Executor blocking) {
+        return client.callAsync("DELETE", mount + "/metadata/" + name, null, blocking).thenApply(response -> null);
     }
 
     @Override

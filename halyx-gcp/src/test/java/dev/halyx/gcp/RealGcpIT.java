@@ -249,6 +249,11 @@ class RealGcpIT {
 
     @Nested
     class SecretManager extends ParameterStoreConformanceTest {
+        @Override
+        protected boolean nonBlockingAsync() {
+            return true;
+        }
+
         /** Secret Manager's latest alias is eventually consistent; only reads by version number are strong. */
         @Override
         protected Duration overwriteLag() {
@@ -274,6 +279,11 @@ class RealGcpIT {
     @Nested
     class ParameterManagerGlobal extends ParameterStoreConformanceTest {
         @Override
+        protected boolean nonBlockingAsync() {
+            return true;
+        }
+
+        @Override
         protected CloudContext context() {
             return gcp();
         }
@@ -291,6 +301,11 @@ class RealGcpIT {
 
     @Nested
     class ParameterManagerRegional extends ParameterStoreConformanceTest {
+        @Override
+        protected boolean nonBlockingAsync() {
+            return true;
+        }
+
         @Override
         protected CloudContext context() {
             return gcp();

@@ -18,9 +18,15 @@ package dev.halyx.gcp;
 import com.google.api.core.ApiFuture;
 import com.google.api.core.ApiFutureCallback;
 import com.google.api.core.ApiFutures;
+import com.google.api.gax.paging.AsyncPage;
+import com.google.api.gax.rpc.ApiException;
+import com.google.api.gax.rpc.StatusCode;
 import com.google.common.util.concurrent.MoreExecutors;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import dev.halyx.interceptor.AsyncInvocation;
 
 /** Google's futures as {@code CompletableFuture}s, for the drivers' non-blocking paths. */
 public final class GcpFutures {
@@ -49,5 +55,23 @@ public final class GcpFutures {
             }
         }, MoreExecutors.directExecutor());
         return result;
+    }
+
+    /** Every value of {@code page} and the pages after it, each fetched when the one before has arrived. */
+    public static <T> CompletableFuture<List<T>> allPages(AsyncPage<T> page) {
+        return collect(page, new ArrayList<>());
+    }
+
+    private static <T> CompletableFuture<List<T>> collect(AsyncPage<T> page, List<T> into) {
+        page.getValues().forEach(into::add);
+        if (!page.hasNextPage()) {
+            return CompletableFuture.completedFuture(into);
+        }
+        return of(page.getNextPageAsync()).thenCompose(next -> collect(next, into));
+    }
+
+    /** True if {@code error}, unwrapped, is Google's answer with {@code code}. */
+    public static boolean hasCode(Throwable error, StatusCode.Code code) {
+        return AsyncInvocation.unwrap(error) instanceof ApiException e && e.getStatusCode().getCode() == code;
     }
 }

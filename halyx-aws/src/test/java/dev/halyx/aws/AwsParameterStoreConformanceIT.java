@@ -70,6 +70,11 @@ class AwsParameterStoreConformanceIT {
     @Nested
     class SsmParameterStore extends ParameterStoreConformanceTest {
         @Override
+        protected boolean nonBlockingAsync() {
+            return true;
+        }
+
+        @Override
         protected CloudContext context() {
             return halyx.provider("aws");
         }
@@ -87,6 +92,11 @@ class AwsParameterStoreConformanceIT {
 
     @Nested
     class SecretsManager extends ParameterStoreConformanceTest {
+        @Override
+        protected boolean nonBlockingAsync() {
+            return true;
+        }
+
         @Override
         protected CloudContext context() {
             return halyx.provider("aws");

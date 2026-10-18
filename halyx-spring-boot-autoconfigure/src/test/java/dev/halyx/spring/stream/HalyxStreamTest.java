@@ -44,6 +44,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 
@@ -116,6 +117,26 @@ class HalyxStreamTest {
             assertThat(consumer.topic()).isEqualTo("orders");
             assertThat(consumer.group()).isEqualTo("billing");
         });
+    }
+
+    @Test
+    void beansHaveAsynchronousViews() {
+        runner.withPropertyValues(MEMORY).withPropertyValues("halyx.stream-consumers.orders.start-position=earliest")
+                .run(context -> {
+                    StreamProducer producer = context.getBean("orders-out", StreamProducer.class);
+                    StreamConsumer consumer = context.getBean("orders", StreamConsumer.class);
+
+                    producer.async().sendAll(List.of(OutgoingRecord.of("c1", "a1"), OutgoingRecord.of("c1", "a2")))
+                            .get(15, TimeUnit.SECONDS);
+                    List<ReceivedRecord> records = new ArrayList<>();
+                    Instant deadline = Instant.now().plusSeconds(15);
+                    while (records.size() < 2 && Instant.now().isBefore(deadline)) {
+                        records.addAll(consumer.async().poll(Duration.ofMillis(200)).get(15, TimeUnit.SECONDS));
+                    }
+                    consumer.async().commit().get(15, TimeUnit.SECONDS);
+
+                    assertThat(records).extracting(ReceivedRecord::valueAsString).containsExactly("a1", "a2");
+                });
     }
 
     @Test

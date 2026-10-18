@@ -83,6 +83,11 @@ class VaultParameterStoreIT {
     @Nested
     class KvSecrets extends ParameterStoreConformanceTest {
         @Override
+        protected boolean nonBlockingAsync() {
+            return true;
+        }
+
+        @Override
         protected CloudContext context() {
             return halyx.provider("vault");
         }

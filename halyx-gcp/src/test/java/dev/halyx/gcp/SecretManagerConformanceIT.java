@@ -70,6 +70,11 @@ class SecretManagerConformanceIT {
     @Nested
     class Secrets extends ParameterStoreConformanceTest {
         @Override
+        protected boolean nonBlockingAsync() {
+            return true;
+        }
+
+        @Override
         protected CloudContext context() {
             return halyx.provider("gcp");
         }

@@ -35,6 +35,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.function.Supplier;
 
 /** The portable stream consumer: claim-check resolution, manual commits and interceptors over a driver. */
@@ -45,11 +47,13 @@ public final class DefaultStreamConsumer implements StreamConsumer {
     private final ConsumerDriver driver;
     private final StreamConsumerConfig config;
     private final InterceptorChain interceptors;
-    /** The next offset to commit per partition, for manual polling; used on the polling thread only. */
+    /** The next offset to commit per partition, for manual polling; used by one call at a time. */
     private final Map<Partition, Long> positions = new HashMap<>();
     private boolean polling;
     private PartitionListener listener;
     private boolean closed;
+    /** Orders the calls of every asynchronous view of this consumer, whatever executor each runs on. */
+    private final AsyncStreamConsumer.Serial serial = new AsyncStreamConsumer.Serial();
 
     public DefaultStreamConsumer(ConsumerDriver driver, StreamConsumerConfig config, InterceptorChain interceptors) {
         this.driver = Objects.requireNonNull(driver, "driver");
@@ -142,6 +146,46 @@ public final class DefaultStreamConsumer implements StreamConsumer {
         }
         listener = new PartitionListener(this, recordListener, options);
         return listener;
+    }
+
+    @Override
+    public AsyncStreamConsumer async(Executor blocking) {
+        Objects.requireNonNull(blocking, "blocking");
+        return new AsyncStreamConsumer() {
+            @Override
+            public String provider() {
+                return DefaultStreamConsumer.this.provider();
+            }
+
+            @Override
+            public String topic() {
+                return DefaultStreamConsumer.this.topic();
+            }
+
+            @Override
+            public String group() {
+                return DefaultStreamConsumer.this.group();
+            }
+
+            @Override
+            public CompletableFuture<List<ReceivedRecord>> poll(Duration wait) {
+                Objects.requireNonNull(wait, "wait");
+                return serial.submit(() -> DefaultStreamConsumer.this.poll(wait), blocking);
+            }
+
+            @Override
+            public CompletableFuture<Void> commit() {
+                return serial.submit(() -> {
+                    DefaultStreamConsumer.this.commit();
+                    return null;
+                }, blocking);
+            }
+
+            @Override
+            public StreamConsumer blocking() {
+                return DefaultStreamConsumer.this;
+            }
+        };
     }
 
     ConsumerDriver driver() {

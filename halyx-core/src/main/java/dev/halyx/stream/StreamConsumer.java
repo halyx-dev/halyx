@@ -16,9 +16,11 @@
 package dev.halyx.stream;
 
 import dev.halyx.capability.Capabilities;
+import dev.halyx.interceptor.InterceptorChain;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.Executor;
 
 /**
  * One member of a consumer group on one topic. Read by hand with {@link #poll} and {@link #commit}, or run a
@@ -46,6 +48,19 @@ public interface StreamConsumer extends AutoCloseable {
      * Partitions handed to another member since the last poll are skipped.
      */
     void commit();
+
+    /**
+     * The asynchronous view of this consumer: {@link #poll} and {@link #commit} as {@code CompletableFuture}s, run
+     * one at a time on virtual threads. Cheap to call.
+     */
+    default AsyncStreamConsumer async() {
+        return async(InterceptorChain.blocking());
+    }
+
+    /** The asynchronous view, running its calls on {@code blocking}, such as an application's scheduler. */
+    default AsyncStreamConsumer async(Executor blocking) {
+        return AsyncStreamConsumer.onExecutor(this, blocking);
+    }
 
     /** Runs {@code listener} on every record until the returned listener (or this consumer) is closed. */
     StreamListener listen(RecordListener listener, ListenerOptions options);

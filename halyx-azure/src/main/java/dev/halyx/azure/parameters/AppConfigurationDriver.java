@@ -16,6 +16,7 @@
 package dev.halyx.azure.parameters;
 
 import com.azure.core.exception.HttpResponseException;
+import com.azure.data.appconfiguration.ConfigurationAsyncClient;
 import com.azure.data.appconfiguration.ConfigurationClient;
 import com.azure.data.appconfiguration.models.ConfigurationSetting;
 import com.azure.data.appconfiguration.models.SettingSelector;
@@ -23,6 +24,7 @@ import dev.halyx.azure.AzureErrors;
 import dev.halyx.azure.AzureProvider;
 import dev.halyx.capability.Capabilities;
 import dev.halyx.error.CloudException;
+import dev.halyx.interceptor.AsyncInvocation;
 import dev.halyx.parameters.Parameter;
 import dev.halyx.parameters.spi.AbstractParameterDriver;
 
@@ -30,6 +32,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 /**
  * Parameters on Azure App Configuration. Portable names are keys as they are; an optional label
@@ -39,11 +43,14 @@ import java.util.Optional;
 public final class AppConfigurationDriver extends AbstractParameterDriver {
 
     private final ConfigurationClient client;
+    private final ConfigurationAsyncClient asyncClient;
     private final String label;
 
-    public AppConfigurationDriver(ConfigurationClient client, String label, boolean nativeNames) {
+    public AppConfigurationDriver(ConfigurationClient client, ConfigurationAsyncClient asyncClient, String label,
+                                  boolean nativeNames) {
         super(AzureProvider.ID, Capabilities.none(), nativeNames);
         this.client = client;
+        this.asyncClient = asyncClient;
         this.label = label;
     }
 
@@ -61,11 +68,8 @@ public final class AppConfigurationDriver extends AbstractParameterDriver {
 
     @Override
     public Map<String, Parameter> list(String prefix) {
-        SettingSelector selector = new SettingSelector()
-                .setKeyFilter(prefix.isEmpty() ? "*" : prefix + "*")
-                .setLabelFilter(label == null ? "\0" : label);
         Map<String, Parameter> found = new LinkedHashMap<>();
-        client.listConfigurationSettings(selector).forEach(setting -> {
+        client.listConfigurationSettings(selector(prefix)).forEach(setting -> {
             if (matches(setting.getKey(), prefix)) {
                 found.put(setting.getKey(), toPortable(setting));
             }
@@ -89,6 +93,42 @@ public final class AppConfigurationDriver extends AbstractParameterDriver {
         }
     }
 
+    private SettingSelector selector(String prefix) {
+        return new SettingSelector().setKeyFilter(prefix.isEmpty() ? "*" : prefix + "*")
+                .setLabelFilter(label == null ? "\0" : label);
+    }
+
+    @Override
+    public CompletableFuture<Optional<Parameter>> getAsync(String name, Executor blocking) {
+        return asyncClient.getConfigurationSetting(name, label).toFuture()
+                .thenApply(setting -> Optional.ofNullable(setting).map(AppConfigurationDriver::toPortable))
+                .exceptionallyCompose(error -> notFound(error) ? CompletableFuture.completedFuture(Optional.empty())
+                        : CompletableFuture.failedFuture(error));
+    }
+
+    @Override
+    public CompletableFuture<Map<String, Parameter>> listAsync(String prefix, Executor blocking) {
+        return asyncClient.listConfigurationSettings(selector(prefix)).filter(setting -> matches(setting.getKey(), prefix))
+                .collect(LinkedHashMap<String, Parameter>::new, (found, setting) -> found.put(setting.getKey(), toPortable(setting)))
+                .<Map<String, Parameter>>map(found -> found).toFuture();
+    }
+
+    @Override
+    public CompletableFuture<Parameter> putAsync(String name, String value, Executor blocking) {
+        return asyncClient.setConfigurationSetting(name, label, value).toFuture().thenApply(AppConfigurationDriver::toPortable);
+    }
+
+    @Override
+    public CompletableFuture<Void> deleteAsync(String name, Executor blocking) {
+        return asyncClient.deleteConfigurationSetting(name, label).toFuture().<Void>thenApply(deleted -> null)
+                .exceptionallyCompose(error -> notFound(error) ? CompletableFuture.completedFuture(null)
+                        : CompletableFuture.failedFuture(error));
+    }
+
+    private static boolean notFound(Throwable error) {
+        return AsyncInvocation.unwrap(error) instanceof HttpResponseException e && isNotFound(e);
+    }
+
     /** The App Configuration SDK reports missing keys as a plain 404 response exception. */
     private static boolean isNotFound(HttpResponseException e) {
         return e.getResponse() != null && e.getResponse().getStatusCode() == 404;
@@ -107,6 +147,6 @@ public final class AppConfigurationDriver extends AbstractParameterDriver {
 
     @Override
     protected List<Object> nativeClients() {
-        return List.of(client);
+        return List.of(client, asyncClient);
     }
 }

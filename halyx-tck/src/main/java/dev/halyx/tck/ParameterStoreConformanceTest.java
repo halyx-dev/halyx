@@ -22,6 +22,8 @@ import org.junit.jupiter.api.TestInfo;
 import dev.halyx.CloudContext;
 import dev.halyx.error.NotFoundException;
 import dev.halyx.error.UnavailableException;
+import dev.halyx.interceptor.AsyncInvocation;
+import dev.halyx.parameters.AsyncParameterStore;
 import dev.halyx.parameters.Parameter;
 import dev.halyx.parameters.ParameterCapability;
 import dev.halyx.parameters.ParameterChanges;
@@ -36,6 +38,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
@@ -60,6 +63,19 @@ public abstract class ParameterStoreConformanceTest {
     /** The store under test for {@code config}; override to test a wrapper around {@code context()}'s stores. */
     protected ParameterStore newStore(ParameterStoreConfig config) {
         return context().parameterStore(config);
+    }
+
+    /**
+     * Whether the driver's asynchronous calls need no blocking thread once logged in, so the kit can prove it
+     * with a {@link CountingExecutor}. False by default.
+     */
+    protected boolean nonBlockingAsync() {
+        return false;
+    }
+
+    /** Whether asynchronous deletes need no blocking thread either (Key Vault's start a poller, which blocks). */
+    protected boolean nonBlockingAsyncDelete() {
+        return nonBlockingAsync();
     }
 
     /** Test names to skip in this environment, mapped to the reason. */
@@ -327,6 +343,80 @@ public abstract class ParameterStoreConformanceTest {
 
         assertThat(cached.statistics().backendReads()).as("read after the write goes to the backend").isEqualTo(reads + 1);
         assertThat(readAfterOverwrite(cached, "own", "v2")).isEqualTo("v2");
+    }
+
+    // --- asynchronous calls --------------------------------------------------------------------
+
+    /** The future's value, or its failure as the blocking call would have thrown it. */
+    private static <T> T await(CompletableFuture<T> future) {
+        return AsyncInvocation.join(future.orTimeout(60, TimeUnit.SECONDS));
+    }
+
+    @Test
+    void asyncCallsMatchTheBlockingOnes() {
+        AsyncParameterStore async = store().async();
+
+        Parameter stored = await(async.put("db/url", "u1"));
+        assertThat(stored.name()).isEqualTo("db/url");
+        assertThat(await(async.get("db/url"))).hasValueSatisfying(p -> {
+            assertThat(p.name()).isEqualTo("db/url");
+            assertThat(p.value()).isEqualTo("u1");
+            assertThat(p.version()).isEqualTo(stored.version());
+        });
+        assertThat(await(async.require("db/url"))).isEqualTo("u1");
+        assertThat(store().require("db/url")).as("written asynchronously, read blocking").isEqualTo("u1");
+        await(async.put("db/pool/size", "8"));
+        assertThat(listed(store(), "db", "db/url", "db/pool/size")).hasSize(2);
+        assertThat(await(async.getAll("db"))).containsOnlyKeys("db/url", "db/pool/size");
+        if (store().capabilities().supports(ParameterCapability.VERSIONS)) {
+            assertThat(await(async.get("db/url", stored.version())))
+                    .hasValueSatisfying(p -> assertThat(p.value()).isEqualTo("u1"));
+        }
+
+        await(async.delete("db/url"));
+        await(async.delete("db/url"));
+        assertThat(gone(store(), "db/url")).isTrue();
+        assertThat(await(async.get("missing"))).isEmpty();
+        assertThatThrownBy(() -> await(async.require("missing"))).isInstanceOf(NotFoundException.class);
+        assertThatThrownBy(() -> await(async.put("bad//name", "v"))).isInstanceOf(IllegalArgumentException.class);
+        await(async.ping());
+    }
+
+    @Test
+    void asyncReadsShareTheCache() {
+        ParameterStore cached = cachingStore(Duration.ofMinutes(5));
+        store().put("shared-cache", "v1");
+
+        assertThat(await(cached.async().get("shared-cache"))).isPresent();
+        assertThat(cached.require("shared-cache")).isEqualTo("v1");
+        assertThat(await(cached.async().get("shared-cache"))).isPresent();
+        assertThat(cached.statistics().backendReads()).isEqualTo(1);
+        assertThat(cached.statistics().cacheHits()).isEqualTo(2);
+
+        await(cached.async().put("shared-cache", "v2"));
+        assertThat(cached.require("shared-cache")).as("an asynchronous write drops the cache").isNotNull();
+        assertThat(cached.statistics().backendReads()).isEqualTo(2);
+    }
+
+    @Test
+    void asyncCallsNeedNoBlockingThread() {
+        assumeTrue(nonBlockingAsync(), "the driver's asynchronous calls use blocking threads");
+        store().ping(); // logs in, where the driver must
+        CountingExecutor blocking = new CountingExecutor();
+        AsyncParameterStore async = store().async(blocking);
+
+        Parameter stored = await(async.put("proof", "v"));
+        assertThat(await(async.get("proof"))).isPresent();
+        if (store().capabilities().supports(ParameterCapability.VERSIONS)) {
+            assertThat(await(async.get("proof", stored.version()))).isPresent();
+        }
+        await(async.getAll(""));
+        await(async.ping());
+        if (nonBlockingAsyncDelete()) {
+            await(async.delete("proof"));
+        }
+
+        blocking.assertUnused();
     }
 
     // --- JSON secrets --------------------------------------------------------------------------

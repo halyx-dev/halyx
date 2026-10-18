@@ -15,9 +15,12 @@
  */
 package dev.halyx.stream;
 
+import dev.halyx.interceptor.InterceptorChain;
+
 import dev.halyx.capability.Capabilities;
 
 import java.util.List;
+import java.util.concurrent.Executor;
 
 /** Sends records to one topic. Thread-safe; share one per topic. */
 public interface StreamProducer {
@@ -46,5 +49,18 @@ public interface StreamProducer {
     int partitionCount();
 
     /** The native client, such as Kafka's {@code Producer}. */
+    /**
+     * The asynchronous view of this producer, whose sends return {@code CompletableFuture}s that complete when the
+     * broker acknowledges, with no thread waiting. Cheap to call.
+     */
+    default AsyncStreamProducer async() {
+        return async(InterceptorChain.blocking());
+    }
+
+    /** The asynchronous view, running any blocking work on {@code blocking}, such as an application's scheduler. */
+    default AsyncStreamProducer async(Executor blocking) {
+        return AsyncStreamProducer.onExecutor(this, blocking);
+    }
+
     <T> T unwrap(Class<T> nativeType);
 }

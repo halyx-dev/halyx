@@ -79,6 +79,13 @@ orders.sendAll(List.of(OutgoingRecord.of("customer-42", a), OutgoingRecord.of("c
 - **A producer is thread-safe.** Keep one per topic; producers on the same cluster share one Kafka producer.
 - **`partitionCount()`** asks the cluster for the topic's partitions, which also checks that it exists.
 
+## Sending without blocking
+
+`async()` gives a producer's asynchronous view: `send` and `sendAll` as `CompletableFuture`s that complete from
+Kafka's send callbacks when the broker acknowledges, with claim checks stored through the blob store's asynchronous
+view. Kafka's client may still block a send briefly the first time it fetches a topic's metadata, or when its buffer
+is full (up to `max.block.ms`). A transactional producer runs each batch's transaction on a virtual thread.
+
 ## Listening
 
 `listen` runs the consumer and hands each record to your handler:
@@ -129,6 +136,10 @@ try (StreamConsumer audit = halyx.provider("aws").streamConsumer(StreamConsumerC
 
 Records polled but not committed are read again, by this member or whichever member owns the partition next.
 A consumer either polls by hand or runs a listener, not both, and `poll` and `commit` belong to one thread.
+
+`async()` gives `poll` and `commit` as `CompletableFuture`s, so the calling thread never waits. Kafka's consumer
+takes one call at a time, so a consumer's asynchronous calls run one after another, in the order they were made,
+each on a virtual thread: the view frees the caller's thread, not the consumer's.
 
 ## Consumer groups
 

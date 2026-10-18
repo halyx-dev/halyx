@@ -16,6 +16,7 @@
 package dev.halyx.reactor;
 
 import dev.halyx.capability.Capabilities;
+import dev.halyx.stream.AsyncStreamProducer;
 import dev.halyx.stream.OutgoingRecord;
 import dev.halyx.stream.SendResult;
 import dev.halyx.stream.StreamProducer;
@@ -26,6 +27,7 @@ import reactor.core.publisher.Mono;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.Executor;
 
 /** A {@link StreamProducer} as {@code Mono}s, each sending once per subscription on the application's scheduler. */
 public final class ReactiveStreamProducer {
@@ -55,17 +57,26 @@ public final class ReactiveStreamProducer {
         return producer;
     }
 
+    /**
+     * The producer's asynchronous view for one call, whose blocking work (a transaction, or a driver without a
+     * non-blocking path) runs on {@code blocking}: the scheduler, with the subscriber's context restored.
+     */
+    private AsyncStreamProducer async(Executor blocking) {
+        AsyncStreamProducer view = producer.async(blocking);
+        return view != null ? view : AsyncStreamProducer.onExecutor(producer, blocking); // a mock or proxy without one
+    }
+
     public Mono<SendResult> send(OutgoingRecord record) {
-        return calls.mono(() -> producer.send(record));
+        return calls.future(blocking -> async(blocking).send(record));
     }
 
     public Mono<SendResult> send(String key, String value) {
-        return calls.mono(() -> producer.send(key, value));
+        return calls.future(blocking -> async(blocking).send(key, value));
     }
 
     /** Sends the records, results in their order. */
     public Mono<List<SendResult>> sendAll(List<OutgoingRecord> records) {
-        return calls.mono(() -> producer.sendAll(records));
+        return calls.future(blocking -> async(blocking).sendAll(records));
     }
 
     /**

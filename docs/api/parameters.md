@@ -88,6 +88,20 @@ Optional<Parameter> previous = secrets.get("api/key", previousVersionId);
 `capabilities().supports(ParameterCapability.VERSIONS)` says whether a store keeps versions. App
 Configuration doesn't.
 
+## Asynchronous calls
+
+`async()` gives the store's asynchronous view: `get`, `require`, `getAll`, `put`, `delete` and `ping` as
+`CompletableFuture`s, through the same read cache, statistics and interceptors as the blocking calls. A cached
+read completes at once; the rest go to the backend with no thread waiting, on every backend: SSM Parameter Store,
+Secrets Manager, App Configuration, Key Vault, Secret Manager, Parameter Manager and Vault. Three calls still
+block, on a virtual thread: Key Vault deletes and the recovery a conflicting Key Vault write starts (the SDK
+starts its long-running operations only through a poller), and Vault's login, when the token is missing or
+about to expire.
+
+```java
+secrets.async().require("api/key").thenAccept(client::authenticate);
+```
+
 ## Watching for changes
 
 `watch` polls a prefix and reports added, updated and removed values, which suits credential rotation:

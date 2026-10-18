@@ -15,6 +15,7 @@
  */
 package dev.halyx.reactor;
 
+import dev.halyx.cache.AsyncCache;
 import dev.halyx.cache.Cache;
 import dev.halyx.cache.CacheLock;
 import dev.halyx.cache.CacheStatistics;
@@ -83,6 +84,8 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
@@ -96,6 +99,11 @@ import java.util.stream.Stream;
 final class BlockingViews {
 
     private BlockingViews() {
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <V> CompletableFuture<V> narrow(CompletableFuture<? extends V> future) {
+        return (CompletableFuture<V>) future;
     }
 
     private static <T> T await(Mono<T> mono) {
@@ -229,6 +237,23 @@ final class BlockingViews {
             public void putAll(Map<String, ? extends V> entries, Duration ttl) { await(rx.putAll(entries, ttl)); }
             public V getOrLoad(String key, Supplier<? extends V> loader) { return await(rx.getOrLoad(key, Mono.fromSupplier(loader))); }
             public V getOrLoad(String key, Duration ttl, Supplier<? extends V> loader) { return await(rx.getOrLoad(key, ttl, Mono.fromSupplier(loader))); }
+            // The async view subscribes at once, so calls start in the order they are made, as the cache's own do.
+            public AsyncCache<V> async(Executor blocking) {
+                Cache<V> self = this;
+                return new AsyncCache<V>() {
+                    public String provider() { return rx.provider(); }
+                    public String namespace() { return rx.namespace(); }
+                    public CompletableFuture<Optional<V>> get(String key) { return rx.get(key).map(Optional::of).defaultIfEmpty(Optional.empty()).toFuture(); }
+                    public CompletableFuture<Map<String, V>> getAll(Collection<String> keys) { return rx.getAll(keys).toFuture(); }
+                    public CompletableFuture<Void> put(String key, V value) { return rx.put(key, value).toFuture(); }
+                    public CompletableFuture<Void> put(String key, V value, Duration ttl) { return rx.put(key, value, ttl).toFuture(); }
+                    public CompletableFuture<Boolean> delete(String key) { return rx.delete(key).toFuture(); }
+                    public CompletableFuture<Boolean> exists(String key) { return rx.exists(key).toFuture(); }
+                    public CompletableFuture<V> getOrLoad(String key, Supplier<? extends CompletableFuture<? extends V>> loader) { return rx.getOrLoad(key, Mono.fromFuture(() -> narrow(loader.get()))).toFuture(); }
+                    public CompletableFuture<V> getOrLoad(String key, Duration ttl, Supplier<? extends CompletableFuture<? extends V>> loader) { return rx.getOrLoad(key, ttl, Mono.fromFuture(() -> narrow(loader.get()))).toFuture(); }
+                    public Cache<V> blocking() { return self; }
+                };
+            }
             public boolean delete(String key) { return await(rx.delete(key)); }
             public long deleteAll(Collection<String> keys) { return await(rx.deleteAll(keys)); }
             public boolean exists(String key) { return await(rx.exists(key)); }

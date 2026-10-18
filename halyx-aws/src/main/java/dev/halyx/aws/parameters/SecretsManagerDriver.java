@@ -20,11 +20,13 @@ import dev.halyx.aws.AwsProvider;
 import dev.halyx.capability.Capabilities;
 import dev.halyx.error.CloudException;
 import dev.halyx.error.UnavailableException;
+import dev.halyx.interceptor.AsyncInvocation;
 import dev.halyx.parameters.Parameter;
 import dev.halyx.parameters.ParameterCapability;
 import dev.halyx.parameters.spi.AbstractParameterDriver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import software.amazon.awssdk.services.secretsmanager.SecretsManagerAsyncClient;
 import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
 import software.amazon.awssdk.services.secretsmanager.model.FilterNameStringType;
 import software.amazon.awssdk.services.secretsmanager.model.GetSecretValueResponse;
@@ -37,6 +39,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.function.Supplier;
 
 /**
  * Secrets on AWS Secrets Manager. Portable names are used as secret names unchanged; values are
@@ -50,10 +55,14 @@ public final class SecretsManagerDriver extends AbstractParameterDriver {
     private static final Logger LOG = LoggerFactory.getLogger(SecretsManagerDriver.class);
 
     private final SecretsManagerClient secrets;
+    private final Supplier<SecretsManagerAsyncClient> secretsAsync;
 
-    public SecretsManagerDriver(SecretsManagerClient secrets, boolean nativeNames) {
+    /** @param secretsAsync the non-blocking client for asynchronous calls, made when first asked for */
+    public SecretsManagerDriver(SecretsManagerClient secrets, boolean nativeNames,
+                                Supplier<SecretsManagerAsyncClient> secretsAsync) {
         super(AwsProvider.ID, Capabilities.of(ParameterCapability.VERSIONS), nativeNames);
         this.secrets = secrets;
+        this.secretsAsync = secretsAsync;
     }
 
     @Override
@@ -156,6 +165,106 @@ public final class SecretsManagerDriver extends AbstractParameterDriver {
             }
             // already being deleted
         }
+    }
+
+    @Override
+    public CompletableFuture<Optional<Parameter>> getAsync(String name, Executor blocking) {
+        return secretsAsync.get().getSecretValue(b -> b.secretId(name))
+                .thenApply(response -> Optional.of(toPortable(name, response)))
+                .exceptionallyCompose(SecretsManagerDriver::absent);
+    }
+
+    @Override
+    public CompletableFuture<Optional<Parameter>> getAsync(String name, String version, Executor blocking) {
+        return secretsAsync.get().getSecretValue(b -> b.secretId(name).versionId(version))
+                .thenApply(response -> Optional.of(toPortable(name, response)))
+                .exceptionallyCompose(SecretsManagerDriver::absent);
+    }
+
+    /** Empty for a secret that is missing or being deleted, as the blocking reads. */
+    private static CompletableFuture<Optional<Parameter>> absent(Throwable error) {
+        Throwable cause = AsyncInvocation.unwrap(error);
+        return cause instanceof ResourceNotFoundException
+                || cause instanceof InvalidRequestException e && pendingDeletion(e)
+                ? CompletableFuture.completedFuture(Optional.empty()) : CompletableFuture.failedFuture(cause);
+    }
+
+    @Override
+    public CompletableFuture<Map<String, Parameter>> listAsync(String prefix, Executor blocking) {
+        List<String> names = new ArrayList<>();
+        return secretsAsync.get().listSecretsPaginator(b -> {
+            if (!prefix.isEmpty()) {
+                b.filters(f -> f.key(FilterNameStringType.NAME).values(prefix));
+            }
+        }).subscribe(page -> page.secretList().forEach(entry -> {
+            if (matches(entry.name(), prefix)) {
+                names.add(entry.name());
+            }
+        })).thenCompose(done -> {
+            List<CompletableFuture<Map<String, Parameter>>> batches = new ArrayList<>();
+            for (int from = 0; from < names.size(); from += BATCH) {
+                batches.add(batchAsync(names.subList(from, Math.min(from + BATCH, names.size()))));
+            }
+            return CompletableFuture.allOf(batches.toArray(CompletableFuture[]::new)).thenApply(all -> {
+                Map<String, Parameter> found = new LinkedHashMap<>();
+                batches.forEach(batch -> found.putAll(batch.join()));
+                return found;
+            });
+        });
+    }
+
+    /** One batch read, or, once BatchGetSecretValue is denied, one read per secret. */
+    private CompletableFuture<Map<String, Parameter>> batchAsync(List<String> batch) {
+        if (!batchReads) {
+            return oneByOneAsync(batch);
+        }
+        // secrets deleted since they were listed come back in errors() and are left out
+        return secretsAsync.get().batchGetSecretValue(b -> b.secretIdList(batch)).<Map<String, Parameter>>thenApply(response -> {
+            Map<String, Parameter> found = new LinkedHashMap<>();
+            response.secretValues().forEach(v ->
+                    found.put(v.name(), new Parameter(v.name(), v.secretString(), v.versionId(), v.createdDate())));
+            return found;
+        }).exceptionallyCompose(error -> {
+            if (!(AsyncInvocation.unwrap(error) instanceof SecretsManagerException e) || !accessDenied(e)) {
+                return CompletableFuture.failedFuture(error);
+            }
+            if (batchReads) {
+                batchReads = false;
+                LOG.warn("secretsmanager:BatchGetSecretValue is denied; listing reads secrets one by one");
+            }
+            return oneByOneAsync(batch);
+        });
+    }
+
+    private CompletableFuture<Map<String, Parameter>> oneByOneAsync(List<String> batch) {
+        List<CompletableFuture<Optional<Parameter>>> reads = batch.stream().map(name -> getAsync(name, null)).toList();
+        return CompletableFuture.allOf(reads.toArray(CompletableFuture[]::new)).thenApply(all -> {
+            Map<String, Parameter> found = new LinkedHashMap<>();
+            reads.forEach(read -> read.join().ifPresent(p -> found.put(p.name(), p)));
+            return found;
+        });
+    }
+
+    @Override
+    public CompletableFuture<Parameter> putAsync(String name, String value, Executor blocking) {
+        return secretsAsync.get().putSecretValue(b -> b.secretId(name).secretString(value))
+                .thenApply(response -> new Parameter(name, value, response.versionId(), null))
+                .exceptionallyCompose(error -> AsyncInvocation.unwrap(error) instanceof ResourceNotFoundException
+                        ? secretsAsync.get().createSecret(b -> b.name(name).secretString(value))
+                                .thenApply(response -> new Parameter(name, value, response.versionId(), null))
+                        : CompletableFuture.failedFuture(error));
+    }
+
+    @Override
+    public CompletableFuture<Void> deleteAsync(String name, Executor blocking) {
+        return secretsAsync.get().deleteSecret(b -> b.secretId(name).forceDeleteWithoutRecovery(true))
+                .<Void>thenApply(response -> null)
+                .exceptionallyCompose(error -> {
+                    Throwable cause = AsyncInvocation.unwrap(error);
+                    return cause instanceof ResourceNotFoundException
+                            || cause instanceof InvalidRequestException e && pendingDeletion(e)
+                            ? CompletableFuture.completedFuture(null) : CompletableFuture.failedFuture(cause);
+                });
     }
 
     /** Secrets Manager says so in the message only: "...because it was marked for deletion" / "scheduled for deletion". */

@@ -23,6 +23,8 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.function.Supplier;
 
 /**
@@ -39,6 +41,37 @@ final class LazyCacheDriver implements CacheDriver {
     LazyCacheDriver(String provider, Supplier<CacheDriver> connector) {
         this.provider = provider;
         this.connector = connector;
+    }
+
+    /** The connected driver, connecting first on {@code blocking} if needed, so the caller never waits for it. */
+    private CompletableFuture<CacheDriver> driverAsync(Executor blocking) {
+        CacheDriver d = delegate;
+        return d != null ? CompletableFuture.completedFuture(d) : CompletableFuture.supplyAsync(this::driver, blocking);
+    }
+
+    @Override
+    public CompletableFuture<Optional<byte[]>> getAsync(String key, Executor blocking) {
+        return driverAsync(blocking).thenCompose(d -> d.getAsync(key, blocking));
+    }
+
+    @Override
+    public CompletableFuture<Map<String, byte[]>> getAllAsync(List<String> keys, Executor blocking) {
+        return driverAsync(blocking).thenCompose(d -> d.getAllAsync(keys, blocking));
+    }
+
+    @Override
+    public CompletableFuture<Void> setAsync(String key, byte[] value, Optional<Duration> ttl, Executor blocking) {
+        return driverAsync(blocking).thenCompose(d -> d.setAsync(key, value, ttl, blocking));
+    }
+
+    @Override
+    public CompletableFuture<Long> deleteAsync(List<String> keys, Executor blocking) {
+        return driverAsync(blocking).thenCompose(d -> d.deleteAsync(keys, blocking));
+    }
+
+    @Override
+    public CompletableFuture<Boolean> existsAsync(String key, Executor blocking) {
+        return driverAsync(blocking).thenCompose(d -> d.existsAsync(key, blocking));
     }
 
     private CacheDriver driver() {
