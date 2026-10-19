@@ -30,6 +30,14 @@ With Halyx you can build **portable multi-cloud microservices and applications**
 services on several clouds at once, such as files on S3, a cache on Azure, events on Pub/Sub and secrets
 in Vault. Each cloud is registered as a named provider and used through the same API.
 
+| | |
+|---|---|
+| **8 services, 3 clouds, 1 API** | storage, NoSQL, messaging, events, Kafka streams, SQL, caches, parameters and secrets on AWS, Azure and Google Cloud |
+| **Same behaviour, proven** | one conformance kit per service, run against every provider on emulators and [on real cloud accounts, with published results](https://kamranzafar.github.io/halyx/cloud-testing/) |
+| **No passwords** | databases, caches and Kafka log in with AWS IAM, Microsoft Entra ID or Google IAM |
+| **A library, not a platform** | runs inside your application: no sidecar, no agent, and the native SDK client is one `unwrap` away |
+| **Spring Boot 3.5 and 4** | a starter with listeners, Spring Data repositories, R2DBC, `@Cacheable`, health, metrics and `spring.config.import` |
+
 **[Documentation](https://kamranzafar.github.io/halyx/)** · [Getting started](https://kamranzafar.github.io/halyx/getting-started.html) · [API guide](https://kamranzafar.github.io/halyx/api/) ·
 [Spring Boot](https://kamranzafar.github.io/halyx/spring-boot.html) · [Cloud testing](https://kamranzafar.github.io/halyx/cloud-testing/) · [Roadmap](https://kamranzafar.github.io/halyx/roadmap.html)
 
@@ -57,6 +65,34 @@ Halyx was created to make that code portable too, without giving up what each cl
 - **Passwordless and production-ready.** Databases, caches and streams log in with AWS IAM, Microsoft Entra ID or
   Google IAM. Parallel transfers, batching, checksums, presigned URLs, message listeners, fail-open
   caches and Micrometer observability are built in.
+
+## Who it's for
+
+- **Products installed into each customer's own cloud.** Ship one build to customers on AWS, Azure or Google
+  Cloud instead of maintaining three versions of your storage, messaging and secrets code.
+- **Regulated teams that need a credible exit plan.** Regulations such as the EU's DORA expect a realistic
+  plan for leaving a cloud provider. With Halyx the plan is a configuration change, backed by the same tests
+  passing on every cloud.
+- **Data residency.** Run the same service on AWS in one country and on Azure or Google Cloud in another.
+- **Services that use several clouds at once**, such as a bucket on one cloud and a queue on another.
+- **Any team that wants fast tests.** The in-memory provider and emulators behave like the real services, so
+  most tests don't need a cloud account, even if you only use one cloud.
+
+## How it compares
+
+| | Halyx | Spring Cloud AWS, Azure, GCP | Dapr | MultiCloudJ |
+|---|---|---|---|---|
+| Clouds | AWS, Azure, Google Cloud | One per project | Many, through components | AWS, Google Cloud, Alibaba Cloud |
+| Languages | Java | Java | Any | Java |
+| One API on AWS, Azure and Google Cloud | Yes | No: one project per cloud | Yes | No Azure |
+| Runs inside your application | Yes | Yes | No: a sidecar | Yes |
+| Same behaviour checked on every cloud | Yes, on real clouds | No | Varies by component | Not documented |
+| SQL, caches, Kafka and secrets with IAM logins | Yes | Per cloud | Partly | No |
+| Native SDK client available | Yes | Yes | No | Not documented |
+| Spring Boot starter | Yes | Yes | Yes | No |
+
+Each of these is the right choice for some teams. Dapr suits services in many languages and has workflows and
+actors; Spring Cloud suits teams staying on one cloud; MultiCloudJ covers Alibaba Cloud.
 
 ## How it makes microservices cloud-agnostic
 
