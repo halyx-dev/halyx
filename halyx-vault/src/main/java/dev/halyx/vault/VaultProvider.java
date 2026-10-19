@@ -71,6 +71,10 @@ public final class VaultProvider implements CloudProvider {
                     yield VaultLogin.token(env);
                 }
                 case Credentials.Anonymous ignored -> throw new IllegalArgumentException("Vault needs authentication");
+                case Credentials.Impersonation ignored -> throw new IllegalArgumentException("Vault doesn't log in by "
+                        + "impersonation: use a token, or configure vault.auth=approle|kubernetes");
+                case Credentials.ServicePrincipal ignored -> throw new IllegalArgumentException("Vault doesn't log in "
+                        + "with an Entra ID service principal: use a token, or configure vault.auth=approle|kubernetes");
             };
             case "approle" -> VaultLogin.appRole(config.property(VaultProperties.AUTH_PATH).orElse("approle"),
                     required(config, VaultProperties.APPROLE_ROLE_ID), required(config, VaultProperties.APPROLE_SECRET_ID));

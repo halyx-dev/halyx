@@ -91,6 +91,9 @@ import software.amazon.awssdk.services.ssm.SsmAsyncClient;
 import software.amazon.awssdk.services.ssm.SsmClient;
 import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
+import software.amazon.awssdk.services.sts.StsClient;
+import software.amazon.awssdk.services.sts.auth.StsAssumeRoleCredentialsProvider;
+import software.amazon.awssdk.services.sts.model.AssumeRoleRequest;
 
 import java.util.Locale;
 import java.util.Map;
@@ -123,6 +126,7 @@ final class AwsConnection implements ProviderConnection {
     private SsmAsyncClient ssmAsync;
     private SecretsManagerAsyncClient secretsManagerAsync;
     private AwsCredentialsProvider credentials;
+    private StsClient sts;
 
     AwsConnection(ProviderConfig config) {
         this.config = config;
@@ -296,13 +300,44 @@ final class AwsConnection implements ProviderConnection {
     /** Made once and shared by every client, so the default chain resolves and refreshes credentials once. */
     private synchronized AwsCredentialsProvider credentials() {
         if (credentials == null) {
-            credentials = switch (config.credentials()) {
-                case Credentials.DefaultChain ignored -> DefaultCredentialsProvider.builder().build();
-                case Credentials.Static s -> StaticCredentialsProvider.create(AwsBasicCredentials.create(s.id(), s.secret()));
-                case Credentials.Anonymous ignored -> AnonymousCredentialsProvider.create();
-            };
+            credentials = credentials(config.credentials());
         }
         return credentials;
+    }
+
+    private AwsCredentialsProvider credentials(Credentials source) {
+        return switch (source) {
+            case Credentials.DefaultChain ignored -> DefaultCredentialsProvider.builder().build();
+            case Credentials.Static s -> StaticCredentialsProvider.create(AwsBasicCredentials.create(s.id(), s.secret()));
+            case Credentials.Anonymous ignored -> AnonymousCredentialsProvider.create();
+            case Credentials.Impersonation role -> assumeRole(role);
+            case Credentials.ServicePrincipal ignored -> throw new IllegalArgumentException("A Microsoft Entra ID service "
+                    + "principal logs in to Azure, not AWS: use the default chain, an access key or an assumed role");
+        };
+    }
+
+    /**
+     * An IAM role through STS, starting from the source credentials. The provider refreshes the role's temporary
+     * credentials before they expire.
+     */
+    private AwsCredentialsProvider assumeRole(Credentials.Impersonation role) {
+        if (!role.target().startsWith("arn:")) {
+            throw new IllegalArgumentException("On AWS, impersonation assumes an IAM role: pass its ARN, such as "
+                    + "arn:aws:iam::123456789012:role/orders, not '" + role.target() + "'");
+        }
+        var client = StsClient.builder().region(region()).credentialsProvider(credentials(role.source()))
+                .httpClient(http()).overrideConfiguration(overrides());
+        config.endpoint().ifPresent(client::endpointOverride);
+        sts = client.build();
+        var request = AssumeRoleRequest.builder().roleArn(role.target())
+                .roleSessionName(role.sessionName() != null ? role.sessionName() : "halyx");
+        if (role.externalId() != null) {
+            request.externalId(role.externalId());
+        }
+        if (role.lifetime() != null) {
+            request.durationSeconds(Math.toIntExact(role.lifetime().toSeconds()));
+        }
+        return StsAssumeRoleCredentialsProvider.builder().stsClient(sts).refreshRequest(request.build()).build();
     }
 
     /** A DynamoDB table. */
@@ -550,5 +585,9 @@ final class AwsConnection implements ProviderConnection {
             closeable.close();
         }
         credentials = null;
+        if (sts != null) {
+            sts.close();
+            sts = null;
+        }
     }
 }

@@ -79,12 +79,12 @@ class MemorystoreCacheConformanceIT {
     }
 
     @Test
-    void iamNeedsApplicationDefaultCredentials() {
+    void iamNeedsAGoogleIdentity() {
         try (Halyx anonymous = Halyx.builder()
                 .register("gcp", ProviderConfig.of("gcp").credentials(Credentials.anonymous())).build()) {
             var iam = CacheConfig.builder(endpoint()).auth(CacheAuth.iam()).build();
 
-            assertThatThrownBy(() -> anonymous.provider("gcp").cache(iam)).hasMessageContaining("Application Default Credentials");
+            assertThatThrownBy(() -> anonymous.provider("gcp").cache(iam)).hasMessageContaining("needs a Google identity");
         }
     }
 }

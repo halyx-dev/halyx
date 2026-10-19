@@ -15,7 +15,9 @@
  */
 package dev.halyx.gcp;
 
+import com.google.api.gax.core.FixedCredentialsProvider;
 import com.google.api.gax.core.NoCredentialsProvider;
+import com.google.auth.oauth2.GoogleCredentials;
 import com.google.cloud.eventarc.publishing.v1.PublisherClient;
 import com.google.cloud.eventarc.publishing.v1.PublisherSettings;
 import dev.halyx.events.EventBusConfig;
@@ -91,6 +93,7 @@ import dev.halyx.stream.spi.ProducerDriver;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Optional;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -110,6 +113,7 @@ final class GcpConnection implements ProviderConnection {
     private KafkaStreamClients streams;
     private SecretManagerServiceClient secretManager;
     private final Map<String, ParameterManagerClient> parameterManagers = new HashMap<>();
+    private GoogleCredentials googleCredentials;
 
     GcpConnection(ProviderConfig config) {
         this.config = config;
@@ -136,9 +140,7 @@ final class GcpConnection implements ProviderConnection {
             switch (config.credentials()) {
                 case Credentials.DefaultChain ignored -> { } // Application Default Credentials
                 case Credentials.Anonymous ignored -> builder.setCredentials(NoCredentials.getInstance());
-                case Credentials.Static ignored -> throw new IllegalArgumentException(
-                        "GCP does not use static key pairs; use Credentials.defaultChain() with "
-                                + "GOOGLE_APPLICATION_CREDENTIALS or workload identity");
+                default -> builder.setCredentials(googleCredentials());
             }
             storage = builder.build().getService();
         }
@@ -186,9 +188,7 @@ final class GcpConnection implements ProviderConnection {
                 if (!"global".equals(location)) {
                     settings.setEndpoint("parametermanager." + location + ".rep.googleapis.com:443");
                 }
-                if (config.credentials() instanceof Credentials.Anonymous) {
-                    settings.setCredentialsProvider(NoCredentialsProvider.create());
-                }
+                credentialsProvider().ifPresent(settings::setCredentialsProvider);
             }
             return ParameterManagerClient.create(settings.build());
         } catch (IOException e) {
@@ -209,6 +209,8 @@ final class GcpConnection implements ProviderConnection {
                 options.setEmulatorHost(endpoint.getHost() + ":" + endpoint.getPort());
             } else if (config.credentials() instanceof Credentials.Anonymous) {
                 options.setCredentials(NoCredentials.getInstance());
+            } else if (!(config.credentials() instanceof Credentials.DefaultChain)) {
+                options.setCredentials(googleCredentials());
             }
             firestore = options.build().getService();
         }
@@ -251,9 +253,7 @@ final class GcpConnection implements ProviderConnection {
             // <location>-eventarcpublishing endpoints serve only Eventarc Standard channels.
             try {
                 var settings = PublisherSettings.newBuilder();
-                if (config.credentials() instanceof Credentials.Anonymous) {
-                    settings.setCredentialsProvider(NoCredentialsProvider.create());
-                }
+                credentialsProvider().ifPresent(settings::setCredentialsProvider);
                 eventarc = PublisherClient.create(settings.build());
             } catch (IOException e) {
                 throw new UncheckedIOException("Could not create the Eventarc publishing client", e);
@@ -286,8 +286,8 @@ final class GcpConnection implements ProviderConnection {
                 var channel = ManagedChannelBuilder.forAddress(endpoint.getHost(), endpoint.getPort()).usePlaintext().build();
                 settings.setTransportChannelProvider(FixedTransportChannelProvider.create(GrpcTransportChannel.create(channel)))
                         .setCredentialsProvider(NoCredentialsProvider.create());
-            } else if (config.credentials() instanceof Credentials.Anonymous) {
-                settings.setCredentialsProvider(NoCredentialsProvider.create());
+            } else {
+                credentialsProvider().ifPresent(settings::setCredentialsProvider);
             }
             return factory.create(settings.build());
         } catch (IOException e) {
@@ -303,8 +303,8 @@ final class GcpConnection implements ProviderConnection {
                 var channel = ManagedChannelBuilder.forAddress(endpoint.getHost(), endpoint.getPort()).usePlaintext().build();
                 settings.setTransportChannelProvider(FixedTransportChannelProvider.create(GrpcTransportChannel.create(channel)))
                         .setCredentialsProvider(NoCredentialsProvider.create());
-            } else if (config.credentials() instanceof Credentials.Anonymous) {
-                settings.setCredentialsProvider(NoCredentialsProvider.create());
+            } else {
+                credentialsProvider().ifPresent(settings::setCredentialsProvider);
             }
             return SecretManagerServiceClient.create(settings.build());
         } catch (IOException e) {
@@ -329,16 +329,25 @@ final class GcpConnection implements ProviderConnection {
             case SqlAuth.Password password -> JdbcDatabases.passwordSource(password);
             case SqlAuth.Iam i when instance.isPresent() -> {
                 // The connector fetches and sends the token; the driver only needs the user.
-                CloudSqlIamTokens tokens = CloudSqlIamTokens.applicationDefault(sql.engine(), i.username());
+                CloudSqlIamTokens tokens = new CloudSqlIamTokens(googleCredentials(), sql.engine(), i.username());
                 String user = tokens.username();
                 yield () -> SqlLogin.password(user, null);
             }
-            case SqlAuth.Iam i -> CloudSqlIamTokens.applicationDefault(sql.engine(), i.username());
+            case SqlAuth.Iam i -> new CloudSqlIamTokens(googleCredentials(), sql.engine(), i.username());
         };
         Map<String, String> defaults = instance
-                .map(i -> CloudSqlConnector.properties(sql.engine(), i, iam))
+                .map(i -> connectorProperties(sql.engine(), i, iam))
                 .orElseGet(() -> iam ? JdbcDatabases.requireTls(sql.engine()) : Map.of());
         return databases.create(sql, url, credentials, defaults);
+    }
+
+    /** The connector fetches its own certificates and tokens, so it is told which service account to impersonate. */
+    private Map<String, String> connectorProperties(SqlEngine engine, String instance, boolean iam) {
+        Map<String, String> properties = new LinkedHashMap<>(CloudSqlConnector.properties(engine, instance, iam));
+        if (config.credentials() instanceof Credentials.Impersonation impersonation) {
+            properties.put("cloudSqlTargetPrincipal", impersonation.target());
+        }
+        return properties;
     }
 
     @Override
@@ -355,11 +364,11 @@ final class GcpConnection implements ProviderConnection {
             case SqlAuth.Password password -> new SqlEndpoint(sql.engine(), host, sql.port(), sql.database(),
                     JdbcDatabases.passwordSource(password), false);
             case SqlAuth.Iam iam -> new SqlEndpoint(sql.engine(), host, sql.port(), sql.database(),
-                    CloudSqlIamTokens.applicationDefault(sql.engine(), iam.username()), true);
+                    new CloudSqlIamTokens(googleCredentials(), sql.engine(), iam.username()), true);
         };
     }
 
-    /** Cloud SQL IAM login needs PostgreSQL or MySQL, and Application Default Credentials. */
+    /** Cloud SQL IAM login needs PostgreSQL or MySQL, and a Google identity. */
     private void checkIam(SqlConfig sql) {
         if (!(sql.auth() instanceof SqlAuth.Iam)) {
             return;
@@ -368,9 +377,9 @@ final class GcpConnection implements ProviderConnection {
             throw new UnsupportedFeatureException("Cloud SQL IAM authentication supports PostgreSQL and MySQL, "
                     + "not SQL Server; use password auth", null, GcpProvider.ID, null);
         }
-        if (!(config.credentials() instanceof Credentials.DefaultChain)) {
-            throw new IllegalArgumentException("Cloud SQL IAM authentication uses Application Default Credentials; "
-                    + "configure the provider with Credentials.defaultChain()");
+        if (!GoogleIdentity.isIdentity(config.credentials())) {
+            throw new IllegalArgumentException("Cloud SQL IAM authentication needs a Google identity: configure the "
+                    + "provider with Credentials.defaultChain() or impersonation");
         }
     }
 
@@ -399,23 +408,43 @@ final class GcpConnection implements ProviderConnection {
         return streams;
     }
 
-    /** Google IAM tokens through Application Default Credentials. */
+    /** Google IAM tokens for the provider's identity. */
     private KafkaCredentialsSource managedKafkaCredentials(StreamConfig cluster) {
         return KafkaStreamClients.credentials(cluster.auth(), () -> {
-            if (!(config.credentials() instanceof Credentials.DefaultChain)) {
-                throw new IllegalArgumentException("Managed Kafka IAM login uses Application Default Credentials; "
-                        + "configure the provider with Credentials.defaultChain()");
+            if (!GoogleIdentity.isIdentity(config.credentials())) {
+                throw new IllegalArgumentException("Managed Kafka IAM login needs a Google identity: configure the "
+                        + "provider with Credentials.defaultChain() or impersonation");
             }
-            return ManagedKafkaTokens.applicationDefault(cluster.property(GcpProperties.KAFKA_PRINCIPAL));
+            return new ManagedKafkaTokens(googleCredentials(), cluster.property(GcpProperties.KAFKA_PRINCIPAL));
         });
     }
 
     private MemorystoreIamTokens iamTokens(CacheAuth.Iam iam) {
-        if (!(config.credentials() instanceof Credentials.DefaultChain)) {
-            throw new IllegalArgumentException("Memorystore IAM authentication uses Application Default Credentials; "
-                    + "configure the provider with Credentials.defaultChain()");
+        if (!GoogleIdentity.isIdentity(config.credentials())) {
+            throw new IllegalArgumentException("Memorystore IAM authentication needs a Google identity: configure the "
+                    + "provider with Credentials.defaultChain() or impersonation");
         }
-        return MemorystoreIamTokens.applicationDefault(iam.username());
+        return new MemorystoreIamTokens(googleCredentials(), iam.username());
+    }
+
+    /**
+     * The provider's Google credentials, made once and shared by every client and token source: Application
+     * Default Credentials, or a service account they impersonate.
+     */
+    private synchronized GoogleCredentials googleCredentials() {
+        if (googleCredentials == null) {
+            googleCredentials = GoogleIdentity.credentials(config.credentials());
+        }
+        return googleCredentials;
+    }
+
+    /** gRPC credentials when they differ from the client's own Application Default Credentials. */
+    private Optional<com.google.api.gax.core.CredentialsProvider> credentialsProvider() {
+        return switch (config.credentials()) {
+            case Credentials.Anonymous ignored -> Optional.of(NoCredentialsProvider.create());
+            case Credentials.DefaultChain ignored -> Optional.empty();
+            default -> Optional.of(FixedCredentialsProvider.create(googleCredentials())); // refuses other kinds
+        };
     }
 
     @Override

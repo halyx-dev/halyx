@@ -94,7 +94,7 @@ if (lock.isPresent()) {
 
 | `CacheAuth` | AWS | Azure | Google Cloud |
 |---|---|---|---|
-| `iam()` / `iam(user)` | ElastiCache IAM: a SigV4-signed token (15 minutes); the username is the ElastiCache user id; needs `aws.elasticache.cache-name` | an Entra ID token for `https://redis.azure.com/.default`; the username is the token's `oid` | Memorystore IAM: an OAuth access token from Application Default Credentials |
+| `iam()` / `iam(user)` | ElastiCache IAM: a SigV4-signed token (15 minutes); the username is the ElastiCache user id; needs `aws.elasticache.cache-name` | an Entra ID token for `https://redis.azure.com/.default`; the username is the token's `oid` | Memorystore IAM: an OAuth access token for the provider's identity (Application Default Credentials, or an impersonated service account) |
 | `password(...)` | AUTH token, or ACL user and password | access key | AUTH string |
 | `none()` | local or unsecured servers | | |
 

@@ -70,6 +70,19 @@
             <artifactId>halyx-kafka</artifactId>
         </dependency>
         <!-- Parameters and secrets -->
+        <!-- Credentials: assumed roles and web identity (EKS) need STS; SSO profiles need SSO and SSO OIDC -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>sts</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>sso</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>ssooidc</artifactId>
+        </dependency>
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>ssm</artifactId>
@@ -127,6 +140,11 @@
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>elasticache</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>iam</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>

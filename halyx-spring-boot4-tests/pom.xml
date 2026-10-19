@@ -155,6 +155,11 @@
             <artifactId>halyx-aws</artifactId>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>iam</artifactId>
+            <scope>test</scope>
+        </dependency>
         <!-- the real-cloud Spring stream test (RealSpringStreamIT) on Event Hubs and Managed Kafka -->
         <dependency>
             <groupId>dev.halyx</groupId>

@@ -45,6 +45,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
 import java.net.URI;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -157,23 +158,79 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
     }
 
     /**
-     * @param type   {@code default} (platform credential chain), {@code static} (id and secret, such as an
-     *               AWS access key or an Azure account name and key) or {@code anonymous}
+     * @param type          {@code default} (platform credential chain), {@code static} (id and secret, such as an
+     *                      AWS access key or an Azure account name and key), {@code impersonate} (an AWS IAM role
+     *                      or a Google service account), {@code service-principal} (a Microsoft Entra ID
+     *                      application) or {@code anonymous}
+     * @param id            static credentials: the id; impersonation: the access key ID to start from, instead of
+     *                      the default chain (AWS only)
+     * @param secret        static credentials: the secret; impersonation: the secret access key to start from;
+     *                      service principal: the client secret
+     * @param target        impersonation: the role ARN (AWS) or service account email (Google Cloud)
+     * @param sessionName   impersonation: the role session name (AWS only)
+     * @param externalId    impersonation: the external ID the role's trust policy requires (AWS only)
+     * @param lifetime      impersonation: how long each set of temporary credentials lasts
+     * @param tenantId      service principal: the Entra ID tenant
+     * @param clientId      service principal: the application (client) ID
+     * @param certificate   service principal: a PEM certificate with its private key, instead of a secret
+     * @param tokenFile     service principal: a federated token file, such as a Kubernetes service account
+     *                      token, instead of a secret
      */
-    public record CredentialsProperties(@DefaultValue("default") Type type, String id, String secret) {
+    public record CredentialsProperties(@DefaultValue("default") Type type, String id, String secret, String target,
+                                        String sessionName, String externalId, Duration lifetime, String tenantId,
+                                        String clientId, Path certificate, Path tokenFile) {
 
-        public enum Type { DEFAULT, STATIC, ANONYMOUS }
+        public enum Type { DEFAULT, STATIC, IMPERSONATE, SERVICE_PRINCIPAL, ANONYMOUS }
 
         Credentials toCredentials(String provider) {
+            String prefix = "halyx.providers." + provider + ".credentials";
             return switch (type) {
                 case DEFAULT -> Credentials.defaultChain();
                 case ANONYMOUS -> Credentials.anonymous();
                 case STATIC -> {
                     if (id == null || secret == null) {
-                        throw new IllegalStateException("halyx.providers." + provider
-                                + ".credentials: static credentials need both id and secret");
+                        throw new IllegalStateException(prefix + ": static credentials need both id and secret");
                     }
                     yield Credentials.of(id, secret);
+                }
+                case IMPERSONATE -> {
+                    if (target == null) {
+                        throw new IllegalStateException(prefix + ": impersonation needs the target, a role ARN or a "
+                                + "service account email");
+                    }
+                    if ((id == null) != (secret == null)) {
+                        throw new IllegalStateException(prefix + ": an access key to start from needs both id and secret");
+                    }
+                    var impersonation = Credentials.impersonate(target);
+                    if (id != null) {
+                        impersonation = impersonation.from(Credentials.of(id, secret));
+                    }
+                    if (sessionName != null) {
+                        impersonation = impersonation.sessionName(sessionName);
+                    }
+                    if (externalId != null) {
+                        impersonation = impersonation.externalId(externalId);
+                    }
+                    if (lifetime != null) {
+                        impersonation = impersonation.lifetime(lifetime);
+                    }
+                    yield impersonation;
+                }
+                case SERVICE_PRINCIPAL -> {
+                    if (tenantId == null || clientId == null) {
+                        throw new IllegalStateException(prefix + ": a service principal needs tenant-id and client-id");
+                    }
+                    int set = (secret != null ? 1 : 0) + (certificate != null ? 1 : 0) + (tokenFile != null ? 1 : 0);
+                    if (set != 1) {
+                        throw new IllegalStateException(prefix + ": a service principal needs exactly one of secret, "
+                                + "certificate and token-file");
+                    }
+                    if (secret != null) {
+                        yield Credentials.servicePrincipal(tenantId, clientId, secret);
+                    }
+                    yield certificate != null
+                            ? Credentials.servicePrincipalWithCertificate(tenantId, clientId, certificate)
+                            : Credentials.servicePrincipalWithFederatedToken(tenantId, clientId, tokenFile);
                 }
             };
         }

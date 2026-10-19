@@ -21,7 +21,7 @@ end.
 
 | Stage | Work |
 |---|---|
-| **In progress** | [Release 1.0.0](#release-100) on Maven Central |
+| **In progress** | [Release 1.0.0](#release-100) on Maven Central, and [cloud logins](#cloud-logins-assumed-roles-impersonation-and-service-principals): assumed roles, impersonation and service principals |
 | **Next** | [Portable Spring Boot microservices](#portable-spring-boot-microservices), then [microservices on Kubernetes](#microservices-on-kubernetes-eks-gke-and-aks) |
 | **Open items** | [Gaps in delivered milestones](#open-items), mostly real-cloud runs and platform limits |
 | **Delivered** | [14 milestones](#delivered): every service on AWS, Azure and Google Cloud, Spring Boot 3.5 and 4, reactive and asynchronous APIs |
@@ -42,6 +42,23 @@ The first release on Maven Central.
 | JPMS module descriptors | To do |
 | Continuous integration | To do |
 | API compatibility checks with japicmp | From the release after 1.0.0 |
+
+### Cloud logins: assumed roles, impersonation and service principals
+
+**Goal:** log in as the identity each deployment needs, not only through the default chain: an IAM role in another
+AWS account, a Google service account, or an Entra ID application for code running outside Azure. This is the
+groundwork for [cross-cloud services](#2-microservices-on-kubernetes-eks-gke-and-aks) that use federation rather
+than keys. See [Provider configuration](providers.md#assumed-roles-and-impersonated-service-accounts).
+
+| Deliverable | Status |
+|---|---|
+| `Credentials.impersonate(target)`: an AWS IAM role through STS, with an external ID, a session name and a lifetime, from the default chain or an access key | Done |
+| The same on Google Cloud: an impersonated service account for every client, for Cloud SQL, Memorystore and Managed Kafka logins, and for the Cloud SQL connector | Done |
+| `Credentials.servicePrincipal(...)`: an Entra ID application with a client secret, a certificate or a federated token file, for every Azure service, including database, cache and Event Hubs logins | Done |
+| STS, SSO and SSO OIDC in `halyx-aws`, so the default chain's web identity (EKS) and SSO logins work | Done |
+| Spring Boot: `credentials.type: impersonate` and `service-principal`, with startup checks | Done |
+| Tests: assumed roles on Floci, directly and through Spring Boot; credential mapping on Azure and Google Cloud | Done |
+| Real-cloud runs: an assumed role with an external ID on AWS, an impersonated service account on Google Cloud, and a service principal with a secret and with a federated token on Azure | To do, at the end of the phase |
 
 ## Next
 

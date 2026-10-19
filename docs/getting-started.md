@@ -89,8 +89,9 @@ try (Halyx halyx = Halyx.builder()
 ```
 
 Credentials come from each cloud's default chain unless you pass them: environment variables, workload
-identity (EKS, AKS, GKE), instance or managed identity, or your CLI login. See
-[Provider configuration](providers.md) for regions, endpoints and every setting.
+identity (EKS, AKS, GKE), instance or managed identity, or your CLI login. A provider can also assume an AWS
+IAM role, impersonate a Google service account, or log in to Azure as an Entra ID service principal. See
+[Provider configuration](providers.md#credentials) for credentials, regions, endpoints and every setting.
 
 ## Use several clouds at once
 

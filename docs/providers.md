@@ -36,12 +36,55 @@ In Spring Boot, the same settings live under `halyx.providers.<name>`; see
 | `Credentials` | AWS | Azure | Google Cloud | HashiCorp Vault |
 |---|---|---|---|---|
 | `defaultChain()` (default) | the AWS default chain: environment, profile, SSO, web identity (EKS), container and instance roles | `DefaultAzureCredential`: environment, workload identity (AKS), managed identity, Azure CLI | Application Default Credentials: `GOOGLE_APPLICATION_CREDENTIALS`, workload identity (GKE), metadata server, `gcloud` login | the `VAULT_TOKEN` environment variable |
+| `impersonate(target)` | assume the IAM role `target` (an ARN) through STS | not supported | impersonate the service account `target` (an email) | not supported |
+| `servicePrincipal(...)` | not supported | an Entra ID application: client secret, certificate or federated token | not supported | not supported |
 | `of(id, secret)` | access key ID and secret | storage account name and key (shared key, Blob Storage only) | not supported: use the default chain | `of("token", "<token>")` |
 | `anonymous()` | unsigned requests, for emulators | no credentials, for emulators | no credentials, for emulators | |
 
 Prefer the default chain. It covers workload identity on Kubernetes, managed identities and CLI logins,
-with no secrets in configuration. Passwordless database and cache logins
-([SQL](api/sql.md), [caches](api/caches.md)) need the default chain on Azure and Google Cloud.
+with no secrets in configuration. Passwordless database, cache and Kafka logins
+([SQL](api/sql.md), [caches](api/caches.md), [streams](api/streams.md)) need an identity: on Azure the default
+chain or a service principal, on Google Cloud the default chain or impersonation.
+
+### Assumed roles and impersonated service accounts
+
+`Credentials.impersonate(target)` acts as another identity, with temporary credentials that are refreshed
+before they expire. It starts from the default chain:
+
+```java
+// AWS: an IAM role in another account, through STS
+Credentials orders = Credentials.impersonate("arn:aws:iam::123456789012:role/orders")
+        .externalId("acme")                  // when the role's trust policy requires one
+        .sessionName("billing")              // shown in CloudTrail; "halyx" otherwise
+        .lifetime(Duration.ofMinutes(30));   // the role's default otherwise
+
+// Google Cloud: a service account, through the IAM Credentials API
+Credentials reports = Credentials.impersonate("reports@acme-prod.iam.gserviceaccount.com");
+```
+
+On AWS, `.from(Credentials.of(accessKeyId, secret))` starts from an access key instead. The identity the
+provider starts from needs permission to act as the target: `sts:AssumeRole` in the role's trust policy on AWS,
+or `roles/iam.serviceAccountTokenCreator` on the service account on Google Cloud. A session name and an
+external ID are AWS settings, and Google Cloud refuses them.
+
+Register one provider per account or role. Each gets its own credentials, so one application can use buckets in
+several AWS accounts, each through its own role.
+
+### Entra ID service principals
+
+Code running outside Azure, on AWS, on Google Cloud or on premises, has no managed identity, so it logs in to
+Azure as a Microsoft Entra ID application (a service principal):
+
+```java
+Credentials.servicePrincipal(tenantId, clientId, clientSecret);
+Credentials.servicePrincipalWithCertificate(tenantId, clientId, Path.of("/etc/halyx/app.pem"));   // certificate and private key
+Credentials.servicePrincipalWithFederatedToken(tenantId, clientId, Path.of("/var/run/secrets/azure/token"));
+```
+
+A federated token needs no stored secret. Entra ID trusts the token's issuer through a federated identity
+credential on the application, so a pod on EKS or GKE can log in to Azure with the Kubernetes service account
+token its cluster projects into it. Every Azure service uses the service principal, including Entra ID logins to
+databases, caches and Event Hubs.
 
 ## HTTP connections
 

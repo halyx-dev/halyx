@@ -26,11 +26,18 @@ import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.identity.spi.AwsSessionCredentialsIdentity;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.iam.IamClient;
 import software.amazon.awssdk.services.s3.S3Client;
+
+import java.net.URI;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** End to end: an application configured purely through properties, against S3 on Floci. */
+/** End to end: an application configured purely through properties, against S3 and STS on Floci. */
 @Testcontainers(disabledWithoutDocker = true)
 class HalyxFlociS3IT {
 
@@ -61,6 +68,42 @@ class HalyxFlociS3IT {
 
                     assertThat(invoices.provider()).isEqualTo("aws");
                     assertThat(invoices.getBytes(BlobKey.of("2026/42.pdf"))).asString().isEqualTo("%PDF");
+                });
+    }
+
+    @Test
+    void assumesAnIamRoleFromProperties() {
+        String endpoint = "http://" + FLOCI.getHost() + ":" + FLOCI.getMappedPort(4566);
+        try (IamClient iam = IamClient.builder().region(Region.AWS_GLOBAL).endpointOverride(URI.create(endpoint))
+                .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create("test", "test")))
+                .build()) {
+            iam.createRole(r -> r.roleName("spring-orders").assumeRolePolicyDocument("""
+                    {"Version":"2012-10-17","Statement":[{"Effect":"Allow",
+                     "Principal":{"AWS":"arn:aws:iam::000000000000:root"},"Action":"sts:AssumeRole"}]}"""));
+        }
+        new ApplicationContextRunner()
+                .withConfiguration(AutoConfigurations.of(HalyxAutoConfiguration.class))
+                .withPropertyValues(
+                        "halyx.providers.aws.type=aws",
+                        "halyx.providers.aws.region=us-east-1",
+                        "halyx.providers.aws.endpoint=" + endpoint,
+                        "halyx.providers.aws.credentials.type=impersonate",
+                        "halyx.providers.aws.credentials.target=arn:aws:iam::000000000000:role/spring-orders",
+                        "halyx.providers.aws.credentials.id=test",
+                        "halyx.providers.aws.credentials.secret=test",
+                        "halyx.providers.aws.credentials.session-name=spring",
+                        "halyx.providers.aws.properties.aws.s3.path-style=true",
+                        "halyx.blob-stores.orders.bucket=spring-orders")
+                .run(context -> {
+                    BlobStore orders = context.getBean("orders", BlobStore.class);
+                    S3Client s3 = orders.unwrap(S3Client.class);
+
+                    s3.createBucket(b -> b.bucket("spring-orders"));
+                    orders.put(BlobKey.of("1.json"), BlobContent.ofString("{}"));
+
+                    assertThat(orders.getBytes(BlobKey.of("1.json"))).asString().isEqualTo("{}");
+                    assertThat(s3.serviceClientConfiguration().credentialsProvider().resolveIdentity().join())
+                            .isInstanceOf(AwsSessionCredentialsIdentity.class);
                 });
     }
 }

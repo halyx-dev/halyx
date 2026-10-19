@@ -86,9 +86,32 @@ halyx:
       type: aws                    # aws | azure | gcp | vault | memory
       region: eu-west-2
       # endpoint: http://localhost:4566
-      # credentials: { type: static, id: ..., secret: ... }   # default | static | anonymous
+      # credentials: { type: static, id: ..., secret: ... }   # default | static | impersonate | service-principal | anonymous
       properties:                  # provider settings: see Provider configuration
         http.max-connections: 256
+```
+
+Assumed roles, impersonated service accounts and Entra ID service principals are set under `credentials`:
+
+```yaml
+halyx:
+  providers:
+    partner-account:
+      type: aws
+      credentials:
+        type: impersonate
+        target: arn:aws:iam::123456789012:role/orders     # a service account email on gcp
+        external-id: acme                                 # optional, AWS only
+        session-name: billing                             # optional, AWS only
+        lifetime: 30m                                     # optional
+        # id: ... and secret: ...                         # an access key to start from, instead of the default chain (AWS)
+    azure-from-eks:
+      type: azure
+      credentials:
+        type: service-principal
+        tenant-id: 00000000-0000-0000-0000-000000000000
+        client-id: 11111111-1111-1111-1111-111111111111
+        token-file: /var/run/secrets/eks.amazonaws.com/serviceaccount/token   # or secret: ..., or certificate: app.pem
 ```
 
 Each entry is a named provider, like `Halyx.builder().register(name, config)`. When only one provider is
@@ -523,7 +546,8 @@ halyx:
 Startup fails with a message naming the property for:
 - an unknown provider type, with the module to add
 - an unknown or ambiguous `provider` reference
-- incomplete static credentials, or a password login without its password
+- incomplete static credentials, impersonation without a target, a service principal without exactly one of
+  `secret`, `certificate` and `token-file`, or a password login without its password
 - a `json` cache without `trusted-packages`
 - `halyx.r2dbc-databases` without `halyx-r2dbc`, or `halyx.spring-kafka.cluster` without Spring for Apache Kafka
 - a `@HalyxListener` naming no subscription or stream consumer, a second listener on one stream consumer, or

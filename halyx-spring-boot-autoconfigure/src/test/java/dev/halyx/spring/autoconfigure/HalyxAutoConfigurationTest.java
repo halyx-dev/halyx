@@ -27,6 +27,7 @@ import dev.halyx.config.ProviderConfig;
 import dev.halyx.error.ThrottledException;
 import dev.halyx.interceptor.Interceptor;
 import dev.halyx.interceptor.Invocation;
+import dev.halyx.config.Credentials;
 import dev.halyx.interceptor.OperationContext;
 import dev.halyx.micrometer.ObservationInterceptor;
 import dev.halyx.spring.autoconfigure.observation.HalyxObservationAutoConfiguration;
@@ -43,6 +44,8 @@ import org.springframework.core.annotation.Order;
 
 import java.io.Serializable;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -210,6 +213,66 @@ class HalyxAutoConfigurationTest {
         runner.withPropertyValues("halyx.providers.x.type=memory", "halyx.providers.x.credentials.type=static")
                 .run(context -> assertThat(context).hasFailed().getFailure()
                         .hasMessageContaining("need both id and secret"));
+    }
+
+    @Test
+    void impersonationIsBoundFromProperties() {
+        runner.withPropertyValues(
+                "halyx.providers.x.type=memory",
+                "halyx.providers.x.credentials.type=impersonate",
+                "halyx.providers.x.credentials.target=arn:aws:iam::123456789012:role/orders",
+                "halyx.providers.x.credentials.id=AKIA",
+                "halyx.providers.x.credentials.secret=s3cr3t-value",
+                "halyx.providers.x.credentials.session-name=billing",
+                "halyx.providers.x.credentials.external-id=acme",
+                "halyx.providers.x.credentials.lifetime=15m").run(context -> {
+            Credentials credentials = context.getBean(Halyx.class).provider("x").config().credentials();
+            assertThat(credentials).isEqualTo(Credentials.impersonate("arn:aws:iam::123456789012:role/orders")
+                    .from(Credentials.of("AKIA", "s3cr3t-value")).sessionName("billing").externalId("acme")
+                    .lifetime(Duration.ofMinutes(15)));
+            assertThat(credentials.toString()).doesNotContain("s3cr3t-value");
+        });
+    }
+
+    @Test
+    void impersonationWithoutATargetFailsAtStartup() {
+        runner.withPropertyValues("halyx.providers.x.type=memory", "halyx.providers.x.credentials.type=impersonate")
+                .run(context -> assertThat(context).hasFailed().getFailure()
+                        .hasMessageContaining("halyx.providers.x.credentials").hasMessageContaining("needs the target"));
+    }
+
+    @Test
+    void servicePrincipalsAreBoundFromProperties() {
+        runner.withPropertyValues(
+                "halyx.providers.secret.type=memory",
+                "halyx.providers.secret.credentials.type=service-principal",
+                "halyx.providers.secret.credentials.tenant-id=tenant",
+                "halyx.providers.secret.credentials.client-id=client",
+                "halyx.providers.secret.credentials.secret=s3cr3t-value",
+                "halyx.providers.federated.type=memory",
+                "halyx.providers.federated.credentials.type=service-principal",
+                "halyx.providers.federated.credentials.tenant-id=tenant",
+                "halyx.providers.federated.credentials.client-id=client",
+                "halyx.providers.federated.credentials.token-file=/var/run/secrets/azure/token").run(context -> {
+            Halyx halyx = context.getBean(Halyx.class);
+            assertThat(halyx.provider("secret").config().credentials())
+                    .isEqualTo(Credentials.servicePrincipal("tenant", "client", "s3cr3t-value"));
+            assertThat(halyx.provider("federated").config().credentials()).isEqualTo(
+                    Credentials.servicePrincipalWithFederatedToken("tenant", "client", Path.of("/var/run/secrets/azure/token")));
+        });
+    }
+
+    @Test
+    void aServicePrincipalWithTwoWaysToLogInFailsAtStartup() {
+        runner.withPropertyValues(
+                        "halyx.providers.x.type=memory",
+                        "halyx.providers.x.credentials.type=service-principal",
+                        "halyx.providers.x.credentials.tenant-id=tenant",
+                        "halyx.providers.x.credentials.client-id=client",
+                        "halyx.providers.x.credentials.secret=s3cr3t-value",
+                        "halyx.providers.x.credentials.certificate=app.pem")
+                .run(context -> assertThat(context).hasFailed().getFailure()
+                        .hasMessageContaining("exactly one of secret, certificate and token-file"));
     }
 
     @Test

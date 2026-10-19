@@ -160,12 +160,12 @@ class AzureCacheConformanceIT {
     }
 
     @Test
-    void entraIdNeedsTheDefaultCredentialChain() {
+    void entraIdNeedsAnIdentity() {
         Halyx keyed = Halyx.builder().register("azure", ProviderConfig.of("azure")
                 .credentials(dev.halyx.config.Credentials.of("account", "key"))).build();
         try (keyed) {
             var entra = CacheConfig.builder(cacheEndpoint).auth(CacheAuth.iam()).build();
-            assertThatThrownBy(() -> keyed.provider("azure").cache(entra)).hasMessageContaining("default Azure credential chain");
+            assertThatThrownBy(() -> keyed.provider("azure").cache(entra)).hasMessageContaining("needs an identity");
         }
     }
 }
