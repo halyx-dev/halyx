@@ -52,7 +52,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /**
  * SQL databases against real Azure (tier 2): Microsoft Entra ID login to Azure Database for PostgreSQL
  * (flexible server) and Azure SQL Database, both with the test service principal as Entra admin. Runs only
- * with {@code -Dhalyx.real.azure.sql=true}, normally through {@code TIER=2 scripts/azure-real-cloud.sh}.
+ * with {@code -Dhalyx.real.azure.sql=true}, normally through {@code TIER=2 cloud-testing/scripts/azure-real-cloud.sh}.
  * Credentials are {@code DefaultAzureCredential} (the principal from the environment); the PostgreSQL admin
  * password comes from the environment, never from a system property.
  */

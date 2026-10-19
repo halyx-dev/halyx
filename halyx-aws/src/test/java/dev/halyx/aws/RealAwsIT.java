@@ -53,7 +53,7 @@ import dev.halyx.tck.EventBusConformanceTest;
 
 /**
  * The conformance kits against real AWS (tier 1: S3, DynamoDB, SNS, SQS, SSM, Secrets Manager). Runs only with
- * {@code -Dhalyx.real.aws=true}, normally through scripts/aws-real-cloud.sh, which creates the bucket and
+ * {@code -Dhalyx.real.aws=true}, normally through cloud-testing/scripts/aws-real-cloud.sh, which creates the bucket and
  * tables with Terraform and passes their names in. Credentials and region come from the default AWS chain
  * (AWS_PROFILE, AWS_REGION). Topics and queues are created here, named after the run, and deleted at the end.
  */

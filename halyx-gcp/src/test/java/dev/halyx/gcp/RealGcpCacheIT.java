@@ -37,7 +37,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /**
  * The cache kit against real Memorystore for Valkey (tier 3): IAM authentication with the identity's access
  * token, over TLS checked against the instance's private CA. Runs only with {@code -Dhalyx.real.gcp.cache=true},
- * normally through {@code TIER=3 scripts/gcp-real-cloud.sh}. Memorystore has no public endpoints, so the
+ * normally through {@code TIER=3 cloud-testing/scripts/gcp-real-cloud.sh}. Memorystore has no public endpoints, so the
  * script forwards a local port through a bastion. The certificate names the instance's private endpoint, not
  * the tunnel's 127.0.0.1, so these caches check the chain only ({@code redis.verify-peer=ca}).
  */

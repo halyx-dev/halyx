@@ -17,11 +17,11 @@
 
 # Runs the real-Azure tests, then deletes everything the run created.
 #
-#   scripts/azure-real-cloud.sh
-#   AZURE_LOCATION=australiaeast IT_TEST='RealAzureIT$Cosmos' scripts/azure-real-cloud.sh   # one suite only
-#   TIER=2 scripts/azure-real-cloud.sh     # Azure Database for PostgreSQL and Azure SQL with Entra ID login
-#   TIER=3 scripts/azure-real-cloud.sh     # Azure Managed Redis with Entra ID
-#   TIER=4 scripts/azure-real-cloud.sh     # Event Hubs (Kafka endpoint) with Entra ID, plus Spring Boot 3 and 4
+#   cloud-testing/scripts/azure-real-cloud.sh
+#   AZURE_LOCATION=australiaeast IT_TEST='RealAzureIT$Cosmos' cloud-testing/scripts/azure-real-cloud.sh   # one suite only
+#   TIER=2 cloud-testing/scripts/azure-real-cloud.sh     # Azure Database for PostgreSQL and Azure SQL with Entra ID login
+#   TIER=3 cloud-testing/scripts/azure-real-cloud.sh     # Azure Managed Redis with Entra ID
+#   TIER=4 cloud-testing/scripts/azure-real-cloud.sh     # Event Hubs (Kafka endpoint) with Entra ID, plus Spring Boot 3 and 4
 #
 # Terraform and the tests act as the test service principal, whose credentials are read from
 # AZURE_CREDENTIALS_FILE (default ~/.azure/halyx-test.env, outside the repository):
@@ -58,9 +58,9 @@ export ARM_CLIENT_ID="$AZURE_CLIENT_ID" ARM_CLIENT_SECRET="$AZURE_CLIENT_SECRET"
        ARM_TENANT_ID="$AZURE_TENANT_ID" ARM_SUBSCRIPTION_ID="$AZURE_SUBSCRIPTION_ID"
 
 LOCATION="${AZURE_LOCATION:-australiaeast}"
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 TIER="${TIER:-1}"
-TF_DIR="$ROOT/infra/azure/tier$TIER"
+TF_DIR="$ROOT/cloud-testing/infra/azure/tier$TIER"
 RUN="r$(date +%y%m%d%H%M)$(openssl rand -hex 2)"
 TF_VARS=(-var "location=$LOCATION" -var "run_id=$RUN")
 # az takes --subscription after the command, not before it.

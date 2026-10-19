@@ -28,8 +28,8 @@ the `halyx-test` service account, impersonated through Application Default Crede
 ## Tier 1: latest result
 
 ```bash
-GCP_PROJECT=<project> GCP_REGION=australia-southeast1 scripts/gcp-real-cloud.sh
-IT_TEST='RealGcpIT$Firestore' scripts/gcp-real-cloud.sh     # one suite only
+GCP_PROJECT=<project> GCP_REGION=australia-southeast1 cloud-testing/scripts/gcp-real-cloud.sh
+IT_TEST='RealGcpIT$Firestore' cloud-testing/scripts/gcp-real-cloud.sh     # one suite only
 ```
 
 **Identity.** Terraform and the tests act as a dedicated `halyx-test` service account, through
@@ -39,7 +39,7 @@ Application Default Credentials that impersonate it:
 gcloud auth application-default login --impersonate-service-account=halyx-test@<project>.iam.gserviceaccount.com
 ```
 
-**Provision.** Terraform (`infra/gcp/tier1`) creates the following, labelled `halyx-test=<run id>`:
+**Provision.** Terraform (`cloud-testing/infra/gcp/tier1`) creates the following, labelled `halyx-test=<run id>`:
 - a Cloud Storage bucket, which also holds the messaging kit's claim-check payloads
 - a Firestore database of the run's own, so the project's `(default)` database is never touched
 - the composite indexes the document store's index queries need: `status` with `placedAt` ascending and
@@ -377,10 +377,10 @@ collections and their `status`/`placedAt` composite indexes, through `halyx-spri
 ## Tier 2: latest result
 
 ```bash
-TIER=2 GCP_PROJECT=<project> GCP_REGION=australia-southeast1 scripts/gcp-real-cloud.sh
+TIER=2 GCP_PROJECT=<project> GCP_REGION=australia-southeast1 cloud-testing/scripts/gcp-real-cloud.sh
 ```
 
-Terraform (`infra/gcp/tier2`) creates Cloud SQL for PostgreSQL 17 and for MySQL 8.4:
+Terraform (`cloud-testing/infra/gcp/tier2`) creates Cloud SQL for PostgreSQL 17 and for MySQL 8.4:
 - shared-core `db-f1-micro` on the `ENTERPRISE` edition (newer versions default to Enterprise Plus, which
   has no shared-core tiers)
 - IAM authentication on, encrypted connections only, no backups, no deletion protection
@@ -441,10 +441,10 @@ Times per new connection, in the order they ran, on newly created instances:
 ## Tier 3: latest result
 
 ```bash
-TIER=3 GCP_PROJECT=<project> GCP_REGION=australia-southeast1 scripts/gcp-real-cloud.sh
+TIER=3 GCP_PROJECT=<project> GCP_REGION=australia-southeast1 cloud-testing/scripts/gcp-real-cloud.sh
 ```
 
-Terraform (`infra/gcp/tier3`) creates the following, in a VPC and subnet of the run's own:
+Terraform (`cloud-testing/infra/gcp/tier3`) creates the following, in a VPC and subnet of the run's own:
 - **Cache:** a Memorystore for Valkey 8.0 instance: cluster mode disabled, `SHARED_CORE_NANO`, IAM
   authorization, and TLS (`SERVER_AUTHENTICATION`) with a server certificate from Memorystore's private CA.
   Cluster mode is off so the client gets one endpoint and no redirects to node IPs a tunnel can't reach.
@@ -545,10 +545,10 @@ mix up. So there is no "denied user" test. The rejection tests cover a missing a
 ## Tier 4: latest result
 
 ```bash
-TIER=4 GCP_PROJECT=<project> GCP_REGION=australia-southeast1 scripts/gcp-real-cloud.sh
+TIER=4 GCP_PROJECT=<project> GCP_REGION=australia-southeast1 cloud-testing/scripts/gcp-real-cloud.sh
 ```
 
-Terraform (`infra/gcp/tier4`) creates the following, in a VPC and subnet of the run's own:
+Terraform (`cloud-testing/infra/gcp/tier4`) creates the following, in a VPC and subnet of the run's own:
 - **Cluster:** a Managed Service for Apache Kafka cluster with the smallest capacity, 3 vCPUs and 3 GiB.
   Its brokers get Private Service Connect addresses in the subnet, and the service adds their DNS names to
   the VPC. There is no public endpoint.
@@ -559,7 +559,7 @@ Terraform (`infra/gcp/tier4`) creates the following, in a VPC and subnet of the 
 
 Kafka clients connect to the bootstrap address, then to each broker by the name the cluster advertises, so
 an SSH tunnel to one address, as in tier 3, can't work. The tests run on the runner instead. The script
-builds them on the test machine, copies them with their classpath (`scripts/in-vpc-runner.sh`, 172 jars,
+builds them on the test machine, copies them with their classpath (`cloud-testing/scripts/in-vpc-runner.sh`, 172 jars,
 141 MB), and runs `RealGcpStreamIT` there with the JUnit console launcher. The reports come back into
 `halyx-gcp/target/failsafe-reports`. No credentials leave the test machine: the runner gets tokens from
 its metadata server, as an application on Compute Engine would.

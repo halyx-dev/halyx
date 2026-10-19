@@ -52,7 +52,7 @@ import java.util.concurrent.ExecutionException;
 /**
  * The stream kit against real Event Hubs namespaces' Kafka endpoints (tier 4), with Microsoft Entra ID login only
  * (shared access keys are off). Runs only with {@code -Dhalyx.real.azure.streams=true}, normally through
- * {@code TIER=4 scripts/azure-real-cloud.sh}.
+ * {@code TIER=4 cloud-testing/scripts/azure-real-cloud.sh}.
  *
  * <p>Each test creates its topics (event hubs) through Kafka's admin API, logged in the same way, and older ones
  * are deleted as it goes. A Standard namespace stopped accepting new event hubs after about twenty had been

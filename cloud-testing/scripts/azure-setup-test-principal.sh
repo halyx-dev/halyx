@@ -15,9 +15,9 @@
 # limitations under the License.
 #
 
-# One-time setup for scripts/azure-real-cloud.sh, run by a subscription Owner with the az CLI signed in:
+# One-time setup for cloud-testing/scripts/azure-real-cloud.sh, run by a subscription Owner with the az CLI signed in:
 #
-#   scripts/azure-setup-test-principal.sh [subscription-id]
+#   cloud-testing/scripts/azure-setup-test-principal.sh [subscription-id]
 #
 # 1. Registers the resource providers tier 1 uses.
 # 2. Creates the service principal halyx-test with Contributor on the subscription (to create and delete each

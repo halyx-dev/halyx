@@ -47,7 +47,7 @@ import java.util.concurrent.ExecutionException;
 /**
  * The stream kit against a real Google Cloud Managed Service for Apache Kafka cluster (tier 4), with Google IAM
  * login. Runs only with {@code -Dhalyx.real.gcp.streams=true}, normally through
- * {@code TIER=4 scripts/gcp-real-cloud.sh}, which runs it on a VM inside the cluster's VPC: the cluster has no
+ * {@code TIER=4 cloud-testing/scripts/gcp-real-cloud.sh}, which runs it on a VM inside the cluster's VPC: the cluster has no
  * public endpoint. Credentials are Application Default Credentials: on the runner, the VM's service account.
  *
  * <p>Each test creates its topics through Kafka's admin API, logged in with the same IAM tokens, and older ones

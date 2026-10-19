@@ -53,7 +53,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /**
  * SQL databases against real Cloud SQL (tier 2): IAM database authentication and password login for
  * PostgreSQL and MySQL, both directly over TLS to the public IP and through the Cloud SQL Java connector.
- * Runs only with {@code -Dhalyx.real.gcp.sql=true}, normally through {@code TIER=2 scripts/gcp-real-cloud.sh}.
+ * Runs only with {@code -Dhalyx.real.gcp.sql=true}, normally through {@code TIER=2 cloud-testing/scripts/gcp-real-cloud.sh}.
  * The tests run as the service account Application Default Credentials impersonate, which is also the IAM
  * database user. Passwords come from the environment, never from system properties.
  */

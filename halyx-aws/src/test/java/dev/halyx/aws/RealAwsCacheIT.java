@@ -37,7 +37,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /**
  * The cache kit against real ElastiCache for Valkey (tier 3): TLS with full certificate and hostname checks,
  * and IAM user authentication. Runs only with {@code -Dhalyx.real.aws.cache=true}, normally through
- * {@code TIER=3 scripts/aws-real-cloud.sh}. ElastiCache has no public endpoints, so the script tunnels a
+ * {@code TIER=3 cloud-testing/scripts/aws-real-cloud.sh}. ElastiCache has no public endpoints, so the script tunnels a
  * local port through a bastion and points the cache's real hostname at 127.0.0.1 with a JVM hosts file:
  * the client connects to the real name and verifies the real certificate. Lettuce's own DNS client ignores
  * JVM hosts files, so these caches resolve through the JVM ({@code redis.dns-resolver=jdk}).

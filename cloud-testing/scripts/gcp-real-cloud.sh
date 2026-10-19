@@ -17,12 +17,12 @@
 
 # Runs the real-GCP tests, then deletes everything the run created.
 #
-#   scripts/gcp-real-cloud.sh                                   # project from gcloud config
-#   GCP_PROJECT=my-project GCP_REGION=australia-southeast1 scripts/gcp-real-cloud.sh
-#   IT_TEST='RealGcpIT$Firestore' scripts/gcp-real-cloud.sh     # one suite only
-#   TIER=2 scripts/gcp-real-cloud.sh                            # Cloud SQL PostgreSQL and MySQL with IAM auth
-#   TIER=3 scripts/gcp-real-cloud.sh                            # Memorystore for Valkey with IAM auth
-#   TIER=4 scripts/gcp-real-cloud.sh                            # streams on Managed Kafka with IAM, plus Spring Boot
+#   cloud-testing/scripts/gcp-real-cloud.sh                                   # project from gcloud config
+#   GCP_PROJECT=my-project GCP_REGION=australia-southeast1 cloud-testing/scripts/gcp-real-cloud.sh
+#   IT_TEST='RealGcpIT$Firestore' cloud-testing/scripts/gcp-real-cloud.sh     # one suite only
+#   TIER=2 cloud-testing/scripts/gcp-real-cloud.sh                            # Cloud SQL PostgreSQL and MySQL with IAM auth
+#   TIER=3 cloud-testing/scripts/gcp-real-cloud.sh                            # Memorystore for Valkey with IAM auth
+#   TIER=4 cloud-testing/scripts/gcp-real-cloud.sh                            # streams on Managed Kafka with IAM, plus Spring Boot
 #
 # The tests and Terraform act as the test service account (GCP_IMPERSONATE, default halyx-test@<project>),
 # through Application Default Credentials that impersonate it:
@@ -62,9 +62,9 @@ export GOOGLE_CLOUD_PROJECT="$PROJECT"
 gcloud auth application-default print-access-token >/dev/null 2>&1 || {
   echo "Application Default Credentials can't get a token; run:"
   echo "  gcloud auth application-default login --impersonate-service-account=$IMPERSONATE"; exit 1; }
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 TIER="${TIER:-1}"
-TF_DIR="$ROOT/infra/gcp/tier$TIER"
+TF_DIR="$ROOT/cloud-testing/infra/gcp/tier$TIER"
 RUN="r$(date +%y%m%d%H%M)$(openssl rand -hex 2)"
 START="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 TF_VARS=(-var "project=$PROJECT" -var "region=$REGION" -var "run_id=$RUN")
@@ -94,7 +94,7 @@ fi
 
 log() { printf '\n== %s\n' "$*"; }
 # shellcheck source=in-vpc-runner.sh
-source "$ROOT/scripts/in-vpc-runner.sh"
+source "$ROOT/cloud-testing/scripts/in-vpc-runner.sh"
 
 # Parameter Manager serves regional locations from regional endpoints; gcloud sends them to the global one
 # (and gets a misleading PERMISSION_DENIED) unless told otherwise.

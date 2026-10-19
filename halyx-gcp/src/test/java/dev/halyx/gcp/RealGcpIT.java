@@ -53,7 +53,7 @@ import dev.halyx.tck.DocumentRepositoryConformanceTest;
 /**
  * The conformance kits against real GCP (tier 1: Cloud Storage, Firestore, Pub/Sub, Secret Manager,
  * Parameter Manager). Runs only with {@code -Dhalyx.real.gcp=true}, normally through
- * {@code scripts/gcp-real-cloud.sh}, which creates the bucket and a Firestore database of the run's own with
+ * {@code cloud-testing/scripts/gcp-real-cloud.sh}, which creates the bucket and a Firestore database of the run's own with
  * Terraform and passes their names in. Credentials are Application Default Credentials (normally
  * impersonating the test service account). Topics and subscriptions are created here, named and labelled
  * after the run, and deleted at the end; secrets and parameters use the kit's random tck- names.

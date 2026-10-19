@@ -31,7 +31,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Kubernetes login against Vault running in a real cluster: Vault validates the service account token
- * with the Kubernetes TokenReview API. Run with {@code scripts/vault-kubernetes-it.sh}, which sets up
+ * with the Kubernetes TokenReview API. Run with {@code cloud-testing/scripts/vault-kubernetes-it.sh}, which sets up
  * minikube and the variables below.
  */
 @EnabledIfEnvironmentVariable(named = "HALYX_VAULT_K8S_ADDR", matches = ".+")

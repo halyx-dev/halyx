@@ -20,7 +20,7 @@
 #   2. deploys Vault in dev mode with permission to review service account tokens
 #   3. enables Kubernetes auth with a role bound to the "halyx-app" service account
 #   4. port-forwards Vault, issues a real service account token, and runs the test
-# Usage: scripts/vault-kubernetes-it.sh [--delete]   (--delete removes the profile afterwards)
+# Usage: cloud-testing/scripts/vault-kubernetes-it.sh [--delete]   (--delete removes the profile afterwards)
 set -euo pipefail
 
 PROFILE=halyx
@@ -92,7 +92,7 @@ for _ in $(seq 1 30); do curl -sf "http://127.0.0.1:$LOCAL_PORT/v1/sys/health" >
 # A real, short-lived service account token, exactly what a pod gets projected.
 kubectl "${CTX[@]}" -n "$NS" create token halyx-app --duration=10m > "$WORK/token"
 
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 HALYX_VAULT_K8S_ADDR="http://127.0.0.1:$LOCAL_PORT" \
 HALYX_VAULT_K8S_ROLE=halyx-app \
 HALYX_VAULT_K8S_JWT="$WORK/token" \

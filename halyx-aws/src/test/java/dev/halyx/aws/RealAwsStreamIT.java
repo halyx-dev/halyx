@@ -47,7 +47,7 @@ import java.util.concurrent.ExecutionException;
 
 /**
  * The stream kit against a real MSK Serverless cluster (tier 4), with IAM access control. Runs only with
- * {@code -Dhalyx.real.aws.streams=true}, normally through {@code TIER=4 scripts/aws-real-cloud.sh}, which runs
+ * {@code -Dhalyx.real.aws.streams=true}, normally through {@code TIER=4 cloud-testing/scripts/aws-real-cloud.sh}, which runs
  * it on a VM inside the cluster's VPC: MSK Serverless has no public endpoint. Credentials and region come from the
  * default AWS chain.
  *

@@ -28,12 +28,12 @@ the `halyx_test` IAM user. Every run creates its own throwaway resources and del
 ## How a tier 1 run works
 
 ```bash
-AWS_PROFILE=default AWS_REGION=ap-southeast-2 scripts/aws-real-cloud.sh
+AWS_PROFILE=default AWS_REGION=ap-southeast-2 cloud-testing/scripts/aws-real-cloud.sh
 # a single suite:
-IT_TEST='RealAwsIT$SecretsManager' AWS_PROFILE=default AWS_REGION=ap-southeast-2 scripts/aws-real-cloud.sh
+IT_TEST='RealAwsIT$SecretsManager' AWS_PROFILE=default AWS_REGION=ap-southeast-2 cloud-testing/scripts/aws-real-cloud.sh
 ```
 
-1. **Provision.** Terraform (`infra/aws/tier1`) creates one S3 bucket, two DynamoDB tables, and an EventBridge
+1. **Provision.** Terraform (`cloud-testing/infra/aws/tier1`) creates one S3 bucket, two DynamoDB tables, and an EventBridge
    event bus with a rule that delivers the kit's events to an SQS inbox queue. Their names
    include a fresh run id (`r<yyMMddHHmm><hex>`), and everything is tagged `halyx-test=<run id>`.
 2. **Test.** `RealAwsIT` runs the conformance kits, and is enabled only by `-Dhalyx.real.aws=true`.
@@ -368,10 +368,10 @@ The repository kit and the Spring Boot repository test run on the tier's two Dyn
 ## Tier 2: latest result
 
 ```bash
-TIER=2 AWS_PROFILE=default AWS_REGION=ap-southeast-2 scripts/aws-real-cloud.sh
+TIER=2 AWS_PROFILE=default AWS_REGION=ap-southeast-2 cloud-testing/scripts/aws-real-cloud.sh
 ```
 
-Terraform (`infra/aws/tier2`) creates RDS for PostgreSQL 17 and RDS for MySQL 8.4 instances in the default VPC:
+Terraform (`cloud-testing/infra/aws/tier2`) creates RDS for PostgreSQL 17 and RDS for MySQL 8.4 instances in the default VPC:
 - `db.t4g.micro`, IAM database authentication on, no backups, no final snapshot
 - reachable only from the test machine's public IPv4 address (a `/32` security group rule)
 - a master password generated for the run and passed through the environment only. Terraform's state
@@ -435,10 +435,10 @@ instance. `replacedConnectionsLogInAgainWithTokens` took about 9s because it ope
 ## Tier 3: latest result
 
 ```bash
-TIER=3 AWS_PROFILE=default AWS_REGION=ap-southeast-2 scripts/aws-real-cloud.sh
+TIER=3 AWS_PROFILE=default AWS_REGION=ap-southeast-2 cloud-testing/scripts/aws-real-cloud.sh
 ```
 
-Terraform (`infra/aws/tier3`) creates the following in the default VPC:
+Terraform (`cloud-testing/infra/aws/tier3`) creates the following in the default VPC:
 - **Cache:** an ElastiCache for Valkey 8.0 replication group, one `cache.t4g.micro` node, with TLS in
   transit and encryption at rest.
 - **Users:** a user group with the required `default` user, switched off. Valkey users can't be
@@ -542,19 +542,19 @@ catch.
 ## Tier 4: not run
 
 ```bash
-TIER=4 scripts/aws-real-cloud.sh
+TIER=4 cloud-testing/scripts/aws-real-cloud.sh
 ```
 
 Tier 4 is ready but hasn't run. The test account is on the AWS Free plan, and the plan's service control
 policy denies every `kafka:*` action (`explicit deny in a service control policy`). Only moving the account
 to the paid plan lifts it; an IAM policy on the test user can't.
 
-What a run does: Terraform (`infra/aws/tier4`) creates an **MSK Serverless** cluster with IAM access control,
+What a run does: Terraform (`cloud-testing/infra/aws/tier4`) creates an **MSK Serverless** cluster with IAM access control,
 a bucket for claim checks, and a `t4g.small` runner VM in the same VPC that accepts SSH only from the test
 machine, with a key pair generated for the run. MSK Serverless has no public endpoint, and Kafka clients
 connect to each broker by the name the cluster advertises, so the SSH tunnel used for ElastiCache can't
 work. Instead the script builds the tests on the test machine, copies them to the runner with their
-classpath (`scripts/in-vpc-runner.sh`), and runs `RealAwsStreamIT` there with the JUnit console launcher.
+classpath (`cloud-testing/scripts/in-vpc-runner.sh`), and runs `RealAwsStreamIT` there with the JUnit console launcher.
 The runner has no instance profile: it gets two-hour session credentials of the test user
 (`sts get-session-token`), sent over SSH and never written to its disk. Then `RealSpringStreamIT` runs there
 on Spring Boot 3 and 4, as on [Azure](azure.md#tier-4-latest-result) and [Google Cloud](gcp.md#tier-4-latest-result).

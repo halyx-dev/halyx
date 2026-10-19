@@ -56,7 +56,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /**
  * SQL databases against real RDS (tier 2): RDS IAM token login and password login, both over TLS, for
  * PostgreSQL and MySQL. Runs only with {@code -Dhalyx.real.aws.sql=true}, normally through
- * {@code TIER=2 scripts/aws-real-cloud.sh}, which creates the instances with Terraform. The master password
+ * {@code TIER=2 cloud-testing/scripts/aws-real-cloud.sh}, which creates the instances with Terraform. The master password
  * comes from the environment (HALYX_RDS_MASTER_PASSWORD), never from a system property.
  */
 @EnabledIfSystemProperty(named = "halyx.real.aws.sql", matches = "true")

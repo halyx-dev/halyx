@@ -28,9 +28,9 @@ the `halyx-test` service principal. Every run creates its own throwaway resource
 ## Tier 1: latest result
 
 ```bash
-scripts/azure-setup-test-principal.sh      # once, as a subscription Owner
-scripts/azure-real-cloud.sh                # AZURE_LOCATION=australiaeast by default
-IT_TEST='RealAzureIT$Cosmos' scripts/azure-real-cloud.sh     # one suite only
+cloud-testing/scripts/azure-setup-test-principal.sh      # once, as a subscription Owner
+cloud-testing/scripts/azure-real-cloud.sh                # AZURE_LOCATION=australiaeast by default
+IT_TEST='RealAzureIT$Cosmos' cloud-testing/scripts/azure-real-cloud.sh     # one suite only
 ```
 
 **Identity.** Terraform and the tests act as a dedicated `halyx-test` service principal. Its
@@ -44,7 +44,7 @@ The setup script:
 The tests reach every service through `DefaultAzureCredential`'s environment-variable path, as a deployed
 application would.
 
-**Provision.** Terraform (`infra/azure/tier1`) creates a resource group of the run's own, tagged
+**Provision.** Terraform (`cloud-testing/infra/azure/tier1`) creates a resource group of the run's own, tagged
 `halyx-test=<run id>`, with:
 - a StorageV2 account
 - a Standard Service Bus namespace
@@ -362,11 +362,11 @@ through `halyx-spring-data-document`. Cosmos DB needs no index beyond its defaul
 ## Tier 2: latest result
 
 ```bash
-TIER=2 scripts/azure-real-cloud.sh
+TIER=2 cloud-testing/scripts/azure-real-cloud.sh
 ```
 
 The script first registers `Microsoft.DBforPostgreSQL` and `Microsoft.Sql`, as the service principal
-through the REST API. Terraform (`infra/azure/tier2`) then creates:
+through the REST API. Terraform (`cloud-testing/infra/azure/tier2`) then creates:
 - **PostgreSQL:** a flexible server (16, `B_Standard_B1ms`) with Entra and password auth. The service
   principal is its Entra admin (role `halyx-test`), and a password admin `halyx_admin` gets a password
   generated for the run and passed through the environment only.
@@ -414,10 +414,10 @@ Login latency, from run `r26101122362e30`, the last one that timed logins:
 ## Tier 3: latest result
 
 ```bash
-TIER=3 scripts/azure-real-cloud.sh
+TIER=3 cloud-testing/scripts/azure-real-cloud.sh
 ```
 
-The script registers `Microsoft.Cache`, then Terraform (`infra/azure/tier3`) creates an **Azure Managed
+The script registers `Microsoft.Cache`, then Terraform (`cloud-testing/infra/azure/tier3`) creates an **Azure Managed
 Redis** cache (`Balanced_B0`, no high availability) with:
 - **access keys off**, so only Entra ID works
 - the `EnterpriseCluster` clustering policy: one endpoint, with no redirects to node addresses
@@ -444,10 +444,10 @@ principal's object id, which Halyx reads from the token's `oid` claim.
 ## Tier 4: latest result
 
 ```bash
-TIER=4 scripts/azure-real-cloud.sh
+TIER=4 cloud-testing/scripts/azure-real-cloud.sh
 ```
 
-The script registers `Microsoft.EventHub`, then Terraform (`infra/azure/tier4`) creates three **Event Hubs**
+The script registers `Microsoft.EventHub`, then Terraform (`cloud-testing/infra/azure/tier4`) creates three **Event Hubs**
 namespaces (Standard, one throughput unit) with shared access keys off, so only Entra ID works, and makes the
 principal their Azure Event Hubs Data Owner. `RealAzureStreamIT` runs the stream kit on the namespaces' Kafka
 endpoints (port 9093), logging in with Entra ID tokens through SASL `OAUTHBEARER`. It creates each test's
@@ -460,7 +460,7 @@ sends and receives records through the starter's `StreamProducer` bean and `@Hal
 for Apache Kafka's `KafkaTemplate` and `@KafkaListener`, which log in through `halyx.spring-kafka.cluster`. It
 creates its two topics with Kafka's admin client, logged in with `kafkaClientProperties`.
 
-`KAFKA_CLIENTS=4.2.1 TIER=4 scripts/azure-real-cloud.sh` runs the same tests on Kafka 4 clients.
+`KAFKA_CLIENTS=4.2.1 TIER=4 cloud-testing/scripts/azure-real-cloud.sh` runs the same tests on Kafka 4 clients.
 
 Three namespaces, because a Standard namespace refused new event hubs with `PolicyViolationException` after
 about twenty had been created in a run, even with only one or two alive (see the run history). The test

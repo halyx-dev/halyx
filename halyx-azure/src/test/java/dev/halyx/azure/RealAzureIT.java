@@ -60,7 +60,7 @@ import dev.halyx.tck.DocumentRepositoryConformanceTest;
 /**
  * The conformance kits against real Azure (tier 1: Blob Storage, Cosmos DB, Service Bus, Key Vault, App
  * Configuration), with Entra ID only: shared keys and local auth are off on every resource. Runs only with
- * {@code -Dhalyx.real.azure=true}, normally through {@code scripts/azure-real-cloud.sh}, which creates the
+ * {@code -Dhalyx.real.azure=true}, normally through {@code cloud-testing/scripts/azure-real-cloud.sh}, which creates the
  * resources with Terraform and passes their names in. Credentials are {@code DefaultAzureCredential}, normally
  * the test service principal from the environment. Service Bus topics, subscriptions and queues are created
  * here and deleted at the end (and with the resource group).

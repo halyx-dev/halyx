@@ -17,11 +17,11 @@
 
 # Runs the real-AWS tests, then deletes everything the run created.
 #
-#   AWS_PROFILE=default AWS_REGION=ap-southeast-2 scripts/aws-real-cloud.sh
-#   IT_TEST='RealAwsIT$SecretsManager' scripts/aws-real-cloud.sh     # one suite only
-#   TIER=2 scripts/aws-real-cloud.sh                                  # RDS PostgreSQL and MySQL with IAM auth
-#   TIER=3 scripts/aws-real-cloud.sh                                  # ElastiCache for Valkey with IAM auth
-#   TIER=4 scripts/aws-real-cloud.sh                                  # streams on MSK Serverless with IAM
+#   AWS_PROFILE=default AWS_REGION=ap-southeast-2 cloud-testing/scripts/aws-real-cloud.sh
+#   IT_TEST='RealAwsIT$SecretsManager' cloud-testing/scripts/aws-real-cloud.sh     # one suite only
+#   TIER=2 cloud-testing/scripts/aws-real-cloud.sh                                  # RDS PostgreSQL and MySQL with IAM auth
+#   TIER=3 cloud-testing/scripts/aws-real-cloud.sh                                  # ElastiCache for Valkey with IAM auth
+#   TIER=4 cloud-testing/scripts/aws-real-cloud.sh                                  # streams on MSK Serverless with IAM
 #
 # Tier 1 (the default):
 # 1. Terraform creates an S3 bucket and two DynamoDB tables named after a fresh run id (tagged halyx-test=<id>).
@@ -50,9 +50,9 @@ set -uo pipefail
 export AWS_PROFILE="${AWS_PROFILE:-default}"
 export AWS_REGION="${AWS_REGION:-ap-southeast-2}"
 export AWS_PAGER=""
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 TIER="${TIER:-1}"
-TF_DIR="$ROOT/infra/aws/tier$TIER"
+TF_DIR="$ROOT/cloud-testing/infra/aws/tier$TIER"
 RUN="r$(date +%y%m%d%H%M)$(openssl rand -hex 2)"
 START="$(date -u +%Y-%m-%dT%H:%M:%S)"
 TF_VARS=(-var "region=$AWS_REGION" -var "run_id=$RUN")
@@ -80,7 +80,7 @@ fi
 
 log() { printf '\n== %s\n' "$*"; }
 # shellcheck source=in-vpc-runner.sh
-source "$ROOT/scripts/in-vpc-runner.sh"
+source "$ROOT/cloud-testing/scripts/in-vpc-runner.sh"
 
 sweep() {
   log "Sweeping resources of run $RUN created by the tests"

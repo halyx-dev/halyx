@@ -36,7 +36,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /**
  * The cache kit against real Azure Managed Redis (tier 3): Microsoft Entra ID authentication only (access keys
  * are off), over TLS on the public endpoint with full certificate and host name checks. Runs only with
- * {@code -Dhalyx.real.azure.cache=true}, normally through {@code TIER=3 scripts/azure-real-cloud.sh}.
+ * {@code -Dhalyx.real.azure.cache=true}, normally through {@code TIER=3 cloud-testing/scripts/azure-real-cloud.sh}.
  * The username is the service principal's object id, taken from the token.
  */
 @EnabledIfSystemProperty(named = "halyx.real.azure.cache", matches = "true")

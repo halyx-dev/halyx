@@ -98,8 +98,8 @@ mvn -pl halyx-aws -am verify -Dit.test='S3BlobStoreConformanceIT'   # one suite
 ```
 
 Requirements: Java 21 or later, Maven 3.9 or later, and Docker for the integration tests. They're skipped
-automatically when Docker is unavailable. `docker compose up -d` starts the emulators for manual
-experiments.
+automatically when Docker is unavailable. `docker compose -f cloud-testing/docker-compose.yml up -d` starts the
+emulators for manual experiments.
 
 Every source file carries the Apache-2.0 license header, and the build checks it. Run
 `mvn -N com.mycila:license-maven-plugin:format` to add any missing ones.

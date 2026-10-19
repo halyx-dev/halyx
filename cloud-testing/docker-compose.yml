@@ -15,7 +15,7 @@
 #
 
 # Floci cloud emulators for local development (the integration tests start their own containers).
-#   docker compose up -d
+#   docker compose -f cloud-testing/docker-compose.yml up -d
 services:
   floci-aws:
     image: floci/floci:2.2.0

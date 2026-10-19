@@ -64,13 +64,13 @@ never waits on the caller's behalf. Those runs found the bugs listed on each pro
 One script per cloud runs a tier from start to finish:
 
 ```bash
-scripts/aws-real-cloud.sh                 # TIER=1 by default; TIER=2, 3 or 4 for the others
-scripts/gcp-real-cloud.sh                 # TIER=1 to 4
-scripts/azure-real-cloud.sh               # TIER=1 to 4
-IT_TEST='RealAwsIT$SecretsManager' scripts/aws-real-cloud.sh     # a single suite
+cloud-testing/scripts/aws-real-cloud.sh                 # TIER=1 by default; TIER=2, 3 or 4 for the others
+cloud-testing/scripts/gcp-real-cloud.sh                 # TIER=1 to 4
+cloud-testing/scripts/azure-real-cloud.sh               # TIER=1 to 4
+IT_TEST='RealAwsIT$SecretsManager' cloud-testing/scripts/aws-real-cloud.sh     # a single suite
 ```
 
-1. **Provision.** Terraform in `infra/<cloud>/tier<n>/` creates the run's resources. Every name includes
+1. **Provision.** Terraform in `cloud-testing/infra/<cloud>/tier<n>/` creates the run's resources. Every name includes
    a fresh run id (`r<yyMMddHHmm><hex>`), and everything is tagged or labelled `halyx-test=<run id>`.
    Passwords and SSH keys, where a tier needs them, are generated for the run and passed through the
    environment only.
@@ -97,7 +97,7 @@ the tiers need:
 |---|---|---|
 | AWS | IAM user `halyx_test` | a named AWS CLI profile |
 | GCP | service account `halyx-test`, impersonated | your `gcloud` Application Default Credentials |
-| Azure | service principal `halyx-test` | `~/.azure/halyx-test.env`, created by `scripts/azure-setup-test-principal.sh` |
+| Azure | service principal `halyx-test` | `~/.azure/halyx-test.env`, created by `cloud-testing/scripts/azure-setup-test-principal.sh` |
 
 The exact policies and roles are on each provider's page. Credentials never enter the repository.
 
