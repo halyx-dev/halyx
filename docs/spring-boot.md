@@ -348,7 +348,8 @@ makes a `Cache<V>` that injects by its type. The health check pings the server e
 ### Spring's `@Cacheable`
 
 `halyx.cache-manager.*` backs Spring's caching annotations, `@Cacheable`, `@CachePut` and `@CacheEvict`
-(with `@EnableCaching`):
+(with `@EnableCaching`). Boot's own cache auto-configuration then backs off, so `spring.cache.*` does not apply;
+a `CacheManager` bean of yours takes precedence over both:
 
 ```yaml
 halyx:
@@ -502,8 +503,20 @@ reports in reactive applications as in servlet ones.
 | `MessageListenerDecorator` beans | wrap every `@HalyxListener` |
 | `halyx.retry.*` | uniform retries (`enabled`, `max-attempts`, `initial-backoff`, `max-backoff`, `multiplier`); off by default, since the SDKs already retry |
 
-Bean names are shared across blob stores, caches, topics, subscriptions, document stores, parameter stores,
-databases and your own beans, so keep them distinct.
+Bean names are shared across blob stores, caches, topics, subscriptions, event buses, stream producers and
+consumers, document stores, parameter stores, databases and your own beans, so keep them distinct. A key taken
+twice fails at startup, naming both properties. Keys only default the cloud resource's name, so a renamed key can
+keep it:
+
+```yaml
+halyx:
+  topics:
+    orders-publisher:
+      name: orders                 # SNS topic, Service Bus topic or Pub/Sub topic "orders"
+  subscriptions:
+    orders-subscription:
+      name: orders
+```
 
 ## Fail-fast validation
 
@@ -516,6 +529,12 @@ Startup fails with a message naming the property for:
 - a `@HalyxListener` naming no subscription or stream consumer, a second listener on one stream consumer, or
   `concurrency` on a stream consumer's listener
 - a bean named `messaging` or `streams`, which would hide a health entry of the same name
+- a `halyx.*` key that is already a bean name: another entry's, in any group, or one of your beans
+
+Spring Boot settings that a Halyx bean makes ineffective are logged as warnings at startup: `spring.datasource.*`
+next to `halyx.databases`, `spring.r2dbc.*` next to `halyx.r2dbc-databases`, and `spring.cache.*` while
+`halyx.cache-manager` provides the `CacheManager`. When your own `CacheManager` bean makes Halyx' back off,
+`halyx.cache-manager.endpoint` is reported as ignored.
 
 Configuration metadata is generated, so IDEs autocomplete `halyx.*` keys.
 

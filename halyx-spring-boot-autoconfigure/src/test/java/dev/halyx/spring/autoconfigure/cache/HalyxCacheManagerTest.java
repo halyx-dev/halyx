@@ -18,6 +18,7 @@ package dev.halyx.spring.autoconfigure.cache;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import dev.halyx.Halyx;
 import dev.halyx.cache.CacheConfig;
 import dev.halyx.cache.Codec;
@@ -25,6 +26,8 @@ import dev.halyx.spring.autoconfigure.HalyxAutoConfiguration;
 import dev.halyx.spring.autoconfigure.metrics.HalyxCacheMetricsAutoConfiguration;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
@@ -42,6 +45,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** {@code @Cacheable} on Halyx caches; runs on Boot 3 (Jackson 2) and Boot 4 (Jackson 3). */
+@ExtendWith(OutputCaptureExtension.class)
 class HalyxCacheManagerTest {
 
     public record User(long id, String name) implements Serializable {
@@ -214,9 +218,24 @@ class HalyxCacheManagerTest {
     }
 
     @Test
-    void applicationCacheManagerWins() {
+    void applicationCacheManagerWins(CapturedOutput output) {
         runner.withBean("cacheManager", CacheManager.class, ConcurrentMapCacheManager::new)
                 .run(context -> assertThat(context.getBean(CacheManager.class)).isInstanceOf(ConcurrentMapCacheManager.class));
+        assertThat(output).contains("halyx.cache-manager.endpoint is set but ignored: the application defines its own "
+                + "CacheManager [cacheManager]");
+    }
+
+    @Test
+    void springCacheSettingsAreReportedAsIgnored(CapturedOutput output) {
+        runner.withPropertyValues("spring.cache.type=redis")
+                .run(context -> assertThat(context).getBean(CacheManager.class).isInstanceOf(HalyxCacheManager.class));
+        assertThat(output).contains("spring.cache.* is set but ignored: halyx.cache-manager provides the CacheManager");
+    }
+
+    @Test
+    void nothingIsReportedWhenHalyxManagesCachesAlone(CapturedOutput output) {
+        runner.run(context -> assertThat(context).hasNotFailed());
+        assertThat(output).doesNotContain("is set but ignored");
     }
 
     @Test

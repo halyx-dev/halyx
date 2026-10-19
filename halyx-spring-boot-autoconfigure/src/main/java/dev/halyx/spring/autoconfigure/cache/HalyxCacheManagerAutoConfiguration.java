@@ -20,8 +20,13 @@ import dev.halyx.cache.Codec;
 import dev.halyx.spring.autoconfigure.HalyxAutoConfiguration;
 import dev.halyx.spring.autoconfigure.HalyxBlobStores;
 import dev.halyx.spring.autoconfigure.HalyxProperties;
+import dev.halyx.spring.autoconfigure.IgnoredSpringProperties;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.BeanFactory;
+import org.springframework.beans.factory.ListableBeanFactory;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -30,7 +35,9 @@ import org.springframework.cache.CacheManager;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
+import org.springframework.core.env.Environment;
 
+import java.util.Arrays;
 import java.util.concurrent.Executor;
 
 /**
@@ -47,6 +54,8 @@ import java.util.concurrent.Executor;
 @Import({HalyxCacheManagerAutoConfiguration.Jackson3Codec.class, HalyxCacheManagerAutoConfiguration.Jackson2Codec.class,
         HalyxCacheManagerAutoConfiguration.JdkCodec.class})
 public class HalyxCacheManagerAutoConfiguration {
+
+    private static final Logger LOG = LoggerFactory.getLogger(HalyxCacheManagerAutoConfiguration.class);
 
     static final String CODEC_BEAN = "halyxCacheCodec";
 
@@ -67,6 +76,23 @@ public class HalyxCacheManagerAutoConfiguration {
             return new HalyxCacheManager(halyx, provider, manager, valueCodec, beans.getBean(EXECUTOR_BEAN, Executor.class));
         }
         return new HalyxCacheManager(halyx, provider, manager, valueCodec);
+    }
+
+    /**
+     * Warns when the setting has no effect: the application's own {@code CacheManager} made this one back off, or
+     * this one made Boot's back off while {@code spring.cache.*} is set.
+     */
+    @Bean
+    SmartInitializingSingleton halyxCacheManagerCheck(ListableBeanFactory beans, Environment environment) {
+        return () -> {
+            if (beans.getBeanNamesForType(HalyxCacheManager.class, false, false).length == 0) {
+                LOG.warn("halyx.cache-manager.endpoint is set but ignored: the application defines its own CacheManager {}",
+                        Arrays.toString(beans.getBeanNamesForType(CacheManager.class, false, false)));
+            } else {
+                IgnoredSpringProperties.warnIfSet(environment, "spring.cache",
+                        "halyx.cache-manager provides the CacheManager, so Spring Boot does not create its own");
+            }
+        };
     }
 
     private static void requireTrustedPackages(HalyxProperties properties) {

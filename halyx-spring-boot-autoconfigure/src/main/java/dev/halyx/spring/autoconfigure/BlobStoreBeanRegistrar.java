@@ -74,12 +74,13 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
     @Override
     public void registerBeanDefinitions(AnnotationMetadata metadata, BeanDefinitionRegistry registry) {
         Binder binder = Binder.get(environment);
+        HalyxBeanNames names = new HalyxBeanNames(registry);
         Map<String, HalyxProperties.BlobStoreProperties> stores = binder
                 .bind("halyx.blob-stores", Bindable.mapOf(String.class, HalyxProperties.BlobStoreProperties.class))
                 .orElse(Map.of());
         binder.bind("halyx.caches", Bindable.mapOf(String.class, HalyxProperties.CacheProperties.class))
                 .orElse(Map.of())
-                .forEach((name, cache) -> registry.registerBeanDefinition(name, cacheBean(name, cache)));
+                .forEach((name, cache) -> names.register(name, "halyx.caches." + name, "namespace", cacheBean(name, cache)));
         binder.bind("halyx.parameter-stores", Bindable.mapOf(String.class, HalyxProperties.ParameterStoreProperties.class))
                 .orElse(Map.of())
                 .forEach((name, store) -> {
@@ -87,7 +88,7 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
                             "halyx.parameter-stores." + name, store.provider());
                     definition.getConstructorArgumentValues().addIndexedArgumentValue(2, store.toStoreConfig());
                     definition.setDescription("Halyx " + store.kind().name().toLowerCase() + " store " + name);
-                    registry.registerBeanDefinition(name, definition);
+                    names.register(name, "halyx.parameter-stores." + name, null, definition);
                 });
         Map<String, HalyxProperties.DatabaseProperties> databases = binder
                 .bind("halyx.databases", Bindable.mapOf(String.class, HalyxProperties.DatabaseProperties.class))
@@ -112,12 +113,20 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
             }
             definition.setPrimary(databases.size() == 1 || database.primary());
             definition.setDescription("Halyx " + database.engine() + " database " + name + "/" + database.database());
-            registry.registerBeanDefinition(name, definition);
+            names.register(name, property, null, definition);
         });
+        if (!databases.isEmpty()) {
+            IgnoredSpringProperties.warnIfSet(environment, "spring.datasource", "halyx.databases " + databases.keySet()
+                    + " defines the DataSource beans, so Spring Boot does not create its own");
+        }
         boolean r2dbcConfigured = !binder.bind(HalyxR2dbcDatabases.GROUP,
                 Bindable.mapOf(String.class, HalyxProperties.DatabaseProperties.class)).orElse(Map.of()).isEmpty();
+        if (r2dbcConfigured) {
+            IgnoredSpringProperties.warnIfSet(environment, "spring.r2dbc", HalyxR2dbcDatabases.GROUP
+                    + " defines the ConnectionFactory beans, so Spring Boot does not create its own");
+        }
         if (ClassUtils.isPresent("dev.halyx.r2dbc.R2dbcDatabases", classLoader)) {
-            R2dbcBeanRegistration.register(binder, registry, parameterStores);
+            R2dbcBeanRegistration.register(binder, registry, names, parameterStores);
         } else if (r2dbcConfigured) {
             throw new IllegalStateException(HalyxR2dbcDatabases.GROUP + " is configured, but halyx-r2dbc is not on the "
                     + "classpath: add the dev.halyx:halyx-r2dbc dependency and an R2DBC driver");
@@ -135,13 +144,13 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
                     definition.getConstructorArgumentValues().addIndexedArgumentValue(2, name);
                     definition.getConstructorArgumentValues().addIndexedArgumentValue(3, store);
                     definition.setDescription("Halyx document store " + store.toTableConfig(name).name());
-                    registry.registerBeanDefinition(name, definition);
+                    names.register(name, "halyx.document-stores." + name, "table", definition);
                 });
         binder.bind("halyx.topics", Bindable.mapOf(String.class, HalyxProperties.TopicProperties.class))
                 .orElse(Map.of())
-                .forEach((name, topic) -> registry.registerBeanDefinition(name, messagingBean(Publisher.class,
-                        "halyx.topics." + name, name, topic.provider(), topic, topic.claimCheck(), "publisher",
-                        stores.keySet())));
+                .forEach((name, topic) -> names.register(name, "halyx.topics." + name, "name",
+                        messagingBean(Publisher.class, "halyx.topics." + name, name, topic.provider(), topic,
+                                topic.claimCheck(), "publisher", stores.keySet())));
         binder.bind("halyx.event-buses", Bindable.mapOf(String.class, HalyxProperties.EventBusProperties.class))
                 .orElse(Map.of())
                 .forEach((name, bus) -> {
@@ -150,21 +159,21 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
                     definition.getConstructorArgumentValues().addIndexedArgumentValue(2, name);
                     definition.getConstructorArgumentValues().addIndexedArgumentValue(3, bus);
                     definition.setDescription("Halyx event bus " + name);
-                    registry.registerBeanDefinition(name, definition);
+                    names.register(name, "halyx.event-buses." + name, "name", definition);
                 });
         binder.bind("halyx.subscriptions", Bindable.mapOf(String.class, HalyxProperties.SubscriptionProperties.class))
                 .orElse(Map.of())
-                .forEach((name, subscription) -> registry.registerBeanDefinition(name, messagingBean(Subscription.class,
-                        "halyx.subscriptions." + name, name, subscription.provider(), subscription,
-                        subscription.claimCheck(), "subscription", stores.keySet())));
+                .forEach((name, subscription) -> names.register(name, "halyx.subscriptions." + name, "name",
+                        messagingBean(Subscription.class, "halyx.subscriptions." + name, name, subscription.provider(),
+                                subscription, subscription.claimCheck(), "subscription", stores.keySet())));
         Map<String, HalyxProperties.StreamClusterProperties> clusters = binder
                 .bind("halyx.stream-clusters", Bindable.mapOf(String.class, HalyxProperties.StreamClusterProperties.class))
                 .orElse(Map.of());
         binder.bind("halyx.stream-producers", Bindable.mapOf(String.class, HalyxProperties.StreamProducerProperties.class))
                 .orElse(Map.of())
-                .forEach((name, producer) -> registry.registerBeanDefinition(name, streamBean(StreamProducer.class,
-                        "halyx.stream-producers." + name, name, producer.cluster(), producer, producer.claimCheck(),
-                        "streamProducer", clusters, stores.keySet())));
+                .forEach((name, producer) -> names.register(name, "halyx.stream-producers." + name, "topic",
+                        streamBean(StreamProducer.class, "halyx.stream-producers." + name, name, producer.cluster(),
+                                producer, producer.claimCheck(), "streamProducer", clusters, stores.keySet())));
         binder.bind("halyx.stream-consumers", Bindable.mapOf(String.class, HalyxProperties.StreamConsumerProperties.class))
                 .orElse(Map.of())
                 .forEach((name, consumer) -> {
@@ -173,7 +182,7 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
                             stores.keySet());
                     // Closing leaves the consumer group, handing its partitions to the other members.
                     definition.setDestroyMethodName(AbstractBeanDefinition.INFER_METHOD);
-                    registry.registerBeanDefinition(name, definition);
+                    names.register(name, "halyx.stream-consumers." + name, "topic and .group", definition);
                 });
         stores.forEach((name, store) -> {
             String bucket = store.bucket() == null || store.bucket().isBlank() ? name : store.bucket();
@@ -181,7 +190,7 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
                     store.provider());
             definition.getConstructorArgumentValues().addIndexedArgumentValue(2, bucket);
             definition.setDescription("Halyx blob store " + bucket);
-            registry.registerBeanDefinition(name, definition);
+            names.register(name, "halyx.blob-stores." + name, "bucket", definition);
         });
     }
 

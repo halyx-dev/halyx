@@ -37,7 +37,8 @@ final class R2dbcBeanRegistration {
     private R2dbcBeanRegistration() {
     }
 
-    static void register(Binder binder, BeanDefinitionRegistry registry, Set<String> parameterStores) {
+    static void register(Binder binder, BeanDefinitionRegistry registry, HalyxBeanNames names,
+                         Set<String> parameterStores) {
         Map<String, HalyxProperties.DatabaseProperties> databases = binder
                 .bind(HalyxR2dbcDatabases.GROUP, Bindable.mapOf(String.class, HalyxProperties.DatabaseProperties.class))
                 .orElse(Map.of());
@@ -75,7 +76,7 @@ final class R2dbcBeanRegistration {
             definition.setPrimary(databases.size() == 1 || database.primary());
             definition.setDescription("Halyx R2DBC " + database.engine() + " database " + name + "/"
                     + database.database());
-            registry.registerBeanDefinition(name, definition);
+            names.register(name, property, null, definition);
         });
     }
 }
