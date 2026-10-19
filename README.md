@@ -70,8 +70,8 @@ Halyx was created to make that code portable too, without giving up what each cl
 
 - **Products installed into each customer's own cloud.** Ship one build to customers on AWS, Azure or Google
   Cloud instead of maintaining three versions of your storage, messaging and secrets code.
-- **Regulated teams that need a credible exit plan.** Regulations such as the EU's DORA expect a realistic
-  plan for leaving a cloud provider. With Halyx the plan is a configuration change, backed by the same tests
+- **Regulated teams that need a credible exit plan.** Regulations such as the EU's DORA, the UK PRA's
+  SS2/21 and APRA's CPS 230 in Australia expect a realistic plan for leaving or replacing a cloud provider. With Halyx the plan is a configuration change, backed by the same tests
   passing on every cloud.
 - **Data residency.** Run the same service on AWS in one country and on Azure or Google Cloud in another.
 - **Services that use several clouds at once**, such as a bucket on one cloud and a queue on another.
