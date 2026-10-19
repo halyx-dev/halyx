@@ -15,12 +15,12 @@
 #
 
 # GitHub Pages site for Halyx: Settings → Pages → "Deploy from a branch", folder /docs.
-# Published at https://kamranzafar.github.io/halyx
+# Published at https://halyx-dev.github.io/halyx
 
 title: Halyx
 description: "Halyx: one Java API for storage, NoSQL, messaging, streams, SQL, caches and secrets on AWS, Azure and Google Cloud — a portable library over the clouds' own SDKs."
 lang: en-US
-url: "https://kamranzafar.github.io"
+url: "https://halyx-dev.github.io"
 baseurl: "/halyx"
 
 remote_theme: just-the-docs/just-the-docs@v0.12.0
@@ -45,7 +45,7 @@ search:
 
 aux_links:
   "GitHub":
-    - "https://github.com/kamranzafar/halyx"
+    - "https://github.com/halyx-dev/halyx"
 aux_links_new_tab: true
 
 heading_anchors: true
