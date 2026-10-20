@@ -98,6 +98,47 @@ all configuration:
 | Numbers: DynamoDB, Cosmos DB and Firestore don't keep a decimal's scale, so `3.50` reads back as `3.5` | the receipt formats amounts itself |
 | Bean names: a `halyx.*` key is a bean name, so a class called `Fulfilment` can't sit next to `halyx.subscriptions.fulfilment` | Halyx fails at startup, naming both; the sample's classes are `OrderFulfilment`, `ReceiptService` and so on |
 
+## On Kubernetes: EKS, GKE and AKS
+
+The Helm chart in `halyx-samples/portable-orders/deploy/helm/portable-orders` deploys the same image on any cluster.
+Its values carry what differs between clouds:
+
+| Value | Holds |
+|---|---|
+| `profiles` | the cloud and the features, such as `[gcp, events, streams, cache, sql]` |
+| `env` | the `ORDERS_*` resource names, `AWS_REGION` or `GOOGLE_CLOUD_PROJECT` |
+| `config` | more Spring configuration as YAML, mounted as an extra `application.yml`: settings an environment variable can't express, such as provider `properties` |
+| `files` | files mounted under `/etc/portable-orders/files`, such as a cache's private CA |
+| `serviceAccount.annotations`, `podLabels` | the binding to the cloud's workload identity |
+| `javaToolOptions` | JVM options; by default `-XX:MaxDirectMemorySize=64M`, since the buildpack's memory calculator otherwise caps direct memory at 10 MB, too little for the cloud SDKs' Netty clients |
+
+The pods log in with the platform's workload identity. There are no keys in the cluster, and the code and
+configuration don't name the mechanism: each cloud's default credential chain finds it.
+
+| Cluster | Workload identity | What the chart sets |
+|---|---|---|
+| EKS | EKS Pod Identity: an association of the service account with an IAM role | nothing; the association names the namespace and service account |
+| GKE | Workload Identity Federation for GKE: the Kubernetes service account acts as a Google service account | `iam.gke.io/gcp-service-account: <email>` |
+| AKS | Microsoft Entra Workload ID: a managed identity federated to the service account | `azure.workload.identity/client-id: <client id>`, and the pod label `azure.workload.identity/use: "true"` |
+
+`cloud-testing/scripts/build-portable-orders-images.sh` builds the Spring Boot 4 and 3.5 images once.
+`cloud-testing/scripts/eks-real-cloud.sh`, `gke-real-cloud.sh` and `aks-real-cloud.sh` each create a throwaway
+cluster, a registry and every service the sample uses, all named after the run. Each script pushes those same two
+images and deploys them in turn, and checks that its pods run the digests it pushed. It then runs `DeployedServiceIT` against each through a port-forward, and
+always tears everything down. The latest runs are in
+[Cloud testing](cloud-testing/index.md#one-image-on-three-clusters). The services are reached the way production would
+reach them:
+
+| Service | EKS | GKE | AKS |
+|---|---|---|---|
+| Cache | ElastiCache, inside the VPC, IAM user | Memorystore, inside the VPC through Private Service Connect, IAM and TLS with its private CA | Azure Managed Redis, Entra ID |
+| SQL | RDS, inside the VPC, IAM login | Cloud SQL through the Cloud SQL connector, IAM login | Azure Database for PostgreSQL, the identity as its Entra admin |
+| Streams | off: MSK isn't available on the test account | Managed Service for Apache Kafka, inside the VPC | Event Hubs' Kafka endpoint, Entra ID |
+| Settings, secrets | SSM Parameter Store, Secrets Manager | Parameter Manager, Secret Manager | App Configuration, Key Vault |
+
+On Google Cloud, the Cloud SQL connector needs `com.google.cloud.sql:postgres-socket-factory` on the classpath; the
+sample declares it at runtime scope, as an application would.
+
 ## Testing
 
 `PortableOrdersSuite` holds the end-to-end tests. They use only the HTTP API, so they run unchanged against every
@@ -112,7 +153,7 @@ skipped, so the report shows what each deployment ran.
 | Azure emulators, in process | `AzureEmulatorIT` | Floci-az (Blob Storage, Cosmos DB, Key Vault, App Configuration), the Service Bus emulator, PostgreSQL, Valkey, Kafka; all but `events` |
 | Google Cloud emulators, in process | `GcpEmulatorIT` | Floci-gcp (Cloud Storage, Firestore, Pub/Sub, Secret Manager), PostgreSQL, Valkey, Kafka; all but `events` |
 | the image, on the AWS emulators | `ImageIT`, with `-Pimage` | as `AwsEmulatorIT`, with the image configured only through its environment |
-| a running deployment | `DeployedServiceIT`, with `-Dorders.e2e.url=...` | whatever it runs on |
+| a running deployment | `DeployedServiceIT`, with `-Dorders.e2e.url=...` | whatever it runs on: the image on EKS, GKE and AKS, through the scripts above |
 
 `portable-orders-boot3` builds the same sources and runs the same tests on Spring Boot 3.5. The sample itself
 targets Boot 4.
@@ -124,4 +165,5 @@ mvn -pl halyx-samples/portable-orders -Pimage verify                            
 
 The emulator runs differ from the real clouds in two places. Event Grid namespaces and Eventarc Advanced have no
 emulators, so `events` is off on the Azure and Google Cloud emulators. Parameter Manager has none either, so the
-Google Cloud emulator run reads its settings from Secret Manager (`halyx.parameter-stores.settings.kind=secrets`).
+Google Cloud emulator run reads its settings from Secret Manager (`halyx.parameter-stores.settings.kind=secrets`). The
+latest results are in [Cloud testing](cloud-testing/index.md#portable-microservice).

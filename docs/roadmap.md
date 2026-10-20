@@ -1,6 +1,6 @@
 ---
 title: Roadmap
-nav_order: 8
+nav_order: 9
 ---
 
 # Roadmap
@@ -21,10 +21,9 @@ end.
 
 | Stage | Work |
 |---|---|
-| **In progress** | [Release 1.0.0](#release-100) on Maven Central, and [cloud logins](#cloud-logins-assumed-roles-impersonation-and-service-principals): assumed roles, impersonation and service principals |
-| **Next** | [Portable Spring Boot microservices](#portable-spring-boot-microservices), then [microservices on Kubernetes](#microservices-on-kubernetes-eks-gke-and-aks) |
+| **In progress** | [Release 1.0.0](#release-100) on Maven Central, and [cloud logins](#cloud-logins-assumed-roles-impersonation-and-service-principals) (assumed roles, impersonation and service principals) |
 | **Open items** | [Gaps in delivered milestones](#open-items), mostly real-cloud runs and platform limits |
-| **Delivered** | [14 milestones](#delivered): every service on AWS, Azure and Google Cloud, Spring Boot 3.5 and 4, reactive and asynchronous APIs |
+| **Delivered** | [15 milestones](#delivered): every service on AWS, Azure and Google Cloud, Spring Boot 3.5 and 4, reactive and asynchronous APIs, and a portable microservice on EKS, GKE and AKS |
 
 ## In progress
 
@@ -46,9 +45,8 @@ The first release on Maven Central.
 ### Cloud logins: assumed roles, impersonation and service principals
 
 **Goal:** log in as the identity each deployment needs, not only through the default chain: an IAM role in another
-AWS account, a Google service account, or an Entra ID application for code running outside Azure. This is the
-groundwork for [cross-cloud services](#2-microservices-on-kubernetes-eks-gke-and-aks) that use federation rather
-than keys. See [Provider configuration](providers.md#assumed-roles-and-impersonated-service-accounts).
+AWS account, a Google service account, or an Entra ID application for code running outside Azure. Code on one
+cloud can then log in to another through federation rather than keys. See [Provider configuration](providers.md#assumed-roles-and-impersonated-service-accounts).
 
 | Deliverable | Status |
 |---|---|
@@ -59,31 +57,6 @@ than keys. See [Provider configuration](providers.md#assumed-roles-and-impersona
 | Spring Boot: `credentials.type: impersonate` and `service-principal`, with startup checks | Done |
 | Tests: assumed roles on Floci, directly and through Spring Boot; credential mapping on Azure and Google Cloud | Done |
 | Real-cloud runs: an assumed role with an external ID on AWS, an impersonated service account on Google Cloud, and a service principal with a secret and with a federated token on Azure | To do, at the end of the phase |
-
-## Next
-
-### 1. Portable Spring Boot microservices
-
-**Goal:** one Spring Boot sample service, built once, that runs unchanged on AWS, Google Cloud and Azure. Only its
-configuration says which cloud it is on.
-
-| Deliverable | Status |
-|---|---|
-| A sample service using every Halyx API (blobs, documents, messaging, events, streams, caches, SQL, parameters and secrets), with end-to-end tests | To do |
-| The cloud chosen only by Spring profiles and properties: the same image on each cloud, with no cloud-specific code and no rebuild | To do |
-| The same end-to-end tests run against every deployment, with the results and any differences between clouds in [Cloud testing](cloud-testing/index.md) | To do |
-
-### 2. Microservices on Kubernetes: EKS, GKE and AKS
-
-**Goal:** the portable service on each cloud's managed Kubernetes, logging in with the platform's workload identity
-and no stored keys, and then spread across clouds.
-
-| Deliverable | Status |
-|---|---|
-| **Portable:** the same image and Helm chart on EKS (EKS Pod Identity or IRSA), GKE (Workload Identity Federation for GKE) and AKS (Microsoft Entra Workload ID), each using its own cloud's services | To do |
-| **Hybrid, cross-cloud services:** a pod on one cloud using another cloud's services, such as a pod on GKE reading S3, through identity federation rather than keys | To do |
-| **Hybrid, split application:** one application across clusters on different clouds, talking through streams or messaging | To do |
-| Throwaway clusters per run, with Terraform and the same always-tear-down scripts as the other test tiers | To do |
 
 ## Open items
 
@@ -116,6 +89,7 @@ Work left over from delivered milestones.
 | 12 | Event services | CloudEvents 1.0 and `EventPublisher`, publishing to EventBridge, Event Grid namespace topics and Eventarc Advanced, and receiving through each router's queue, including Event Grid pull subscriptions; on the memory provider, emulators and real clouds, with Spring Boot 3 and 4 | [Events](api/events.md) |
 | 13 | R2DBC with cloud IAM login | `halyx-r2dbc`: a pooled R2DBC `ConnectionFactory` for PostgreSQL and MySQL whose new connections log in with RDS IAM, Entra ID or Cloud SQL IAM tokens, or a rotating password; Spring Data R2DBC on Boot 3.5 and 4; real-cloud runs on RDS, Azure Database for PostgreSQL and Cloud SQL. SQL Server stays password-only, because its R2DBC driver takes no access tokens | [R2DBC](spring-boot.md#r2dbc-and-spring-data-r2dbc) |
 | 14 | Reactive and asynchronous APIs | `halyx-reactor`: `Mono` and `Flux` for every service with back-pressure and context propagation, reactive repositories, WebFlux and reactive `@Cacheable`, and interoperability with RxJava, Mutiny, `Flow` and `CompletableFuture`. `async()` views of every service, non-blocking where the SDK's async client does it well: S3, Azure Blob Storage, DynamoDB, Cosmos DB, Firestore, SNS, SQS, Service Bus and Pub/Sub publishing, EventBridge, Event Grid, Eventarc, SQS, Pub/Sub and Event Grid receives, Redis and Valkey, Kafka producers, and every parameter backend. The adapters add about 5 µs per call | [Reactive and async](api/reactive.md) |
+| 15 | Portable Spring Boot microservices | `halyx-samples/portable-orders`, an orders service on every Halyx API, built once as one image that runs unchanged on every cloud: the cloud is chosen by Spring profile, and optional features cover services a deployment can't offer. One Helm chart deploys the same image digests on EKS (Pod Identity), GKE (Workload Identity Federation) and AKS (Entra Workload ID), with no stored keys. One end-to-end suite runs in memory, on each cloud's emulators, against the image and on the three clusters, on Boot 4 and 3.5: EKS 8/10 (no MSK), GKE and AKS 9/10 | [Portable microservice](portable-service.md) |
 
 ## On demand
 

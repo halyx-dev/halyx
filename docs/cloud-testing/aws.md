@@ -784,3 +784,18 @@ bucket.
   ]
 }
 ```
+
+## IAM for the EKS run
+
+`cloud-testing/scripts/eks-real-cloud.sh` runs the [portable orders service](../portable-service.md) on EKS. It also
+needs tier 2's EC2 and RDS permissions and tier 3's ElastiCache ones, plus the customer-managed policy in
+[`cloud-testing/infra/aws/k8s/test-identity-policy.json`](https://github.com/halyx-dev/halyx/blob/main/cloud-testing/infra/aws/k8s/test-identity-policy.json):
+- EKS
+- ECR for repositories named `halyx-*`
+- IAM roles named `halyx-*`: the cluster's, the node's and the service's. Only the four AWS-managed EKS policies may
+  be attached, and the roles may be passed only to EKS, EC2 and EKS Pod Identity.
+- the run's settings and signing key: SSM parameters and secrets under `halyx-*`
+
+The service's own role, which Terraform creates per run, may use only the run's bucket, table, topic, queues, bus,
+parameters, secret, database user and cache user.
+

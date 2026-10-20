@@ -1,6 +1,6 @@
 ---
 title: Cloud testing
-nav_order: 7
+nav_order: 8
 has_children: true
 permalink: /cloud-testing/
 ---
@@ -111,6 +111,65 @@ You need:
 A tier 1 run takes 10 to 30 minutes, and tiers 2 and 3 take 15 to 30, most of it creating and deleting
 managed services. Tier 4 takes about 10 minutes on Azure, and about 45 on Google Cloud, where creating the
 Kafka cluster takes 20 to 25. The resources are the smallest tiers available, so a run costs cents.
+
+## Portable microservice
+
+The [portable orders service](../portable-service.md) runs one end-to-end suite (`PortableOrdersSuite`, 10 tests)
+against every deployment, on Spring Boot 4 and 3.5. A feature a deployment doesn't offer is skipped; the last test
+checks that a feature that's off has no endpoint, so it is skipped wherever every feature is on.
+
+| Deployment | events | streams | cache | sql | Boot 4 | Boot 3.5 |
+|---|---|---|---|---|---|---|
+| In memory (`local`) | yes | yes | yes | no stub | **9/10**, 1 skipped (sql) | **9/10**, 1 skipped |
+| AWS emulators: Floci, PostgreSQL, Valkey, Kafka | EventBridge | Kafka | Valkey | PostgreSQL | **9/10**, 1 skipped (all on) | **9/10**, 1 skipped |
+| Azure emulators: Floci-az, Service Bus emulator, PostgreSQL, Valkey, Kafka | no emulator | Kafka | Valkey | PostgreSQL | **8/10**, 2 skipped (events, all on) | **8/10**, 2 skipped |
+| Google Cloud emulators: Floci-gcp, PostgreSQL, Valkey, Kafka | no emulator | Kafka | Valkey | PostgreSQL | **8/10**, 2 skipped (events, all on) | **8/10**, 2 skipped |
+| The image on the AWS emulators (`-Pimage`) | EventBridge | Kafka | Valkey | PostgreSQL | **9/10**, 1 skipped (all on) | |
+| The image on **EKS** (Pod Identity) | EventBridge | off: no MSK | ElastiCache | RDS | **8/10**, 2 skipped (streams, all on) | **8/10**, 2 skipped |
+| The image on **GKE** (Workload Identity Federation) | Eventarc Advanced | Managed Kafka | Memorystore | Cloud SQL, connector | **9/10**, 1 skipped (all on) | **9/10**, 1 skipped |
+| The image on **AKS** (Entra Workload ID) | Event Grid | Event Hubs | Managed Redis | Azure Database for PostgreSQL | **9/10**, 1 skipped (all on) | **9/10**, 1 skipped |
+
+### One image on three clusters
+
+`cloud-testing/scripts/build-portable-orders-images.sh` builds the two images once. `eks-real-cloud.sh`,
+`gke-real-cloud.sh` and `aks-real-cloud.sh` push them and deploy them with one Helm chart. Each cluster is throwaway,
+logs in with its platform's workload identity, and uses only its own cloud's services. Each run records the digest
+it pushed and the digest its pods ran, and fails if they differ. In the latest runs, all three registries got the same
+digests, and every pod ran them:
+
+| Image | Digest | EKS (ECR) | GKE (Artifact Registry) | AKS (ACR) |
+|---|---|---|---|---|
+| `portable-orders` (Spring Boot 4) | `sha256:b905c4c5…1a6a` | ran it | ran it | ran it |
+| `portable-orders-boot3` (Spring Boot 3.5) | `sha256:7b5b4e59…5a9b` | ran it | ran it | ran it |
+
+| Run | Cluster | Boot 4 | Boot 3.5 | Teardown |
+|---|---|---|---|---|
+| `r26102013300aab` | EKS, `ap-southeast-2`, one `m7i-flex.large` node | 8/10, 2 skipped | 8/10, 2 skipped | nothing left |
+| `r26102013369237` | GKE, `australia-southeast1-a`, one `e2-standard-2` node | 9/10, 1 skipped | 9/10, 1 skipped | nothing left |
+| `r26102013275a4d` | AKS, `australiaeast`, one `Standard_B2s_v2` node | 9/10, 1 skipped | 9/10, 1 skipped | nothing left |
+
+Each run takes 25 to 45 minutes, most of it creating the managed services; GKE's Managed Kafka cluster alone takes
+about 15 minutes.
+
+What the runs found:
+- **Numbers lose their scale.** DynamoDB, Cosmos DB and Firestore keep a decimal's value but not its scale, so a
+  price of `3.50` reads back as `3.5`. The service formats amounts itself; the in-memory store hid this.
+- **A `halyx.*` key is a bean name.** Classes called `Fulfilment`, `Receipts` and `Ledger` clashed with the
+  `fulfilment` subscription, the `receipts` blob store and the `ledger` database. Startup failed, naming both.
+- **Parameter Manager has no emulator.** The Google Cloud emulator run reads its settings from Secret Manager
+  instead; the real-cloud run reads them from Parameter Manager.
+- **A least-privilege policy must cover the health check.** The secrets store's health indicator reads a probe secret,
+  `<prefix>/halyx-ping`, and expects "not found". On EKS the pod's role allowed only the signing key, so the probe got
+  "access denied" and health was DOWN. The role now allows reads under the run's prefix.
+- **Buildpack images cap direct memory at 10 MB.** On AKS the Azure SDK's Netty client ran out
+  (`OutOfDirectMemoryError`) and a request hung. The chart sets `-XX:MaxDirectMemorySize=64M` in
+  `JAVA_TOOL_OPTIONS`, and the memory calculator sizes the heap around it.
+- **A database user that owns objects can't be dropped.** Cloud SQL refused to delete the IAM user, which owns the
+  ledger table, so the first GKE teardown left the instance behind (deleted by hand). Terraform now abandons the user
+  and the database, which go with the instance, and the scripts uninstall the release before destroying.
+- **AKS details.** `kube_admin_config` is empty on clusters without Entra ID RBAC (`kube_config` holds the
+  credentials), and Service Bus and Event Hubs namespaces share one DNS zone, so their names must differ. The
+  subscription offers `Standard_B2s_v2` for AKS but not `Standard_B2s`.
 
 ## Not yet tested on a real cloud
 

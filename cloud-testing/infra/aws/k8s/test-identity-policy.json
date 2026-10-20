@@ -1,0 +1,106 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "Eks",
+      "Effect": "Allow",
+      "Action": "eks:*",
+      "Resource": "*"
+    },
+    {
+      "Sid": "EcrLogin",
+      "Effect": "Allow",
+      "Action": ["ecr:GetAuthorizationToken", "ecr:DescribeRepositories"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "EcrRunRepositories",
+      "Effect": "Allow",
+      "Action": "ecr:*",
+      "Resource": "arn:aws:ecr:*:*:repository/halyx-*"
+    },
+    {
+      "Sid": "RunRoles",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole", "iam:DeleteRole", "iam:GetRole", "iam:TagRole", "iam:UntagRole", "iam:ListRoleTags",
+        "iam:UpdateAssumeRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies",
+        "iam:ListInstanceProfilesForRole", "iam:PutRolePolicy", "iam:GetRolePolicy", "iam:DeleteRolePolicy"
+      ],
+      "Resource": "arn:aws:iam::*:role/halyx-*"
+    },
+    {
+      "Sid": "RunRolesEksManagedPolicies",
+      "Effect": "Allow",
+      "Action": ["iam:AttachRolePolicy", "iam:DetachRolePolicy"],
+      "Resource": "arn:aws:iam::*:role/halyx-*",
+      "Condition": {
+        "ArnEquals": {
+          "iam:PolicyARN": [
+            "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy",
+            "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy",
+            "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy",
+            "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "PassRunRoles",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::*:role/halyx-*",
+      "Condition": {
+        "StringEquals": { "iam:PassedToService": ["eks.amazonaws.com", "ec2.amazonaws.com", "pods.eks.amazonaws.com"] }
+      }
+    },
+    {
+      "Sid": "ListRolesForTheTeardownCheck",
+      "Effect": "Allow",
+      "Action": "iam:ListRoles",
+      "Resource": "*"
+    },
+    {
+      "Sid": "EksServiceLinkedRoles",
+      "Effect": "Allow",
+      "Action": "iam:CreateServiceLinkedRole",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "iam:AWSServiceName": ["eks.amazonaws.com", "eks-nodegroup.amazonaws.com", "autoscaling.amazonaws.com"]
+        }
+      }
+    },
+    {
+      "Sid": "Ec2Describe",
+      "Effect": "Allow",
+      "Action": ["ec2:DescribeInstances", "ec2:DescribeVolumes", "ec2:DescribeSecurityGroupRules", "ec2:DescribeAvailabilityZones"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "RunSettings",
+      "Effect": "Allow",
+      "Action": [
+        "ssm:PutParameter", "ssm:DeleteParameter", "ssm:GetParameter", "ssm:GetParameters", "ssm:GetParametersByPath",
+        "ssm:AddTagsToResource", "ssm:ListTagsForResource"
+      ],
+      "Resource": ["arn:aws:ssm:*:*:parameter/halyx-*"]
+    },
+    {
+      "Sid": "DescribeParameters",
+      "Effect": "Allow",
+      "Action": "ssm:DescribeParameters",
+      "Resource": "*"
+    },
+    {
+      "Sid": "RunSecrets",
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:CreateSecret", "secretsmanager:DeleteSecret", "secretsmanager:DescribeSecret",
+        "secretsmanager:GetSecretValue", "secretsmanager:PutSecretValue", "secretsmanager:GetResourcePolicy",
+        "secretsmanager:TagResource", "secretsmanager:ListSecretVersionIds"
+      ],
+      "Resource": "arn:aws:secretsmanager:*:*:secret:halyx-*"
+    }
+  ]
+}

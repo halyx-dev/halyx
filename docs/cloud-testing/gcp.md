@@ -697,3 +697,29 @@ The project also needs these APIs enabled: the IAM Service Account Credentials A
 (`sqladmin.googleapis.com`) for tier 2, and Compute Engine, Memorystore, Network Connectivity and Service
 Consumer Management (`compute`, `memorystore`, `networkconnectivity`, `serviceconsumermanagement`) for tier 3,
 and Managed Service for Apache Kafka (`managedkafka`) for tier 4.
+
+### IAM for the GKE run
+
+`cloud-testing/scripts/gke-real-cloud.sh` runs the [portable orders service](../portable-service.md) on GKE. The nodes
+and the pods run as `halyx-test`, which already holds every data-plane role above, so the service needs nothing new.
+Creating the cluster and its registry does:
+
+| Who | Role | Why |
+|---|---|---|
+| `halyx-test` service account | `roles/container.admin` | create and delete the cluster and its node pool; deploy to it |
+| | `roles/artifactregistry.admin` | create and delete the run's repository and push the images; the nodes pull with it too |
+| the Kubernetes service account `portable-orders/portable-orders` | `roles/iam.workloadIdentityUser` on `halyx-test` | the pods act as `halyx-test` through Workload Identity Federation for GKE |
+
+The project also needs the Kubernetes Engine and Artifact Registry APIs (`container`, `artifactregistry`). The
+workload identity binding can only be made once the project's workload identity pool exists, which happens when the
+first cluster with Workload Identity is created. So the script makes the binding itself, right after the cluster is
+created, as the person running it; on later runs it changes nothing.
+
+```bash
+gcloud services enable container.googleapis.com artifactregistry.googleapis.com
+for role in roles/container.admin roles/artifactregistry.admin; do
+  gcloud projects add-iam-policy-binding <project> --member=serviceAccount:halyx-test@<project>.iam.gserviceaccount.com \
+      --role=$role --condition=None
+done
+```
+

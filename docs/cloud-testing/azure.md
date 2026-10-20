@@ -564,3 +564,15 @@ Event Hubs' Kafka endpoint found these:
 
 Tiers 2 and 3 need nothing beyond tier 1's setup: Contributor covers registering their resource providers,
 creating the servers and caches, and naming the principal as their Entra admin or access-policy holder.
+
+### IAM for the AKS run
+
+`cloud-testing/scripts/aks-real-cloud.sh` runs the [portable orders service](../portable-service.md) on AKS, and
+needs nothing beyond tier 1's setup. Contributor creates the cluster, its registry and a user-assigned managed
+identity, and federates the identity to the service's Kubernetes service account. The identity gets the same
+data-plane roles the principal may assign: Storage Blob Data Contributor, Azure Service Bus Data Owner, Key Vault
+Secrets Officer, App Configuration Data Owner, Azure Event Hubs Data Owner, and EventGrid Data Sender and Receiver.
+It also gets Cosmos DB Built-in Data Contributor, the Managed Redis `default` access policy, and the PostgreSQL
+server's Entra admin. The pods pull images with the registry's admin credentials, because AcrPull isn't among the
+roles the principal may assign.
+

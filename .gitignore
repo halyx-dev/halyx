@@ -57,3 +57,6 @@ graphify-out/
 *.tfstate.*
 .terraform.lock.hcl
 crash.log
+
+# Real-cloud end-to-end reports, kept locally
+cloud-testing/reports/
