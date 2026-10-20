@@ -1,0 +1,89 @@
+# Builds Halyx and runs its unit tests, conformance kits and emulator tests on every push and pull request.
+# Real-cloud tests are never run here: they need -Dhalyx.real.<cloud>=true and cloud credentials.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  MAVEN_ARGS: -B -ntp -Dstyle.color=always
+
+jobs:
+  build:
+    name: Build and unit tests (Java ${{ matrix.java }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        java: [21, 25]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+          cache: maven
+      # Unit tests and the conformance kits on the memory provider; the license headers are checked in verify.
+      - name: Build and test
+        run: mvn verify -DskipITs
+      - name: Test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-reports-java-${{ matrix.java }}
+          path: '**/target/surefire-reports/'
+          retention-days: 7
+
+  integration:
+    name: Emulators (${{ matrix.group }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - group: aws
+            modules: halyx-aws
+          - group: azure
+            modules: halyx-azure
+          - group: gcp
+            modules: halyx-gcp
+          - group: drivers
+            modules: halyx-redis,halyx-sql,halyx-r2dbc,halyx-kafka,halyx-vault,halyx-reactor-tests
+          - group: spring
+            modules: halyx-spring-data-document,halyx-spring-boot-autoconfigure,halyx-spring-boot4-tests
+          - group: samples
+            modules: halyx-samples/portable-orders,halyx-samples/portable-orders-boot3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+      - name: Install the modules they depend on
+        run: mvn install -DskipTests -Dlicense.skip=true
+      # Testcontainers starts the emulators (Floci, the Service Bus emulator, Kafka, Valkey, PostgreSQL) on the
+      # runner's Docker.
+      - name: Emulator tests
+        run: mvn verify -pl ${{ matrix.modules }} -Dlicense.skip=true
+      - name: Test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-reports-${{ matrix.group }}
+          path: |
+            **/target/surefire-reports/
+            **/target/failsafe-reports/
+          retention-days: 7
