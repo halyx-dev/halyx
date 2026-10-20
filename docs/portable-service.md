@@ -98,6 +98,36 @@ all configuration:
 | Numbers: DynamoDB, Cosmos DB and Firestore don't keep a decimal's scale, so `3.50` reads back as `3.5` | the receipt formats amounts itself |
 | Bean names: a `halyx.*` key is a bean name, so a class called `Fulfilment` can't sit next to `halyx.subscriptions.fulfilment` | Halyx fails at startup, naming both; the sample's classes are `OrderFulfilment`, `ReceiptService` and so on |
 
+## Migrating an existing service
+
+The repository has a Claude Code skill for moving an existing Spring Boot service onto Halyx:
+`.claude/skills/migrate-to-halyx`. It works from Spring Cloud AWS, Spring Cloud Azure, Spring Cloud GCP or the raw SDKs.
+Copy the folder into the service's repository (or `~/.claude/skills`) and ask Claude Code to migrate the service,
+or run `/migrate-to-halyx`. The skill works in phases:
+
+1. An inventory of every cloud SDK, template, listener, property and config import, each with its Halyx
+   equivalent and a risk: none, behaviour, data, or no equivalent.
+2. A plan, including whether Halyx can read the existing data as it's stored. **The skill stops here for approval.**
+3. One area per change (dependencies, configuration, storage, documents, messaging, events, streams, caches and
+   SQL), with the existing tests kept passing and memory-provider tests added.
+4. Optionally, the cloud as a profile, as in this sample.
+5. A report of what changed, what behaves differently, and what was left on native clients.
+
+Its references hold the mappings for each cloud, the differences that matter (decimals, ordering, delays, event
+formats, data layouts, the permissions Halyx's health checks need) and the test patterns. It was tried on
+one service per cloud, each migrated step by step on its emulators:
+
+| Before | Services | Result |
+|---|---|---|
+| Spring Cloud AWS 3.4 | S3, DynamoDB (`DynamoDbTemplate`), SNS, SQS (`@SqsListener`), Parameter Store | 5/5 |
+| Spring Cloud Azure 5.22 | Blob Storage, Cosmos DB (`CosmosRepository`), Service Bus (`ServiceBusTemplate`, `@ServiceBusListener`) | 5/5 |
+| Spring Cloud GCP 7.4 | Cloud Storage, Firestore (`FirestoreReactiveRepository`), Pub/Sub (`PubSubTemplate`) | 5/5 |
+
+In each, the original emulator tests passed with their assertions unchanged. Data written by the old library before
+the migration (DynamoDB items, Cosmos DB items with UUID ids, Firestore documents) read correctly through Halyx. And
+a memory-provider test was added. The trials found a Halyx bug, now fixed: next to another Spring Data module, both
+claimed every repository.
+
 ## On Kubernetes: EKS, GKE and AKS
 
 The Helm chart in `halyx-samples/portable-orders/deploy/helm/portable-orders` deploys the same image on any cluster.

@@ -60,3 +60,7 @@ crash.log
 
 # Real-cloud end-to-end reports, kept locally
 cloud-testing/reports/
+
+# Claude Code local state (the skills under .claude/skills are shared)
+.claude/scheduled_tasks.lock
+.claude/settings.local.json
