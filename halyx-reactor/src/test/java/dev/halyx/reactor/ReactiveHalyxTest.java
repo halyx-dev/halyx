@@ -15,6 +15,7 @@
  */
 package dev.halyx.reactor;
 
+import dev.halyx.cache.CacheLock;
 import dev.halyx.Halyx;
 import dev.halyx.config.ProviderConfig;
 import dev.halyx.error.NotFoundException;
@@ -210,6 +211,22 @@ class ReactiveHalyxTest {
                 .expectNextSequence(IntStream.range(0, 25).mapToObj(i -> String.format("%02d", i)).toList())
                 .verifyComplete();
         StepVerifier.create(store.get(Key.of("p", "99"))).verifyComplete();
+    }
+
+    @Test
+    void aWithLockCancelledAsItAcquiresTheLockGivesItBack() {
+        ReactiveCache<String> cache = rx.provider("mem").cache(dev.halyx.cache.CacheConfig.builder(
+                java.net.URI.create("redis://memory:6379")).namespace("cancelled-locks").build());
+
+        // Cancelled at once, many times: some cancellations land after the lock is taken but before the work has it
+        for (int i = 0; i < 300; i++) {
+            String name = "job-" + i;
+            cache.withLock(name, Duration.ofMinutes(1), Duration.ZERO, lock -> Mono.never()).subscribe().dispose();
+            StepVerifier.create(Mono.defer(() -> cache.tryLock(name, Duration.ofMinutes(1)))
+                            .repeatWhenEmpty(100, attempts -> attempts.delayElements(Duration.ofMillis(20)))
+                            .flatMap(cache::release))
+                    .as("lock " + name).expectNext(true).verifyComplete();
+        }
     }
 
     @Test

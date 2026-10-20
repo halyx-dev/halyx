@@ -25,6 +25,7 @@ import java.time.Duration;
 import java.util.Collection;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.Executor;
 import java.util.function.Function;
 
@@ -194,7 +195,40 @@ public final class ReactiveCache<V> {
      * release runs asynchronously, shortly after the cancel returns, since cancelling can't wait for it.
      */
     public <T> Mono<T> withLock(String name, Duration lease, Duration wait, Function<CacheLock, Mono<T>> work) {
-        return Mono.usingWhen(lock(name, lease, wait), work, this::release, (lock, error) -> release(lock), this::release);
+        return Mono.defer(() -> {
+            // A cancellation can land after the scheduler's thread has taken the lock but before the lock reaches
+            // usingWhen, which then has nothing to release: the acquisition hands it back itself.
+            Acquisition acquisition = new Acquisition();
+            Mono<CacheLock> acquire = calls.optional(() -> acquisition.keep(cache.lock(name, lease, wait)))
+                    .doOnCancel(() -> acquisition.cancel().ifPresent(lock -> release(lock).subscribe(released -> { },
+                            error -> { })));
+            return Mono.usingWhen(acquire, work, this::release, (lock, error) -> release(lock), this::release);
+        });
+    }
+
+    /** A lock being acquired for {@link #withLock}: whichever of arrival and cancellation comes second releases it. */
+    private static final class Acquisition {
+
+        private CacheLock lock;
+        private boolean cancelled;
+
+        /** On the scheduler's thread, with the lock just acquired: kept, or released at once if already cancelled. */
+        synchronized Optional<CacheLock> keep(Optional<CacheLock> acquired) {
+            if (cancelled) {
+                acquired.ifPresent(CacheLock::release);
+                return Optional.empty();
+            }
+            lock = acquired.orElse(null);
+            return acquired;
+        }
+
+        /** The lock to release, if it arrived before the cancellation and so may never reach usingWhen. */
+        synchronized Optional<CacheLock> cancel() {
+            cancelled = true;
+            Optional<CacheLock> held = Optional.ofNullable(lock);
+            lock = null;
+            return held;
+        }
     }
 
     public <T> T unwrap(Class<T> nativeType) {
