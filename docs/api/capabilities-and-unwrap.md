@@ -57,7 +57,7 @@ provider: GCS can presign only with credentials that can sign.
 
 | `StreamCapability` | AWS | Azure | Google Cloud |
 |---|---|---|---|
-| `IDEMPOTENCE` | yes | no | yes |
+| `IDEMPOTENCE` | yes | yes | yes |
 | `TRANSACTIONS` | yes | no | yes |
 
 ### Parameters and secrets
