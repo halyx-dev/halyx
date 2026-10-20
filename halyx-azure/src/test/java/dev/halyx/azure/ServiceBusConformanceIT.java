@@ -188,8 +188,8 @@ class ServiceBusConformanceIT extends MessagingConformanceTest {
         CompletingThreads threads = new CompletingThreads();
         Channel c = channel("tck-threads-" + UUID.randomUUID().toString().substring(0, 8), null);
 
-        threads.track(c.publisher().async().publish("one")).get(30, TimeUnit.SECONDS);
-        threads.track(c.publisher().async().publishAll(List.of(OutgoingMessage.of("two"), OutgoingMessage.of("three"))))
+        threads.track(() -> c.publisher().async(threads.executor()).publish("one")).get(30, TimeUnit.SECONDS);
+        threads.track(() -> c.publisher().async(threads.executor()).publishAll(List.of(OutgoingMessage.of("two"), OutgoingMessage.of("three"))))
                 .get(30, TimeUnit.SECONDS);
 
         threads.assertNonBlocking(2, Thread.currentThread());

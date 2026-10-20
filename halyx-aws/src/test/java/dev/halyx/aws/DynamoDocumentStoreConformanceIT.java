@@ -164,7 +164,7 @@ class DynamoDocumentStoreConformanceIT extends DocumentStoreConformanceTest {
                         .credentials(Credentials.of("test", "test")))
                 .build()) {
             AsyncDocumentStore async = observed.provider("aws").documentStore(TableConfig.builder("items-sorted")
-                    .sortKey("sk").build()).async();
+                    .sortKey("sk").build()).async(threads.executor());
             Key key = Key.of("async-threads-" + UUID.randomUUID(), "a");
 
             Item put = async.put(key, Document.builder().put("n", 1).build()).get(30, TimeUnit.SECONDS);

@@ -103,7 +103,7 @@ class AwsEventBusConformanceIT extends EventBusConformanceTest {
     void asyncPublishesCompleteOnTheSdksNonBlockingClient() throws Exception {
         CompletingThreads threads = new CompletingThreads();
 
-        threads.track(publisher().async().publish(CloudEvent.builder("com.acme.threads", "/halyx-tck/threads").build()))
+        threads.track(() -> publisher().async(threads.executor()).publish(CloudEvent.builder("com.acme.threads", "/halyx-tck/threads").build()))
                 .get(30, TimeUnit.SECONDS);
 
         threads.assertNonBlocking(1, Thread.currentThread());

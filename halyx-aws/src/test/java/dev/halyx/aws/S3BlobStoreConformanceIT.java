@@ -95,7 +95,7 @@ class S3BlobStoreConformanceIT extends BlobStoreConformanceTest {
                 .register("aws", ProviderConfig.of("aws").region("us-east-1").endpoint(endpoint)
                         .credentials(Credentials.of("test", "test")).property(AwsProperties.S3_PATH_STYLE, "true"))
                 .build()) {
-            AsyncBlobStore async = observed.provider("aws").blobStore(BUCKET).async();
+            AsyncBlobStore async = observed.provider("aws").blobStore(BUCKET).async(threads.executor());
             BlobKey key = key("async/threads.txt");
 
             async.put(key, BlobContent.ofString("v")).get(30, TimeUnit.SECONDS);

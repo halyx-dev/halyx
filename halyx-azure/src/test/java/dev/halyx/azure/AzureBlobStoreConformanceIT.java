@@ -120,7 +120,7 @@ class AzureBlobStoreConformanceIT extends BlobStoreConformanceTest {
         try (Halyx observed = Halyx.builder().interceptor(threads)
                 .register("azure", ProviderConfig.of("azure").endpoint(endpoint).credentials(Credentials.of(ACCOUNT, KEY)))
                 .build()) {
-            AsyncBlobStore async = observed.provider("azure").blobStore(CONTAINER).async();
+            AsyncBlobStore async = observed.provider("azure").blobStore(CONTAINER).async(threads.executor());
             BlobKey key = BlobKey.of("async-threads/" + UUID.randomUUID() + ".txt");
 
             async.put(key, BlobContent.ofString("v")).get(30, TimeUnit.SECONDS);

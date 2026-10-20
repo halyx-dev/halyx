@@ -120,8 +120,8 @@ abstract class PubSubConformance extends MessagingConformanceTest {
         CompletingThreads threads = new CompletingThreads();
         Channel c = channel("tck-threads-" + UUID.randomUUID().toString().substring(0, 8), null);
 
-        threads.track(c.publisher().async().publish("one")).get(30, TimeUnit.SECONDS);
-        threads.track(c.publisher().async().publishAll(List.of(OutgoingMessage.of("two"), OutgoingMessage.of("three"))))
+        threads.track(() -> c.publisher().async(threads.executor()).publish("one")).get(30, TimeUnit.SECONDS);
+        threads.track(() -> c.publisher().async(threads.executor()).publishAll(List.of(OutgoingMessage.of("two"), OutgoingMessage.of("three"))))
                 .get(30, TimeUnit.SECONDS);
 
         threads.assertNonBlocking(2, Thread.currentThread());
@@ -136,9 +136,9 @@ abstract class PubSubConformance extends MessagingConformanceTest {
         List<ReceivedMessage> received = new ArrayList<>();
         long deadline = System.nanoTime() + Duration.ofSeconds(60).toNanos();
         while (received.isEmpty() && System.nanoTime() < deadline) {
-            received.addAll(threads.track(c.subscription().async().receive(10, Duration.ofSeconds(5))).get(60, TimeUnit.SECONDS));
+            received.addAll(threads.track(() -> c.subscription().async(threads.executor()).receive(10, Duration.ofSeconds(5))).get(60, TimeUnit.SECONDS));
         }
-        threads.track(received.getFirst().ackAsync()).get(30, TimeUnit.SECONDS);
+        threads.track(() -> received.getFirst().ackAsync()).get(30, TimeUnit.SECONDS);
 
         assertThat(threads.names()).isNotEmpty();
         threads.assertNonBlocking(threads.names().size(), Thread.currentThread());

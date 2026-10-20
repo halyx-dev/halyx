@@ -164,13 +164,13 @@ class CosmosDocumentStoreConformanceIT extends DocumentStoreConformanceTest {
     @Test
     void asyncCallsCompleteOnTheSdksNonBlockingClient() throws Exception {
         CompletingThreads threads = new CompletingThreads();
-        AsyncDocumentStore async = store(true).async();
+        AsyncDocumentStore async = store(true).async(threads.executor());
         Key key = Key.of("async-threads-" + UUID.randomUUID(), "a");
 
-        threads.track(async.put(key, Document.builder().put("n", 1).build())).get(30, TimeUnit.SECONDS);
-        threads.track(async.get(key)).get(30, TimeUnit.SECONDS);
-        threads.track(async.query(Query.partition(key.partition()))).get(30, TimeUnit.SECONDS);
-        threads.track(async.delete(key)).get(30, TimeUnit.SECONDS);
+        threads.track(() -> async.put(key, Document.builder().put("n", 1).build())).get(30, TimeUnit.SECONDS);
+        threads.track(() -> async.get(key)).get(30, TimeUnit.SECONDS);
+        threads.track(() -> async.query(Query.partition(key.partition()))).get(30, TimeUnit.SECONDS);
+        threads.track(() -> async.delete(key)).get(30, TimeUnit.SECONDS);
 
         threads.assertNonBlocking(4, Thread.currentThread());
     }

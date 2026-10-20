@@ -48,6 +48,7 @@ import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 
@@ -144,9 +145,16 @@ class ReactiveUsageTest {
     static Flux<Delivery> deliveries(Subscription subscription, ConsumerOptions options) {
         return Flux.create(sink -> {
             Set<Delivery> pending = ConcurrentHashMap.newKeySet();
+            AtomicBoolean cancelled = new AtomicBoolean();
             MessageConsumer consumer = subscription.listen(message -> {
                 Delivery delivery = new Delivery(message, new CompletableFuture<>());
                 pending.add(delivery);
+                // Checked after adding, as onDispose sets it before failing what's pending: either sees the other.
+                // A delivery added after the Flux was cancelled would otherwise wait forever, its message leased.
+                if (cancelled.get()) {
+                    pending.remove(delivery);
+                    throw new CancellationException("pipeline cancelled");
+                }
                 try {
                     sink.next(delivery);
                     delivery.done().join(); // throws if the pipeline failed it, which nacks the message
@@ -155,6 +163,7 @@ class ReactiveUsageTest {
                 }
             }, options);
             sink.onDispose(() -> {
+                cancelled.set(true);
                 pending.forEach(d -> d.done().completeExceptionally(new CancellationException("pipeline cancelled")));
                 // Cancelling can happen inside sink.next, on a listener's thread, and close() waits for running
                 // listeners: close on a thread of its own.

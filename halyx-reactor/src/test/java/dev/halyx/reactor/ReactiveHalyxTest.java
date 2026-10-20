@@ -224,8 +224,11 @@ class ReactiveHalyxTest {
         StepVerifier.create(cache.withLock("job", Duration.ofMinutes(1), Duration.ZERO, lock -> Mono.never()))
                 .expectSubscription().thenCancel().verify(Duration.ofSeconds(5));
 
-        // released every time, so it is free again
-        StepVerifier.create(cache.tryLock("job", Duration.ofMinutes(1)).flatMap(cache::release))
+        // released every time, so it is free again. A cancellation releases asynchronously: cancelling can't wait for
+        // the release, so retry the lock briefly rather than expecting it free the instant thenCancel() returns.
+        StepVerifier.create(Mono.defer(() -> cache.tryLock("job", Duration.ofMinutes(1)))
+                        .repeatWhenEmpty(50, attempts -> attempts.delayElements(Duration.ofMillis(20)))
+                        .flatMap(cache::release))
                 .expectNext(true).verifyComplete();
     }
 }

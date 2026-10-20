@@ -190,7 +190,8 @@ public final class ReactiveCache<V> {
 
     /**
      * Runs {@code work} holding the lock, and releases it however the work ends, including cancellation.
-     * Empty, without running the work, if the lock wasn't acquired within {@code wait}.
+     * Empty, without running the work, if the lock wasn't acquired within {@code wait}. After a cancellation the
+     * release runs asynchronously, shortly after the cancel returns, since cancelling can't wait for it.
      */
     public <T> Mono<T> withLock(String name, Duration lease, Duration wait, Function<CacheLock, Mono<T>> work) {
         return Mono.usingWhen(lock(name, lease, wait), work, this::release, (lock, error) -> release(lock), this::release);

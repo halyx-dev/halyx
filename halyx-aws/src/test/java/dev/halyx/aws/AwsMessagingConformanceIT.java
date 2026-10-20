@@ -196,9 +196,9 @@ class AwsMessagingConformanceIT {
             List<ReceivedMessage> received = new ArrayList<>();
             long deadline = System.nanoTime() + Duration.ofSeconds(60).toNanos();
             while (received.isEmpty() && System.nanoTime() < deadline) {
-                received.addAll(threads.track(c.subscription().async().receive(10, Duration.ofSeconds(5))).get(60, TimeUnit.SECONDS));
+                received.addAll(threads.track(() -> c.subscription().async(threads.executor()).receive(10, Duration.ofSeconds(5))).get(60, TimeUnit.SECONDS));
             }
-            threads.track(received.getFirst().ackAsync()).get(30, TimeUnit.SECONDS);
+            threads.track(() -> received.getFirst().ackAsync()).get(30, TimeUnit.SECONDS);
 
             assertThat(threads.names()).isNotEmpty();
             threads.assertNonBlocking(threads.names().size(), Thread.currentThread());
@@ -216,8 +216,8 @@ class AwsMessagingConformanceIT {
                         .credentials(Credentials.of("test", "test")))
                 .build()) {
             var aws = observed.provider("aws");
-            aws.publisher(topic[0]).async().publish("via sns").get(30, TimeUnit.SECONDS);
-            aws.publisher(TopicConfig.builder(queue).property(AwsProperties.MESSAGING_TARGET, "sqs").build()).async()
+            aws.publisher(topic[0]).async(threads.executor()).publish("via sns").get(30, TimeUnit.SECONDS);
+            aws.publisher(TopicConfig.builder(queue).property(AwsProperties.MESSAGING_TARGET, "sqs").build()).async(threads.executor())
                     .publish("via sqs").get(30, TimeUnit.SECONDS);
         }
 
