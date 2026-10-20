@@ -28,6 +28,14 @@ class BillingTest { ... }
 
 - With several providers in the configuration, add the `local` profile or override `halyx.providers.*` so tests
   use only `memory`.
+- **The memory provider has no SQL, and Spring for Apache Kafka can't use its streams,** which run in process.
+  `halyx.databases` and `halyx.spring-kafka.cluster` on `memory` fail at startup, saying so. In a `local` profile,
+  keep the database on Boot's `spring.datasource` and Kafka on `spring.kafka.bootstrap-servers` (PostgreSQL and
+  Kafka from docker compose or containers), and put `halyx.databases` and `halyx.spring-kafka` in the cloud profiles
+  only. Halyx's own streams (`StreamProducer`, `@HalyxListener` on a stream consumer) do run in memory.
+- **Event buses on `memory` have no rules or filters:** every event reaches every subscription. A consumer that
+  relied on a rule to filter (EventBridge patterns, Event Grid filters, Eventarc enrollments) sees everything
+  locally. Check the condition in the consumer too, or keep that test on the emulator.
 - Event buses on `memory` publish to a topic named after the bus: subscribe with
   `halyx.subscriptions.<key>.topic: <bus name>`.
 - Parameter stores start empty. Write what the test needs through the `ParameterStore` bean, or set the properties
@@ -36,7 +44,46 @@ class BillingTest { ... }
 - When there's no SQL stub: exclude Boot's `DataSourceAutoConfiguration` where the service has no database in that
   profile, or run PostgreSQL in a container.
 
-## Emulator tests
+## Emulator and container tests
+
+**`@ServiceConnection` doesn't reach Halyx's beans.** Boot's connection details from Testcontainers
+(`JdbcConnectionDetails`, `RedisConnectionDetails`, `KafkaConnectionDetails`) configure Boot's own `DataSource`,
+Redis connection and Kafka settings. Halyx's `DataSource`, caches and Kafka login replace those, so a test that
+kept `@ServiceConnection` would point Halyx at the production host from `application.yml`. Remove
+`@ServiceConnection` from those containers and set the `halyx.*` endpoints from them instead; the assertions stay:
+
+```java
+@DynamicPropertySource
+static void containers(DynamicPropertyRegistry registry) {
+    registry.add("halyx.databases.orders-db.host", POSTGRES::getHost);
+    registry.add("halyx.databases.orders-db.port", () -> POSTGRES.getMappedPort(5432));
+    registry.add("halyx.databases.orders-db.database", POSTGRES::getDatabaseName);
+    registry.add("halyx.databases.orders-db.auth.username", POSTGRES::getUsername);
+    registry.add("halyx.databases.orders-db.auth.password", POSTGRES::getPassword);   // with auth.type: password in the test profile
+    registry.add("halyx.stream-clusters.events.bootstrap-servers", KAFKA::getBootstrapServers);
+    registry.add("halyx.cache-manager.endpoint", () -> "redis://" + VALKEY.getHost() + ":" + VALKEY.getMappedPort(6379));
+}
+```
+
+A database on a cloud provider type with `auth.type: password` makes no cloud calls, so a test profile can use the
+service's real provider type (with no endpoints) for the containers.
+
+**Services with no emulator** (Event Grid namespaces, Eventarc Advanced): tests of the old code usually mock the
+SDK client. After the migration, publish to a memory-provider bus and read it back through a subscription, so the
+real `EventPublisher` runs. With two providers, every resource names its `provider`:
+
+```yaml
+halyx:
+  providers:
+    azure: { type: azure }                 # the databases, caches and Kafka on containers
+    local: { type: memory }                # the bus
+  databases: { bookings-db: { provider: azure, engine: postgresql, auth: { type: password } } }
+  event-buses: { booking-events: { provider: local, name: bookings } }
+  subscriptions: { booking-events-tap: { provider: local, name: bookings-tap, topic: bookings } }
+```
+
+Read the tap with `Subscription.receive(...)`, `CloudEvents.decode(message)` and `message.ack()`. Assertions on the
+event (type, source, subject, data) carry over; only the accessors change (`type()` for `getType()`).
 
 Point the provider at the emulator, and create the resources as the infrastructure would:
 
@@ -72,6 +119,43 @@ Azure emulators take connection strings or keys as provider and store properties
 Key Vault and App Configuration). Google Cloud emulators take `endpoint` and `credentials.type: anonymous`. Some
 services have no emulator (Event Grid namespaces, Eventarc Advanced, Parameter Manager): say so, and cover them in
 memory and on the real cloud.
+
+## The old service's state
+
+The existing tests start from empty stores. A deployment starts from what the old version left, and runs beside
+old instances for the length of a rollout. Add one test class that seeds that state **before the context starts**
+(in `@BeforeAll`, with the containers' own clients), then starts the migrated service on it:
+
+| Seed | As the old service left it | Then check |
+|---|---|---|
+| Schema | its Flyway (or Liquibase) run, and rows | the history is unchanged and the rows read as before |
+| Cache entries | Spring's keys (`<cache>::<key>`) and serializer, holding stale values | reads return the database's values: misses, not errors |
+| Counters and keys others read | rate counters at the limit; lifetime counters | old and new instances share them; the key, format and expiry are unchanged |
+| Kafka | a record the old service handled, with the group's offset committed past it | the group carries on from the committed offset: **check the committed offset itself** with `Admin.listConsumerGroupOffsets`, since an idempotent handler hides a renamed group that reads the topic again |
+| Events and messages | the old format, published as an old instance would | migrated consumers read it; other consumers still get what they expect |
+
+Then make one deliberate mistake per area (drop `namespace: ""`, rename the consumer group, remove a rule's
+old-format branch) and check that the test fails. A mistake the test doesn't notice shows the test is too weak.
+
+## The production profile
+
+No container or emulator test runs the cloud profile itself, so a typo there (a wrong key, an anchor that doesn't
+merge, an old `spring.*` setting left behind) would first show in production. Check what it resolves to without
+connecting anywhere:
+
+```java
+@Configuration(proxyBeanMethods = false)
+static class NoBeans {}
+
+try (var context = new SpringApplicationBuilder(NoBeans.class).web(WebApplicationType.NONE).profiles("aws").run()) {
+    Environment env = context.getEnvironment();
+    Binder.get(env).bind("halyx", dev.halyx.spring.autoconfigure.HalyxProperties.class).get();   // binds
+    assertThat(env.getProperty("halyx.databases.orders-db.auth.type")).isEqualTo("iam");
+    assertThat(env.getProperty("spring.datasource.url")).isNull();                               // the old settings are gone
+}
+```
+
+With `spring.profiles.default`, run it with no profile too, as a deployment that sets none would.
 
 ## Behaviour checks worth adding
 

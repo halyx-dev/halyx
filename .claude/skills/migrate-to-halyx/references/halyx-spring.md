@@ -39,8 +39,13 @@ old library is still there, list the SDK's BOM first:
 <!-- then the Spring Cloud AWS, Azure or GCP BOM, until it is removed -->
 ```
 
+Spring Boot's own dependency management wins for the libraries it manages. On Boot 3.5, Lettuce resolves to 6.6
+(Halyx is built with 6.8), and caches work on it; check `mvn dependency:list` for anything else that resolves lower
+than Halyx's `pom.xml` says.
+
 The provider modules bring the cloud SDKs, the Redis and Valkey driver, SQL IAM login and the Kafka login, so the
-service drops its own SDK dependencies. On Google Cloud, the Cloud SQL connector needs
+service drops its own SDK dependencies. Their SDK clients can switch on the old library's auto-configuration while
+both are present: see [differences.md](differences.md#runtime). On Google Cloud, the Cloud SQL connector needs
 `com.google.cloud.sql:postgres-socket-factory` (or the MySQL one) on the runtime classpath. Spring Boot 3.5 and 4
 both work.
 
@@ -72,12 +77,21 @@ resource's name, but set `bucket`, `table` or `name` explicitly when migrating, 
 | `halyx.subscriptions.<key>: { name, listener: {...} }` | `Subscription`, used by `@HalyxListener("<key>")` | `receive(max, wait)`, `listen(...)` |
 | `halyx.event-buses.<key>: { name }` | `EventPublisher` | `publish(CloudEvent)`, `publishAll` |
 | `halyx.stream-clusters.<key>: { bootstrap-servers, auth }`, `halyx.stream-producers.<key>`, `halyx.stream-consumers.<key>` | `StreamProducer`, `StreamConsumer` | `send(key, value)`, `send(OutgoingRecord)`; consumers through `@HalyxListener` |
-| `halyx.caches.<key>: { endpoint, auth, default-ttl, codec }` | `Cache<V>` | `get`, `put(key, value[, ttl])`, `putIfAbsent`, `delete`, `increment`, `getOrLoad`, `tryLock` |
-| `halyx.cache-manager: { endpoint, auth, ttl }` | Spring `CacheManager` | `@Cacheable`, `@CachePut`, `@CacheEvict` unchanged |
+| `halyx.caches.<key>: { endpoint, auth, namespace, default-ttl, codec }` | `Cache<V>` | `get`, `put(key, value[, ttl])`, `putIfAbsent`, `delete`, `increment(key, delta[, ttl])`, `getOrLoad`, `tryLock`. Keys are `<namespace>:<key>`, the namespace defaulting to the bean name: set `namespace: ""` to keep existing keys |
+| `halyx.cache-manager: { endpoint, auth, default-ttl, ttl, codec, trusted-packages }` | Spring `CacheManager` | `@Cacheable`, `@CachePut`, `@CacheEvict` unchanged. `codec: jdk` (the default, as Spring's) reads any class unless `trusted-packages` is set: set it. `json` requires it |
 | `halyx.parameter-stores.<key>: { kind: secrets\|parameters, prefix, location }` | `ParameterStore` | `get`, `require(name[, field])`, `getAll(prefix)`, `put`, `watch` |
 | `halyx.databases.<key>: { engine, host, database, auth: { type: iam\|password, username } }` | `DataSource` (primary if only one) | JPA, `JdbcTemplate`, Flyway and Liquibase unchanged |
 | `halyx.r2dbc-databases.<key>` | R2DBC `ConnectionFactory` | Spring Data R2DBC unchanged |
 | `halyx.spring-kafka.cluster: <stream cluster key>` | (configures Spring Kafka's factories) | `KafkaTemplate` and `@KafkaListener` unchanged |
+
+Every key is a bean name, in every group, including `databases` and `stream-clusters`. Before choosing them, list
+the service's own bean names (each `@Component`, `@Service` and `@Configuration` class, in lower camel case, and
+each `@Bean` method). A class `Bookings` and `halyx.databases.bookings` clash; `bookings-db` doesn't.
+
+Imports: `dev.halyx.spring.messaging.HalyxListener`; `dev.halyx.cache.Cache`; `dev.halyx.events.CloudEvent`,
+`EventPublisher` and `CloudEvents`; `dev.halyx.messaging.Publisher`, `Subscription`, `ReceivedMessage` and
+`OutgoingMessage`; `dev.halyx.storage.BlobStore`; `dev.halyx.nosql.DocumentStore`;
+`dev.halyx.parameters.ParameterStore`; and, for configuration tests, `dev.halyx.spring.autoconfigure.HalyxProperties`.
 
 ```java
 @Component

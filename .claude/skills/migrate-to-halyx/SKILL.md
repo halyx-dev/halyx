@@ -41,8 +41,13 @@ Present:
 3. **Data compatibility** for each document store and blob store: can Halyx read the existing data as it is
    stored? Check it against [differences.md](references/differences.md#existing-data). If it can't, propose either a
    data migration or leaving that store on its native client for now. Never quietly change a storage layout.
-4. The order of the steps (below), and the tests that will prove each one.
-5. The target configuration: the `halyx.*` properties and bean names, and how the cloud will be chosen (profiles).
+4. **The rollout:** old and new instances run side by side during a deploy. For each event, record, counter and
+   key that both versions (or other services) touch, say how both will work at once: rule changes made before the
+   deploy, keys kept with `namespace: ""`, the same Kafka groups. See
+   [differences.md](references/differences.md#rollout-old-and-new-instances-side-by-side).
+5. The order of the steps (below), and the tests that will prove each one.
+6. The target configuration: the `halyx.*` properties and bean names, checked against the service's own bean names
+   (every key is one), and how the cloud will be chosen (profiles).
 
 Then wait for the user to approve or change the plan.
 
@@ -54,6 +59,8 @@ Order, from lowest to highest risk (skip what the service doesn't use):
    but check the resolved SDK versions (`mvn dependency:tree`). The Spring Cloud AWS, Azure and GCP BOMs pin their own,
    often older, cloud SDKs, which win over what Halyx needs. While both are present, import the cloud SDK's BOM at
    Halyx's version first ([halyx-spring.md](references/halyx-spring.md#sdk-versions)), and drop it with the old BOM.
+   Then start the service and run its tests: the provider module's SDK clients can switch on the old library's
+   auto-configuration for services the code never used ([differences.md](references/differences.md#runtime)).
 2. **Configuration and secrets:** `spring.config.import: halyx:<store>` in place of the cloud's config import.
 3. **Object storage**
 4. **Documents:** a Spring Data `DocumentRepository`, or `DocumentStore`
@@ -75,8 +82,16 @@ For each area:
 - Remove the cloud SDK code for that area. Keep a native client only where the plan says so, obtained through
   `unwrap`, and isolate it behind one class.
 - Build and run the existing tests. Then add or adapt tests as [testing.md](references/testing.md) describes:
-  memory-provider tests first, then the emulator tests the project already has.
+  memory-provider tests first, then the emulator tests the project already has. Containers wired with
+  `@ServiceConnection` must be wired through `halyx.*` properties instead, or the test silently targets the
+  production host.
 - Summarise what changed and what behaves differently, then move to the next area.
+
+After the last area, add the two tests no existing test covers ([testing.md](references/testing.md)):
+- **the old service's state:** the migrated service started on what the old one left (schema history, cache
+  entries, counters, committed Kafka offsets, old-format events), with one deliberate mistake per area to show the
+  test can fail
+- **the production profile:** what the cloud profile resolves to, without connecting anywhere
 
 ## Phase 4: make the cloud a profile
 
@@ -86,7 +101,9 @@ Once no cloud SDK is left in the code:
   with names from environment variables where they differ per deployment. `portable-orders`' `application.yml`
   shows the pattern.
 - Set `spring.profiles.default` to the cloud it runs on today, so deployments that set no profile keep working.
-- Add a `local` profile on the `memory` provider, so the service starts with no cloud at all.
+- Add a `local` profile on the `memory` provider, so the service starts with no cloud at all. The memory provider
+  has no SQL, and Spring for Apache Kafka needs a real broker: keep `halyx.databases` and `halyx.spring-kafka` in
+  the cloud profiles, and give `local` Boot's `spring.datasource` and `spring.kafka.bootstrap-servers`.
 - Keep only the provider modules the user wants: all of them for one artifact that runs anywhere, or the one in use.
 
 Only do this phase if the user wants the service portable, not just migrated.

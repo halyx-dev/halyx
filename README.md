@@ -248,8 +248,9 @@ service to Halyx, or run `/migrate-to-halyx`. It works in reviewable steps:
 5. **Report:** what changed, the differences to tolerate, and the follow-ups, such as IAM changes and data
    migrations.
 
-It has been tried on one Spring Cloud service per cloud: each passed its original tests unchanged, and read the data
-the old library had written. Its reference files (cloud-by-cloud mappings, known differences and test patterns) are
+It has been tried on six Spring Cloud services, two per cloud, which between them use every kind of service Halyx covers. Each passed
+its original tests, and started cleanly on the data, cache entries, counters, Kafka offsets and events the old
+version left behind. Its reference files (cloud-by-cloud mappings, known differences and test patterns) are
 plain Markdown, so other
 assistants can use them too: point yours at
 [`SKILL.md`](.claude/skills/migrate-to-halyx/SKILL.md) as its instructions. See

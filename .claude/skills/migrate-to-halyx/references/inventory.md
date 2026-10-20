@@ -7,9 +7,9 @@ deployment files. The patterns below are starting points; follow each hit to see
 
 | Cloud | Look for |
 |---|---|
-| AWS | `software.amazon.awssdk:*` (`s3`, `dynamodb`, `dynamodb-enhanced`, `sqs`, `sns`, `eventbridge`, `ssm`, `secretsmanager`, `elasticache`, `rds`), `io.awspring.cloud:spring-cloud-aws-*`, `software.amazon.msk:aws-msk-iam-auth`, `software.amazon.jdbc:aws-advanced-jdbc-wrapper`, `com.amazonaws:*` (SDK v1) |
+| AWS | `software.amazon.awssdk:*` (`s3`, `dynamodb`, `dynamodb-enhanced`, `sqs`, `sns`, `eventbridge`, `ssm`, `secretsmanager`, `elasticache`, `rds`, `http-auth-aws` for hand-signed IAM tokens), `io.awspring.cloud:spring-cloud-aws-*`, `software.amazon.msk:aws-msk-iam-auth`, `software.amazon.jdbc:aws-advanced-jdbc-wrapper`, `com.amazonaws:*` (SDK v1) |
 | Azure | `com.azure:azure-*` (`storage-blob`, `cosmos`, `messaging-servicebus`, `messaging-eventgrid`, `messaging-eventhubs`, `security-keyvault-secrets`, `data-appconfiguration`, `identity`), `com.azure.spring:spring-cloud-azure-*`, `com.azure.spring:spring-messaging-azure-*` |
-| Google Cloud | `com.google.cloud:google-cloud-*` (`storage`, `firestore`, `pubsub`, `secretmanager`, `parametermanager`, `eventarc-publishing`), `com.google.cloud:spring-cloud-gcp-*`, `com.google.cloud.sql:*-socket-factory` |
+| Google Cloud | `com.google.cloud:google-cloud-*` (`storage`, `firestore`, `pubsub`, `secretmanager`, `parametermanager`, `eventarc-publishing`), `com.google.cloud:spring-cloud-gcp-*`, `com.google.cloud.sql:*-socket-factory`, `com.google.cloud.hosted.kafka:managed-kafka-auth-login-handler` |
 | Any | `org.springframework.cloud:spring-cloud-stream-binder-*` (Kafka, SQS, Pub/Sub, Service Bus), `spring-kafka`, `spring-boot-starter-data-redis`, `org.testcontainers:localstack` |
 
 ## Code
@@ -24,7 +24,11 @@ grep -rnE "com\.azure\.(storage|cosmos|messaging|security\.keyvault|data\.appcon
 # Google Cloud SDK and Spring Cloud GCP
 grep -rnE "com\.google\.cloud\.(storage|firestore|pubsub|secretmanager|parametermanager)|com\.google\.cloud\.spring|PubSubTemplate|PubSubSubscriberTemplate|\.subscribe\(|PubSubInboundChannelAdapter|FirestoreReactiveRepository|FirestoreTemplate|@Document\(collectionName|\"gs://|SecretManagerServiceClient|Storage\b.*getService" src
 # Caches, Kafka and SQL with a cloud login
-grep -rnE "RedisTemplate|StringRedisTemplate|LettuceConnectionFactory|@Cacheable|@EnableCaching|KafkaTemplate|@KafkaListener|IAMLoginModule|IAMClientCallbackHandler|aws-wrapper|azure.passwordless|cloudSqlInstance" src
+grep -rnE "RedisTemplate|StringRedisTemplate|LettuceConnectionFactory|LettuceClientConfigurationBuilderCustomizer|RedisCredentialsProvider|RedisCacheManagerBuilderCustomizer|RedisCacheConfiguration|@Cacheable|@CacheEvict|@EnableCaching|opsForValue\(\)\.increment|KafkaTemplate|@KafkaListener|groupId|IAMLoginModule|IAMClientCallbackHandler|GcpLoginCallbackHandler|aws-wrapper|azure.passwordless|cloudSqlInstance" src
+# Events SDKs, and the clients built by hand around them
+grep -rnE "EventBridgeClient|putEvents|EventGridSenderClient|EventGridReceiverClient|eventarc\.publishing|PublisherClient|PublishRequest" src
+# Tests that wire containers into Boot's own beans (they won't reach Halyx's)
+grep -rnE "@ServiceConnection|@MockitoBean|@MockBean" src/test
 ```
 
 ## Configuration
@@ -53,3 +57,11 @@ grep -rnE "^\s*(aws|azure|gcp|kafka|redis|datasource|stream):|aws-parameterstore
   store's key naming and its metadata.
 - **IAM:** the permissions the service's role has today; Halyx needs a few the old code may not have
   ([differences.md](differences.md#permissions)).
+- **Who else reads it:** cache entries, counters and keys that dashboards or other services read; Kafka records
+  other teams consume (the value format and `JsonSerializer`'s type headers); events whose rules and consumers sit
+  outside the service. Each is a contract the migration must keep, or change with its owners.
+- **Hand-written cloud glue:** credential providers, token signers and client beans built for IAM logins
+  (ElastiCache SigV4 tokens, Memorystore access tokens, `EventBridgeClient` or `PublisherClient` beans). Halyx
+  replaces them; list them so they are deleted, not left behind.
+- **Bean names:** every `@Component`, `@Service`, `@Configuration` class (in lower camel case) and `@Bean`
+  method. The `halyx.*` keys you choose must not repeat them.

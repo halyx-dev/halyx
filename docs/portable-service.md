@@ -114,19 +114,33 @@ or run `/migrate-to-halyx`. The skill works in phases:
 5. A report of what changed, what behaves differently, and what was left on native clients.
 
 Its references hold the mappings for each cloud, the differences that matter (decimals, ordering, delays, event
-formats, data layouts, the permissions Halyx's health checks need) and the test patterns. It was tried on
-one service per cloud, each migrated step by step on its emulators:
+formats, data layouts, the permissions Halyx's health checks need), how old and new instances work side by side
+during a rollout, and the test patterns. It was tried on six services, two per cloud, each migrated step by step on
+emulators and containers:
 
 | Before | Services | Result |
 |---|---|---|
 | Spring Cloud AWS 3.4 | S3, DynamoDB (`DynamoDbTemplate`), SNS, SQS (`@SqsListener`), Parameter Store | 5/5 |
+| Spring Cloud AWS 3.4 and the AWS SDK | EventBridge to SQS, MSK, ElastiCache and RDS with IAM (`aws-msk-iam-auth`, a hand-signed token, the AWS JDBC Wrapper); `KafkaTemplate`, `@Cacheable`, JPA and Flyway | 14/14 |
 | Spring Cloud Azure 5.22 | Blob Storage, Cosmos DB (`CosmosRepository`), Service Bus (`ServiceBusTemplate`, `@ServiceBusListener`) | 5/5 |
+| Spring Cloud Azure 5.22 and the Azure SDK | Event Grid namespaces, and passwordless Event Hubs (Kafka), Azure Managed Redis and PostgreSQL | 12/12 |
 | Spring Cloud GCP 7.4 | Cloud Storage, Firestore (`FirestoreReactiveRepository`), Pub/Sub (`PubSubTemplate`) | 5/5 |
+| Spring Cloud GCP 7.4 and the Google Cloud SDK | Eventarc Advanced, and Managed Kafka, Memorystore and Cloud SQL with IAM | 11/11 |
 
-In each, the original emulator tests passed with their assertions unchanged. Data written by the old library before
-the migration (DynamoDB items, Cosmos DB items with UUID ids, Firestore documents) read correctly through Halyx. And
-a memory-provider test was added. The trials found a Halyx bug, now fixed: next to another Spring Data module, both
-claimed every repository.
+In each, the original tests passed with their assertions unchanged. The two exceptions were event checks: they had
+read a mocked SDK client, and now read the Halyx bus (the same values through Halyx's `CloudEvent` accessors).
+Every trial also added three tests:
+- a memory-provider (or `local` profile) test
+- a test of the production profile, checking what it resolves to
+- a test starting the migrated service on what the old one left behind
+
+The old service's state covered DynamoDB items, Cosmos DB items with UUID ids and Firestore documents, plus Flyway
+history, Spring's cache entries, rate and lifetime counters, committed Kafka offsets, and old-format events from
+instances still being replaced. Each compatibility setting was also broken on purpose to show the tests notice.
+
+The trials found one Halyx bug, now fixed: next to another Spring Data module, both claimed every repository. They
+also gave two startup errors clearer messages: `halyx.databases` and `halyx.spring-kafka` on the memory provider now
+say what to use instead.
 
 ## On Kubernetes: EKS, GKE and AKS
 

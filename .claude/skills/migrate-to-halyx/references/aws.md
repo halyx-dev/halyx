@@ -96,27 +96,42 @@ entry's `Source` and `DetailType`, so rules on those still match, but `detail` h
 the old payload under `data`. Rules that match on payload fields (`detail.status`) must become `detail.data.status`,
 and consumers outside Halyx must read `detail.data`. Plan that change with the rule owners. Halyx consumers receive
 through the rule's target queue: `halyx.subscriptions.<key>.name: <queue>`, with a `CloudEvent` listener parameter.
-They also decode AWS service events (with `detail-type` as the type and `detail` as the data).
+They also decode AWS service events, and events from instances still on the old code, with `detail-type` as the type
+and `detail` as the data. During the rollout both formats are on the bus: change the rules first, as
+[differences.md](differences.md#rollout-old-and-new-instances-side-by-side) describes (tested on Floci: `$or` patterns,
+`exists` on `detail.specversion`, and an input transformer that keeps an outside consumer's envelope unchanged).
+
+```java
+// Before: EventBridgeClient.putEvents(... .source("acme.loyalty").detailType("TierChanged").detail(json))
+tierEvents.publish(CloudEvent.builder("TierChanged", "acme.loyalty").subject(memberId).json(json).build());
+```
 
 ## Streams: MSK
 
 - Spring Kafka with `aws-msk-iam-auth` (`sasl.jaas.config: ...IAMLoginModule required;`): drop the SASL settings and
   `spring.kafka.bootstrap-servers`, define `halyx.stream-clusters.events: { bootstrap-servers, auth: { type: iam } }`,
-  and set `halyx.spring-kafka.cluster: events`. `KafkaTemplate` and `@KafkaListener` stay as they are.
+  and set `halyx.spring-kafka.cluster: events`. `KafkaTemplate` and `@KafkaListener` stay as they are, and so do
+  the serializers, the group ids and the record format other teams read. Drop `aws-msk-iam-auth`. Put both in the
+  cloud profile: a `local` profile keeps `spring.kafka.bootstrap-servers` (see [testing.md](testing.md)).
 - Or move to `StreamProducer` and `@HalyxListener` on `halyx.stream-consumers` for retries and dead letters in Halyx.
 
 ## Caches: ElastiCache
 
 `spring.data.redis.*` with an ElastiCache endpoint: for key-value use, a `halyx.caches.<key>` bean with
 `auth: { type: iam, username }` and `properties: { aws.elasticache.cache-name: <replication group> }`. For
-`@Cacheable`, `halyx.cache-manager` with the same settings. `RedisTemplate` features beyond key-value, TTLs,
+`@Cacheable`, `halyx.cache-manager` with the same settings (a YAML anchor shares them). Hand-written IAM code goes:
+a `LettuceClientConfigurationBuilderCustomizer` or `RedisCredentialsProviderFactory` presigning `Action=connect`
+with SigV4. `StringRedisTemplate` counters (`INCR`, then `EXPIRE` on the first) become
+`increment(key, 1, ttl)` on a `Cache<String>` with `namespace: ""`, which keeps the keys. `RedisTemplate` features beyond key-value, TTLs,
 counters and locks (streams, pub/sub, sorted sets, Lua) have no Halyx equivalent: keep Spring Data Redis for them.
 
 ## SQL: RDS and Aurora
 
-`jdbc:aws-wrapper:postgresql://...?wrapperPlugins=iam`, or a hand-built token provider: `halyx.databases.orders:
-{ engine: postgresql, host, database, auth: { type: iam, username } }`. Remove `spring.datasource.url`, `username`
-and `password`; Boot's `DataSourceAutoConfiguration` backs off. Passwords from Secrets Manager:
+`jdbc:aws-wrapper:postgresql://...?wrapperPlugins=iam`, or a hand-built token provider: `halyx.databases.orders-db:
+{ engine: postgresql, host, database, auth: { type: iam, username }, pool: { max-size, min-idle } }`. Remove
+`spring.datasource.*`, including `driver-class-name: software.amazon.jdbc.Driver` and `hikari.*` (the pool settings
+move to `pool`); Boot's `DataSourceAutoConfiguration` backs off. JPA, `JdbcTemplate` and Flyway use the Halyx pool,
+and the Flyway history carries over. Passwords from Secrets Manager:
 `auth: { type: password, username, secret: { store: secrets, name: orders/db, field: password } }`. The AWS Advanced
 JDBC Wrapper's failover plugins have no Halyx equivalent yet: point `host` at the cluster endpoint.
 

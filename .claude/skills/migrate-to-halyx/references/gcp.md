@@ -80,28 +80,45 @@ orderEvents.publish(json);
 ## Events: Eventarc Advanced
 
 Halyx publishes CloudEvents to an **Eventarc Advanced message bus** (`halyx.event-buses.<key>.name: <bus resource
-name>`). Consumers read the Pub/Sub subscription its pipeline delivers to. Eventarc Standard triggers, and events
+name>`). Consumers read the Pub/Sub subscription its pipeline delivers to.
+
+```java
+// Before: google-cloud-eventarc-publishing, a CloudEvents JSON message
+publisherClient.publish(PublishRequest.newBuilder().setMessageBus(bus).setJsonMessage(cloudEventJson).build());
+// After: halyx.event-buses.price-events.name: projects/<p>/locations/<l>/messageBuses/<bus>
+priceEvents.publish(CloudEvent.builder("com.acme.catalog.price.changed", "//catalog.acme.com/products")
+        .subject(sku).json(data).build());
+```
+
+Keep the type, source, subject and data, and the enrollments' CEL filters and the subscribers see no change. The
+`PublisherClient` bean goes. Eventarc Standard triggers, and events
 published straight to Pub/Sub as a CloudEvents convention, aren't a bus: keep those as messaging.
 
 ## Streams: Managed Service for Apache Kafka
 
 Spring Kafka with Google's login callback handler (`GcpLoginCallbackHandler`, `SASL_SSL` with `OAUTHBEARER`):
 `halyx.stream-clusters.events: { bootstrap-servers: bootstrap.<cluster>.<region>.managedkafka.<project>.cloud.goog:9092,
-auth: { type: iam } }` and `halyx.spring-kafka.cluster: events`. Halyx finds the principal from the credentials; set
+auth: { type: iam } }` and `halyx.spring-kafka.cluster: events`, in the cloud profile. Drop the SASL settings and
+`managed-kafka-auth-login-handler`; `KafkaTemplate`, `@KafkaListener`, the serializers and the group ids stay. Halyx finds the principal from the credentials; set
 `properties.gcp.kafka.principal` only for user credentials.
 
 ## Caches: Memorystore
 
 `spring.data.redis.*` with Memorystore: `halyx.caches.<key>: { endpoint: rediss://<ip>:<port>, auth: { type: iam } }`
-for IAM auth (the identity needs `roles/memorystore.dbConnectionUser`). With in-transit encryption, the server CA:
-`properties: { redis.ca-certificate: <path to the instance's CA PEM>, redis.verify-peer: ca }`.
+for IAM auth (the identity needs `roles/memorystore.dbConnectionUser`), or `halyx.cache-manager` for `@Cacheable`.
+A hand-written token provider (a `RedisCredentialsProvider` returning a `GoogleCredentials` access token) goes. With
+in-transit encryption, the server CA, which Boot took as an SSL bundle (`spring.ssl.bundle.pem.*`):
+`properties: { redis.ca-certificate: <path to the instance's CA PEM> }`, plus `redis.verify-peer: ca` where the
+certificate can't name the address (a tunnel, or Private Service Connect).
 
 ## SQL: Cloud SQL
 
 `spring-cloud-gcp-starter-sql-postgresql` (`spring.cloud.gcp.sql.instance-connection-name`,
-`database-name`): `halyx.databases.orders: { engine: postgresql, database, auth: { type: iam, username: <service
-account email without .gserviceaccount.com> }, properties: { gcp.sql.instance: <project:region:instance> } }`, with
-`com.google.cloud.sql:postgres-socket-factory` at runtime (the connector). Or connect to the instance's IP with `host`
+`database-name`, `enable-iam-auth`): `halyx.databases.orders-db: { engine: postgresql, database, auth: { type: iam },
+properties: { gcp.sql.instance: <project:region:instance> } }`, with `com.google.cloud.sql:postgres-socket-factory`
+at runtime (the connector). The username is derived from the service account (`app@project.iam`); set
+`auth.username` only for another one. While Spring Cloud GCP is still present, the socket factory switches on its
+Cloud SQL processing: set `spring.cloud.gcp.sql.enabled: false` (see [differences.md](differences.md#runtime)). Or connect to the instance's IP with `host`
 and no connector. MySQL takes the full email as the username.
 
 ## No Halyx equivalent

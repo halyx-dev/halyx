@@ -11,7 +11,7 @@ CLI. Keys and connection strings are for emulators only. Resources keep their na
 | `spring.cloud.azure.storage.blob.account-name` / `endpoint` | `halyx.providers.azure.properties.azure.storage.account` |
 | `spring.cloud.azure.cosmos.endpoint`, `.database` | `azure.cosmos.endpoint`, `azure.cosmos.database` provider properties |
 | `spring.cloud.azure.servicebus.namespace` | `azure.servicebus.namespace: <name>.servicebus.windows.net` |
-| `spring.cloud.azure.credential.*`, `client-id` for a user-assigned identity | the default chain; for an Entra application outside Azure, `credentials: { type: service-principal, tenant-id, client-id, secret \| certificate \| token-file }` |
+| `spring.cloud.azure.credential.*`, `client-id` for a user-assigned identity | the default chain. It takes a user-assigned identity's client id from the `AZURE_CLIENT_ID` environment variable, so that setting moves to the deployment (workload identity on AKS sets it already). For an Entra application outside Azure, `credentials: { type: service-principal, tenant-id, client-id, secret \| certificate \| token-file }` |
 | Key Vault property sources (`spring.cloud.azure.keyvault.secret.property-sources[0].endpoint`) | `spring.config.import: halyx:secrets`, with `halyx.parameter-stores.secrets: { kind: secrets, location: <vault URL> }` |
 | App Configuration (`spring.cloud.azure.appconfiguration.stores[0].endpoint`, key filters, labels) | `halyx:settings`, with `halyx.parameter-stores.settings: { kind: parameters, location: <endpoint>, prefix, properties: { azure.appconfig.label: <label> } }` |
 
@@ -93,24 +93,40 @@ subscriptions.
 **Basic Event Grid topics and the Event Grid schema have no Halyx equivalent:** moving to a namespace topic is an
 infrastructure change and a format change for consumers. Raise it in the plan.
 
+```java
+// Before: azure-messaging-eventgrid-namespaces
+sender.send(new com.azure.core.models.CloudEvent("/bookings", "com.acme.booking.confirmed",
+        BinaryData.fromObject(data), CloudEventDataFormat.JSON, "application/json").setSubject(id));
+// After: halyx.event-buses.booking-events: { name: bookings, properties: { azure.eventgrid.endpoint: https://... } }
+bookingEvents.publish(CloudEvent.builder("com.acme.booking.confirmed", "/bookings").subject(id).json(json).build());
+```
+
+Both are CloudEvents 1.0 on the namespace topic, so subscribers see the same type, source, subject and data. The
+`EventGridSenderClient` bean and its `TokenCredential` go.
+
 ## Streams: Event Hubs (Kafka endpoint)
 
 Spring Kafka against `<namespace>.servicebus.windows.net:9093` with OAUTHBEARER (Spring Cloud Azure's passwordless
-Kafka): `halyx.stream-clusters.events: { bootstrap-servers: <namespace>.servicebus.windows.net:9093, auth: { type:
-iam } }` and `halyx.spring-kafka.cluster: events`. Code using the native `EventHubProducerClient` and
+Kafka, which `spring-cloud-azure-starter` adds when the bootstrap servers are an Event Hubs namespace):
+`halyx.stream-clusters.events: { bootstrap-servers: <namespace>.servicebus.windows.net:9093, auth: { type:
+iam } }` and `halyx.spring-kafka.cluster: events`, in the cloud profile. `KafkaTemplate`, `@KafkaListener`, the
+serializers and the group ids stay. Code using the native `EventHubProducerClient` and
 `EventProcessorClient` (AMQP, checkpoints in Blob Storage) moves to `StreamProducer` and `@HalyxListener` on the Kafka
 endpoint. Offsets then live in Kafka consumer groups, not the checkpoint store, so plan where consumers start.
 
 ## Caches: Azure Cache for Redis, Azure Managed Redis
 
-`spring.data.redis.*`, with `azure.passwordless-enabled` or an access key, becomes `halyx.caches.<key>: { endpoint:
-rediss://<host>:<port>, auth: { type: iam, username: <the identity's object id> } }`, or `halyx.cache-manager` for
-`@Cacheable`. The identity needs a data access policy assignment on the cache.
+`spring.data.redis.*`, with `azure.passwordless-enabled` (`spring-cloud-azure-starter-data-redis-lettuce`) or an
+access key, becomes `halyx.caches.<key>: { endpoint: rediss://<host>:<port>, auth: { type: iam, username: <the
+identity's object id> } }`, or `halyx.cache-manager` for `@Cacheable` (with `codec: jdk` for Spring's default
+serializer, and `trusted-packages`). Keep existing `StringRedisTemplate` keys with `namespace: ""`. The identity needs a data access policy assignment on the cache.
 
 ## SQL: Azure Database for PostgreSQL and MySQL, Azure SQL
 
-`spring.datasource.azure.passwordless-enabled: true`: `halyx.databases.orders: { engine: postgresql | mysql |
-sqlserver, host, database, auth: { type: iam, username: <the Entra principal's database role> } }`.
+`spring.datasource.azure.passwordless-enabled: true` (`spring-cloud-azure-starter-jdbc-postgresql` or `-mysql`):
+`halyx.databases.orders-db: { engine: postgresql | mysql | sqlserver, host, database, auth: { type: iam, username:
+<the Entra principal's database role> } }`, the host from the JDBC URL. Halyx's IAM login turns on TLS, so
+`sslmode=require` needs no setting.
 
 ## No Halyx equivalent
 
