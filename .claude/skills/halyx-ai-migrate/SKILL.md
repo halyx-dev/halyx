@@ -1,5 +1,5 @@
 ---
-name: migrate-to-halyx
+name: halyx-ai-migrate
 description: Migrate an existing Spring Boot microservice from AWS, Azure or Google Cloud SDKs (Spring Cloud AWS, Spring Cloud Azure, Spring Cloud GCP, or the raw SDKs) to Halyx, so it runs unchanged on any cloud. Use when asked to migrate, port or convert a service to Halyx, to make a service cloud-agnostic or portable, to assess how much work a migration is, or to replace S3Template, SqsTemplate, @SqsListener, DynamoDbTemplate, ServiceBusTemplate, @ServiceBusListener, CosmosRepository, PubSubTemplate, Firestore repositories, aws-parameterstore:, sm:// or Key Vault property sources with Halyx.
 ---
 
@@ -92,6 +92,8 @@ After the last area, add the two tests no existing test covers ([testing.md](ref
   entries, counters, committed Kafka offsets, old-format events), with one deliberate mistake per area to show the
   test can fail
 - **the production profile:** what the cloud profile resolves to, without connecting anywhere
+
+Then start the packaged jar or image once: the test classpath can hold dependencies the package doesn't.
 
 ## Phase 4: make the cloud a profile
 

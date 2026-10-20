@@ -44,7 +44,12 @@ Spring Boot's own dependency management wins for the libraries it manages. On Bo
 than Halyx's `pom.xml` says.
 
 The provider modules bring the cloud SDKs, the Redis and Valkey driver, SQL IAM login and the Kafka login, so the
-service drops its own SDK dependencies. Their SDK clients can switch on the old library's auto-configuration while
+service drops its own SDK dependencies. **Don't re-declare an SDK artifact with `<scope>test</scope>`** for the
+tests' own clients (provisioning an emulator, reading a queue). A direct declaration wins over the transitive one,
+so `software.amazon.awssdk:sqs` at test scope makes `halyx-aws`'s SQS client test-only. Every test still passes,
+since the test classpath has it, and the packaged service fails at startup with `NoClassDefFoundError`. This
+happened in a trial and was found only on EKS. The tests can use the clients the provider module brings. Check
+with `mvn dependency:list -DincludeScope=runtime`. Their SDK clients can switch on the old library's auto-configuration while
 both are present: see [differences.md](differences.md#runtime). On Google Cloud, the Cloud SQL connector needs
 `com.google.cloud.sql:postgres-socket-factory` (or the MySQL one) on the runtime classpath. Spring Boot 3.5 and 4
 both work.

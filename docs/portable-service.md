@@ -98,50 +98,6 @@ all configuration:
 | Numbers: DynamoDB, Cosmos DB and Firestore don't keep a decimal's scale, so `3.50` reads back as `3.5` | the receipt formats amounts itself |
 | Bean names: a `halyx.*` key is a bean name, so a class called `Fulfilment` can't sit next to `halyx.subscriptions.fulfilment` | Halyx fails at startup, naming both; the sample's classes are `OrderFulfilment`, `ReceiptService` and so on |
 
-## Migrating an existing service
-
-The repository has a Claude Code skill for moving an existing Spring Boot service onto Halyx:
-`.claude/skills/migrate-to-halyx`. It works from Spring Cloud AWS, Spring Cloud Azure, Spring Cloud GCP or the raw SDKs.
-Copy the folder into the service's repository (or `~/.claude/skills`) and ask Claude Code to migrate the service,
-or run `/migrate-to-halyx`. The skill works in phases:
-
-1. An inventory of every cloud SDK, template, listener, property and config import, each with its Halyx
-   equivalent and a risk: none, behaviour, data, or no equivalent.
-2. A plan, including whether Halyx can read the existing data as it's stored. **The skill stops here for approval.**
-3. One area per change (dependencies, configuration, storage, documents, messaging, events, streams, caches and
-   SQL), with the existing tests kept passing and memory-provider tests added.
-4. Optionally, the cloud as a profile, as in this sample.
-5. A report of what changed, what behaves differently, and what was left on native clients.
-
-Its references hold the mappings for each cloud, the differences that matter (decimals, ordering, delays, event
-formats, data layouts, the permissions Halyx's health checks need), how old and new instances work side by side
-during a rollout, and the test patterns. It was tried on six services, two per cloud, each migrated step by step on
-emulators and containers:
-
-| Before | Services | Result |
-|---|---|---|
-| Spring Cloud AWS 3.4 | S3, DynamoDB (`DynamoDbTemplate`), SNS, SQS (`@SqsListener`), Parameter Store | 5/5 |
-| Spring Cloud AWS 3.4 and the AWS SDK | EventBridge to SQS, MSK, ElastiCache and RDS with IAM (`aws-msk-iam-auth`, a hand-signed token, the AWS JDBC Wrapper); `KafkaTemplate`, `@Cacheable`, JPA and Flyway | 14/14 |
-| Spring Cloud Azure 5.22 | Blob Storage, Cosmos DB (`CosmosRepository`), Service Bus (`ServiceBusTemplate`, `@ServiceBusListener`) | 5/5 |
-| Spring Cloud Azure 5.22 and the Azure SDK | Event Grid namespaces, and passwordless Event Hubs (Kafka), Azure Managed Redis and PostgreSQL | 12/12 |
-| Spring Cloud GCP 7.4 | Cloud Storage, Firestore (`FirestoreReactiveRepository`), Pub/Sub (`PubSubTemplate`) | 5/5 |
-| Spring Cloud GCP 7.4 and the Google Cloud SDK | Eventarc Advanced, and Managed Kafka, Memorystore and Cloud SQL with IAM | 11/11 |
-
-In each, the original tests passed with their assertions unchanged. The two exceptions were event checks: they had
-read a mocked SDK client, and now read the Halyx bus (the same values through Halyx's `CloudEvent` accessors).
-Every trial also added three tests:
-- a memory-provider (or `local` profile) test
-- a test of the production profile, checking what it resolves to
-- a test starting the migrated service on what the old one left behind
-
-The old service's state covered DynamoDB items, Cosmos DB items with UUID ids and Firestore documents, plus Flyway
-history, Spring's cache entries, rate and lifetime counters, committed Kafka offsets, and old-format events from
-instances still being replaced. Each compatibility setting was also broken on purpose to show the tests notice.
-
-The trials found one Halyx bug, now fixed: next to another Spring Data module, both claimed every repository. They
-also gave two startup errors clearer messages: `halyx.databases` and `halyx.spring-kafka` on the memory provider now
-say what to use instead.
-
 ## On Kubernetes: EKS, GKE and AKS
 
 The Helm chart in `halyx-samples/portable-orders/deploy/helm/portable-orders` deploys the same image on any cluster.

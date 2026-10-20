@@ -225,36 +225,19 @@ try (Halyx halyx = Halyx.builder()
 Add `halyx-core` plus the provider modules (`halyx-aws`, `halyx-azure`, `halyx-gcp`, `halyx-vault`)
 to your build, ideally through the `halyx-bom`; add `halyx-reactor` for `Mono` and `Flux` views of every service. See [Getting started](https://halyx-dev.github.io/halyx/getting-started.html).
 
-## Migrating existing microservices with AI
+## AI skills
 
-Moving a Spring Boot service from a cloud's SDK to Halyx is mostly mechanical, which suits an AI coding assistant.
-The repository includes a [Claude Code](https://claude.com/claude-code) skill for it,
-[`.claude/skills/migrate-to-halyx`](.claude/skills/migrate-to-halyx). It covers Spring Cloud AWS, Spring Cloud
-Azure, Spring Cloud GCP and the raw SDKs: `S3Template`, `@SqsListener`, `DynamoDbTemplate`, `@ServiceBusListener`,
-`CosmosRepository`, `PubSubTemplate`, `aws-parameterstore:`, `sm://` and the rest.
+The repository includes skills for AI coding assistants, in [`.claude/skills`](.claude/skills). Each is plain
+Markdown: Claude Code runs it as a skill, and other assistants can follow it as instructions.
 
-Copy the folder into your service's repository (or `~/.claude/skills`), then ask Claude Code to migrate the
-service to Halyx, or run `/migrate-to-halyx`. It works in reviewable steps:
+| Skill | Does |
+|---|---|
+| [`halyx-ai-migrate`](.claude/skills/halyx-ai-migrate) | migrates an existing Spring Boot service from a cloud's SDK, or Spring Cloud AWS, Azure or GCP, to Halyx, one reviewed step at a time |
+| [`halyx-ai-review`](.claude/skills/halyx-ai-review) | reviews a Halyx service for anything that still ties it to one cloud, with a verdict per cloud (read-only) |
 
-1. **Inventory:** every cloud SDK use, template, listener, property and config import, each with its Halyx
-   equivalent and a risk.
-2. **Plan:** what maps directly and what behaves differently (ordering, delays, decimals, event formats). It checks
-   whether Halyx can read your existing tables, containers and parameters as they're stored, and lists what has no
-   portable equivalent and stays on the native client. It stops here for your approval.
-3. **Migrate one area at a time:** configuration, storage, documents, messaging, events, streams, caches and SQL.
-   Your existing tests keep passing, and memory-provider tests are added.
-4. **Optionally, make the cloud a Spring profile,** as [`halyx-samples/portable-orders`](halyx-samples/portable-orders)
-   does.
-5. **Report:** what changed, the differences to tolerate, and the follow-ups, such as IAM changes and data
-   migrations.
-
-It has been tried on six Spring Cloud services, two per cloud, which between them use every kind of service Halyx covers. Each passed
-its original tests, and started cleanly on the data, cache entries, counters, Kafka offsets and events the old
-version left behind. Its reference files (cloud-by-cloud mappings, known differences and test patterns) are
-plain Markdown, so other
-assistants can use them too: point yours at
-[`SKILL.md`](.claude/skills/migrate-to-halyx/SKILL.md) as its instructions. See
-[Portable microservice](https://halyx-dev.github.io/halyx/portable-service.html#migrating-an-existing-service).
+Copy a skill's folder into your service's `.claude/skills` (or `~/.claude/skills`), then ask for the job or run
+`/halyx-ai-migrate` or `/halyx-ai-review`. See [AI skills](https://halyx-dev.github.io/halyx/ai-skills.html), and
+[Migrating to Halyx](https://halyx-dev.github.io/halyx/migration.html) for the method and the trial migrations.
 
 ## Documentation
 
@@ -267,6 +250,8 @@ assistants can use them too: point yours at
 | [Provider configuration](https://halyx-dev.github.io/halyx/providers.html) | credentials, regions, endpoints and every provider setting |
 | [Spring Boot](https://halyx-dev.github.io/halyx/spring-boot.html) | the starter, properties, listeners, health, metrics, configuration import, [Spring Data repositories](https://halyx-dev.github.io/halyx/spring-boot.html#spring-data-repositories), R2DBC and Spring for Apache Kafka |
 | [Portable microservice](https://halyx-dev.github.io/halyx/portable-service.html) | a sample Spring Boot service that runs unchanged on every cloud, and how it's tested |
+| [Migrating to Halyx](https://halyx-dev.github.io/halyx/migration.html) | moving an existing Spring Boot service onto Halyx, with an AI assistant or by hand: mappings, existing data, rollouts and testing |
+| [AI skills](https://halyx-dev.github.io/halyx/ai-skills.html) | skills for AI coding assistants: migrating a service to Halyx, and reviewing one for portability |
 | [Design, build and test](https://halyx-dev.github.io/halyx/design.html) | architecture, building, the conformance kits and benchmarks |
 | [Cloud testing](https://halyx-dev.github.io/halyx/cloud-testing/) | results on real [AWS](https://halyx-dev.github.io/halyx/cloud-testing/aws.html), [Google Cloud](https://halyx-dev.github.io/halyx/cloud-testing/gcp.html) and [Azure](https://halyx-dev.github.io/halyx/cloud-testing/azure.html) |
 | [Roadmap](https://halyx-dev.github.io/halyx/roadmap.html) | what's done and what's next |

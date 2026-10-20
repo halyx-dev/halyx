@@ -1,6 +1,6 @@
 ---
 title: Design, build and test
-nav_order: 7
+nav_order: 9
 ---
 
 # Design, build, test and benchmarks
@@ -89,6 +89,11 @@ that.
 | `halyx-spring-boot4-tests` | the shared Spring and Spring Data tests run on Boot 4 (not published) |
 | `halyx-benchmarks` | JMH benchmarks and a load-test harness (not published) |
 | `halyx-samples` | `portable-orders`, a Spring Boot 4 service on every Halyx API, and `portable-orders-boot3`, the same on Boot 3.5, with their end-to-end tests (not published); see [Portable microservice](portable-service.md) |
+
+### AI skills
+
+The skills for AI coding assistants live in `.claude/skills/`, outside the Maven reactor, and are named
+`halyx-ai-<verb>` so they can't be mistaken for modules. See [AI skills](ai-skills.md).
 
 ## Build
 

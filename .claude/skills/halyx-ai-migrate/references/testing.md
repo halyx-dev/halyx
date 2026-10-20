@@ -137,6 +137,13 @@ old instances for the length of a rollout. Add one test class that seeds that st
 Then make one deliberate mistake per area (drop `namespace: ""`, rename the consumer group, remove a rule's
 old-format branch) and check that the test fails. A mistake the test doesn't notice shows the test is too weak.
 
+## The packaged service
+
+Every test above runs on the test classpath, which can hold what the packaged jar lacks. Start the built jar or
+image at least once, on emulators or a `local` profile, before the first deployment: `java -jar target/*.jar`
+with the profile's settings, or the image, as `portable-orders`' `ImageIT` does. A dependency left at test scope
+shows up there as `NoClassDefFoundError` at startup. In a trial it showed up only once the service was on EKS.
+
 ## The production profile
 
 No container or emulator test runs the cloud profile itself, so a typo there (a wrong key, an anchor that doesn't
