@@ -553,6 +553,9 @@ Startup fails with a message naming the property for:
   `secret`, `certificate` and `token-file`, or a password login without its password
 - a `json` cache without `trusted-packages`
 - `halyx.r2dbc-databases` without `halyx-r2dbc`, or `halyx.spring-kafka.cluster` without Spring for Apache Kafka
+- `halyx.databases` or `halyx.spring-kafka.cluster` on the memory provider, which has no SQL and whose streams
+  Spring for Apache Kafka can't use: a profile without a cloud uses Boot's `spring.datasource` and
+  `spring.kafka.bootstrap-servers` instead
 - a `@HalyxListener` naming no subscription or stream consumer, a second listener on one stream consumer, or
   `concurrency` on a stream consumer's listener
 - a bean named `messaging` or `streams`, which would hide a health entry of the same name

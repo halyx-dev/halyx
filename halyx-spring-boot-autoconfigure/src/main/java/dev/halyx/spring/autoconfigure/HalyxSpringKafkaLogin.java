@@ -16,6 +16,7 @@
 package dev.halyx.spring.autoconfigure;
 
 import dev.halyx.Halyx;
+import dev.halyx.error.UnsupportedFeatureException;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
@@ -57,8 +58,15 @@ final class HalyxSpringKafkaLogin implements BeanPostProcessor {
             String name = BlobStoreBeanRegistrar.resolveCluster("halyx.spring-kafka", cluster.isBlank() ? null : cluster,
                     config.streamClusters());
             HalyxProperties.StreamClusterProperties clusterProperties = config.streamClusters().get(name);
-            login = HalyxBlobStores.context(halyx.getObject(), "halyx.stream-clusters." + name, clusterProperties.provider())
-                    .kafkaClientProperties(clusterProperties.toStreamConfig(name));
+            try {
+                login = HalyxBlobStores.context(halyx.getObject(), "halyx.stream-clusters." + name, clusterProperties.provider())
+                        .kafkaClientProperties(clusterProperties.toStreamConfig(name));
+            } catch (UnsupportedFeatureException e) {
+                throw new IllegalStateException("halyx.spring-kafka.cluster=" + name + ": " + e.getMessage()
+                        + ". Spring for Apache Kafka needs a Kafka cluster, and the memory provider's streams run in "
+                        + "process: in a profile without a cloud, leave halyx.spring-kafka.cluster out and set "
+                        + "spring.kafka.bootstrap-servers", e);
+            }
         }
         return login;
     }

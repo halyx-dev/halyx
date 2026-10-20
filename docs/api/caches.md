@@ -35,7 +35,7 @@ Cache<String> sessions = halyx.provider("aws").cache(
 |---|---|
 | endpoint | `redis://host:port`, or `rediss://` for TLS |
 | `namespace(prefix)` | a key prefix, so several caches can share a server; `clear()` is limited to it |
-| `defaultTtl(duration)` | the expiry of writes that don't pass one |
+| `defaultTtl(duration)` | the expiry of `put`, `putAll`, `putIfAbsent` and `getOrLoad` writes that don't pass one; counters keep no expiry unless `increment(key, delta, ttl)` sets one |
 | `auth(CacheAuth)` | see [authentication](#authentication) |
 | `cluster(true)` | cluster mode, with topology refresh |
 | `failOpen(true)` | see [fail-open](#fail-open) |

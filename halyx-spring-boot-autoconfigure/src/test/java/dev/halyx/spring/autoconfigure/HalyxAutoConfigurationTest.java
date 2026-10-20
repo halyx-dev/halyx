@@ -34,6 +34,7 @@ import dev.halyx.spring.autoconfigure.observation.HalyxObservationAutoConfigurat
 import dev.halyx.storage.BlobContent;
 import dev.halyx.storage.BlobKey;
 import dev.halyx.storage.BlobStore;
+import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.FilteredClassLoader;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -42,6 +43,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.ResolvableType;
 import org.springframework.core.annotation.Order;
 
+import java.util.Map;
 import java.io.Serializable;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -430,6 +432,29 @@ class HalyxAutoConfigurationTest {
                 .withPropertyValues("halyx.providers.local.type=memory", "halyx.spring-kafka.cluster=events")
                 .run(context -> assertThat(context).hasFailed().getFailure().hasStackTraceContaining(
                         "halyx.spring-kafka.cluster is set, but Spring for Apache Kafka is not on the classpath"));
+    }
+
+    @Test
+    void aDatabaseOnTheMemoryProviderFailsAtStartupNamingSpringDatasource() {
+        runner.withPropertyValues("halyx.providers.local.type=memory", "halyx.databases.orders.engine=postgresql",
+                        "halyx.databases.orders.host=db", "halyx.databases.orders.database=orders",
+                        "halyx.databases.orders.auth.username=app", "halyx.databases.orders.auth.password=p")
+                .run(context -> assertThat(context).hasFailed().getFailure().hasStackTraceContaining(
+                        "halyx.databases.orders: SQL databases are not supported by this provider. The memory provider "
+                                + "has no SQL databases: in a profile without a cloud, configure Spring Boot's "
+                                + "spring.datasource instead"));
+    }
+
+    @Test
+    void springKafkaOnTheMemoryProviderFailsAtStartupNamingSpringKafkaBootstrapServers() {
+        runner.withConfiguration(AutoConfigurations.of(HalyxSpringKafkaAutoConfiguration.class))
+                .withPropertyValues("halyx.providers.local.type=memory", "halyx.spring-kafka.cluster=events",
+                        "halyx.stream-clusters.events.bootstrap-servers=memory:9092")
+                .withBean(DefaultKafkaProducerFactory.class, () -> new DefaultKafkaProducerFactory<>(Map.of()))
+                .run(context -> assertThat(context).hasFailed().getFailure().hasStackTraceContaining(
+                        "halyx.spring-kafka.cluster=events: Streams are not supported by this provider. Spring for "
+                                + "Apache Kafka needs a Kafka cluster")
+                        .hasStackTraceContaining("set spring.kafka.bootstrap-servers"));
     }
 
     // --- cache codecs --------------------------------------------------------------------------------

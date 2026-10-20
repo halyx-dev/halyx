@@ -20,6 +20,7 @@ import dev.halyx.Halyx;
 import dev.halyx.cache.Cache;
 import dev.halyx.cache.CacheConfig;
 import dev.halyx.cache.Codec;
+import dev.halyx.error.UnsupportedFeatureException;
 import dev.halyx.events.EventPublisher;
 import dev.halyx.messaging.Publisher;
 import dev.halyx.nosql.DocumentStore;
@@ -181,7 +182,12 @@ public final class HalyxBlobStores {
     private Database database(String property, String provider, String name, HalyxProperties.DatabaseProperties database,
                               ParameterStore secrets) {
         SqlAuth resolved = resolveAuth(property + ".auth", database.auth(), secrets);
-        return context(property, provider).database(database.toSqlConfig(name, resolved));
+        try {
+            return context(property, provider).database(database.toSqlConfig(name, resolved));
+        } catch (UnsupportedFeatureException e) {
+            throw new IllegalStateException(property + ": " + e.getMessage() + ". The memory provider has no SQL "
+                    + "databases: in a profile without a cloud, configure Spring Boot's spring.datasource instead", e);
+        }
     }
 
     /** The login of a database entry; {@code secrets} is its {@code auth.secret.store} bean, or null without one. */
