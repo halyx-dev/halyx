@@ -263,6 +263,12 @@
             <artifactId>context-propagation</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- A second Spring Data module, for the shared multi-module (strict mode) repository test -->
+        <dependency>
+            <groupId>org.springframework.data</groupId>
+            <artifactId>spring-data-keyvalue</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-simple</artifactId>

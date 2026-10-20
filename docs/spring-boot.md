@@ -189,7 +189,10 @@ interface OrderRepository extends DocumentRepository<Order, Key> {     // Key fo
 Index queries are eventually consistent on DynamoDB, as with `queryIndex`. There's no general `@Transactional`:
 use `DocumentStore.transact` for atomic writes across items. Without Spring Boot, `@EnableHalyxRepositories`
 creates the repositories over the application's `DocumentStore` beans; turn the auto-configuration off with
-`halyx.document-repositories.enabled=false`. Both work with the Spring Data each Boot version manages (2025.0 on Boot 3.5,
+`halyx.document-repositories.enabled=false`. Halyx repositories work alongside other Spring Data modules, such as
+JPA, JDBC, Spring Data Cosmos or Spring Cloud GCP's Firestore: each module claims only the repositories that
+extend its own repository types, so a service can move its entities to Halyx one at a time. Both work with the
+Spring Data each Boot version manages (2025.0 on Boot 3.5,
 2026.0 on Boot 4).
 
 ## Messaging
