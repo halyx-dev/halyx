@@ -1,0 +1,202 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+
+    Copyright 2026 Kamran Zafar
+
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>dev.halyx</groupId>
+        <artifactId>halyx-samples</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <!--
+      The portable orders service built from portable-orders' sources on Spring Boot 3.5, with the same end-to-end
+      tests: the sample's code is the same on both Boot lines.
+    -->
+    <artifactId>portable-orders-boot3</artifactId>
+    <name>Halyx :: Samples :: Portable orders on Spring Boot 3.5</name>
+
+    <properties>
+        <image.name>halyx/portable-orders-boot3:${project.version}</image.name>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <!--
+              BOMs imported here win over those imported by halyx-parent, so Boot's BOM decides Spring versions, as in a
+              real Boot application. Testcontainers must stay on 2.x (1.x cannot talk to Docker 29+): import it first.
+            -->
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>testcontainers-bom</artifactId>
+                <version>${testcontainers.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-dependencies</artifactId>
+                <version>${spring-boot3.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <dependency>
+            <groupId>dev.halyx</groupId>
+            <artifactId>halyx-spring-boot-starter</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <!-- Every provider, so the same jar runs on each cloud -->
+        <dependency>
+            <groupId>dev.halyx</groupId>
+            <artifactId>halyx-aws</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>dev.halyx</groupId>
+            <artifactId>halyx-azure</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>dev.halyx</groupId>
+            <artifactId>halyx-gcp</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>dev.halyx</groupId>
+            <artifactId>halyx-spring-data-document</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <!-- The Cloud SQL connector, for halyx.databases.*.properties.gcp.sql.instance on Google Cloud -->
+        <dependency>
+            <groupId>com.google.cloud.sql</groupId>
+            <artifactId>postgres-socket-factory</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-kafka</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>add-portable-orders-sources</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>add-source</goal>
+                            <goal>add-resource</goal>
+                        </goals>
+                        <configuration>
+                            <sources>
+                                <source>../portable-orders/src/main/java</source>
+                            </sources>
+                            <resources>
+                                <resource>
+                                    <directory>../portable-orders/src/main/resources</directory>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>add-portable-orders-tests</id>
+                        <phase>generate-test-sources</phase>
+                        <goals>
+                            <goal>add-test-source</goal>
+                        </goals>
+                        <configuration>
+                            <sources>
+                                <source>../portable-orders/src/test/java</source>
+                            </sources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <version>${spring-boot3.version}</version>
+                <configuration>
+                    <image>
+                        <name>${image.name}</name>
+                    </image>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <configuration>
+                    <classesDirectory>${project.build.outputDirectory}</classesDirectory>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

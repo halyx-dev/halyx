@@ -57,6 +57,7 @@
         <module>halyx-spring-boot4-tests</module>
         <module>halyx-reactor-tests</module>
         <module>halyx-benchmarks</module>
+        <module>halyx-samples</module>
     </modules>
 
     <properties>

@@ -1,0 +1,44 @@
+image:
+  repository: halyx/portable-orders
+  tag: 1.0.0-SNAPSHOT
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+replicas: 1
+
+# The Spring profiles: one cloud (local, aws, azure or gcp) and any of events, streams, cache and sql.
+profiles:
+  - local
+
+# Environment variables: the ORDERS_* resource names, AWS_REGION, GOOGLE_CLOUD_PROJECT and so on.
+env: {}
+
+# More Spring configuration, as YAML, for what environment variables can't express, such as provider properties.
+config: ""
+
+# Files mounted under /etc/portable-orders/files, such as a cache's CA certificate.
+files: {}
+
+# The workload identity the pods log in to the cloud as. The chart only names it; the cluster and the cloud bind it:
+#   EKS: an EKS Pod Identity association for this service account (no annotation)
+#   GKE: iam.gke.io/gcp-service-account: <service account email>
+#   AKS: azure.workload.identity/client-id: <managed identity client id>, with the pod label below
+serviceAccount:
+  name: portable-orders
+  annotations: {}
+
+podLabels: {}    # AKS: azure.workload.identity/use: "true"
+
+# JVM options. The buildpack's memory calculator caps direct memory at 10 MB unless it is set here; the cloud SDKs'
+# Netty clients need more (Azure's ran out at 10 MB). The calculator sizes the heap around what is set.
+javaToolOptions: "-XX:MaxDirectMemorySize=64M"
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 1Gi
+  limits:
+    memory: 1536Mi
+
+service:
+  port: 80

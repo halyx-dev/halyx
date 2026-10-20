@@ -113,6 +113,10 @@ type, region and resource names. So the same build can:
 - fail over, or exit a cloud, with a plan that is realistic rather than theoretical
 - run unit tests against the in-memory provider and integration tests against emulators
 
+[`halyx-samples/portable-orders`](halyx-samples/portable-orders) shows it end to end: a Spring Boot service using every
+service below, built once as one image, which runs on AWS, Azure or Google Cloud by Spring profile alone. See
+[Portable microservice](https://halyx-dev.github.io/halyx/portable-service.html).
+
 | Service | Halyx API | AWS | Azure | Google Cloud | Also |
 |---|---|---|---|---|---|
 | Object storage | `BlobStore` | Amazon S3 | Azure Blob Storage | Cloud Storage | in-memory |
@@ -231,6 +235,7 @@ to your build, ideally through the `halyx-bom`; add `halyx-reactor` for `Mono` a
 | [Capabilities and native clients](https://halyx-dev.github.io/halyx/api/capabilities-and-unwrap.html) | provider differences, and `unwrap` for the native SDK clients |
 | [Provider configuration](https://halyx-dev.github.io/halyx/providers.html) | credentials, regions, endpoints and every provider setting |
 | [Spring Boot](https://halyx-dev.github.io/halyx/spring-boot.html) | the starter, properties, listeners, health, metrics, configuration import, [Spring Data repositories](https://halyx-dev.github.io/halyx/spring-boot.html#spring-data-repositories), R2DBC and Spring for Apache Kafka |
+| [Portable microservice](https://halyx-dev.github.io/halyx/portable-service.html) | a sample Spring Boot service that runs unchanged on every cloud, and how it's tested |
 | [Design, build and test](https://halyx-dev.github.io/halyx/design.html) | architecture, building, the conformance kits and benchmarks |
 | [Cloud testing](https://halyx-dev.github.io/halyx/cloud-testing/) | results on real [AWS](https://halyx-dev.github.io/halyx/cloud-testing/aws.html), [Google Cloud](https://halyx-dev.github.io/halyx/cloud-testing/gcp.html) and [Azure](https://halyx-dev.github.io/halyx/cloud-testing/azure.html) |
 | [Roadmap](https://halyx-dev.github.io/halyx/roadmap.html) | what's done and what's next |

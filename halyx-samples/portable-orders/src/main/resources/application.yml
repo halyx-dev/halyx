@@ -1,0 +1,293 @@
+#
+# Copyright 2026 Kamran Zafar
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# The same jar and image on every cloud. Profiles pick:
+#   the cloud:     local (in-memory, no cloud), aws, azure or gcp
+#   the features:  events, streams, cache, sql (each optional; see the feature documents below)
+# for example SPRING_PROFILES_ACTIVE=aws,events,cache,sql. Cloud resource names come from ORDERS_* environment
+# variables, with defaults for a deployment that uses the sample's names.
+spring:
+  application:
+    name: portable-orders
+  autoconfigure:
+    # Halyx provides the DataSource (sql feature); without it, Boot would try to make one from spring.datasource.*.
+    # Both Boot 3 and Boot 4 names; the absent one is ignored.
+    exclude:
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+      - org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+
+orders:
+  # Defaults, overridden by the settings parameter store (portable-orders/orders/max-lines and so on)
+  max-lines: 20
+  currency: GBP
+
+halyx:
+  blob-stores:
+    receipts:
+      bucket: ${ORDERS_RECEIPTS_BUCKET:portable-orders-receipts}
+  document-stores:
+    orders:
+      table: ${ORDERS_TABLE:portable-orders}
+      sort-key: sk
+  topics:
+    order-placed:
+      name: ${ORDERS_TOPIC:portable-orders-placed}
+  subscriptions:
+    fulfilment:
+      name: ${ORDERS_FULFILMENT_SUBSCRIPTION:portable-orders-fulfilment}
+  parameter-stores:
+    settings:
+      kind: parameters
+      prefix: ${ORDERS_PARAMETER_PREFIX:portable-orders}
+      reload-interval: ${ORDERS_SETTINGS_RELOAD:1m}
+    secrets:
+      kind: secrets
+      prefix: ${ORDERS_PARAMETER_PREFIX:portable-orders}
+      cache-ttl: 5m
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Clouds. Each names its provider after itself, and imports the settings store into the Environment once its provider
+# is defined.
+
+---
+spring:
+  config:
+    activate:
+      on-profile: local
+    import: optional:halyx:settings
+orders:
+  cloud: local
+halyx:
+  providers:
+    local:
+      type: memory
+  subscriptions:
+    fulfilment:
+      topic: ${ORDERS_TOPIC:portable-orders-placed}   # the memory broker binds subscriptions to topics itself
+
+---
+spring:
+  config:
+    activate:
+      on-profile: aws
+    import: halyx:settings
+orders:
+  cloud: aws
+halyx:
+  providers:
+    aws:
+      type: aws
+      region: ${AWS_REGION:eu-west-2}
+
+---
+spring:
+  config:
+    activate:
+      on-profile: azure
+    import: halyx:settings
+orders:
+  cloud: azure
+halyx:
+  providers:
+    azure:
+      type: azure
+      properties:
+        azure.storage.account: ${ORDERS_STORAGE_ACCOUNT}
+        azure.cosmos.endpoint: ${ORDERS_COSMOS_ENDPOINT}
+        azure.cosmos.database: ${ORDERS_COSMOS_DATABASE:portable-orders}
+        azure.servicebus.namespace: ${ORDERS_SERVICEBUS_NAMESPACE}
+  subscriptions:
+    fulfilment:
+      name: ${ORDERS_FULFILMENT_SUBSCRIPTION:portable-orders-placed/subscriptions/fulfilment}
+  parameter-stores:
+    settings:
+      location: ${ORDERS_APPCONFIG_ENDPOINT}
+    secrets:
+      location: ${ORDERS_KEYVAULT_URL}
+
+---
+spring:
+  config:
+    activate:
+      on-profile: gcp
+    import: halyx:settings
+orders:
+  cloud: gcp
+halyx:
+  providers:
+    gcp:
+      type: gcp
+      properties:
+        gcp.project-id: ${GOOGLE_CLOUD_PROJECT}
+  parameter-stores:
+    settings:
+      location: ${ORDERS_PARAMETER_LOCATION:global}
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Features. Each adds its Halyx resources here and turns on its components (@Profile) in the code.
+
+---
+# Each new order is a CloudEvent on the order-events bus, which routes it to the notifications subscription.
+spring:
+  config:
+    activate:
+      on-profile: events
+halyx:
+  event-buses:
+    order-events:
+      name: ${ORDERS_EVENT_BUS:portable-orders}
+  subscriptions:
+    notifications:
+      name: ${ORDERS_NOTIFICATIONS_SUBSCRIPTION:portable-orders-notifications}
+
+---
+spring:
+  config:
+    activate:
+      on-profile: local & events
+halyx:
+  subscriptions:
+    notifications:
+      topic: ${ORDERS_EVENT_BUS:portable-orders}
+
+---
+spring:
+  config:
+    activate:
+      on-profile: azure & events
+halyx:
+  event-buses:
+    order-events:
+      properties:
+        azure.eventgrid.endpoint: ${ORDERS_EVENTGRID_ENDPOINT}
+  subscriptions:
+    notifications:
+      # a pull subscription on the Event Grid namespace topic
+      name: ${ORDERS_NOTIFICATIONS_SUBSCRIPTION:notifications}
+      topic: ${ORDERS_EVENT_BUS:portable-orders}
+      properties:
+        azure.eventgrid.endpoint: ${ORDERS_EVENTGRID_ENDPOINT}
+
+---
+# Each new order is a record on the order-audit stream; the auditor consumer group reads it.
+spring:
+  config:
+    activate:
+      on-profile: streams
+halyx:
+  stream-clusters:
+    audit:
+      bootstrap-servers: ${ORDERS_KAFKA_BOOTSTRAP_SERVERS:memory:9092}
+      auth:
+        type: ${ORDERS_KAFKA_AUTH:iam}
+  stream-producers:
+    order-audit:
+      topic: ${ORDERS_AUDIT_TOPIC:portable-orders-audit}
+      idempotent: true
+  stream-consumers:
+    auditor:
+      topic: ${ORDERS_AUDIT_TOPIC:portable-orders-audit}
+      group: ${ORDERS_AUDIT_GROUP:portable-orders-auditor}
+      start-position: earliest
+
+---
+spring:
+  config:
+    activate:
+      on-profile: local & streams
+halyx:
+  stream-clusters:
+    audit:
+      auth:
+        type: none
+
+---
+# Idempotency keys in a Redis or Valkey cache: ElastiCache, Azure Managed Redis or Memorystore.
+spring:
+  config:
+    activate:
+      on-profile: cache
+halyx:
+  caches:
+    idempotency:
+      endpoint: ${ORDERS_CACHE_ENDPOINT:redis://memory:6379}
+      auth:
+        type: ${ORDERS_CACHE_AUTH:iam}
+
+---
+spring:
+  config:
+    activate:
+      on-profile: local & cache
+halyx:
+  caches:
+    idempotency:
+      auth:
+        type: none
+
+---
+spring:
+  config:
+    activate:
+      on-profile: aws & cache
+halyx:
+  caches:
+    idempotency:
+      auth:
+        username: ${ORDERS_CACHE_USER:portable-orders}
+      properties:
+        aws.elasticache.cache-name: ${ORDERS_CACHE_NAME:portable-orders}
+
+---
+spring:
+  config:
+    activate:
+      on-profile: azure & cache
+halyx:
+  caches:
+    idempotency:
+      auth:
+        username: ${ORDERS_CACHE_USER}    # the object id of the identity the access policy names
+
+---
+# A ledger of confirmed orders in PostgreSQL: RDS, Azure Database for PostgreSQL or Cloud SQL, with IAM login.
+spring:
+  config:
+    activate:
+      on-profile: sql
+  sql:
+    init:
+      mode: always
+halyx:
+  databases:
+    ledger:
+      engine: postgresql
+      host: ${ORDERS_DB_HOST:localhost}
+      port: ${ORDERS_DB_PORT:5432}
+      database: ${ORDERS_DB_NAME:orders}
+      auth:
+        type: ${ORDERS_DB_AUTH:iam}
+        username: ${ORDERS_DB_USER:portable_orders}
+        password: ${ORDERS_DB_PASSWORD:}

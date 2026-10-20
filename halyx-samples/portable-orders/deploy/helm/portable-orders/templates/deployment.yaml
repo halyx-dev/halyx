@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Chart.Name }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Chart.Name }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: portable-orders
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: {{ join "," .Values.profiles | quote }}
+            - name: SPRING_CONFIG_ADDITIONAL_LOCATION
+              value: optional:file:/etc/portable-orders/config/
+            {{- with .Values.javaToolOptions }}
+            - name: JAVA_TOOL_OPTIONS
+              value: {{ . | quote }}
+            {{- end }}
+            {{- range $name, $value := .Values.env }}
+            - name: {{ $name }}
+              value: {{ $value | toString | quote }}
+            {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/portable-orders/config/application.yml
+              subPath: application.yml
+            - name: config
+              mountPath: /etc/portable-orders/files
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 5
+            failureThreshold: 60
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ .Release.Name }}

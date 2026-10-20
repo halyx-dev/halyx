@@ -1,0 +1,208 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+
+    Copyright 2026 Kamran Zafar
+
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>dev.halyx</groupId>
+        <artifactId>halyx-samples</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <!--
+      A Spring Boot 4 orders service that uses every Halyx API and runs unchanged on AWS, Azure and Google Cloud.
+      One jar and one image hold all three providers; Spring profiles and properties pick the cloud and the features.
+      portable-orders-boot3 builds the same sources and tests on Spring Boot 3.5.
+    -->
+    <artifactId>portable-orders</artifactId>
+    <name>Halyx :: Samples :: Portable orders</name>
+
+    <properties>
+        <!-- `mvn -pl halyx-samples/portable-orders spring-boot:build-image` names the image this -->
+        <image.name>halyx/portable-orders:${project.version}</image.name>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <!--
+              BOMs imported here win over those imported by halyx-parent, so Boot's BOM decides Spring versions, as in a
+              real Boot application. Testcontainers must stay on 2.x (1.x cannot talk to Docker 29+): import it first.
+            -->
+            <dependency>
+                <groupId>org.testcontainers</groupId>
+                <artifactId>testcontainers-bom</artifactId>
+                <version>${testcontainers.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-dependencies</artifactId>
+                <version>${spring-boot4.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!-- halyx-parent manages kafka-clients directly, which beats any import; Boot 4 manages Kafka 4 -->
+            <dependency>
+                <groupId>org.apache.kafka</groupId>
+                <artifactId>kafka-clients</artifactId>
+                <version>${kafka4.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <dependency>
+            <groupId>dev.halyx</groupId>
+            <artifactId>halyx-spring-boot-starter</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <!-- Every provider, so the same jar runs on each cloud -->
+        <dependency>
+            <groupId>dev.halyx</groupId>
+            <artifactId>halyx-aws</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>dev.halyx</groupId>
+            <artifactId>halyx-azure</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>dev.halyx</groupId>
+            <artifactId>halyx-gcp</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>dev.halyx</groupId>
+            <artifactId>halyx-spring-data-document</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <!-- The Cloud SQL connector, for halyx.databases.*.properties.gcp.sql.instance on Google Cloud -->
+        <dependency>
+            <groupId>com.google.cloud.sql</groupId>
+            <artifactId>postgres-socket-factory</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-kafka</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <version>${spring-boot4.version}</version>
+                <configuration>
+                    <image>
+                        <name>${image.name}</name>
+                    </image>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <configuration>
+                    <!-- the repackaged jar can't be put on a classpath; the tests use the classes -->
+                    <classesDirectory>${project.build.outputDirectory}</classesDirectory>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+        <!-- `mvn -pl halyx-samples/portable-orders -Pimage verify` builds the image and runs ImageIT against it -->
+        <profile>
+            <id>image</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.springframework.boot</groupId>
+                        <artifactId>spring-boot-maven-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>build-image</id>
+                                <phase>pre-integration-test</phase>
+                                <goals>
+                                    <goal>build-image-no-fork</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-failsafe-plugin</artifactId>
+                        <configuration>
+                            <systemPropertyVariables>
+                                <orders.image>${image.name}</orders.image>
+                            </systemPropertyVariables>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+</project>
