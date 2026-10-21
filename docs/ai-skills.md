@@ -39,7 +39,7 @@ The skills are in the repository under
 | Another assistant | point it at the skill's `SKILL.md` as its instructions; its references are linked from there | ask for the job |
 
 Claude Code picks a skill from its description, so asking in your own words works as well as the slash command.
-Outside this repository, the skills link to the published docs at https://halyx-dev.github.io/halyx/ and to the
+Outside this repository, the skills link to the published docs at https://halyx.dev/docs/ and to the
 [portable orders sample](https://github.com/halyx-dev/halyx/tree/main/halyx-samples/portable-orders) on GitHub.
 
 ## halyx-ai-migrate

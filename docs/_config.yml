@@ -15,7 +15,8 @@
 #
 
 # GitHub Pages site for Halyx: Settings → Pages → "Deploy from a branch", folder /docs.
-# Published at https://halyx-dev.github.io/halyx
+# Published at https://halyx-dev.github.io/halyx. Superseded by https://halyx.dev, built from these docs by the
+# halyx.dev repository; remove this file, and turn off GitHub Pages for this repository, once halyx.dev is live.
 
 title: Halyx
 description: "Halyx: one Java API for storage, NoSQL, messaging, streams, SQL, caches and secrets on AWS, Azure and Google Cloud — a portable library over the clouds' own SDKs."

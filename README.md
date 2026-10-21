@@ -16,7 +16,7 @@
 </div>
 
 <p align="center">
-  <a href="https://halyx-dev.github.io/halyx/"><img alt="Documentation" src="https://img.shields.io/badge/docs-halyx-dev.github.io%2Fhalyx-0a7bbb"></a>
+  <a href="https://halyx.dev/docs/"><img alt="Documentation" src="https://img.shields.io/badge/docs-halyx.dev-0a7bbb"></a>
   <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
   <img alt="Java 21+" src="https://img.shields.io/badge/java-21%2B-orange">
   <img alt="Spring Boot 3.5 and 4" src="https://img.shields.io/badge/spring%20boot-3.5%20%7C%204-6db33f">
@@ -33,13 +33,13 @@ in Vault. Each cloud is registered as a named provider and used through the same
 | | |
 |---|---|
 | **8 services, 3 clouds, 1 API** | storage, NoSQL, messaging, events, Kafka streams, SQL, caches, parameters and secrets on AWS, Azure and Google Cloud |
-| **Same behaviour, proven** | one conformance kit per service, run against every provider on emulators and [on real cloud accounts, with published results](https://halyx-dev.github.io/halyx/cloud-testing/) |
+| **Same behaviour, proven** | one conformance kit per service, run against every provider on emulators and [on real cloud accounts, with published results](https://halyx.dev/docs/cloud-testing/) |
 | **No passwords** | databases, caches and Kafka log in with AWS IAM, Microsoft Entra ID or Google IAM |
 | **A library, not a platform** | runs inside your application: no sidecar, no agent, and the native SDK client is one `unwrap` away |
 | **Spring Boot 3.5 and 4** | a starter with listeners, Spring Data repositories, R2DBC, `@Cacheable`, health, metrics and `spring.config.import` |
 
-**[Documentation](https://halyx-dev.github.io/halyx/)** · [Getting started](https://halyx-dev.github.io/halyx/getting-started.html) · [API guide](https://halyx-dev.github.io/halyx/api/) ·
-[Spring Boot](https://halyx-dev.github.io/halyx/spring-boot.html) · [Cloud testing](https://halyx-dev.github.io/halyx/cloud-testing/) · [Roadmap](https://halyx-dev.github.io/halyx/roadmap.html)
+**[Documentation](https://halyx.dev/docs/)** · [Getting started](https://halyx.dev/docs/getting-started.html) · [API guide](https://halyx.dev/docs/api/) ·
+[Spring Boot](https://halyx.dev/docs/spring-boot.html) · [Cloud testing](https://halyx.dev/docs/cloud-testing/) · [Roadmap](https://halyx.dev/docs/roadmap.html)
 
 ## Why Halyx
 
@@ -57,7 +57,7 @@ Halyx was created to make that code portable too, without giving up what each cl
 - **The same behaviour, not just the same signatures.** Conditional writes, versions, ordering, expiry,
   retries and errors such as `NotFoundException` mean the same everywhere. Shared conformance kits check
   every provider against emulators on every build and
-  [against the real clouds](https://halyx-dev.github.io/halyx/cloud-testing/).
+  [against the real clouds](https://halyx.dev/docs/cloud-testing/).
 - **Several clouds in one service.** Each cloud is a named provider, so one microservice can store files
   on S3, publish to Pub/Sub and cache in Azure, with one error model and one set of tests.
 - **No lowest common denominator.** Differences are declared as capabilities, and `unwrap` hands you the
@@ -91,8 +91,10 @@ Halyx was created to make that code portable too, without giving up what each cl
 | Native SDK client available | Yes | Yes | No | Not documented |
 | Spring Boot starter | Yes | Yes | Yes | No |
 
-Each of these is the right choice for some teams. Dapr suits services in many languages and has workflows and
-actors; Spring Cloud suits teams staying on one cloud; MultiCloudJ covers Alibaba Cloud.
+Halyx is built for Java teams that want one API on AWS, Azure and Google Cloud, with the same behaviour checked
+on each, all inside their own application. The others fit different needs: Dapr for services in many languages,
+or for workflows and actors; Spring Cloud for a service that will only ever run on one cloud; MultiCloudJ for
+Alibaba Cloud.
 
 ## How it makes microservices cloud-agnostic
 
@@ -115,7 +117,7 @@ type, region and resource names. So the same build can:
 
 [`halyx-samples/portable-orders`](halyx-samples/portable-orders) shows it end to end: a Spring Boot service using every
 service below, built once as one image, which runs on AWS, Azure or Google Cloud by Spring profile alone. See
-[Portable microservice](https://halyx-dev.github.io/halyx/portable-service.html).
+[Portable microservice](https://halyx.dev/docs/portable-service.html).
 
 | Service | Halyx API | AWS | Azure | Google Cloud | Also |
 |---|---|---|---|---|---|
@@ -198,7 +200,7 @@ the resources at Azure Blob Storage, Service Bus and Azure Database. The Java co
 
 You also get health checks, Micrometer metrics and tracing, `@Cacheable` support, and
 `spring.config.import=halyx:<store>` for parameters and secrets. See the
-[Spring Boot guide](https://halyx-dev.github.io/halyx/spring-boot.html).
+[Spring Boot guide](https://halyx.dev/docs/spring-boot.html).
 
 ## Using it without Spring
 
@@ -223,7 +225,7 @@ try (Halyx halyx = Halyx.builder()
 ```
 
 Add `halyx-core` plus the provider modules (`halyx-aws`, `halyx-azure`, `halyx-gcp`, `halyx-vault`)
-to your build, ideally through the `halyx-bom`; add `halyx-reactor` for `Mono` and `Flux` views of every service. See [Getting started](https://halyx-dev.github.io/halyx/getting-started.html).
+to your build, ideally through the `halyx-bom`; add `halyx-reactor` for `Mono` and `Flux` views of every service. See [Getting started](https://halyx.dev/docs/getting-started.html).
 
 ## AI skills
 
@@ -236,27 +238,27 @@ Markdown: Claude Code runs it as a skill, and other assistants can follow it as 
 | [`halyx-ai-review`](.claude/skills/halyx-ai-review) | reviews a Halyx service for anything that still ties it to one cloud, with a verdict per cloud (read-only) |
 
 Copy a skill's folder into your service's `.claude/skills` (or `~/.claude/skills`), then ask for the job or run
-`/halyx-ai-migrate` or `/halyx-ai-review`. See [AI skills](https://halyx-dev.github.io/halyx/ai-skills.html), and
-[Migrating to Halyx](https://halyx-dev.github.io/halyx/migration.html) for the method and the trial migrations.
+`/halyx-ai-migrate` or `/halyx-ai-review`. See [AI skills](https://halyx.dev/docs/ai-skills.html), and
+[Migrating to Halyx](https://halyx.dev/docs/migration.html) for the method and the trial migrations.
 
 ## Documentation
 
 | | |
 |---|---|
-| [Getting started](https://halyx-dev.github.io/halyx/getting-started.html) | dependencies, your first calls, several clouds at once, testing |
-| [API guide](https://halyx-dev.github.io/halyx/api/) | every service with examples: [storage](https://halyx-dev.github.io/halyx/api/storage.html), [NoSQL](https://halyx-dev.github.io/halyx/api/nosql.html), [messaging](https://halyx-dev.github.io/halyx/api/messaging.html), [streams](https://halyx-dev.github.io/halyx/api/streams.html), [SQL](https://halyx-dev.github.io/halyx/api/sql.html), [caches](https://halyx-dev.github.io/halyx/api/caches.html), [parameters and secrets](https://halyx-dev.github.io/halyx/api/parameters.html) |
-| [Errors and retries](https://halyx-dev.github.io/halyx/api/errors.html) | the portable error model, retries, throttling and interceptors |
-| [Capabilities and native clients](https://halyx-dev.github.io/halyx/api/capabilities-and-unwrap.html) | provider differences, and `unwrap` for the native SDK clients |
-| [Provider configuration](https://halyx-dev.github.io/halyx/providers.html) | credentials, regions, endpoints and every provider setting |
-| [Spring Boot](https://halyx-dev.github.io/halyx/spring-boot.html) | the starter, properties, listeners, health, metrics, configuration import, [Spring Data repositories](https://halyx-dev.github.io/halyx/spring-boot.html#spring-data-repositories), R2DBC and Spring for Apache Kafka |
-| [Portable microservice](https://halyx-dev.github.io/halyx/portable-service.html) | a sample Spring Boot service that runs unchanged on every cloud, and how it's tested |
-| [Migrating to Halyx](https://halyx-dev.github.io/halyx/migration.html) | moving an existing Spring Boot service onto Halyx, with an AI assistant or by hand: mappings, existing data, rollouts and testing |
-| [AI skills](https://halyx-dev.github.io/halyx/ai-skills.html) | skills for AI coding assistants: migrating a service to Halyx, and reviewing one for portability |
-| [Design, build and test](https://halyx-dev.github.io/halyx/design.html) | architecture, building, the conformance kits and benchmarks |
-| [Cloud testing](https://halyx-dev.github.io/halyx/cloud-testing/) | results on real [AWS](https://halyx-dev.github.io/halyx/cloud-testing/aws.html), [Google Cloud](https://halyx-dev.github.io/halyx/cloud-testing/gcp.html) and [Azure](https://halyx-dev.github.io/halyx/cloud-testing/azure.html) |
-| [Roadmap](https://halyx-dev.github.io/halyx/roadmap.html) | what's done and what's next |
+| [Getting started](https://halyx.dev/docs/getting-started.html) | dependencies, your first calls, several clouds at once, testing |
+| [API guide](https://halyx.dev/docs/api/) | every service with examples: [storage](https://halyx.dev/docs/api/storage.html), [NoSQL](https://halyx.dev/docs/api/nosql.html), [messaging](https://halyx.dev/docs/api/messaging.html), [streams](https://halyx.dev/docs/api/streams.html), [SQL](https://halyx.dev/docs/api/sql.html), [caches](https://halyx.dev/docs/api/caches.html), [parameters and secrets](https://halyx.dev/docs/api/parameters.html) |
+| [Errors and retries](https://halyx.dev/docs/api/errors.html) | the portable error model, retries, throttling and interceptors |
+| [Capabilities and native clients](https://halyx.dev/docs/api/capabilities-and-unwrap.html) | provider differences, and `unwrap` for the native SDK clients |
+| [Provider configuration](https://halyx.dev/docs/providers.html) | credentials, regions, endpoints and every provider setting |
+| [Spring Boot](https://halyx.dev/docs/spring-boot.html) | the starter, properties, listeners, health, metrics, configuration import, [Spring Data repositories](https://halyx.dev/docs/spring-boot.html#spring-data-repositories), R2DBC and Spring for Apache Kafka |
+| [Portable microservice](https://halyx.dev/docs/portable-service.html) | a sample Spring Boot service that runs unchanged on every cloud, and how it's tested |
+| [Migrating to Halyx](https://halyx.dev/docs/migration.html) | moving an existing Spring Boot service onto Halyx, with an AI assistant or by hand: mappings, existing data, rollouts and testing |
+| [AI skills](https://halyx.dev/docs/ai-skills.html) | skills for AI coding assistants: migrating a service to Halyx, and reviewing one for portability |
+| [Design, build and test](https://halyx.dev/docs/design.html) | architecture, building, the conformance kits and benchmarks |
+| [Cloud testing](https://halyx.dev/docs/cloud-testing/) | results on real [AWS](https://halyx.dev/docs/cloud-testing/aws.html), [Google Cloud](https://halyx.dev/docs/cloud-testing/gcp.html) and [Azure](https://halyx.dev/docs/cloud-testing/azure.html) |
+| [Roadmap](https://halyx.dev/docs/roadmap.html) | what's done and what's next |
 
-The documentation is published at **[halyx-dev.github.io/halyx](https://halyx-dev.github.io/halyx/)**, built from the `docs/` folder.
+The documentation is published at **[halyx.dev](https://halyx.dev/docs/)**, built from the `docs/` folder.
 
 ## Building
 
@@ -264,7 +266,7 @@ The documentation is published at **[halyx-dev.github.io/halyx](https://halyx-de
 mvn verify      # unit tests and every conformance kit against emulators (needs Docker)
 ```
 
-Java 21+ and Maven 3.9+. See [Design, build and test](https://halyx-dev.github.io/halyx/design.html#build).
+Java 21+ and Maven 3.9+. See [Design, build and test](https://halyx.dev/docs/design.html#build).
 
 ## License
 

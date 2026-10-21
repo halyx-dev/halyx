@@ -10,7 +10,7 @@ The goal is the same service, behaving the same way, with its cloud services rea
 repository is the finished shape to aim for; read it when unsure how something should end up.
 
 Outside the Halyx repository (the usual case: the skill copied into the service's repository or `~/.claude/skills`),
-the docs are at https://halyx-dev.github.io/halyx/ (`docs/<page>.md` here is `<page>.html` there), and the sample is
+the docs are at https://halyx.dev/docs/ (`docs/<page>.md` here is `https://halyx.dev/docs/<page>.html` there), and the sample is
 at https://github.com/halyx-dev/halyx/tree/main/halyx-samples/portable-orders.
 
 Work in phases and **stop for approval after phase 2**. A migration touches data, messaging and credentials; the

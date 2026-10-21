@@ -11,7 +11,7 @@ cloud settings in the shared configuration, features one cloud lacks, decimals, 
 that only ever run one cloud. [references/rules.md](references/rules.md) lists every check, with how to detect it.
 
 This review is **read-only**: it changes nothing, and it never calls a cloud. Outside the Halyx repository the
-docs are at https://halyx-dev.github.io/halyx/ (`docs/<page>.md` here is `<page>.html` there).
+docs are at https://halyx.dev/docs/ (`docs/<page>.md` here is `https://halyx.dev/docs/<page>.html` there).
 
 ## Steps
 
