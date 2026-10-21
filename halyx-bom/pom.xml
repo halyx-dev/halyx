@@ -41,6 +41,25 @@
         </license>
     </licenses>
 
+    <!-- Repeated from halyx-parent, which this BOM deliberately doesn't inherit. -->
+    <url>https://halyx.dev</url>
+
+    <developers>
+        <developer>
+            <id>kamranzafar</id>
+            <name>Kamran Zafar</name>
+            <email>kamran@kamranzafar.org</email>
+            <url>https://github.com/kamranzafar</url>
+        </developer>
+    </developers>
+
+    <scm>
+        <connection>scm:git:https://github.com/halyx-dev/halyx.git</connection>
+        <developerConnection>scm:git:git@github.com:halyx-dev/halyx.git</developerConnection>
+        <url>https://github.com/halyx-dev/halyx</url>
+        <tag>HEAD</tag>
+    </scm>
+
     <dependencyManagement>
         <dependencies>
             <dependency>
@@ -120,4 +139,49 @@
             </dependency>
         </dependencies>
     </dependencyManagement>
+
+    <!-- The parent's release profile, less the source and javadoc jars a POM doesn't have. -->
+    <profiles>
+        <profile>
+            <id>release</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-gpg-plugin</artifactId>
+                        <version>3.2.8</version>
+                        <executions>
+                            <execution>
+                                <id>sign-artifacts</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>sign</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.sonatype.central</groupId>
+                        <artifactId>central-publishing-maven-plugin</artifactId>
+                        <version>0.12.0</version>
+                        <extensions>true</extensions>
+                        <configuration>
+                            <publishingServerId>central</publishingServerId>
+                            <autoPublish>false</autoPublish>
+                            <deploymentName>Halyx ${project.version}</deploymentName>
+                            <!-- The plugin ignores maven.deploy.skip, so the unpublished modules are listed here. -->
+                            <excludeArtifacts>
+                                <excludeArtifact>halyx-reactor-tests</excludeArtifact>
+                                <excludeArtifact>halyx-spring-boot4-tests</excludeArtifact>
+                                <excludeArtifact>halyx-benchmarks</excludeArtifact>
+                                <excludeArtifact>halyx-samples</excludeArtifact>
+                                <excludeArtifact>portable-orders</excludeArtifact>
+                                <excludeArtifact>portable-orders-boot3</excludeArtifact>
+                            </excludeArtifacts>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

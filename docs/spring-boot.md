@@ -575,3 +575,8 @@ The same starter works on both: your application's Boot parent or BOM picks the 
 - **Health:** wired with Actuator's `org.springframework.boot.actuate.health` on Boot 3, and with the
   `org.springframework.boot.health` module on Boot 4. Exactly one of the two activates.
 - **Tested on both:** the test suite runs on 3.5, and the same shared tests run again on 4.1.
+- **Dependency versions:** your Boot BOM also picks Spring Framework, Reactor, Micrometer, Spring for Apache
+  Kafka, Netty and Jackson, so their security fixes arrive with your Boot upgrades. Some fixes exist only in the
+  lines Boot 4 manages (Spring Framework 7, Reactor 3.8, Micrometer 1.16, Spring for Apache Kafka 4), not in the
+  Boot 3.5 lines. Without a Boot BOM, the provider modules bring patched versions of the libraries the cloud
+  SDKs and clients pull in, such as Netty, Jackson and Kafka's compression libraries.

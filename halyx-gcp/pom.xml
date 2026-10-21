@@ -87,6 +87,23 @@
             <groupId>dev.halyx</groupId>
             <artifactId>halyx-kafka</artifactId>
         </dependency>
+        <!--
+          Security fixes: the Google Cloud libraries' Jackson and Guava, held at the patched versions halyx-parent manages. Declared here so
+          they are nearer than the copies the libraries bring, and win in applications too.
+        -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+        </dependency>
+
         <!-- Tests: TCK against the Floci emulator in Docker (run with mvn verify) -->
         <dependency>
             <groupId>dev.halyx</groupId>

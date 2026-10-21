@@ -45,6 +45,26 @@
             <artifactId>kafka-clients</artifactId>
         </dependency>
 
+        <!--
+          Security fixes: kafka-clients' compression libraries, held at the patched versions halyx-parent manages. Declared here so
+          they are nearer than the copies the libraries bring, and win in applications too.
+        -->
+        <dependency>
+            <groupId>org.xerial.snappy</groupId>
+            <artifactId>snappy-java</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.github.luben</groupId>
+            <artifactId>zstd-jni</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>at.yawk.lz4</groupId>
+            <artifactId>lz4-java</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
         <!-- Tests: the stream TCK against Apache Kafka in Docker (run with mvn verify) -->
         <dependency>
             <groupId>dev.halyx</groupId>

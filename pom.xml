@@ -16,7 +16,7 @@
     limitations under the License.
 
 -->
-<project xmlns="http://maven.apache.org/POM/4.0.0"
+<project child.project.url.inherit.append.path="false" xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
@@ -28,6 +28,9 @@
 
     <name>Halyx :: Parent</name>
     <description>Halyx: one Java API for storage, NoSQL, messaging, streams, SQL, caches and secrets on AWS, Azure and Google Cloud — a portable library over the clouds' own SDKs.</description>
+    <!-- The modules share the project's URL and SCM; without these attributes Maven appends each artifactId. -->
+    <url>https://halyx.dev</url>
+    <inceptionYear>2026</inceptionYear>
 
     <licenses>
         <license>
@@ -36,6 +39,29 @@
             <distribution>repo</distribution>
         </license>
     </licenses>
+
+    <developers>
+        <developer>
+            <id>kamranzafar</id>
+            <name>Kamran Zafar</name>
+            <email>kamran@kamranzafar.org</email>
+            <url>https://github.com/kamranzafar</url>
+        </developer>
+    </developers>
+
+    <scm child.scm.connection.inherit.append.path="false"
+         child.scm.developerConnection.inherit.append.path="false"
+         child.scm.url.inherit.append.path="false">
+        <connection>scm:git:https://github.com/halyx-dev/halyx.git</connection>
+        <developerConnection>scm:git:git@github.com:halyx-dev/halyx.git</developerConnection>
+        <url>https://github.com/halyx-dev/halyx</url>
+        <tag>HEAD</tag>
+    </scm>
+
+    <issueManagement>
+        <system>GitHub</system>
+        <url>https://github.com/halyx-dev/halyx/issues</url>
+    </issueManagement>
 
     <modules>
         <module>halyx-bom</module>
@@ -65,8 +91,8 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
         <!-- Cloud SDKs (managed through their own BOMs) -->
-        <aws-sdk.version>2.55.14</aws-sdk.version>
-        <azure-sdk-bom.version>1.3.8</azure-sdk-bom.version>
+        <aws-sdk.version>2.57.1</aws-sdk.version>
+        <azure-sdk-bom.version>1.3.9</azure-sdk-bom.version>
         <gcp-libraries-bom.version>26.90.0</gcp-libraries-bom.version>
         <!-- Not in libraries-bom yet; 0.43.0 is from the same google-cloud-java release (1.93.0) -->
         <gcp-parametermanager.version>0.43.0</gcp-parametermanager.version>
@@ -80,10 +106,10 @@
         <spring-boot3.version>3.5.16</spring-boot3.version>
         <spring-boot4.version>4.1.1</spring-boot4.version>
         <!-- Jackson 3 (tools.jackson), Boot 4's JSON library; compile-only for the cache codec -->
-        <jackson3.version>3.1.5</jackson3.version>
+        <jackson3.version>3.1.8</jackson3.version>
 
         <!-- Redis/Valkey client: the 6.x line stays on Netty 4.1, like the AWS and Azure SDKs -->
-        <lettuce.version>6.8.2.RELEASE</lettuce.version>
+        <lettuce.version>6.9.0.RELEASE</lettuce.version>
         <!-- SQL: the pool Spring Boot 3.5 ships (Boot 4 brings 7.x, which is API compatible), and test drivers -->
         <hikaricp.version>6.3.3</hikaricp.version>
         <!-- R2DBC, as Spring Boot 3.5 manages it; Boot 4 applications get their own -->
@@ -107,7 +133,7 @@
         <kafka.version>3.9.2</kafka.version>
         <!-- The Kafka clients Spring Boot 4.1 manages, for the Boot 4 tests -->
         <kafka4.version>4.2.1</kafka4.version>
-        <postgresql.version>42.7.11</postgresql.version>
+        <postgresql.version>42.7.14</postgresql.version>
         <mysql-connector-j.version>9.7.0</mysql-connector-j.version>
         <mssql-jdbc.version>12.10.2.jre11</mssql-jdbc.version>
         <cloud-sql-connector.version>1.30.0</cloud-sql-connector.version>
@@ -116,6 +142,20 @@
         <kafka.image>apache/kafka:3.9.1</kafka.image>
         <!-- halyx-kafka also runs its broker tests on Kafka 4 -->
         <kafka4.image>apache/kafka:4.2.1</kafka4.image>
+
+        <!--
+          Transitive dependencies held above the versions the SDKs and clients bring, for security fixes found by
+          Snyk: Netty (Lettuce, the AWS and Azure SDKs, R2DBC), Jackson 2 (Azure and Google Cloud), Kafka's
+          compression libraries (kafka-clients 3.9.2 is the newest 3.9), Proton-J (Azure AMQP) and Guava (Google
+          Cloud). Netty stays on 4.1, like Spring Boot 3.5; a Boot 4 application's BOM chooses 4.2.
+        -->
+        <netty.version>4.1.139.Final</netty.version>
+        <jackson2.version>2.22.4</jackson2.version>
+        <snappy-java.version>1.1.10.12</snappy-java.version>
+        <zstd-jni.version>1.5.7-24</zstd-jni.version>
+        <lz4-java.version>1.12.0</lz4-java.version>
+        <proton-j.version>0.35.0</proton-j.version>
+        <guava.version>33.7.2-jre</guava.version>
 
         <!-- Common -->
         <slf4j.version>2.0.20</slf4j.version>
@@ -137,6 +177,11 @@
         <maven-jar-plugin.version>3.5.0</maven-jar-plugin.version>
         <maven-enforcer-plugin.version>3.6.3</maven-enforcer-plugin.version>
         <build-helper-maven-plugin.version>3.6.2</build-helper-maven-plugin.version>
+        <!-- Release: source and javadoc jars, signing, and publishing to Maven Central -->
+        <maven-source-plugin.version>3.3.1</maven-source-plugin.version>
+        <maven-javadoc-plugin.version>3.12.0</maven-javadoc-plugin.version>
+        <maven-gpg-plugin.version>3.2.8</maven-gpg-plugin.version>
+        <central-publishing-maven-plugin.version>0.12.0</central-publishing-maven-plugin.version>
     </properties>
 
     <dependencyManagement>
@@ -327,6 +372,47 @@
                 <groupId>dev.halyx</groupId>
                 <artifactId>halyx-vault</artifactId>
                 <version>${project.version}</version>
+            </dependency>
+
+            <!-- Security overrides of transitive dependencies (see the properties); before the SDK BOMs so they win -->
+            <dependency>
+                <groupId>io.netty</groupId>
+                <artifactId>netty-bom</artifactId>
+                <version>${netty.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>com.fasterxml.jackson</groupId>
+                <artifactId>jackson-bom</artifactId>
+                <version>${jackson2.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>org.xerial.snappy</groupId>
+                <artifactId>snappy-java</artifactId>
+                <version>${snappy-java.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.github.luben</groupId>
+                <artifactId>zstd-jni</artifactId>
+                <version>${zstd-jni.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>at.yawk.lz4</groupId>
+                <artifactId>lz4-java</artifactId>
+                <version>${lz4-java.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.qpid</groupId>
+                <artifactId>proton-j</artifactId>
+                <version>${proton-j.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.google.guava</groupId>
+                <artifactId>guava</artifactId>
+                <version>${guava.version}</version>
             </dependency>
 
             <!-- Cloud SDK BOMs -->
@@ -535,4 +621,85 @@ limitations under the License.]]></inlineHeader>
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!--
+          mvn -Prelease deploy: builds source and javadoc jars, signs every artifact with GPG and uploads them to
+          Maven Central as one deployment. The token is the server "central" in settings.xml; the GPG key comes
+          from the agent, or from MAVEN_GPG_KEY and MAVEN_GPG_PASSPHRASE in CI. Modules with maven.deploy.skip
+          (tests, benchmarks and samples) are left out.
+        -->
+        <profile>
+            <id>release</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-source-plugin</artifactId>
+                        <version>${maven-source-plugin.version}</version>
+                        <executions>
+                            <execution>
+                                <id>attach-sources</id>
+                                <goals>
+                                    <goal>jar-no-fork</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-javadoc-plugin</artifactId>
+                        <version>${maven-javadoc-plugin.version}</version>
+                        <configuration>
+                            <doclint>all,-missing</doclint>
+                            <quiet>true</quiet>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>attach-javadocs</id>
+                                <goals>
+                                    <goal>jar</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-gpg-plugin</artifactId>
+                        <version>${maven-gpg-plugin.version}</version>
+                        <executions>
+                            <execution>
+                                <id>sign-artifacts</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>sign</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.sonatype.central</groupId>
+                        <artifactId>central-publishing-maven-plugin</artifactId>
+                        <version>${central-publishing-maven-plugin.version}</version>
+                        <extensions>true</extensions>
+                        <configuration>
+                            <publishingServerId>central</publishingServerId>
+                            <!-- Validated and held on central.sonatype.com until published by hand there. -->
+                            <autoPublish>false</autoPublish>
+                            <deploymentName>Halyx ${project.version}</deploymentName>
+                            <!-- The plugin ignores maven.deploy.skip, so the unpublished modules are listed here. -->
+                            <excludeArtifacts>
+                                <excludeArtifact>halyx-reactor-tests</excludeArtifact>
+                                <excludeArtifact>halyx-spring-boot4-tests</excludeArtifact>
+                                <excludeArtifact>halyx-benchmarks</excludeArtifact>
+                                <excludeArtifact>halyx-samples</excludeArtifact>
+                                <excludeArtifact>portable-orders</excludeArtifact>
+                                <excludeArtifact>portable-orders-boot3</excludeArtifact>
+                            </excludeArtifacts>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

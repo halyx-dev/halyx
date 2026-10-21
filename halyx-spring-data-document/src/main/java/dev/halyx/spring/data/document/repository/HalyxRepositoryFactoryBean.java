@@ -26,7 +26,7 @@ import org.springframework.data.repository.core.support.RepositoryFactorySupport
 
 /**
  * Creates a repository bean. Each entity's document store is the {@code DocumentStore} bean named by its
- * {@link DocumentTable}, or the application's only {@code DocumentStore} bean.
+ * {@link dev.halyx.spring.data.document.DocumentTable}, or the application's only {@code DocumentStore} bean.
  */
 public class HalyxRepositoryFactoryBean<R extends Repository<T, ID>, T, ID>
         extends RepositoryFactoryBeanSupport<R, T, ID> {
