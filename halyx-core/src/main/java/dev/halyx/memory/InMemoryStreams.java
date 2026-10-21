@@ -188,6 +188,8 @@ final class InMemoryStreams {
         private final Map<Integer, Long> positions = new HashMap<>();
         private RebalanceListener listener;
         private int seenGeneration = -1;
+        /** Some of this member's partitions are still owned by another member, which hasn't revoked them yet. */
+        private boolean awaitingRevocation;
         private boolean joined;
         private boolean woken;
 
@@ -261,7 +263,12 @@ final class InMemoryStreams {
             }
         }
 
-        /** Works out the new assignment under the lock, then tells the listener outside it, as Kafka does in poll. */
+        /**
+         * Works out the new assignment under the lock, then tells the listener outside it, as Kafka does in poll.
+         * As in Kafka, a partition is only assigned once its previous owner has revoked it, and so committed what
+         * it processed; until then it stays with that owner, and this member checks again when partitions are
+         * given up.
+         */
         private void rebalanceIfNeeded() {
             List<Partition> revoked = new ArrayList<>();
             List<Partition> assigned = new ArrayList<>();
@@ -270,10 +277,11 @@ final class InMemoryStreams {
                 if (!joined) {
                     throw new IllegalStateException("subscribe before polling");
                 }
-                if (seenGeneration == group.generation) {
+                if (seenGeneration == group.generation && !awaitingRevocation) {
                     return;
                 }
                 seenGeneration = group.generation;
+                awaitingRevocation = false;
                 int index = group.members.indexOf(this);
                 int members = group.members.size();
                 Set<Integer> now = new HashSet<>();
@@ -288,9 +296,19 @@ final class InMemoryStreams {
                     }
                 }
                 for (int p : now) {
-                    if (!owned.contains(p)) {
-                        assigned.add(new Partition(topic.name, p));
+                    if (owned.contains(p)) {
+                        continue;
                     }
+                    if (ownedByAnotherMember(p)) {
+                        awaitingRevocation = true;
+                        continue;
+                    }
+                    // Claimed here, under the same lock as the check, so no other member can take it meanwhile.
+                    owned.add(p);
+                    Long committed = group.committed.get(p);
+                    positions.put(p, committed != null ? committed
+                            : config.startPosition() == StartPosition.EARLIEST ? 0L : topic.partitions.get(p).size());
+                    assigned.add(new Partition(topic.name, p));
                 }
             } finally {
                 lock.unlock();
@@ -305,11 +323,8 @@ final class InMemoryStreams {
                     paused.remove(p.partition());
                     positions.remove(p.partition());
                 }
-                for (Partition p : assigned) {
-                    owned.add(p.partition());
-                    Long committed = group.committed.get(p.partition());
-                    positions.put(p.partition(), committed != null ? committed
-                            : config.startPosition() == StartPosition.EARLIEST ? 0L : topic.partitions.get(p.partition()).size());
+                if (!revoked.isEmpty()) {
+                    changed.signalAll(); // members waiting for these partitions
                 }
             } finally {
                 lock.unlock();
@@ -317,6 +332,15 @@ final class InMemoryStreams {
             if (!assigned.isEmpty()) {
                 listener.onAssigned(assigned);
             }
+        }
+
+        private boolean ownedByAnotherMember(int partition) {
+            for (Member member : group.members) {
+                if (member != this && member.owned.contains(partition)) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         private List<DriverRecord> read() {
@@ -406,8 +430,8 @@ final class InMemoryStreams {
                 owned.clear();
                 if (joined && group.members.remove(this)) {
                     group.generation++;
-                    changed.signalAll();
                 }
+                changed.signalAll(); // members waiting for these partitions
                 joined = false;
             } finally {
                 lock.unlock();
