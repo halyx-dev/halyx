@@ -7,8 +7,8 @@ nav_order: 8
 {: .no_toc }
 
 Halyx ships skills for AI coding assistants: packaged instructions and reference material for jobs that are mostly
-mechanical but easy to get subtly wrong. Migrating a service onto Halyx is one; checking that a Halyx service
-really is portable is another. Each skill is a folder of plain Markdown. Claude Code loads it as a skill, and any
+mechanical but easy to get subtly wrong. Creating a portable service is one, migrating a service onto Halyx is
+another, and checking that a Halyx service really is portable is a third. Each skill is a folder of plain Markdown. Claude Code loads it as a skill, and any
 other assistant can follow it as instructions.
 
 <details open markdown="block">
@@ -22,10 +22,12 @@ other assistant can follow it as instructions.
 
 | Skill | Does | Changes code |
 |---|---|---|
+| [`halyx-ai-create`](#halyx-ai-create) | creates a new Spring Boot service on Halyx, with a profile per cloud, tests on each cloud's emulators and, if asked, a Helm chart and IAM | yes, after you approve a plan |
 | [`halyx-ai-migrate`](#halyx-ai-migrate) | migrates a Spring Boot service from a cloud's SDK, or from Spring Cloud AWS, Azure or GCP, to Halyx | yes, one area at a time, after you approve a plan |
 | [`halyx-ai-review`](#halyx-ai-review) | reviews a Halyx service for anything that still ties it to one cloud, with a verdict per cloud | no: it writes a report |
 
-They fit together: migrate a service, then review it before calling it portable or deploying it to another cloud.
+They fit together: create a new service or migrate an existing one, then review it before calling it portable or
+deploying it to another cloud. `halyx-ai-create` runs the review's checks itself as its last step.
 
 ## Installing and running them
 
@@ -34,13 +36,57 @@ The skills are in the repository under
 
 | Assistant | Install | Run |
 |---|---|---|
-| Claude Code, in one service | copy the skill's folder into the service's `.claude/skills/` | ask for the job ("migrate this service to Halyx", "review this service for portability"), or type the slash command: `/halyx-ai-migrate`, `/halyx-ai-review` |
+| Claude Code, in one service | copy the skill's folder into the service's `.claude/skills/` | ask for the job ("create an orders service on Halyx", "migrate this service to Halyx", "review this service for portability"), or type the slash command: `/halyx-ai-create`, `/halyx-ai-migrate`, `/halyx-ai-review` |
 | Claude Code, for every project | copy the folder into `~/.claude/skills/` | the same |
 | Another assistant | point it at the skill's `SKILL.md` as its instructions; its references are linked from there | ask for the job |
 
 Claude Code picks a skill from its description, so asking in your own words works as well as the slash command.
 Outside this repository, the skills link to the published docs at https://halyx.dev/docs/ and to the
 [portable orders sample](https://github.com/halyx-dev/halyx/tree/main/halyx-samples/portable-orders) on GitHub.
+
+## halyx-ai-create
+
+Creates a new Spring Boot service that runs on AWS, Azure and Google Cloud from one jar, in the shape of the
+[portable orders sample](portable-service.md): the cloud is a Spring profile, a `local` profile runs with no cloud,
+and the code holds nothing from a cloud SDK.
+
+**How it works:**
+1. **Understanding the service:** its operations, its data and how each is read, what happens asynchronously, its
+   settings and secrets, the target clouds, Spring Boot 4 or 3.5, and which deployment pieces are wanted.
+2. **Plan:** each need mapped to a Halyx resource and to the service on each cloud, the data model with its keys
+   and indexes, why each asynchronous step can run twice, what differs per cloud, and the tests. It stops here for
+   your approval.
+3. **Scaffold:** the build, `application.yml` with a document per cloud, then the code, built and started after each
+   step.
+4. **Tests:** one end-to-end suite over the API, run in memory, on each cloud's emulators, from the packaged jar,
+   and a test of each cloud profile that connects nowhere. Then one deliberate mistake per area, to see the right
+   test fail.
+5. **Deployment pieces, if asked:** a Helm chart with workload identity per cloud, least-privilege permissions per
+   resource, and Terraform.
+6. **Review and report:** the portability checks, with blockers and risks fixed, then what was built and what only a
+   real cloud can show.
+
+| Reference | Holds |
+|---|---|
+| `building-blocks.md` | each need mapped to a Halyx resource and the service on each cloud; choosing between neighbours; document keys and indexes; what differs per cloud |
+| `project.md` | the build and the versions it resolves, the layout, bean and resource names, `application.yml` per cloud, and the checks before calling it done |
+| `code.md` | the sample's patterns: records and repositories, store then announce, listeners that can run twice, events, streams, caches, SQL, blobs and secrets |
+| `testing.md` | the suite, the memory and emulator runs and how to provision them, the profile test, the packaged jar, and proving the tests can fail |
+| `deploy.md` | the image, the Helm chart, workload identity, permissions per resource on each cloud, and infrastructure as code |
+
+**How it was tested:** three services were generated by following the skill, each with a different mix:
+- **invoices**, on Spring Boot 4: blob storage, a document store with an index, messaging, secrets and `@Cacheable`
+- **inventory**, on Spring Boot 3.5: SQL with Flyway and transactions, events, Kafka streams, and settings that
+  reload
+- **pageviews**, on Spring Boot 4 with WebFlux: reactive repositories, cache counters for quotas, and streams
+
+Each passed its suite in memory and on the AWS, Azure and Google Cloud emulators (events are skipped on Azure and
+Google Cloud, which have no emulator for them), its profile tests and its packaged jar. Each also caught the
+deliberate mistakes made in it. Every trial found something that is now in the skill. Two examples: a profile test
+that loads a cloud profile's config import reaches the real cloud with the machine's credentials, and
+`DateTimeFormatter.ISO_INSTANT` isn't fixed width, so it can't sort a key. The trials also showed that a standalone
+Spring Boot 4.1 service resolves Lettuce 7.5 and Netty 4.2, and that Halyx's caches and streams work on them. None of
+the three has run on a real cloud yet.
 
 ## halyx-ai-migrate
 
@@ -122,7 +168,7 @@ per cloud.
 
 A skill is a folder in `.claude/skills/` with a `SKILL.md`: front matter with its `name` and a `description` that
 says what it does and when to use it, then the method. Detail goes in `references/`. Before a skill is listed here,
-it gets trial runs like the two above, ideally including one where the outcome isn't known in advance. Each trial
+it gets trial runs like the ones above, ideally including one where the outcome isn't known in advance. Each trial
 should end with what it found written back into the skill.
 
 Candidates for later:
