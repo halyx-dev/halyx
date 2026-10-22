@@ -24,7 +24,8 @@ public interface MessageConsumer extends AutoCloseable {
 
     /**
      * Stops pulling, lets running handlers finish (up to the shutdown timeout) and nacks any message received
-     * but not yet started, so it is redelivered promptly.
+     * but not yet started, so it is redelivered promptly. Called from one of this consumer's handlers, it returns
+     * at once, and the consumer stops once that handler returns.
      */
     @Override
     void close();

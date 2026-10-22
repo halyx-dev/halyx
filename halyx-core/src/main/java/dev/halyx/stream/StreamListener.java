@@ -24,7 +24,8 @@ public interface StreamListener extends AutoCloseable {
 
     /**
      * Stops reading, lets records being handled finish (up to the shutdown timeout) and commits what was
-     * handled. Records read but not handled are read again by whichever member owns the partition next.
+     * handled. Records read but not handled are read again by whichever member owns the partition next. Called
+     * from one of this listener's handlers, it returns at once, and the listener stops once that handler returns.
      */
     @Override
     void close();

@@ -62,6 +62,9 @@ final class PartitionListener implements StreamListener {
     private final ConsumerDriver driver;
     private final RecordListener listener;
     private final ListenerOptions options;
+    /** The listener whose handler runs on this thread, so close() from inside a handler doesn't wait for itself. */
+    private static final ThreadLocal<PartitionListener> HANDLING = new ThreadLocal<>();
+
     private final Map<Partition, PartitionWork> partitions = new ConcurrentHashMap<>();
     private final Rebalance rebalance = new Rebalance();
     private final ExecutorService handlers = Executors.newThreadPerTaskExecutor(
@@ -224,8 +227,17 @@ final class PartitionListener implements StreamListener {
         }
     }
 
+    /**
+     * Commits everything handled, waiting for the broker. That includes what a periodic commit already sent: it
+     * was asynchronous and may have failed, and this is the last commit before the partitions move on.
+     */
     private void commitNow(Collection<PartitionWork> works) {
-        Map<Partition, Long> offsets = uncommitted(works);
+        Map<Partition, Long> offsets = new LinkedHashMap<>();
+        for (PartitionWork work : works) {
+            if (work.committable >= 0) {
+                offsets.put(work.partition, work.committable);
+            }
+        }
         if (offsets.isEmpty()) {
             return;
         }
@@ -317,6 +329,7 @@ final class PartitionListener implements StreamListener {
                 return false;
             }
             inFlight.incrementAndGet();
+            HANDLING.set(this);
             Throwable failure;
             try {
                 listener.onRecord(consumer.toReceived(record, attempt));
@@ -327,6 +340,7 @@ final class PartitionListener implements StreamListener {
             } catch (Throwable e) {
                 failure = e;
             } finally {
+                HANDLING.remove();
                 inFlight.decrementAndGet();
             }
             failed.incrementAndGet();
@@ -379,7 +393,9 @@ final class PartitionListener implements StreamListener {
         running = false;
         partitions.values().forEach(PartitionWork::wake);
         driver.wakeup();
-        if (Thread.currentThread() == poller) {
+        // From the poller, or from one of this listener's handlers, waiting would wait for the caller itself: the
+        // listener finishes stopping once the caller returns.
+        if (Thread.currentThread() == poller || HANDLING.get() == this) {
             return;
         }
         awaitStopped(stopTimeout());

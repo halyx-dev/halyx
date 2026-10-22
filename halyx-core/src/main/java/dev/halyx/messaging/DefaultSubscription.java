@@ -36,8 +36,6 @@ import java.util.Set;
 import java.util.WeakHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -57,7 +55,6 @@ public final class DefaultSubscription implements Subscription {
     private final List<DriverMessage> pendingAcks = new ArrayList<>();
     /** Listeners started on this subscription, stopped when its context closes; a running one is held by its poller. */
     private final Set<MessageConsumer> consumers = Collections.synchronizedSet(Collections.newSetFromMap(new WeakHashMap<>()));
-    private ScheduledExecutorService ackFlusher;
 
     public DefaultSubscription(SubscriptionDriver driver, SubscriptionConfig config, InterceptorChain interceptors) {
         this.driver = Objects.requireNonNull(driver, "driver");
@@ -293,11 +290,9 @@ public final class DefaultSubscription implements Subscription {
                 full = new ArrayList<>(pendingAcks);
                 pendingAcks.clear();
             } else if (pendingAcks.size() == 1) {
-                if (ackFlusher == null) {
-                    ackFlusher = Executors.newSingleThreadScheduledExecutor(Thread.ofPlatform().daemon()
-                            .name("halyx-ack-" + driver.name()).factory());
-                }
-                ackFlusher.schedule(this::flushAcks, ACK_LINGER.toMillis(), TimeUnit.MILLISECONDS);
+                // The linger runs on a virtual thread of its own, so nothing is left running once consumers stop.
+                CompletableFuture.runAsync(this::flushAcks, CompletableFuture.delayedExecutor(ACK_LINGER.toMillis(),
+                        TimeUnit.MILLISECONDS, task -> Thread.ofVirtual().name("halyx-ack-" + driver.name()).start(task)));
             }
         }
         if (full != null) {
@@ -329,15 +324,9 @@ public final class DefaultSubscription implements Subscription {
         }
     }
 
-    /** Flushes pending acks and stops the flusher (when a consumer stops). */
+    /** Flushes pending acks (when a consumer stops). */
     void stopAckBatching() {
         flushAcks();
-        synchronized (pendingAcks) {
-            if (ackFlusher != null) {
-                ackFlusher.shutdown();
-                ackFlusher = null;
-            }
-        }
     }
 
     private <T> T execute(String operation, boolean idempotent, Supplier<T> call) {

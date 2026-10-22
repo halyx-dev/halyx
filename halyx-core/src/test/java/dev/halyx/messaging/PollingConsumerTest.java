@@ -36,6 +36,8 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -203,5 +205,45 @@ class PollingConsumerTest {
 
         assertThat(ran).containsExactly("first", "second");
         assertThat(tails).isEmpty();
+    }
+
+    @Test
+    void anAckAfterBatchingStoppedIsSentAndLeavesNoThreadBehind() throws Exception {
+        var driver = new BatchDriver(Duration.ofMinutes(1));
+        driver.ackBatch = 10;
+        driver.add("late", null);
+        DefaultSubscription subscription = (DefaultSubscription) subscription(driver);
+        ReceivedMessage message = subscription.receive(1, Duration.ofMillis(100)).getFirst();
+
+        subscription.stopAckBatching(); // as when its consumer stops
+        message.ackDeferred();          // from a handler that outlived the shutdown timeout
+        Thread.sleep(DefaultSubscription.ACK_LINGER.toMillis() * 3);
+
+        assertThat(driver.acked).containsExactly("late");
+        assertThat(Thread.getAllStackTraces().keySet()).noneMatch(t -> t.getName().startsWith("halyx-ack-"));
+    }
+
+    @Test
+    void aHandlerCanCloseItsOwnConsumerWithoutWaitingForItself() throws InterruptedException {
+        var driver = new BatchDriver(Duration.ofMinutes(1));
+        AtomicReference<MessageConsumer> self = new AtomicReference<>();
+        AtomicLong closeTookMillis = new AtomicLong(-1);
+        self.set(subscription(driver).listen(message -> {
+            long start = System.nanoTime();
+            self.get().close();
+            closeTookMillis.set(Duration.ofNanos(System.nanoTime() - start).toMillis());
+        }, new ConsumerOptions(16, 10, Duration.ofMillis(50), Duration.ofMillis(20), Duration.ofMillis(100), false,
+                Duration.ofSeconds(10))));
+        driver.add("stop", null);
+
+        for (int i = 0; i < 500 && closeTookMillis.get() < 0; i++) {
+            Thread.sleep(10);
+        }
+        assertThat(closeTookMillis.get()).isBetween(0L, 1999L);
+        assertThat(self.get().isRunning()).isFalse();
+        for (int i = 0; i < 500 && driver.acked.isEmpty(); i++) {
+            Thread.sleep(10);
+        }
+        assertThat(driver.acked).containsExactly("stop");
     }
 }

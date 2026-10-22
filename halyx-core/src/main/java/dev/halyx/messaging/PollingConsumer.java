@@ -55,6 +55,9 @@ final class PollingConsumer implements MessageConsumer {
     private final ExecutorService handlers = Executors.newThreadPerTaskExecutor(
             Thread.ofVirtual().name("halyx-handle-", 0).factory());
     /** The last scheduled handler per ordering key; the next message of that key runs after it. */
+    /** The consumer whose handler runs on this thread, so close() from inside a handler doesn't wait for itself. */
+    private static final ThreadLocal<PollingConsumer> HANDLING = new ThreadLocal<>();
+
     private final ConcurrentMap<String, CompletableFuture<Void>> keyTails = new ConcurrentHashMap<>();
     private volatile boolean running = true;
 
@@ -141,6 +144,7 @@ final class PollingConsumer implements MessageConsumer {
     }
 
     private void handle(ReceivedMessage message, ScheduledFuture<?> extender) {
+        HANDLING.set(this);
         try {
             listener.onMessage(message);
             if (!message.isSettled()) {
@@ -157,6 +161,7 @@ final class PollingConsumer implements MessageConsumer {
                 throw error;
             }
         } finally {
+            HANDLING.remove();
             if (extender != null) {
                 extender.cancel(false);
             }
@@ -214,6 +219,16 @@ final class PollingConsumer implements MessageConsumer {
         }
         running = false;
         poller.interrupt();
+        if (HANDLING.get() == this) {
+            // Waiting for every handler would wait for the caller itself: stopping finishes once it returns.
+            Thread.ofVirtual().name("halyx-stop-" + subscription.name()).start(this::finishClosing);
+            return;
+        }
+        finishClosing();
+    }
+
+    /** Waits for running handlers and the poller, then stops lease extension and ack batching. */
+    private void finishClosing() {
         try {
             // All slots free means no handler is running and the poller holds none.
             if (!slots.tryAcquire(options.concurrency(), options.shutdownTimeout().toMillis(), TimeUnit.MILLISECONDS)) {
