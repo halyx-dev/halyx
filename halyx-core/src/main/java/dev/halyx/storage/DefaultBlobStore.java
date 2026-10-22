@@ -132,8 +132,11 @@ public final class DefaultBlobStore implements BlobStore {
         OperationContext context = new OperationContext(SERVICE, "write", provider, bucket + "/" + key, false);
         return interceptors.execute(context, () -> {
             ChunkingOutputStream out = new ChunkingOutputStream(driver, key, options);
+            PutResult result;
             try {
                 sink.writeTo(out);
+                // Inside the try: a part or the commit failing here leaves an upload to abort too.
+                result = out.finish();
             } catch (IOException e) {
                 out.abort();
                 throw new UncheckedIOException(e);
@@ -141,7 +144,6 @@ public final class DefaultBlobStore implements BlobStore {
                 out.abort();
                 throw e;
             }
-            PutResult result = out.finish();
             return verifyWrite(driver, key, result, out.expectedChecksums());
         });
     }

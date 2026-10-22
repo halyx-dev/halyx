@@ -18,6 +18,7 @@ package dev.halyx.redis;
 import dev.halyx.cache.spi.CacheDriver;
 import dev.halyx.error.CloudException;
 import dev.halyx.error.UnknownCloudException;
+import dev.halyx.interceptor.AsyncInvocation;
 
 import java.time.Duration;
 import java.util.List;
@@ -25,18 +26,30 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 /**
  * Connects on first use, and again on a later call if connecting failed. An application can
  * therefore start while its cache is down (essential with fail-open), and recovers once the server
  * is back. After the first successful connect, Lettuce handles reconnects itself.
+ *
+ * <p>Concurrent callers share one connect attempt rather than queueing for their own, and for
+ * {@link #RETRY_AFTER} after a failed attempt they fail at once with its error, so a cache that is down
+ * costs callers one connect timeout at most, not one each. Waiting holds no monitor, which would pin a
+ * virtual thread's carrier on Java 21.
  */
 final class LazyCacheDriver implements CacheDriver {
 
     private final String provider;
     private final Supplier<CacheDriver> connector;
+    /** How long a failed connect is reused before a call tries again. */
+    static final Duration RETRY_AFTER = Duration.ofSeconds(1);
+
     private volatile CacheDriver delegate;
+    /** The connect under way, or the last one, which failed if {@link #delegate} is still null. */
+    private final AtomicReference<CompletableFuture<CacheDriver>> connecting = new AtomicReference<>();
+    private volatile long failedAt;
 
     LazyCacheDriver(String provider, Supplier<CacheDriver> connector) {
         this.provider = provider;
@@ -76,16 +89,29 @@ final class LazyCacheDriver implements CacheDriver {
 
     private CacheDriver driver() {
         CacheDriver d = delegate;
-        if (d == null) {
-            synchronized (this) {
-                d = delegate;
-                if (d == null) {
+        if (d != null) {
+            return d;
+        }
+        while (true) {
+            CompletableFuture<CacheDriver> current = connecting.get();
+            if (current != null && (!current.isCompletedExceptionally()
+                    || System.nanoTime() - failedAt < RETRY_AFTER.toNanos())) {
+                return AsyncInvocation.join(current);
+            }
+            CompletableFuture<CacheDriver> mine = new CompletableFuture<>();
+            if (connecting.compareAndSet(current, mine)) {
+                try {
                     d = connector.get();
-                    delegate = d;
+                } catch (RuntimeException | Error e) {
+                    failedAt = System.nanoTime();
+                    mine.completeExceptionally(e);
+                    throw e;
                 }
+                delegate = d;
+                mine.complete(d);
+                return d;
             }
         }
-        return d;
     }
 
     @Override

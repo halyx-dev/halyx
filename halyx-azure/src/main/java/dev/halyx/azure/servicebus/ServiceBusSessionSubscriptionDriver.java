@@ -43,6 +43,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Receives from a session-enabled Service Bus queue or subscription. It holds up to {@code maxSessions}
@@ -74,6 +75,11 @@ public final class ServiceBusSessionSubscriptionDriver extends AbstractSubscript
     private final List<Session> active = new CopyOnWriteArrayList<>();
     private final Map<String, Locked> locked = new ConcurrentHashMap<>();
     private CompletableFuture<ServiceBusReceiverClient> accepting;
+    /**
+     * One receive at a time, which may wait up to its full poll; a lock, not a monitor, which would pin a virtual
+     * thread's carrier on Java 21 for that long.
+     */
+    private final ReentrantLock lock = new ReentrantLock();
     private volatile Duration lease = Duration.ofSeconds(30);
 
     public ServiceBusSessionSubscriptionDriver(ServiceBusSessionReceiverClient sessions, String name, int maxSessions) {
@@ -94,28 +100,33 @@ public final class ServiceBusSessionSubscriptionDriver extends AbstractSubscript
     }
 
     @Override
-    public synchronized List<DriverMessage> receive(int max, Duration wait) {
-        long deadline = System.nanoTime() + wait.toNanos();
-        List<DriverMessage> out = new ArrayList<>();
-        while (true) {
-            adoptAcceptedSession(active.isEmpty() ? remaining(deadline) : Duration.ZERO);
-            for (Session session : active) {
-                if (out.size() >= max) {
-                    break;
+    public List<DriverMessage> receive(int max, Duration wait) {
+        lock.lock();
+        try {
+            long deadline = System.nanoTime() + wait.toNanos();
+            List<DriverMessage> out = new ArrayList<>();
+            while (true) {
+                adoptAcceptedSession(active.isEmpty() ? remaining(deadline) : Duration.ZERO);
+                for (Session session : active) {
+                    if (out.size() >= max) {
+                        break;
+                    }
+                    List<ServiceBusReceivedMessage> batch = new ArrayList<>();
+                    session.receiver.receiveMessages(max - out.size(), SESSION_POLL).forEach(batch::add);
+                    if (batch.isEmpty() && session.inFlight.get() == 0) {
+                        release(session); // drained: let another session in
+                        continue;
+                    }
+                    for (ServiceBusReceivedMessage message : batch) {
+                        out.add(toDriverMessage(message, session));
+                    }
                 }
-                List<ServiceBusReceivedMessage> batch = new ArrayList<>();
-                session.receiver.receiveMessages(max - out.size(), SESSION_POLL).forEach(batch::add);
-                if (batch.isEmpty() && session.inFlight.get() == 0) {
-                    release(session); // drained: let another session in
-                    continue;
-                }
-                for (ServiceBusReceivedMessage message : batch) {
-                    out.add(toDriverMessage(message, session));
+                if (!out.isEmpty() || System.nanoTime() >= deadline) {
+                    return out;
                 }
             }
-            if (!out.isEmpty() || System.nanoTime() >= deadline) {
-                return out;
-            }
+        } finally {
+            lock.unlock();
         }
     }
 
@@ -235,11 +246,16 @@ public final class ServiceBusSessionSubscriptionDriver extends AbstractSubscript
     }
 
     @Override
-    public synchronized void close() {
-        active.forEach(this::release);
-        if (accepting != null) {
-            accepting.thenAccept(ServiceBusReceiverClient::close);
+    public void close() {
+        lock.lock();
+        try {
+            active.forEach(this::release);
+            if (accepting != null) {
+                accepting.thenAccept(ServiceBusReceiverClient::close);
+            }
+            sessions.close();
+        } finally {
+            lock.unlock();
         }
-        sessions.close();
     }
 }

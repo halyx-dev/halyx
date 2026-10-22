@@ -34,6 +34,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Future;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 
 /**
@@ -45,6 +46,13 @@ final class KafkaProducerDriver extends AbstractProducerDriver {
     private final String topic;
     private final Supplier<Producer<byte[], byte[]>> factory;
     private volatile Producer<byte[], byte[]> producer;
+    /** Creates the producer once; creating a transactional one calls the broker. */
+    private final ReentrantLock creating = new ReentrantLock();
+    /**
+     * One transaction at a time. Locks rather than monitors: both are held across broker calls, during which a
+     * monitor would pin a virtual thread's carrier on Java 21.
+     */
+    private final ReentrantLock transactions = new ReentrantLock();
     private final boolean transactional;
     private final long maxRecordBytes;
     private final Capabilities capabilities;
@@ -76,7 +84,8 @@ final class KafkaProducerDriver extends AbstractProducerDriver {
             return await(sendEach(producer, records));
         }
         // One transaction at a time per transactional producer.
-        synchronized (producer) {
+        transactions.lock();
+        try {
             producer.beginTransaction();
             try {
                 List<Future<RecordMetadata>> sent = sendEach(producer, records);
@@ -86,18 +95,23 @@ final class KafkaProducerDriver extends AbstractProducerDriver {
                 abortQuietly(producer, e);
                 throw e;
             }
+        } finally {
+            transactions.unlock();
         }
     }
 
     private Producer<byte[], byte[]> producer() {
         Producer<byte[], byte[]> p = producer;
         if (p == null) {
-            synchronized (this) {
+            creating.lock();
+            try {
                 p = producer;
                 if (p == null) {
                     p = factory.get();
                     producer = p;
                 }
+            } finally {
+                creating.unlock();
             }
         }
         return p;

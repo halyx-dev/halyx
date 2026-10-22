@@ -211,6 +211,22 @@ StepVerifier.create(rx.provider("orders").blobStore("b").head(BlobKey.of("missin
 
 Calls run on real threads, so use `StepVerifier`'s waiting, not virtual time, for Halyx calls.
 
+## Which thread runs your callbacks
+
+Every service's `async()` view returns `CompletableFuture`s. A call's result reaches your code on a Halyx virtual
+thread, named `halyx-complete-…`, never on the SDK's network thread, so a callback may block, even on another
+Halyx call. A future already complete when it is returned runs its callbacks on the calling thread.
+
+- `async(executor)` runs a call's blocking work, if it has any, on `executor`; results still arrive on Halyx's
+  threads. A stream consumer's `poll` and `commit` run one at a time, entirely on that executor.
+- The calling thread's thread locals (MDC, a security context, a trace scope) aren't set in callbacks. To carry
+  them, continue with `thenApplyAsync(fn, executor)` on an executor of your own, or use Micrometer's context
+  propagation.
+- Callbacks run as concurrently as the calls that produced them. To bound them, or to get back to a thread of your
+  own (an event loop, a UI thread), continue with `thenApplyAsync` on your executor.
+- The reactive views move every result onto your scheduler, with the subscriber's context restored, so none of
+  this applies to them.
+
 ## Without the module
 
 Applications that don't want `halyx-reactor` can wrap calls themselves, on a scheduler of their own:

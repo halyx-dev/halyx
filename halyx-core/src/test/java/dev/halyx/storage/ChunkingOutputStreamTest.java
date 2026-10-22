@@ -111,10 +111,21 @@ class ChunkingOutputStreamTest {
         assertThat(driver.calls).containsExactly("start", "part1:" + PART, "part2:5", "complete", "put:5");
     }
 
+    @Test
+    void aFailedCommitAbortsTheUpload() {
+        driver.failComplete = true;
+
+        assertThatThrownBy(() -> store.write(BlobKey.of("k"), out -> out.write(new byte[PART + 10]), options))
+                .hasMessageContaining("commit refused");
+
+        assertThat(driver.calls).containsExactly("start", "part1:" + PART, "part2:10", "complete", "abort");
+    }
+
     private static final class RecordingDriver extends AbstractBlobStoreDriver {
 
         final List<String> calls = new ArrayList<>();
         final List<Checksums> expected = new ArrayList<>();
+        boolean failComplete;
 
         RecordingDriver() {
             super("test", "bucket", Capabilities.of(StorageCapability.CHECKSUM));
@@ -144,6 +155,9 @@ class ChunkingOutputStreamTest {
                         RecordingDriver.this.expected.add(expected);
                     }
                     calls.add("complete");
+                    if (failComplete) {
+                        throw new IllegalStateException("commit refused");
+                    }
                     return new PutResult(key, ETag.of("e"));
                 }
 

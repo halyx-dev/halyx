@@ -130,6 +130,8 @@ class FailOpenIT {
         try (GenericContainer<?> valkey = new GenericContainer<>(ValkeyCacheConformanceIT.VALKEY).withExposedPorts(6379)) {
             valkey.setPortBindings(List.of(port + ":6379"));
             valkey.start();
+            // Calls straight after a failed connect reuse its failure, rather than each trying again.
+            Thread.sleep(LazyCacheDriver.RETRY_AFTER.toMillis());
             cache.put("k", "v");
             assertThat(cache.get("k")).hasValue("v");
         }

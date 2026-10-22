@@ -23,7 +23,10 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -131,5 +134,52 @@ class AsyncInterceptorChainTest {
 
         assertThat(result).isCompletedExceptionally();
         assertThatThrownBy(result::join).hasCauseInstanceOf(NotFoundException.class);
+    }
+
+    @Test
+    void callbacksRunOffTheSdksNetworkThreadSoTheyMayBlock() throws Exception {
+        // One network thread, as Lettuce has per connection: it completes calls, and reads every reply.
+        ExecutorService network = Executors.newSingleThreadExecutor(Thread.ofPlatform().name("sdk-io").factory());
+        try {
+            CountDownLatch replied = new CountDownLatch(1);
+            CompletableFuture<String> call = InterceptorChain.empty().executeAsync(IDEMPOTENT,
+                    () -> CompletableFuture.supplyAsync(() -> {
+                        await(replied);
+                        return "first";
+                    }, network));
+
+            // The callback blocks on a second call, whose reply needs the network thread.
+            CompletableFuture<String> chained = call.thenApply(first -> {
+                try {
+                    return first + "+" + network.submit(() -> "second").get(5, TimeUnit.SECONDS)
+                            + " on " + Thread.currentThread().getName();
+                } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                }
+            });
+            replied.countDown();
+
+            assertThat(chained.get(10, TimeUnit.SECONDS)).startsWith("first+second on halyx-complete-");
+        } finally {
+            network.shutdownNow();
+        }
+    }
+
+    @Test
+    void cancellingTheReturnedFutureCancelsTheCall() {
+        CompletableFuture<String> pending = new CompletableFuture<>();
+        CompletableFuture<String> returned = InterceptorChain.empty().executeAsync(IDEMPOTENT, () -> pending);
+
+        returned.cancel(false);
+
+        assertThat(pending).isCancelled();
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 }

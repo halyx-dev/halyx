@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 
 /**
  * Runs interceptors in registration order (the first registered is outermost), ending with the
@@ -31,6 +32,9 @@ public final class InterceptorChain {
     /** Runs blocking work for asynchronous calls: a driver without a non-blocking path, or a blocking interceptor. */
     private static final Executor BLOCKING = Executors.newThreadPerTaskExecutor(
             Thread.ofVirtual().name("halyx-async-", 0).factory());
+    /** Where asynchronous calls complete for their callers: off the SDKs' network threads. */
+    private static final Executor COMPLETING = Executors.newThreadPerTaskExecutor(
+            Thread.ofVirtual().name("halyx-complete-", 0).factory());
 
     private final List<Interceptor> interceptors;
 
@@ -48,7 +52,10 @@ public final class InterceptorChain {
 
     /**
      * Runs an asynchronous operation through the interceptors; the terminal call returns at once with a future. A
-     * failure thrown instead of returned is turned into a failed future, so callers see one kind of failure.
+     * failure thrown instead of returned is turned into a failed future, so callers see one kind of failure. The
+     * future completes on a Halyx virtual thread, never on an SDK's network thread (Lettuce's event loop, Reactor
+     * Netty's): a caller's callback that blocks, on another Halyx call for example, would otherwise hold up the
+     * thread that call's reply needs. A future already complete when returned runs callbacks on the caller's thread.
      */
     public <T> CompletableFuture<T> executeAsync(OperationContext context, AsyncInvocation<T> terminal) {
         return executeAsync(context, terminal, BLOCKING);
@@ -56,7 +63,35 @@ public final class InterceptorChain {
 
     /** The same, running blocking interceptors on {@code blocking} instead of the shared virtual threads. */
     public <T> CompletableFuture<T> executeAsync(OperationContext context, AsyncInvocation<T> terminal, Executor blocking) {
-        return proceedAsync(0, context, terminal, blocking);
+        return completeOnOwnThread(proceedAsync(0, context, terminal, blocking));
+    }
+
+    /** {@code call}'s outcome, handed over to a {@link #COMPLETING} thread; cancelling it cancels {@code call}. */
+    private static <T> CompletableFuture<T> completeOnOwnThread(CompletableFuture<T> call) {
+        if (call.isDone()) {
+            return call;
+        }
+        CompletableFuture<T> handedOver = new CompletableFuture<>();
+        call.whenComplete((value, error) -> {
+            Runnable settle = () -> {
+                if (error != null) {
+                    handedOver.completeExceptionally(error);
+                } else {
+                    handedOver.complete(value);
+                }
+            };
+            try {
+                COMPLETING.execute(settle);
+            } catch (RejectedExecutionException e) {
+                settle.run();
+            }
+        });
+        handedOver.whenComplete((value, error) -> {
+            if (handedOver.isCancelled()) {
+                call.cancel(false);
+            }
+        });
+        return handedOver;
     }
 
     /** Where asynchronous calls run blocking work: virtual threads, shared by every chain. */

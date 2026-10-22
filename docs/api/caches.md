@@ -138,7 +138,8 @@ With `failOpen(true)`, an unavailable server (connection failure, timeout or thr
 After 5 failures in a row, calls skip the server for 10 seconds (a circuit breaker), so a dead cache
 doesn't add a timeout to every request. Operations whose result matters (`putIfAbsent`, `replace`,
 `getAndDelete`, `deleteIfEquals`, counters and locks) still fail. Connections are opened lazily and
-retried, so an application starts even while its cache is down. The default command timeout is 2
+retried, so an application starts even while its cache is down. Calls made while a connect is under way share it,
+and for a second after one fails they fail at once rather than each trying again. The default command timeout is 2
 seconds (`redis.command-timeout`).
 
 `ping()` checks that the server answers an authenticated command and ignores fail-open, so it fails during an

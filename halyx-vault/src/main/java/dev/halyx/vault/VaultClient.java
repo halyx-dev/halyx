@@ -39,6 +39,7 @@ import java.time.Instant;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Minimal Vault HTTP API client. Holds the current token, logs in again shortly before it expires,
@@ -52,6 +53,11 @@ final class VaultClient implements AutoCloseable {
     private final Optional<String> namespace;
     private final VaultLogin login;
     private final HttpClient http;
+    /**
+     * Guards {@link #token}. A lock rather than a monitor: logging in calls Vault, and a virtual thread blocked
+     * while holding a monitor pins its carrier thread on Java 21.
+     */
+    private final ReentrantLock tokenLock = new ReentrantLock();
     private VaultLogin.Token token;
 
     VaultClient(URI address, Optional<String> namespace, VaultLogin login, Optional<Path> caCertificate) {
@@ -91,8 +97,11 @@ final class VaultClient implements AutoCloseable {
             return send(method, path, body, currentToken());
         } catch (VaultHttpException e) {
             if (e.status() == 403 && login.renewable()) {
-                synchronized (this) {
+                tokenLock.lock();
+                try {
                     token = null;
+                } finally {
+                    tokenLock.unlock();
                 }
                 return send(method, path, body, currentToken());
             }
@@ -104,20 +113,25 @@ final class VaultClient implements AutoCloseable {
         return send(method, path, body, null);
     }
 
-    private synchronized String currentToken() {
-        if (token == null || token.expiringSoon(Instant.now())) {
-            try {
-                token = login.login(this);
-            } catch (VaultHttpException e) {
-                // Vault rejects bad logins with 400 (for example an unknown role) as well as 403:
-                // either way the credentials were refused.
-                if (e.status() >= 400 && e.status() < 500) {
-                    throw new VaultHttpException(403, "login rejected: " + e.getMessage());
+    private String currentToken() {
+        tokenLock.lock();
+        try {
+            if (token == null || token.expiringSoon(Instant.now())) {
+                try {
+                    token = login.login(this);
+                } catch (VaultHttpException e) {
+                    // Vault rejects bad logins with 400 (for example an unknown role) as well as 403:
+                    // either way the credentials were refused.
+                    if (e.status() >= 400 && e.status() < 500) {
+                        throw new VaultHttpException(403, "login rejected: " + e.getMessage());
+                    }
+                    throw e;
                 }
-                throw e;
             }
+            return token.token();
+        } finally {
+            tokenLock.unlock();
         }
-        return token.token();
     }
 
     /**
@@ -128,8 +142,11 @@ final class VaultClient implements AutoCloseable {
         return tokenAsync(blocking).thenCompose(vaultToken -> sendAsync(method, path, body, vaultToken))
                 .exceptionallyCompose(error -> {
                     if (AsyncInvocation.unwrap(error) instanceof VaultHttpException e && e.status() == 403 && login.renewable()) {
-                        synchronized (this) {
+                        tokenLock.lock();
+                        try {
                             token = null;
+                        } finally {
+                            tokenLock.unlock();
                         }
                         return tokenAsync(blocking).thenCompose(vaultToken -> sendAsync(method, path, body, vaultToken));
                     }
@@ -138,10 +155,13 @@ final class VaultClient implements AutoCloseable {
     }
 
     private CompletableFuture<String> tokenAsync(Executor blocking) {
-        synchronized (this) {
+        tokenLock.lock();
+        try {
             if (token != null && !token.expiringSoon(Instant.now())) {
                 return CompletableFuture.completedFuture(token.token());
             }
+        } finally {
+            tokenLock.unlock();
         }
         return CompletableFuture.supplyAsync(this::currentToken, blocking);
     }

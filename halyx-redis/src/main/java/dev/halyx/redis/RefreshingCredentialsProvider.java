@@ -28,6 +28,7 @@ import java.time.Instant;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Adapts a {@link RedisCredentialsSource} to Lettuce. Logins are reused until shortly before they
@@ -46,6 +47,8 @@ final class RefreshingCredentialsProvider implements RedisCredentialsProvider, A
     private final RedisCredentialsSource source;
     private final Sinks.Many<RedisCredentials> updates = Sinks.many().replay().latest();
     private final ScheduledExecutorService scheduler;
+    /** Guards the current login; a lock, not a monitor, since logging in may call the cloud's token service. */
+    private final ReentrantLock lock = new ReentrantLock();
     private RedisLogin current;
 
     RefreshingCredentialsProvider(RedisCredentialsSource source) {
@@ -72,12 +75,17 @@ final class RefreshingCredentialsProvider implements RedisCredentialsProvider, A
         return updates.asFlux();
     }
 
-    synchronized RedisLogin currentLogin() {
-        if (current == null || expiringSoon(current)) {
-            current = source.login();
-            schedule(current);
+    RedisLogin currentLogin() {
+        lock.lock();
+        try {
+            if (current == null || expiringSoon(current)) {
+                current = source.login();
+                schedule(current);
+            }
+            return current;
+        } finally {
+            lock.unlock();
         }
-        return current;
     }
 
     private void schedule(RedisLogin login) {
@@ -90,9 +98,12 @@ final class RefreshingCredentialsProvider implements RedisCredentialsProvider, A
     private void refresh() {
         try {
             RedisLogin fresh;
-            synchronized (this) {
+            lock.lock();
+            try {
                 fresh = source.login();
                 current = fresh;
+            } finally {
+                lock.unlock();
             }
             updates.tryEmitNext(toLettuce(fresh));
             schedule(fresh);
