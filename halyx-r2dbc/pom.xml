@@ -36,6 +36,10 @@
     <name>Halyx :: R2DBC</name>
     <description>Halyx, the multi-cloud Java library: pooled R2DBC connections to PostgreSQL and MySQL that log in with Amazon RDS IAM, Microsoft Entra ID or Cloud SQL IAM tokens, for Spring Data R2DBC and reactive applications.</description>
 
+    <properties>
+        <halyx.module.name>dev.halyx.r2dbc</halyx.module.name>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>dev.halyx</groupId>

@@ -31,6 +31,10 @@
     <name>Halyx :: AWS</name>
     <description>Halyx, the multi-cloud Java library: the AWS provider (S3, DynamoDB, SNS, SQS, SSM Parameter Store, Secrets Manager, ElastiCache and RDS IAM login).</description>
 
+    <properties>
+        <halyx.module.name>dev.halyx.aws</halyx.module.name>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>dev.halyx</groupId>

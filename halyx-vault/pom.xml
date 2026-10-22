@@ -31,6 +31,10 @@
     <name>Halyx :: HashiCorp Vault</name>
     <description>Halyx, the multi-cloud Java library: the HashiCorp Vault KV v2 provider for parameters and secrets. It uses the JDK HTTP client and a built-in JSON codec, so it adds no third-party dependencies that could clash with the cloud SDKs.</description>
 
+    <properties>
+        <halyx.module.name>dev.halyx.vault</halyx.module.name>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>dev.halyx</groupId>

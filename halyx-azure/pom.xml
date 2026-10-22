@@ -31,6 +31,10 @@
     <name>Halyx :: Azure</name>
     <description>Halyx, the multi-cloud Java library: the Azure provider (Blob Storage, Cosmos DB, Service Bus, Key Vault, App Configuration, and Entra ID login for caches and databases).</description>
 
+    <properties>
+        <halyx.module.name>dev.halyx.azure</halyx.module.name>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>dev.halyx</groupId>

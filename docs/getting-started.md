@@ -64,6 +64,11 @@ Providers are discovered with `ServiceLoader`: a module on the classpath is all 
 also need your JDBC driver (`org.postgresql:postgresql`, `com.mysql:mysql-connector-j` or
 `com.microsoft.sqlserver:mssql-jdbc`).
 
+On the module path, the jars are automatic modules named after their root packages: `dev.halyx` for
+`halyx-core`, `dev.halyx.aws`, `dev.halyx.azure`, `dev.halyx.gcp`, `dev.halyx.jdbc` for `halyx-sql`, and
+`dev.halyx.spring` for the auto-configuration. Write `requires dev.halyx;` and `requires dev.halyx.aws;`.
+Providers are found through their `META-INF/services` files, as they are on the classpath.
+
 ## Your first calls
 
 A `Halyx` object holds one named connection per cloud account or region. It is thread-safe, meant to

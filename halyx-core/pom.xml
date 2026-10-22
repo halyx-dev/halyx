@@ -31,6 +31,10 @@
     <name>Halyx :: Core</name>
     <description>Halyx, the multi-cloud Java library: the portable API, provider SPI, error model, interceptors and the in-memory provider.</description>
 
+    <properties>
+        <halyx.module.name>dev.halyx</halyx.module.name>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>org.slf4j</groupId>

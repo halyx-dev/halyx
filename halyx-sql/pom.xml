@@ -36,6 +36,10 @@
     <name>Halyx :: SQL</name>
     <description>Halyx, the multi-cloud Java library: pooled JDBC DataSources (HikariCP) with password, cloud IAM and Entra ID login.</description>
 
+    <properties>
+        <halyx.module.name>dev.halyx.jdbc</halyx.module.name>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>dev.halyx</groupId>

@@ -36,6 +36,10 @@
     <name>Halyx :: Spring Boot Starter</name>
     <description>Halyx, the multi-cloud Java library: the Spring Boot starter.</description>
 
+    <properties>
+        <halyx.module.name>dev.halyx.spring.starter</halyx.module.name>
+    </properties>
+
     <dependencyManagement>
         <dependencies>
             <dependency>

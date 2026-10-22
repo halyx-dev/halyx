@@ -31,6 +31,10 @@
     <name>Halyx :: Redis</name>
     <description>Halyx, the multi-cloud Java library: the Redis and Valkey cache driver (Lettuce) shared by the AWS, Azure and Google Cloud providers, which add only their authentication (IAM and Entra ID tokens), so the data path is the same everywhere.</description>
 
+    <properties>
+        <halyx.module.name>dev.halyx.redis</halyx.module.name>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>dev.halyx</groupId>

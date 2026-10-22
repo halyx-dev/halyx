@@ -234,11 +234,12 @@ Markdown: Claude Code runs it as a skill, and other assistants can follow it as 
 
 | Skill | Does |
 |---|---|
+| [`halyx-ai-create`](.claude/skills/halyx-ai-create) | creates a new Spring Boot service on Halyx that runs unchanged on AWS, Azure and Google Cloud, following the portable orders sample: a profile per cloud, tests on the memory provider and each cloud's emulators, and optionally a Helm chart and IAM |
 | [`halyx-ai-migrate`](.claude/skills/halyx-ai-migrate) | migrates an existing Spring Boot service from a cloud's SDK, or Spring Cloud AWS, Azure or GCP, to Halyx, one reviewed step at a time |
 | [`halyx-ai-review`](.claude/skills/halyx-ai-review) | reviews a Halyx service for anything that still ties it to one cloud, with a verdict per cloud (read-only) |
 
 Copy a skill's folder into your service's `.claude/skills` (or `~/.claude/skills`), then ask for the job or run
-`/halyx-ai-migrate` or `/halyx-ai-review`. See [AI skills](https://halyx.dev/docs/ai-skills.html), and
+`/halyx-ai-create`, `/halyx-ai-migrate` or `/halyx-ai-review`. See [AI skills](https://halyx.dev/docs/ai-skills.html), and
 [Migrating to Halyx](https://halyx.dev/docs/migration.html) for the method and the trial migrations.
 
 ## Documentation
@@ -253,7 +254,7 @@ Copy a skill's folder into your service's `.claude/skills` (or `~/.claude/skills
 | [Spring Boot](https://halyx.dev/docs/spring-boot.html) | the starter, properties, listeners, health, metrics, configuration import, [Spring Data repositories](https://halyx.dev/docs/spring-boot.html#spring-data-repositories), R2DBC and Spring for Apache Kafka |
 | [Portable microservice](https://halyx.dev/docs/portable-service.html) | a sample Spring Boot service that runs unchanged on every cloud, and how it's tested |
 | [Migrating to Halyx](https://halyx.dev/docs/migration.html) | moving an existing Spring Boot service onto Halyx, with an AI assistant or by hand: mappings, existing data, rollouts and testing |
-| [AI skills](https://halyx.dev/docs/ai-skills.html) | skills for AI coding assistants: migrating a service to Halyx, and reviewing one for portability |
+| [AI skills](https://halyx.dev/docs/ai-skills.html) | skills for AI coding assistants: creating a new service on Halyx, migrating one to it, and reviewing one for portability |
 | [Design, build and test](https://halyx.dev/docs/design.html) | architecture, building, the conformance kits and benchmarks |
 | [Cloud testing](https://halyx.dev/docs/cloud-testing/) | results on real [AWS](https://halyx.dev/docs/cloud-testing/aws.html), [Google Cloud](https://halyx.dev/docs/cloud-testing/gcp.html) and [Azure](https://halyx.dev/docs/cloud-testing/azure.html) |
 | [Roadmap](https://halyx.dev/docs/roadmap.html) | what's done and what's next |

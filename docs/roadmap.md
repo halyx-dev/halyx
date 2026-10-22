@@ -36,10 +36,14 @@ The first release on Maven Central.
 | Apache-2.0 license, with headers on every source file | Done |
 | The `dev.halyx` group id | Done |
 | A full build and test pass, on emulators and on real clouds | Done |
-| Project metadata: URL, SCM and developers | To do |
-| Source and javadoc jars, signing, and the Central publishing plugin | To do |
-| JPMS module descriptors | To do |
-| Continuous integration | To do |
+| Project metadata: URL, SCM and developers | Done |
+| Source and javadoc jars, signing, and the Central publishing plugin (`mvn -Prelease deploy`) | Done; a dry run without signing or upload builds every published module's jars |
+| Java module names: an `Automatic-Module-Name` in each published jar, such as `dev.halyx` for `halyx-core` and `dev.halyx.aws` for `halyx-aws`, checked together on the module path | Done |
+| Continuous integration: unit and emulator tests on every push, and the documentation site | Done |
+| A security policy ([`SECURITY.md`](https://github.com/halyx-dev/halyx/blob/main/SECURITY.md)) and [release notes](https://github.com/halyx-dev/halyx/blob/main/CHANGELOG.md) | Done |
+| A public repository, and the documentation at halyx.dev | To do |
+| The release: version 1.0.0, a `v1.0.0` tag, the upload to Maven Central, and a GitHub release | To do |
+| `module-info.java` descriptors | Later: most of the cloud SDKs ship without them |
 | API compatibility checks with japicmp | From the release after 1.0.0 |
 
 ### Cloud logins: assumed roles, impersonation and service principals
@@ -66,7 +70,6 @@ Work left over from delivered milestones.
 |---|---|---|
 | Real-cloud run on MSK Serverless with IAM, including transactions | Streams | **Blocked:** the test account's AWS Free plan doesn't allow MSK. The script, Terraform and runner are ready ([AWS tier 4](cloud-testing/aws.md#tier-4-not-run)) |
 | Real-cloud run on Azure Database for MySQL with Entra ID | SQL databases | **Blocked:** needs a directory-level grant for the server's identity |
-| Scoping of the ElastiCache `Connect` permission in the AWS tier 3 test IAM policy | Real-cloud testing | To check |
 | The Cloud SQL connector's R2DBC adapters | R2DBC | Planned |
 | Kotlin coroutines: `suspend` listeners and coroutine repositories, tested | Reactive | Planned |
 | Calls that still block underneath on a virtual thread: Google Cloud Storage (no asynchronous Java API), Service Bus receives (only its async receiver's own stream can settle its messages), and Cosmos DB and Firestore read-then-write calls | Asynchronous I/O | **Platform limit:** revisited when the SDKs allow |

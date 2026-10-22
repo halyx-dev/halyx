@@ -36,6 +36,7 @@
     <description>Halyx, the multi-cloud Java library: Micrometer observations of every operation, and trace context carried through messages, events and stream records.</description>
 
     <properties>
+        <halyx.module.name>dev.halyx.micrometer</halyx.module.name>
         <!-- As Spring Boot 3.5 manages them; applications get the versions their own BOM or Boot manages -->
         <micrometer.version>1.15.12</micrometer.version>
         <micrometer-tracing.version>1.5.12</micrometer-tracing.version>

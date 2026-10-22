@@ -35,6 +35,10 @@
     <name>Halyx :: Spring Data Document</name>
     <description>Halyx, the multi-cloud Java library: Spring Data repositories over DynamoDB, Azure Cosmos DB and Google Cloud Firestore, with derived queries on keys and secondary indexes, optimistic locking and keyset scrolling.</description>
 
+    <properties>
+        <halyx.module.name>dev.halyx.spring.data.document</halyx.module.name>
+    </properties>
+
     <dependencyManagement>
         <dependencies>
             <dependency>

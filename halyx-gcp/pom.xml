@@ -31,6 +31,10 @@
     <name>Halyx :: GCP</name>
     <description>Halyx, the multi-cloud Java library: the Google Cloud provider (Cloud Storage, Firestore, Pub/Sub, Secret Manager, Parameter Manager, and IAM login for Memorystore and Cloud SQL).</description>
 
+    <properties>
+        <halyx.module.name>dev.halyx.gcp</halyx.module.name>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>dev.halyx</groupId>

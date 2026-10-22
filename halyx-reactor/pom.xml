@@ -36,6 +36,10 @@
     <name>Halyx :: Reactor</name>
     <description>Halyx, the multi-cloud Java library: Project Reactor (Mono and Flux) views of object storage, documents, messaging, events, streams, caches and parameters, on a scheduler the application chooses.</description>
 
+    <properties>
+        <halyx.module.name>dev.halyx.reactor</halyx.module.name>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>dev.halyx</groupId>

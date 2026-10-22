@@ -35,6 +35,10 @@
     <name>Halyx :: Kafka</name>
     <description>Halyx, the multi-cloud Java library: the Kafka stream driver shared by the AWS, Azure and Google Cloud providers, for Amazon MSK, Azure Event Hubs and Google Cloud Managed Service for Apache Kafka.</description>
 
+    <properties>
+        <halyx.module.name>dev.halyx.kafka</halyx.module.name>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>dev.halyx</groupId>
