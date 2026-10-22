@@ -70,9 +70,14 @@ class RealAwsCacheIT {
         return URI.create("rediss://" + HOST + ":" + PORT);
     }
 
-    /** The cache endpoint, resolved through the JVM so the tunnel's hosts file applies. */
+    /**
+     * The cache endpoint, resolved through the JVM so the tunnel's hosts file applies. A 1 MiB value through the
+     * SSH tunnel takes about two seconds, the default command timeout, so the tests allow longer.
+     */
     static CacheConfig.Builder cache() {
-        return CacheConfig.builder(endpoint()).property(RedisCaches.DNS_RESOLVER, "jdk");
+        return CacheConfig.builder(endpoint())
+                .property(RedisCaches.DNS_RESOLVER, "jdk")
+                .property(RedisCaches.COMMAND_TIMEOUT, "PT10S");
     }
 
     static CacheConfig.Builder iam(String user) {

@@ -1,0 +1,124 @@
+#
+# Copyright 2026 Kamran Zafar
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Snyk findings that Halyx can't fix itself, each with the reason. They expire so they are looked at again.
+#
+# Spring Boot 3.5 line: the auto-configuration, the starter and the Spring Data module are built and tested against
+# the versions Boot 3.5 manages, so they work in Boot 3.5 applications, and an application's own Boot BOM decides the
+# versions it runs. Spring Framework 6.2.19 and Spring for Apache Kafka 3.3.16 are the last open-source releases of
+# their lines, and these fixes exist only in Spring Framework 7 and Spring for Apache Kafka 4 (Spring Boot 4).
+version: v1.25.0
+ignore:
+  SNYK-JAVA-ORGSPRINGFRAMEWORK-19267072:
+    - '*':
+        reason: Spring Framework 6.2 (Boot 3.5 line); fixed only in 7.0.9. The application's Boot BOM decides.
+        expires: 2027-04-22T00:00:00.000Z
+        created: 2026-10-22T00:00:00.000Z
+  SNYK-JAVA-ORGSPRINGFRAMEWORK-19267073:
+    - '*':
+        reason: Spring Framework 6.2 (Boot 3.5 line); fixed only in 7.0.9. The application's Boot BOM decides.
+        expires: 2027-04-22T00:00:00.000Z
+        created: 2026-10-22T00:00:00.000Z
+  SNYK-JAVA-ORGSPRINGFRAMEWORK-19267075:
+    - '*':
+        reason: Spring Framework 6.2 (Boot 3.5 line); fixed only in 7.0.9. The application's Boot BOM decides.
+        expires: 2027-04-22T00:00:00.000Z
+        created: 2026-10-22T00:00:00.000Z
+  SNYK-JAVA-ORGSPRINGFRAMEWORK-19267077:
+    - '*':
+        reason: Spring Framework 6.2 (Boot 3.5 line, the Boot 3.5 sample only); fixed only in 7.0.9.
+        expires: 2027-04-22T00:00:00.000Z
+        created: 2026-10-22T00:00:00.000Z
+  SNYK-JAVA-ORGSPRINGFRAMEWORK-19267078:
+    - '*':
+        reason: Spring Framework 6.2 (Boot 3.5 line, the Boot 3.5 sample only); fixed only in 7.0.9.
+        expires: 2027-04-22T00:00:00.000Z
+        created: 2026-10-22T00:00:00.000Z
+  SNYK-JAVA-ORGSPRINGFRAMEWORK-19267079:
+    - '*':
+        reason: Spring Framework 6.2 (Boot 3.5 line, the Boot 3.5 sample only); fixed only in 7.0.9.
+        expires: 2027-04-22T00:00:00.000Z
+        created: 2026-10-22T00:00:00.000Z
+  SNYK-JAVA-ORGSPRINGFRAMEWORK-19267098:
+    - '*':
+        reason: Spring Framework 6.2 (Boot 3.5 line, the Boot 3.5 sample only); fixed only in 7.0.9.
+        expires: 2027-04-22T00:00:00.000Z
+        created: 2026-10-22T00:00:00.000Z
+  SNYK-JAVA-ORGSPRINGFRAMEWORKKAFKA-19267472:
+    - '*':
+        reason: Spring for Apache Kafka 3.3 (Boot 3.5 line, optional in the auto-configuration); fixed only in 4.0.7.
+        expires: 2027-04-22T00:00:00.000Z
+        created: 2026-10-22T00:00:00.000Z
+  # The versions Boot 3.5 manages, which the auto-configuration and the starter test against on purpose. Halyx's own
+  # modules bring the patched versions; a Boot 3.5 application gets Boot's unless it overrides them, as the Boot 3.5
+  # sample shows.
+  SNYK-JAVA-IOPROJECTREACTOR-19267101:
+    - '*':
+        reason: Reactor 3.7.19 as Boot 3.5 manages it, for the auto-configuration's tests; Halyx brings 3.8.7.
+        expires: 2027-04-22T00:00:00.000Z
+        created: 2026-10-22T00:00:00.000Z
+  SNYK-JAVA-IOPROJECTREACTOR-19267102:
+    - '*':
+        reason: Reactor 3.7.19 as Boot 3.5 manages it, for the auto-configuration's tests; Halyx brings 3.8.7.
+        expires: 2027-04-22T00:00:00.000Z
+        created: 2026-10-22T00:00:00.000Z
+  SNYK-JAVA-IOMICROMETER-19233327:
+    - '*':
+        reason: Micrometer 1.15 as Boot 3.5 manages it, for the auto-configuration's tests; fixed only in 1.16.7.
+        expires: 2027-04-22T00:00:00.000Z
+        created: 2026-10-22T00:00:00.000Z
+  SNYK-JAVA-IOMICROMETER-19256585:
+    - '*':
+        reason: Micrometer 1.15 as Boot 3.5 manages it, for the auto-configuration's tests; fixed only in 1.16.7.
+        expires: 2027-04-22T00:00:00.000Z
+        created: 2026-10-22T00:00:00.000Z
+  SNYK-JAVA-COMFASTERXMLJACKSONCORE-17972608:
+    - '*':
+        reason: Jackson 2.21.4 as Boot 3.5 manages it, for the auto-configuration's tests; Halyx brings 2.22.4.
+        expires: 2027-04-22T00:00:00.000Z
+        created: 2026-10-22T00:00:00.000Z
+  SNYK-JAVA-COMFASTERXMLJACKSONCORE-19778370:
+    - '*':
+        reason: Jackson 2.21.4 as Boot 3.5 manages it, for the auto-configuration's tests; Halyx brings 2.22.4.
+        expires: 2027-04-22T00:00:00.000Z
+        created: 2026-10-22T00:00:00.000Z
+  SNYK-JAVA-COMFASTERXMLJACKSONCORE-20059683:
+    - '*':
+        reason: Jackson 2.21.4 as Boot 3.5 manages it, for the auto-configuration's tests; Halyx brings 2.22.4.
+        expires: 2027-04-22T00:00:00.000Z
+        created: 2026-10-22T00:00:00.000Z
+  SNYK-JAVA-COMFASTERXMLJACKSONCORE-20059179:
+    - '*':
+        reason: Jackson 2.21.4 as Boot 3.5 manages it, for the auto-configuration's tests; Halyx brings 2.22.4.
+        expires: 2027-04-22T00:00:00.000Z
+        created: 2026-10-22T00:00:00.000Z
+  SNYK-JAVA-COMFASTERXMLJACKSONCORE-21193287:
+    - '*':
+        reason: Jackson 2.21.4 as Boot 3.5 manages it, for the auto-configuration's tests; Halyx brings 2.22.4.
+        expires: 2027-04-22T00:00:00.000Z
+        created: 2026-10-22T00:00:00.000Z
+  SNYK-JAVA-CHQOSLOGBACK-17675439:
+    - '*':
+        reason: Logback 1.5.34 through spring-boot-starter 3.5.16, which the starter depends on; Boot decides it.
+        expires: 2027-04-22T00:00:00.000Z
+        created: 2026-10-22T00:00:00.000Z
+  # Reactor Netty's HTTP/1.1 pipelining issue is in its HTTP server. Halyx uses only its HTTP client, through the
+  # Azure SDK. The fix (1.3.7) needs Netty 4.2, while the AWS and Azure SDKs and Lettuce 6 stay on Netty 4.1.
+  SNYK-JAVA-IOPROJECTREACTORNETTY-19267394:
+    - '*':
+        reason: Server-side (HTTP/1.1 pipelining); Halyx uses only the client. The fix needs Netty 4.2.
+        expires: 2027-04-22T00:00:00.000Z
+        created: 2026-10-22T00:00:00.000Z
+patch: {}

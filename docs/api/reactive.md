@@ -133,6 +133,10 @@ batches of up to the given size, flush a partial batch after the wait, and send 
 a slow send holds back the source. Each item comes out once its batch is written; a failed batch fails the
 `Flux`, and earlier batches stay written.
 
+The batching uses Reactor's `bufferTimeout` with fair backpressure. Before Reactor 3.8.7, a race there can leave the
+`Flux` hanging (CVE-2026-47863), and the 3.7 line has no fix. Halyx brings 3.8.7; on Spring Boot 3.5, whose BOM
+picks 3.7, declare `io.projectreactor:reactor-core:3.8.7` yourself if you batch.
+
 Blob bodies upload from a `Publisher<ByteBuffer>` as it produces them, in parts for large bodies. The blob is
 stored only if the body completes:
 

@@ -13,10 +13,10 @@ the `halyx-test` service account, impersonated through Application Default Crede
 
 | Tier | Services | Latest result |
 |---|---|---|
-| [1](#tier-1-latest-result) | Cloud Storage, Firestore, Pub/Sub, Secret Manager, Parameter Manager, Eventarc Advanced; Spring Data repositories (blocking and reactive) on Firestore, and Spring Boot on Firestore, Eventarc and, with halyx-reactor, WebFlux | **202/206** passed, 4 skipped (expected); Spring **10/10** |
+| [1](#tier-1-latest-result) | Cloud Storage, Firestore, Pub/Sub, Secret Manager, Parameter Manager, Eventarc Advanced; Spring Data repositories (blocking and reactive) on Firestore, and Spring Boot on Firestore, Eventarc and, with halyx-reactor, WebFlux | **230/234** passed, 4 skipped (expected); Spring **16/16** |
 | [2](#tier-2-latest-result) | Cloud SQL for PostgreSQL and MySQL with IAM auth, direct and through the Cloud SQL connector; R2DBC and Spring Data R2DBC | **22/22**; Spring **2/2** |
-| [3](#tier-3-latest-result) | Memorystore for Valkey with IAM auth and TLS (private CA) | **54/54** |
-| [4](#tier-4-latest-result) | Streams on Managed Service for Apache Kafka with Google IAM, from a runner inside the VPC, plus Spring Boot 3 and 4 | **25/25**; Spring **2/2** |
+| [3](#tier-3-latest-result) | Memorystore for Valkey with IAM auth and TLS (private CA) | **57/57**; Spring **2/2** |
+| [4](#tier-4-latest-result) | Streams on Managed Service for Apache Kafka with Google IAM, from a runner inside the VPC, plus Spring Boot 3 and 4 | **29/29**; Spring **2/2** |
 
 <details open markdown="block">
   <summary>Contents</summary>
@@ -650,6 +650,10 @@ nothing to fix.
 | `r26101721004590` | tier 1, plus Spring Boot 3 and 4 | **218 passed, 4 skipped**; Spring **16/16** | clean | Latest tier 1 result, with the asynchronous views (blob, document, messaging and event kits) on every service, non-blocking where the driver has a path: Firestore, Pub/Sub and Eventarc. |
 | `r26101802235ad4` | tier 1, plus Spring Boot 3 and 4 | **221 passed, 4 skipped**; Spring **16/16** | clean | Latest tier 1 result, with asynchronous receives and settlement in the messaging kit, non-blocking on Pub/Sub. |
 | `r2610181923c397` | tier 1, plus Spring Boot 3 and 4 | **230 passed, 4 skipped**; Spring **16/16** | clean | Latest tier 1 result, with the asynchronous parameter store: Secret Manager and Parameter Manager (global and regional) non-blocking, proven with a counting executor. |
+| `r261022150030d1` | tier 1, plus Spring Boot 3 and 4 | **230 passed, 4 skipped**; Spring **16/16** | clean | Full regression before 1.0.0, at `be792e3`. |
+| `r26102215401be8` | tier 2, plus Spring Boot 3 and 4 | **22/22**; Spring **2/2** | clean | Full regression before 1.0.0, at `be792e3`. |
+| `r2610221559bb6b` | tier 3, plus Spring Boot 3 and 4 | **57/57**; Spring **2/2** | clean | Full regression before 1.0.0, at `be792e3`. |
+| `r2610221620c638` | tier 4, plus Spring Boot 3 and 4 | **29/29**; Spring **2/2** | clean | Full regression before 1.0.0, at `be792e3`, with the kit's new listener tests: a replacement listener carries on where the last stopped, and a joining member waits for the previous owner's partitions. Cluster created in 13m 19s. |
 
 ## What real GCP found
 

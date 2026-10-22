@@ -38,6 +38,9 @@
     <properties>
         <!-- `mvn -pl halyx-samples/portable-orders spring-boot:build-image` names the image this -->
         <image.name>halyx/portable-orders:${project.version}</image.name>
+        <!-- Security fixes over Boot 4.1's versions -->
+        <netty42.version>4.2.19.Final</netty42.version>
+        <tomcat11.version>11.0.27</tomcat11.version>
     </properties>
 
     <dependencyManagement>
@@ -53,6 +56,31 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
+            <!--
+              Security fixes over the versions Boot manages. A real application would do the same, or move to the Boot
+              release that carries them. Imported before Boot's BOM so they win; the explicit entries below win anyway.
+            -->
+            <dependency>
+                <groupId>io.netty</groupId>
+                <artifactId>netty-bom</artifactId>
+                <version>${netty42.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>com.fasterxml.jackson</groupId>
+                <artifactId>jackson-bom</artifactId>
+                <version>${jackson2.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>tools.jackson</groupId>
+                <artifactId>jackson-bom</artifactId>
+                <version>${jackson3.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
             <dependency>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-dependencies</artifactId>
@@ -65,6 +93,22 @@
                 <groupId>org.apache.kafka</groupId>
                 <artifactId>kafka-clients</artifactId>
                 <version>${kafka4.version}</version>
+            </dependency>
+            <!-- Security fixes: Tomcat -->
+            <dependency>
+                <groupId>org.apache.tomcat.embed</groupId>
+                <artifactId>tomcat-embed-core</artifactId>
+                <version>${tomcat11.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.tomcat.embed</groupId>
+                <artifactId>tomcat-embed-el</artifactId>
+                <version>${tomcat11.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.tomcat.embed</groupId>
+                <artifactId>tomcat-embed-websocket</artifactId>
+                <version>${tomcat11.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

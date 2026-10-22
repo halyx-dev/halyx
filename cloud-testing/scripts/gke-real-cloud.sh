@@ -92,6 +92,7 @@ teardown() {
     rm -rf "$WORK"
   else
     echo "  TERRAFORM DESTROY FAILED: run it again in $TF_DIR with the same -var values (run_id=$RUN)"
+    [[ $status == 0 ]] && status=1   # the tests passed, but the run left something behind
   fi
   log "Checking nothing of run $RUN remains"
   local left=""
@@ -124,6 +125,7 @@ teardown() {
     echo "  nothing left"
   else
     echo "  STILL PRESENT:"
+    [[ $status == 0 ]] && status=1   # the tests passed, but the run left something behind
     echo "$left" | tr '\t' '\n' | sed 's/^/    /'
   fi
   exit $status

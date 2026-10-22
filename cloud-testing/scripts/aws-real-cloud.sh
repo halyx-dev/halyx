@@ -115,6 +115,7 @@ teardown() {
     [[ -n "${WORK:-}" ]] && rm -rf "$WORK"                                    # the run's SSH key and staged tests
   else
     echo "  TERRAFORM DESTROY FAILED: run it again in $TF_DIR"
+    [[ $status == 0 ]] && status=1   # the tests passed, but the run left something behind
   fi
   log "Checking nothing of run $RUN remains"
   sleep 10
@@ -173,6 +174,7 @@ teardown() {
     echo "  nothing left"
   else
     echo "  STILL PRESENT (the tagging index can lag a few minutes; check again before deleting by hand):"
+    [[ $status == 0 ]] && status=1   # the tests passed, but the run left something behind
     echo "$left" | tr '\t' '\n' | sed 's/^/    /'
   fi
   exit $status

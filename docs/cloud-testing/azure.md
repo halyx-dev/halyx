@@ -13,10 +13,10 @@ the `halyx-test` service principal. Every run creates its own throwaway resource
 
 | Tier | Services | Latest result |
 |---|---|---|
-| [1](#tier-1-latest-result) | Blob Storage, Cosmos DB, Service Bus, Key Vault, App Configuration, Event Grid namespaces (Entra ID only); Spring Data repositories (blocking and reactive) on Cosmos DB, and Spring Boot on Cosmos DB, Event Grid and, with halyx-reactor, WebFlux | **183/185** passed, 2 skipped (expected); Spring **10/10** |
+| [1](#tier-1-latest-result) | Blob Storage, Cosmos DB, Service Bus, Key Vault, App Configuration, Event Grid namespaces (Entra ID only); Spring Data repositories (blocking and reactive) on Cosmos DB, and Spring Boot on Cosmos DB, Event Grid and, with halyx-reactor, WebFlux | **207/208** passed, 1 skipped (expected); Spring **16/16** |
 | [2](#tier-2-latest-result) | Azure Database for PostgreSQL and Azure SQL with Entra ID login; R2DBC and Spring Data R2DBC on PostgreSQL | **13/13**; Spring **2/2** |
-| [3](#tier-3-latest-result) | Azure Managed Redis with Entra ID (access keys off) | **52/52** |
-| [4](#tier-4-latest-result) | Event Hubs through its Kafka endpoint, with Entra ID (shared access keys off), plus Spring Boot 3 and 4 | **24/25** passed, 1 skipped (expected); Spring **2/2** |
+| [3](#tier-3-latest-result) | Azure Managed Redis with Entra ID (access keys off) | **55/55**; Spring **2/2** |
+| [4](#tier-4-latest-result) | Event Hubs through its Kafka endpoint, with Entra ID (shared access keys off), plus Spring Boot 3 and 4 | **27/29** passed, 2 skipped (expected); Spring **2/2** |
 
 <details open markdown="block">
   <summary>Contents</summary>
@@ -524,6 +524,12 @@ take effect.
 | `r2610180340666a` | tier 1, plus Spring Boot 3 and 4 | **201 passed, 2 skipped**; Spring **16/16** | clean | Latest tier 1 result, with asynchronous receives and settlement in the messaging kit, non-blocking on Event Grid. |
 | `r26101816546ecc` | tier 1, plus Spring Boot 3 and 4 | 204 passed, 1 failed, 1 error, 1 skipped; Spring **16/16** | clean | The asynchronous parameter store. App Configuration answers a delete of a missing key with 204 and no setting, which the async client's plain delete cannot map (the emulator answers 404): fixed in `7bb6d6e`. A Service Bus extended lease ran out while the network stalled. Rerun below. |
 | `r26101819374e4d` | tier 1: App Configuration and Service Bus | **47 passed, 1 skipped** | clean | The two failed suites again, with the fix: latest tier 1 result for them. Key Vault (async, deletes on a blocking thread) passed in the run above. |
+| `r2610221657c81f` | tier 1, plus Spring Boot 3 and 4 | **207 passed, 1 skipped**; Spring **16/16** | clean | Full regression before 1.0.0, at `be792e3`. App Configuration and Service Bus passed first time. |
+| `r2610221721344e` | tier 2, plus Spring Boot 3 and 4 | **13/13**; Spring **2/2** | clean | Full regression before 1.0.0, at `be792e3`. |
+| `r261022173496a4` | tier 3, plus Spring Boot 3 and 4 | **55/55**; Spring **2/2** | clean | Full regression before 1.0.0, at `be792e3`. |
+| `r2610221751dbfa` | tier 4, plus Spring Boot 3 and 4 | **27 passed, 2 skipped**; Spring **2/2** | clean | Full regression before 1.0.0, at `be792e3`. The skips are the claim-check tests, plain and asynchronous: the kit run has no blob store for the claim check. |
+| `r26102222164336` | tier 1, plus Spring Boot 3 and 4 | **207 passed, 1 skipped**; Spring **16/16** | clean | Latest tier 1 result, after the dependency security fixes: Reactor 3.8.7 under the Azure SDK, and Micrometer 1.16.8 under Cosmos DB. |
+| `r26102222414536` | tier 2, plus Spring Boot 3 and 4 | **13/13**; Spring **2/2** | clean | Latest tier 2 result, after the dependency security fixes: R2DBC with Entra ID on Reactor 3.8.7. |
 
 ## What real Azure found
 

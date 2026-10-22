@@ -118,7 +118,11 @@
         <r2dbc-postgresql.version>1.0.9.RELEASE</r2dbc-postgresql.version>
         <r2dbc-mysql.version>1.4.2</r2dbc-mysql.version>
         <r2dbc-mssql.version>1.0.4.RELEASE</r2dbc-mssql.version>
-        <reactor-core.version>3.7.9</reactor-core.version>
+        <!--
+          Security fix: 3.8.7 fixes a race in bufferTimeout with fair backpressure (CVE-2026-47863), which
+          halyx-reactor's batching uses; the 3.7 line has no fix. Boot 3.5 applications get Boot's 3.7.
+        -->
+        <reactor-core.version>3.8.7</reactor-core.version>
         <context-propagation.version>1.1.4</context-propagation.version>
         <rxjava.version>3.1.8</rxjava.version>
         <mutiny.version>2.6.0</mutiny.version>
@@ -156,6 +160,8 @@
         <lz4-java.version>1.12.0</lz4-java.version>
         <proton-j.version>0.35.0</proton-j.version>
         <guava.version>33.7.2-jre</guava.version>
+        <!-- Cosmos DB's Micrometer; only halyx-azure declares it, so halyx-micrometer keeps Boot 3.5's line -->
+        <micrometer-core.version>1.16.8</micrometer-core.version>
 
         <!-- Common -->
         <slf4j.version>2.0.20</slf4j.version>

@@ -86,9 +86,15 @@
             <artifactId>halyx-kafka</artifactId>
         </dependency>
         <!--
-          Security fixes: the Azure SDK's Netty, Jackson and Proton-J, and Lettuce's Netty, held at the patched versions halyx-parent manages. Declared here so
-          they are nearer than the copies the libraries bring, and win in applications too.
+          Security fixes: the Azure SDK's Netty, Jackson and Proton-J, Cosmos DB's Micrometer, and Lettuce's Netty, held at
+          the patched versions halyx-parent manages. Declared here so they are nearer than the copies the libraries bring, and
+          win in applications too.
         -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-core</artifactId>
+            <version>${micrometer-core.version}</version>
+        </dependency>
         <dependency>
             <groupId>io.netty</groupId>
             <artifactId>netty-buffer</artifactId>

@@ -67,11 +67,15 @@ class RealGcpCacheIT {
         return halyx.provider("gcp");
     }
 
-    /** The tunnel, trusting the instance's CA and checking the chain but not the name. */
+    /**
+     * The tunnel, trusting the instance's CA and checking the chain but not the name. A 1 MiB value through the SSH
+     * tunnel takes about two seconds, the default command timeout, so the tests allow longer.
+     */
     static CacheConfig.Builder tunnel() {
         return CacheConfig.builder(URI.create("rediss://127.0.0.1:" + PORT))
                 .property(RedisCaches.CA_CERTIFICATE, CA)
-                .property(RedisCaches.VERIFY_PEER, "ca");
+                .property(RedisCaches.VERIFY_PEER, "ca")
+                .property(RedisCaches.COMMAND_TIMEOUT, "PT10S");
     }
 
     @Nested

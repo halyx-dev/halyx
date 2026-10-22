@@ -42,9 +42,13 @@
         </dependency>
 
         <!--
-          Security fixes: Lettuce's Netty, held at the patched versions halyx-parent manages. Declared here so
-          they are nearer than the copies the libraries bring, and win in applications too.
+          Security fixes: Lettuce's Reactor and Netty, held at the patched versions halyx-parent manages. Declared here
+          so they are nearer than the copies the libraries bring, and win in applications too.
         -->
+        <dependency>
+            <groupId>io.projectreactor</groupId>
+            <artifactId>reactor-core</artifactId>
+        </dependency>
         <dependency>
             <groupId>io.netty</groupId>
             <artifactId>netty-buffer</artifactId>

@@ -13,9 +13,9 @@ the `halyx_test` IAM user. Every run creates its own throwaway resources and del
 
 | Tier | Services | Latest result |
 |---|---|---|
-| [1](#tier-1-latest-result) | S3, DynamoDB, SSM Parameter Store, Secrets Manager, SNS, SQS, EventBridge; Spring Data repositories (blocking and reactive) on DynamoDB, and Spring Boot on DynamoDB, EventBridge and, with halyx-reactor, WebFlux | **197/199**, 2 skipped (expected); Spring **10/10** |
+| [1](#tier-1-latest-result) | S3, DynamoDB, SSM Parameter Store, Secrets Manager, SNS, SQS, EventBridge; Spring Data repositories (blocking and reactive) on DynamoDB, and Spring Boot on DynamoDB, EventBridge and, with halyx-reactor, WebFlux | **227/228**, 1 skipped (expected); Spring **16/16** |
 | [2](#tier-2-latest-result) | RDS for PostgreSQL and MySQL with IAM auth; R2DBC and Spring Data R2DBC | **16/16**; Spring **2/2** |
-| [3](#tier-3-latest-result) | ElastiCache for Valkey with IAM auth | 52/53: the IAM policy still needs checking |
+| [3](#tier-3-latest-result) | ElastiCache for Valkey with IAM auth | **56/56**; Spring **2/2** |
 | [4](#tier-4-not-run) | Streams on MSK Serverless with IAM | not run: the test account's Free plan doesn't allow MSK |
 
 <details open markdown="block">
@@ -475,11 +475,13 @@ This is the first time ElastiCache IAM authentication has been verified end to e
 attach IAM users to a replication group, so until now tokens had only been checked against a SigV4
 validator.
 
-**The open failure.** `halyx-<run>-denied` is a real IAM-enabled user. The test signs the token for that
-user and opens its own connection, because connections are keyed by user. ElastiCache accepted it, so the
-caller's effective IAM permissions include `elasticache:Connect` on that user. The intended policy, below,
-grants it only for `user:halyx-*-app`. The policy actually attached to `halyx_test` still needs checking
-for a broader grant. The test stays strict, since a policy that's too broad is exactly what it should
+**The failure, since fixed.** `halyx-<run>-denied` is a real IAM-enabled user. The test signs the token
+for that user and opens its own connection, because connections are keyed by user. ElastiCache accepted it,
+so the caller's effective IAM permissions included `elasticache:Connect` on that user. The intended policy,
+below, grants it only for `user:halyx-*-app`. The cause was a second policy on the test user: the
+AWS-managed `AmazonElastiCacheFullAccess`, whose `elasticache:*` on `*` includes `Connect` as every user.
+With only the [tier 3 policy](#iam-for-tier-3), run `r2610222254a38c` refused the user and passed 56/56
+(see the run history). The test stays strict, since a policy that's too broad is exactly what it should
 catch.
 
 <details>
@@ -597,6 +599,11 @@ The reports come back into each module's `target/failsafe-reports`.
 | `r26101720233d49` | tier 1, plus Spring Boot 3 and 4 | **215 passed, 2 skipped**; Spring **16/16** | clean | Latest tier 1 result, with the asynchronous views (blob, document, messaging and event kits) on every service, non-blocking where the driver has a path: S3, DynamoDB, SNS, SQS and EventBridge. |
 | `r2610172237815b` | tier 1, plus Spring Boot 3 and 4 | **221 passed, 2 skipped**; Spring **16/16** | clean | Latest tier 1 result, with asynchronous receives and settlement in the messaging kit, non-blocking on SQS. |
 | `r26101814315472` | tier 1, plus Spring Boot 3 and 4 | **227 passed, 1 skipped**; Spring **16/16** | clean | Latest tier 1 result, with the asynchronous parameter store: SSM and Secrets Manager non-blocking, proven with a counting executor, and the Spring parameter beans' async view. |
+| `r2610221418efd8` | tier 1, plus Spring Boot 3 and 4 | **227 passed, 1 skipped**; Spring **16/16** | clean | Full regression before 1.0.0, at `be792e3`. |
+| `r2610221432f7b2` | tier 2, plus Spring Boot 3 and 4 | **16/16**; Spring **2/2** | clean | Full regression before 1.0.0, at `be792e3`. |
+| `r26102214425ee1` | tier 3, plus Spring Boot 3 and 4 | 55/56; Spring **2/2** | clean | Full regression before 1.0.0, at `be792e3`. The IAM user without `Connect` permission was let in again. The cause: the test user also had the AWS-managed `AmazonElastiCacheFullAccess` policy, whose `elasticache:*` on `*` includes `Connect` as every user. Replaced with the [tier 3 policy](#iam-for-tier-3). |
+| `r26102220335c55` | tier 3, plus Spring Boot 3 and 4 | 55/56; Spring **2/2** | clean | With the scoped policy, the user without `Connect` permission was refused, a first. `largeValue` timed out instead: a 1 MiB value through the SSH tunnel takes about the 2-second default command timeout (2.3s in earlier passing runs). The tunnelled tests now allow 10 seconds. |
+| `r2610222254a38c` | tier 3, plus Spring Boot 3 and 4 | **56/56**; Spring **2/2** | clean | Latest tier 3 result: the scoped policy and the 10-second command timeout. Every test passed for the first time, including the IAM user without `Connect` permission being refused. |
 
 ## What real AWS found
 

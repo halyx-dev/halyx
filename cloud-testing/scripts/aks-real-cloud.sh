@@ -100,12 +100,19 @@ teardown() {
   # The release first, so no connection holds the database open while Terraform deletes it.
   [[ -s "$KUBECONFIG" ]] && helm uninstall portable-orders --namespace "$NAMESPACE" --wait >/dev/null 2>&1
   log "terraform destroy"
+  # Deleting the server deletes its database, firewall rule and Entra ID administrator with it. Deleting them one by
+  # one first has hung in Azure until Terraform timed out, so Terraform forgets them and deletes only the server.
+  for child in azurerm_postgresql_flexible_server_database.orders azurerm_postgresql_flexible_server_firewall_rule.azure \
+      azurerm_postgresql_flexible_server_active_directory_administrator.app; do
+    terraform -chdir="$TF_DIR" state rm "$child" >/dev/null 2>&1   # absent after a partial apply
+  done
   if terraform -chdir="$TF_DIR" destroy -auto-approve -input=false "${TF_VARS[@]}" >/dev/null; then
     echo "  destroyed"
     rm -f "$TF_DIR"/terraform.tfstate "$TF_DIR"/terraform.tfstate.backup # held the registry password and signing key
     rm -rf "$WORK"
   else
     echo "  TERRAFORM DESTROY FAILED: run it again in $TF_DIR with -var location=$LOCATION -var run_id=$RUN"
+    [[ $status == 0 ]] && status=1   # the tests passed, but the run left something behind
   fi
   log "Checking nothing of run $RUN remains"
   local left
@@ -125,6 +132,7 @@ teardown() {
     echo "  nothing left"
   else
     echo "  STILL PRESENT:"
+    [[ $status == 0 ]] && status=1   # the tests passed, but the run left something behind
     echo "$left" | tr '\t' '\n' | sed 's/^/    /'
   fi
   exit $status

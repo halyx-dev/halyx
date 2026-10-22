@@ -120,6 +120,7 @@ teardown() {
     rm -f "$TF_DIR"/terraform.tfstate "$TF_DIR"/terraform.tfstate.backup # tier 2 state held the run's password
   else
     echo "  TERRAFORM DESTROY FAILED: run it again in $TF_DIR"
+    [[ $status == 0 ]] && status=1   # the tests passed, but the run left something behind
   fi
   log "Checking nothing of run $RUN remains"
   local left
@@ -140,6 +141,7 @@ teardown() {
     echo "  nothing left"
   else
     echo "  STILL PRESENT:"
+    [[ $status == 0 ]] && status=1   # the tests passed, but the run left something behind
     echo "$left" | tr '\t' '\n' | sed 's/^/    /'
   fi
   exit $status
