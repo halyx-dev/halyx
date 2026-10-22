@@ -27,10 +27,13 @@ import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.WeakHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
@@ -52,6 +55,8 @@ public final class DefaultSubscription implements Subscription {
     private final InterceptorChain interceptors;
     private final AsyncSubscription async = new Async(InterceptorChain.blocking());
     private final List<DriverMessage> pendingAcks = new ArrayList<>();
+    /** Listeners started on this subscription, stopped when its context closes; a running one is held by its poller. */
+    private final Set<MessageConsumer> consumers = Collections.synchronizedSet(Collections.newSetFromMap(new WeakHashMap<>()));
     private ScheduledExecutorService ackFlusher;
 
     public DefaultSubscription(SubscriptionDriver driver, SubscriptionConfig config, InterceptorChain interceptors) {
@@ -98,8 +103,20 @@ public final class DefaultSubscription implements Subscription {
 
     @Override
     public MessageConsumer listen(MessageListener listener, ConsumerOptions options) {
-        return new PollingConsumer(this, Objects.requireNonNull(listener, "listener"),
+        MessageConsumer consumer = new PollingConsumer(this, Objects.requireNonNull(listener, "listener"),
                 Objects.requireNonNull(options, "options"));
+        consumers.add(consumer);
+        return consumer;
+    }
+
+    /** Stops every listener started on this subscription, letting running handlers finish. */
+    public void closeConsumers() {
+        List<MessageConsumer> running;
+        synchronized (consumers) {
+            running = new ArrayList<>(consumers);
+            consumers.clear();
+        }
+        running.forEach(MessageConsumer::close);
     }
 
     private ReceivedMessage toReceived(DriverMessage message) {

@@ -53,6 +53,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
@@ -562,6 +563,40 @@ public abstract class StreamConformanceTest {
         assertThat(seen).containsExactly("a", "b", "b", "b", "c");
         assertThat(finalAttempt.get()).isEqualTo(3);
         await("failures counted", () -> listener.statistics().failed() == 2);
+    }
+
+    @Test
+    void aNewListenerOnTheSameConsumerCarriesOnWhereTheLastStopped() throws Exception {
+        StreamProducer producer = producer();
+        producer.sendAll(List.of(OutgoingRecord.of("same", "a"), OutgoingRecord.of("same", "b"),
+                OutgoingRecord.of("same", "c"), OutgoingRecord.of("same", "d"), OutgoingRecord.of("same", "e"),
+                OutgoingRecord.of("same", "f")));
+        StreamConsumer consumer = consumer(group());
+        List<String> first = new CopyOnWriteArrayList<>();
+        CountDownLatch handlingB = new CountDownLatch(1);
+        CountDownLatch releaseB = new CountDownLatch(1);
+        StreamListener listener = consumer.listen(r -> {
+            first.add(r.valueAsString());
+            if (r.valueAsString().equals("b")) {
+                handlingB.countDown();
+                releaseB.await(timeout().toMillis(), TimeUnit.MILLISECONDS);
+            }
+        }, fastRetries());
+
+        // The listener stops while it handles b, having read c to f ahead: b finishes, c to f are left unhandled.
+        assertThat(handlingB.await(timeout().toMillis(), TimeUnit.MILLISECONDS)).isTrue();
+        Thread closing = Thread.ofVirtual().start(listener::close);
+        await("the listener stopping", () -> !listener.isRunning());
+        releaseB.countDown();
+        closing.join(timeout().toMillis());
+        assertThat(first).containsExactly("a", "b");
+
+        producer.send("same", "g");
+        List<String> second = new CopyOnWriteArrayList<>();
+        consumer.listen(r -> second.add(r.valueAsString()), fastRetries());
+        await("c to g handled", () -> second.size() >= 5);
+        sleep(Duration.ofMillis(500));
+        assertThat(second).containsExactly("c", "d", "e", "f", "g");
     }
 
     @Test

@@ -23,6 +23,7 @@ import dev.halyx.config.ProviderConfig;
 import dev.halyx.error.CloudException;
 import dev.halyx.error.UnavailableException;
 import dev.halyx.events.EventBusConfig;
+import dev.halyx.messaging.MessageConsumer;
 import dev.halyx.messaging.SubscriptionConfig;
 import dev.halyx.messaging.TopicConfig;
 import dev.halyx.nosql.TableConfig;
@@ -31,6 +32,10 @@ import dev.halyx.parameters.ParameterStoreConfig;
 import dev.halyx.parameters.spi.ParameterDriver;
 import dev.halyx.spi.CloudProvider;
 import dev.halyx.spi.ProviderConnection;
+import dev.halyx.stream.ListenerOptions;
+import dev.halyx.stream.StreamConfig;
+import dev.halyx.stream.StreamConsumerConfig;
+import dev.halyx.stream.StreamListener;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Proxy;
@@ -155,5 +160,20 @@ class CloudContextTest {
                 return connection;
             }
         };
+    }
+
+    @Test
+    void closingStopsTheListenersStartedFromIt() {
+        Halyx halyx = Halyx.builder().register("local", ProviderConfig.of("memory")).build();
+        CloudContext context = halyx.provider("local");
+        StreamConfig cluster = StreamConfig.builder("memory:9092").build();
+        StreamListener records = context.streamConsumer(StreamConsumerConfig.of(cluster, "orders", "billing"))
+                .listen(record -> { }, ListenerOptions.DEFAULTS.withPollWait(Duration.ofMillis(100)));
+        MessageConsumer messages = context.subscription("orders").listen(message -> { });
+
+        halyx.close();
+
+        assertThat(records.isRunning()).isFalse();
+        assertThat(messages.isRunning()).isFalse();
     }
 }

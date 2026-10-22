@@ -141,8 +141,14 @@ public final class DefaultStreamConsumer implements StreamConsumer {
         if (polling) {
             throw new IllegalStateException(this + " is being polled by hand; poll and listen can't be mixed");
         }
-        if (listener != null && listener.isRunning()) {
-            throw new IllegalStateException(this + " already has a running listener");
+        if (listener != null) {
+            if (listener.isRunning()) {
+                throw new IllegalStateException(this + " already has a running listener");
+            }
+            // A listener that is stopping still uses the driver, which allows one thread only: wait for it.
+            if (!listener.awaitStopped(listener.stopTimeout())) {
+                throw new IllegalStateException(this + "'s previous listener is still stopping");
+            }
         }
         listener = new PartitionListener(this, recordListener, options);
         return listener;
@@ -240,10 +246,13 @@ public final class DefaultStreamConsumer implements StreamConsumer {
                 running.close();
             }
         } finally {
-            try {
-                driver.close();
-            } catch (RuntimeException e) {
-                LOG.warn("Could not close {} cleanly", this, e);
+            // A poller still running (its last commit is slow) uses the driver, so it closes the driver itself.
+            if (running == null || !running.closeDriverOnExit()) {
+                try {
+                    driver.close();
+                } catch (RuntimeException e) {
+                    LOG.warn("Could not close {} cleanly", this, e);
+                }
             }
         }
     }

@@ -29,7 +29,10 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -186,5 +189,19 @@ class PollingConsumerTest {
             Thread.sleep(DefaultSubscription.ACK_LINGER.toMillis() * 3);
             assertThat(driver.acked).containsExactly("solo");
         }
+    }
+
+    @Test
+    void aKeyWhoseTaskIsAlreadyDoneIsForgotten() {
+        // A direct executor finishes each task before chain registers its clean-up: the ordering that made the
+        // clean-up change the map from inside its own compute.
+        ConcurrentMap<String, CompletableFuture<Void>> tails = new ConcurrentHashMap<>();
+        List<String> ran = new ArrayList<>();
+
+        PollingConsumer.chain(tails, "k", () -> ran.add("first"), Runnable::run);
+        PollingConsumer.chain(tails, "k", () -> ran.add("second"), Runnable::run);
+
+        assertThat(ran).containsExactly("first", "second");
+        assertThat(tails).isEmpty();
     }
 }

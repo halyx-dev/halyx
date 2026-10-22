@@ -29,6 +29,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
@@ -44,7 +45,9 @@ import java.util.concurrent.atomic.AtomicLong;
  * a handler runs: a partition whose handler is retrying, or whose buffer is full, is paused instead. A failed
  * record is retried with exponential backoff, holding back the rest of its partition; after
  * {@code maxAttempts} it goes to the dead-letter producer. Handled offsets are committed every
- * {@code commitInterval}, and before partitions are handed to another member or the listener stops.
+ * {@code commitInterval}, and before partitions are handed to another member or the listener stops. A stopped
+ * listener leaves its member reading from the first record it didn't handle, so a later listener on the same
+ * member carries on from there.
  */
 final class PartitionListener implements StreamListener {
 
@@ -60,12 +63,17 @@ final class PartitionListener implements StreamListener {
     private final RecordListener listener;
     private final ListenerOptions options;
     private final Map<Partition, PartitionWork> partitions = new ConcurrentHashMap<>();
+    private final Rebalance rebalance = new Rebalance();
     private final ExecutorService handlers = Executors.newThreadPerTaskExecutor(
             Thread.ofVirtual().name("halyx-stream-handle-", 0).factory());
     private final Thread poller;
     private volatile boolean running = true;
     /** When handled offsets were last committed; used on the polling thread only. */
     private long lastCommit = System.nanoTime();
+    /** The poller has finished; guarded by this listener's lock. */
+    private boolean exited;
+    /** The poller closes the driver as it finishes, since only that thread may use it; guarded likewise. */
+    private boolean closeDriverOnExit;
 
     private final AtomicLong received = new AtomicLong();
     private final AtomicLong handled = new AtomicLong();
@@ -85,7 +93,13 @@ final class PartitionListener implements StreamListener {
 
     private void run() {
         try {
-            driver.subscribe(new Rebalance());
+            driver.subscribe(rebalance);
+            // A member that ran a listener before still owns its partitions, and re-subscribing doesn't report
+            // them again.
+            Set<Partition> owned = driver.assignment();
+            if (!owned.isEmpty()) {
+                rebalance.onAssigned(owned);
+            }
             int consecutiveErrors = 0;
             while (running) {
                 List<DriverRecord> records;
@@ -110,8 +124,54 @@ final class PartitionListener implements StreamListener {
         } catch (RuntimeException e) {
             LOG.error("Listener on {} stopped", consumer, e);
         } finally {
-            shutdown();
+            try {
+                shutdown();
+            } finally {
+                exit();
+            }
         }
+    }
+
+    private void exit() {
+        boolean closeDriver;
+        synchronized (this) {
+            exited = true;
+            closeDriver = closeDriverOnExit;
+        }
+        if (closeDriver) {
+            try {
+                driver.close();
+            } catch (RuntimeException e) {
+                LOG.warn("Could not close {} cleanly", consumer, e);
+            }
+        }
+    }
+
+    /**
+     * Has the poller close the driver as it finishes, when the consumer closes while the poller is still running.
+     * False if the poller has already finished: the caller closes the driver then.
+     */
+    synchronized boolean closeDriverOnExit() {
+        if (exited) {
+            return false;
+        }
+        closeDriverOnExit = true;
+        return true;
+    }
+
+    /** Waits until the poller has finished; false if it is still running after {@code timeout}. */
+    boolean awaitStopped(Duration timeout) {
+        try {
+            poller.join(Math.max(1, timeout.toMillis()));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        return !poller.isAlive();
+    }
+
+    /** How long stopping may take: running handlers finishing, the poll under way, and the last commit. */
+    Duration stopTimeout() {
+        return options.shutdownTimeout().plus(options.pollWait()).plusSeconds(5);
     }
 
     private void dispatch(List<DriverRecord> records) {
@@ -211,11 +271,42 @@ final class PartitionListener implements StreamListener {
 
     private void shutdown() {
         running = false;
+        List<PartitionWork> works = new ArrayList<>(partitions.values());
         try {
-            stopAndCommit(new ArrayList<>(partitions.values()));
+            stopAndCommit(works);
+            rewind(works);
         } finally {
             partitions.clear();
             handlers.shutdown();
+        }
+    }
+
+    /**
+     * Leaves the driver as a later listener on this member needs it: each partition read again from the first
+     * record this listener read ahead but didn't handle, and none paused.
+     */
+    private void rewind(List<PartitionWork> works) {
+        List<Partition> paused = new ArrayList<>();
+        for (PartitionWork work : works) {
+            DriverRecord next = work.queue.peek();
+            try {
+                if (next != null) {
+                    driver.seek(work.partition, next.offset());
+                }
+            } catch (RuntimeException e) {
+                LOG.debug("Could not rewind {} on {}; its next owner reads it from the committed offset",
+                        work.partition, consumer, e);
+            }
+            if (work.paused) {
+                paused.add(work.partition);
+            }
+        }
+        if (!paused.isEmpty()) {
+            try {
+                driver.resume(paused);
+            } catch (RuntimeException e) {
+                LOG.debug("Could not resume {} on {}", paused, consumer, e);
+            }
         }
     }
 
@@ -291,11 +382,7 @@ final class PartitionListener implements StreamListener {
         if (Thread.currentThread() == poller) {
             return;
         }
-        try {
-            poller.join(options.shutdownTimeout().plus(options.pollWait()).plusSeconds(5).toMillis());
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
+        awaitStopped(stopTimeout());
     }
 
     private static void sleep(long millis) {

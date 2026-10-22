@@ -36,10 +36,12 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /** One consumer group member on one topic, over a Kafka consumer it owns. */
 final class KafkaConsumerDriver extends AbstractConsumerDriver {
@@ -125,6 +127,16 @@ final class KafkaConsumerDriver extends AbstractConsumerDriver {
                 record.key() == null ? null : new String(record.key(), StandardCharsets.UTF_8),
                 record.value() == null ? EMPTY : record.value(), headers,
                 record.timestamp() < 0 ? null : Instant.ofEpochMilli(record.timestamp()));
+    }
+
+    @Override
+    public Set<Partition> assignment() {
+        return new HashSet<>(portable(consumer.assignment()));
+    }
+
+    @Override
+    public void seek(Partition partition, long offset) {
+        consumer.seek(new TopicPartition(partition.topic(), partition.partition()), offset);
     }
 
     @Override

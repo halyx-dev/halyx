@@ -363,6 +363,30 @@ final class InMemoryStreams {
         }
 
         @Override
+        public Set<Partition> assignment() {
+            lock.lock();
+            try {
+                Set<Partition> assignment = new HashSet<>();
+                owned.forEach(p -> assignment.add(new Partition(topic.name, p)));
+                return assignment;
+            } finally {
+                lock.unlock();
+            }
+        }
+
+        @Override
+        public void seek(Partition partition, long offset) {
+            lock.lock();
+            try {
+                if (owned.contains(partition.partition())) {
+                    positions.put(partition.partition(), offset);
+                }
+            } finally {
+                lock.unlock();
+            }
+        }
+
+        @Override
         public void pause(Collection<Partition> partitions) {
             lock.lock();
             try {

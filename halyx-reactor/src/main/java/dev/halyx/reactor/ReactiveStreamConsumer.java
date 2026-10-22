@@ -20,6 +20,7 @@ import dev.halyx.stream.AsyncStreamConsumer;
 import dev.halyx.stream.ListenerOptions;
 import dev.halyx.stream.ReceivedRecord;
 import dev.halyx.stream.StreamConsumer;
+import dev.halyx.stream.StreamListener;
 import org.reactivestreams.Publisher;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -27,7 +28,9 @@ import reactor.core.publisher.Mono;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
 /**
@@ -41,7 +44,8 @@ import java.util.function.Function;
  * Records are handled as the consumer's listener handles them: one at a time per partition, in order, so a
  * record that fails is retried after the backoff, holding back the rest of its partition, until
  * {@code maxAttempts} sends it to the dead letter. Other partitions carry on. Only one listener or
- * {@code Flux} may use a consumer at a time.
+ * {@code Flux} uses a consumer at a time: a {@code Flux} subscribed while another runs starts once that one has
+ * ended and its listener has stopped, so {@code retry()} and {@code repeat()} carry on where it left off.
  *
  * <p>Cancelling a {@code Flux} stops reading but keeps this member in its group, with its partitions, so a new
  * subscriber carries on where it left off; no other member reads those partitions meanwhile. {@link #close()}
@@ -51,6 +55,8 @@ public final class ReactiveStreamConsumer {
 
     private final StreamConsumer consumer;
     private final Calls calls;
+    /** Completes once the listener of the latest {@code Flux} has stopped; guarded by this object's lock. */
+    private CompletableFuture<Void> stopped = CompletableFuture.completedFuture(null);
 
     ReactiveStreamConsumer(StreamConsumer consumer, Calls calls) {
         this.consumer = Objects.requireNonNull(consumer, "consumer");
@@ -90,8 +96,44 @@ public final class ReactiveStreamConsumer {
      * and is read again by the group.
      */
     public Flux<Delivery<ReceivedRecord>> records(ListenerOptions options) {
-        // A record left unsettled by a cancelled pipeline fails its listener, so it isn't committed.
-        return Deliveries.flux(calls.scheduler(), listener -> consumer.listen(listener::onDelivery, options), null);
+        return Flux.defer(() -> {
+            CompletableFuture<Void> previous;
+            CompletableFuture<Void> mine = new CompletableFuture<>();
+            synchronized (this) {
+                previous = stopped;
+                stopped = mine;
+            }
+            // Started once, by the listener or by the end of a Flux that never got that far.
+            AtomicBoolean started = new AtomicBoolean();
+            // A Flux ending stops its listener in the background; the next one, as from retry() or repeat(), waits
+            // for that, since the consumer runs one listener at a time. So does one subscribed meanwhile.
+            return Mono.fromFuture(previous, true)
+                    // A record left unsettled by a cancelled pipeline fails its listener, so it isn't committed.
+                    .thenMany(Deliveries.<ReceivedRecord>flux(calls.scheduler(), listener -> {
+                        if (!started.compareAndSet(false, true)) {
+                            throw new IllegalStateException(this + ": the Flux ended before its listener started");
+                        }
+                        StreamListener running;
+                        try {
+                            running = consumer.listen(listener::onDelivery, options);
+                        } catch (RuntimeException e) {
+                            mine.complete(null);
+                            throw e;
+                        }
+                        return () -> {
+                            try {
+                                running.close();
+                            } finally {
+                                mine.complete(null);
+                            }
+                        };
+                    }, null))
+                    .doFinally(signal -> {
+                        if (started.compareAndSet(false, true)) {
+                            mine.complete(null);
+                        }
+                    });
+        });
     }
 
     /**

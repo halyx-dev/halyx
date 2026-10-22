@@ -240,6 +240,25 @@ class ReactiveStreamingTest {
     }
 
     @Test
+    void aNewFluxOnTheSameConsumerCarriesOnWhereTheLastEnded() {
+        StreamConfig cluster = StreamConfig.builder("memory:9092").build();
+        ReactiveStreamProducer producer = rx.provider("mem").streamProducer(StreamProducerConfig.of(cluster, "journal"));
+        for (int i = 0; i < 6; i++) {
+            producer.send(OutgoingRecord.of("account", "entry-" + i)).block();
+        }
+        ReactiveStreamConsumer consumer = rx.provider("mem").streamConsumer(StreamConsumerConfig.builder(cluster, "journal", "audit")
+                .startPosition(StartPosition.EARLIEST).build());
+        ListenerOptions options = ListenerOptions.DEFAULTS.withPollWait(Duration.ofMillis(100));
+
+        // Each Flux ends as soon as it has two values, and the next subscribes straight away, as repeat() does,
+        // while the last one's listener is still stopping.
+        List<String> values = Flux.range(0, 3)
+                .concatMap(round -> consumer.process(options, record -> Mono.just(record.valueAsString())).take(2))
+                .collectList().block(Duration.ofSeconds(15));
+        assertThat(values).containsExactly("entry-0", "entry-1", "entry-2", "entry-3", "entry-4", "entry-5");
+    }
+
+    @Test
     void parameterWatchesLiveAsLongAsTheirSubscriber() {
         ReactiveParameterStore store = rx.provider("mem").parameterStore(ParameterStoreConfig.secrets().prefix("app").build());
 

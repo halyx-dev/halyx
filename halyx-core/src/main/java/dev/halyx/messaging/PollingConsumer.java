@@ -20,9 +20,10 @@ import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -54,7 +55,7 @@ final class PollingConsumer implements MessageConsumer {
     private final ExecutorService handlers = Executors.newThreadPerTaskExecutor(
             Thread.ofVirtual().name("halyx-handle-", 0).factory());
     /** The last scheduled handler per ordering key; the next message of that key runs after it. */
-    private final Map<String, CompletableFuture<Void>> keyTails = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, CompletableFuture<Void>> keyTails = new ConcurrentHashMap<>();
     private volatile boolean running = true;
 
     private final AtomicLong received = new AtomicLong();
@@ -121,13 +122,22 @@ final class PollingConsumer implements MessageConsumer {
             handlers.execute(() -> handle(message, extender));
             return;
         }
-        keyTails.compute(key, (k, tail) -> {
+        chain(keyTails, key, () -> handle(message, extender), handlers);
+    }
+
+    /**
+     * Runs {@code task} on {@code executor} after every task chained before it on {@code key}, and forgets the
+     * key once its last task is done.
+     */
+    static void chain(ConcurrentMap<String, CompletableFuture<Void>> tails, String key, Runnable task,
+                      Executor executor) {
+        CompletableFuture<Void> next = tails.compute(key, (k, tail) -> {
             CompletableFuture<Void> previous = tail == null ? CompletableFuture.completedFuture(null) : tail;
-            CompletableFuture<Void> next = previous.handle((v, e) -> null)
-                    .thenRunAsync(() -> handle(message, extender), handlers);
-            next.whenComplete((v, e) -> keyTails.remove(k, next));
-            return next;
+            return previous.handle((v, e) -> null).thenRunAsync(task, executor);
         });
+        // Registered once compute has returned: a task already done would otherwise remove its key from inside
+        // compute, which ConcurrentHashMap forbids.
+        next.whenComplete((v, e) -> tails.remove(key, next));
     }
 
     private void handle(ReceivedMessage message, ScheduledFuture<?> extender) {

@@ -96,8 +96,9 @@ doesn't create them. Create them with Terraform, Bicep, CloudFormation or your u
 
 ## Lifecycle
 
-`Halyx` implements `AutoCloseable`. Closing it closes every provider connection, SDK client, cache
-connection and database pool it opened.
+`Halyx` implements `AutoCloseable`. Closing it first stops the listeners and stream consumers started from
+it, letting running handlers finish and commit or ack, then closes every provider connection, SDK client,
+cache connection and database pool it opened.
 
 Create each service once and keep it, typically in a field or as an injected bean, rather than fetching
 it per request:

@@ -50,9 +50,18 @@ import dev.halyx.stream.StreamConsumer;
 import dev.halyx.stream.StreamConsumerConfig;
 import dev.halyx.stream.StreamProducer;
 import dev.halyx.stream.StreamProducerConfig;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * One named, configured provider registration, such as {@code "orders"} on AWS eu-west-2. It hands
@@ -61,6 +70,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>The connection opens lazily on first use. Clients are cached and thread-safe.
  */
 public final class CloudContext implements AutoCloseable {
+
+    private static final Logger LOG = LoggerFactory.getLogger(CloudContext.class);
 
     private final String name;
     private final ProviderConfig config;
@@ -74,6 +85,9 @@ public final class CloudContext implements AutoCloseable {
     private final Map<SubscriptionConfig, Subscription> subscriptions = new ConcurrentHashMap<>();
     private final Map<EventBusConfig, EventPublisher> eventPublishers = new ConcurrentHashMap<>();
     private final Map<StreamProducerConfig, StreamProducer> streamProducers = new ConcurrentHashMap<>();
+    /** Stream consumers created here, closed with this context; one running a listener is held by its poller. */
+    private final Set<StreamConsumer> streamConsumers =
+            Collections.synchronizedSet(Collections.newSetFromMap(new WeakHashMap<>()));
     private volatile ProviderConnection connection;
     private volatile boolean closed;
 
@@ -189,7 +203,9 @@ public final class CloudContext implements AutoCloseable {
      * creates a new member; close it to leave the group.
      */
     public StreamConsumer streamConsumer(StreamConsumerConfig config) {
-        return new DefaultStreamConsumer(connection().streamConsumer(config), config, interceptors);
+        StreamConsumer consumer = new DefaultStreamConsumer(connection().streamConsumer(config), config, interceptors);
+        streamConsumers.add(consumer);
+        return consumer;
     }
 
     /**
@@ -237,6 +253,10 @@ public final class CloudContext implements AutoCloseable {
         return c;
     }
 
+    /**
+     * Stops the listeners and stream consumers started from this context, letting running handlers finish, then
+     * closes its provider connection and every client it opened.
+     */
     @Override
     public void close() {
         ProviderConnection open;
@@ -245,6 +265,7 @@ public final class CloudContext implements AutoCloseable {
             open = connection;
             connection = null;
         }
+        stopConsumers();
         // Outside the lock: a client being created holds its map entry while it waits for the lock in connection().
         blobStores.clear();
         caches.clear();
@@ -256,6 +277,45 @@ public final class CloudContext implements AutoCloseable {
         streamProducers.clear();
         if (open != null) {
             open.close();
+        }
+    }
+
+    /**
+     * Stops stream consumers and message listeners before the clients they use close, so their running handlers
+     * finish and what they handled is committed or acked. They stop in parallel, each within its own shutdown
+     * timeout.
+     */
+    private void stopConsumers() {
+        List<AutoCloseable> running = new ArrayList<>();
+        synchronized (streamConsumers) {
+            running.addAll(streamConsumers);
+            streamConsumers.clear();
+        }
+        for (Subscription subscription : subscriptions.values()) {
+            if (subscription instanceof DefaultSubscription portable) {
+                running.add(new AutoCloseable() {
+                    @Override
+                    public void close() {
+                        portable.closeConsumers();
+                    }
+
+                    @Override
+                    public String toString() {
+                        return "the listeners of " + portable;
+                    }
+                });
+            }
+        }
+        try (ExecutorService stopping = Executors.newVirtualThreadPerTaskExecutor()) {
+            for (AutoCloseable consumer : running) {
+                stopping.execute(() -> {
+                    try {
+                        consumer.close();
+                    } catch (Exception e) {
+                        LOG.warn("Could not stop {} cleanly", consumer, e);
+                    }
+                });
+            }
         }
     }
 

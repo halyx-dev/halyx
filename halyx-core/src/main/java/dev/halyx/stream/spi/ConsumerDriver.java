@@ -22,6 +22,7 @@ import java.time.Duration;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * One consumer group member on one topic. Every method except {@link #wakeup()} is called from a single
@@ -45,6 +46,15 @@ public interface ConsumerDriver extends AutoCloseable {
      * {@link #wakeup()}.
      */
     List<DriverRecord> poll(Duration wait);
+
+    /**
+     * The partitions this member owns now. A listener that takes over from a stopped one on the same member
+     * starts with them, since re-subscribing doesn't report them again.
+     */
+    Set<Partition> assignment();
+
+    /** Makes the next {@link #poll} of {@code partition}, which this member owns, start at {@code offset}. */
+    void seek(Partition partition, long offset);
 
     /** Stops reading these partitions until {@link #resume}; ownership is unaffected. */
     void pause(Collection<Partition> partitions);

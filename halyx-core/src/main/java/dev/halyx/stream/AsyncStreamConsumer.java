@@ -98,7 +98,8 @@ public interface AsyncStreamConsumer {
         public synchronized <T> CompletableFuture<T> submit(Supplier<T> call, Executor executor) {
             CompletableFuture<T> next = tail.handle((done, error) -> null).thenApplyAsync(ignored -> call.get(), executor);
             tail = next;
-            return next;
+            // The caller gets a copy: cancelling it must not start the next call while this one still runs.
+            return next.copy();
         }
     }
 }

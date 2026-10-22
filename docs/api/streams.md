@@ -148,6 +148,8 @@ each on a virtual thread: the view frees the caller's thread, not the consumer's
 - **Where a new group starts** is `startPosition`: `LATEST` (the default) reads only new records, `EARLIEST`
   everything the topic retains. A group with committed positions always resumes from them.
 - **Members leave the group on `close()`**, and their partitions move to the others.
+- **A listener can be replaced.** Closing a listener keeps the consumer in its group with its partitions; a new
+  `listen` on the same consumer carries on from the first record the last one didn't handle.
 
 ## Idempotence, transactions and large values
 
