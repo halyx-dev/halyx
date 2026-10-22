@@ -31,6 +31,10 @@ Halyx halyx = Halyx.builder().register("orders", aws).build();
 In Spring Boot, the same settings live under `halyx.providers.<name>`; see
 [Spring Boot](spring-boot.md#providers).
 
+A blank property value is no value, here and in every resource config's `property(...)`: it removes the setting.
+So an optional setting can come from an environment variable that some deployments leave unset, as in
+`gcp.sql.instance: ${ORDERS_SQL_INSTANCE:}`, and it never reaches a driver as an empty file path or instance name.
+
 ## Credentials
 
 | `Credentials` | AWS | Azure | Google Cloud | HashiCorp Vault |

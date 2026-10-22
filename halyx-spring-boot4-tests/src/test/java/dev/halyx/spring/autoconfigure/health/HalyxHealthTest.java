@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import dev.halyx.spring.autoconfigure.HalyxAutoConfiguration;
 import dev.halyx.spring.autoconfigure.HalyxBuilderCustomizer;
 import dev.halyx.spring.autoconfigure.TestProviders;
+import dev.halyx.spring.autoconfigure.cache.HalyxCacheManagerAutoConfiguration;
 import org.springframework.boot.health.contributor.CompositeHealthContributor;
 import org.springframework.boot.health.contributor.HealthIndicator;
 import org.springframework.boot.health.contributor.Status;
@@ -122,6 +123,32 @@ class HalyxHealthTest {
                     assertThat(sessions.getStatus()).isEqualTo(Status.UP);
                     assertThat(sessions.getDetails()).containsEntry("namespace", "sessions");
                     assertThat(composite.getContributor("files")).isNotNull();
+                });
+    }
+
+    @Test
+    void theCacheManagerHasAnIndicatorEvenAsTheOnlyHalyxBean() {
+        runner.withConfiguration(AutoConfigurations.of(HalyxCacheManagerAutoConfiguration.class))
+                .withPropertyValues("halyx.providers.local.type=memory",
+                        "halyx.cache-manager.endpoint=redis://localhost:6379")
+                .run(context -> {
+                    var composite = context.getBean("halyxHealthContributor", CompositeHealthContributor.class);
+                    var health = ((HealthIndicator) composite.getContributor("cache-manager")).health();
+                    assertThat(health.getStatus()).isEqualTo(Status.UP);
+                    assertThat(health.getDetails()).containsEntry("provider", "memory");
+                });
+    }
+
+    @Test
+    void theCacheManagerIsDownWhenItsServerIsUnreachableEvenFailOpen() {
+        runner.withConfiguration(AutoConfigurations.of(HalyxCacheManagerAutoConfiguration.class))
+                .withPropertyValues("halyx.providers.aws.type=aws", "halyx.providers.aws.region=us-east-1",
+                        "halyx.cache-manager.endpoint=redis://127.0.0.1:1", "halyx.cache-manager.auth.type=none",
+                        "halyx.cache-manager.fail-open=true")
+                .run(context -> {
+                    var composite = context.getBean("halyxHealthContributor", CompositeHealthContributor.class);
+                    assertThat(((HealthIndicator) composite.getContributor("cache-manager")).health().getStatus())
+                            .isEqualTo(Status.DOWN);
                 });
     }
 

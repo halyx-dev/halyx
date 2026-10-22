@@ -31,7 +31,8 @@ import java.util.Optional;
  * }</pre>
  *
  * Provider-specific settings go in {@link #property(String, String)}, with keys published as
- * constants by each provider module (for example {@code AwsProperties.S3_PATH_STYLE}).
+ * constants by each provider module (for example {@code AwsProperties.S3_PATH_STYLE}). A blank value
+ * is no value: it removes the setting, here and in every resource config's {@code property}.
  */
 public final class ProviderConfig {
 
@@ -99,7 +100,11 @@ public final class ProviderConfig {
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(value, "value");
         Map<String, String> copy = new LinkedHashMap<>(properties);
-        copy.put(key, value);
+        if (value.isBlank()) {
+            copy.remove(key); // blank is unset, as an empty ${VAR:} in Spring configuration gives
+        } else {
+            copy.put(key, value);
+        }
         return new ProviderConfig(providerId, region, endpoint, credentials, copy);
     }
 

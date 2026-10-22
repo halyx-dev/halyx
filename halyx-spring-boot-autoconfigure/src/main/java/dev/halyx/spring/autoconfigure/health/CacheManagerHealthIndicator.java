@@ -1,0 +1,38 @@
+/*
+ * Copyright 2026 Kamran Zafar
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package dev.halyx.spring.autoconfigure.health;
+
+import dev.halyx.spring.autoconfigure.cache.HalyxCacheManager;
+import org.springframework.boot.health.contributor.AbstractHealthIndicator;
+import org.springframework.boot.health.contributor.Health;
+
+/** UP when the server behind {@code halyx.cache-manager} answers an authenticated command. */
+public class CacheManagerHealthIndicator extends AbstractHealthIndicator {
+
+    private final HalyxCacheManager cacheManager;
+
+    public CacheManagerHealthIndicator(HalyxCacheManager cacheManager) {
+        super("Cache manager health check failed");
+        this.cacheManager = cacheManager;
+    }
+
+    @Override
+    protected void doHealthCheck(Health.Builder builder) {
+        builder.withDetail("provider", cacheManager.provider()).withDetail("caches", cacheManager.getCacheNames());
+        cacheManager.ping(); // fails on an outage even when the caches are fail-open
+        builder.up();
+    }
+}

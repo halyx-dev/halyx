@@ -40,7 +40,7 @@ Halyx's BOM manages Halyx's.
 | `spring-boot-starter-webmvc` (Boot 4) or `spring-boot-starter-web` (Boot 3.5) | a REST API; `spring-boot-starter-webflux` for a reactive one |
 | `spring-boot-starter-actuator` | always: health, with Halyx's `halyx` contributor, and the probes a deployment uses |
 | `spring-boot-starter-jdbc` (or `-data-jpa`), `org.postgresql:postgresql` at runtime scope | SQL |
-| `com.google.cloud.sql:postgres-socket-factory` at runtime scope, with a version: Halyx's BOM doesn't manage it (use the `cloud-sql-connector.version` in Halyx's `pom.xml`) | SQL on Google Cloud through the Cloud SQL connector |
+| `com.google.cloud.sql:postgres-socket-factory` at runtime scope (Halyx's BOM manages its version) | SQL on Google Cloud through the Cloud SQL connector |
 | `org.flywaydb:flyway-core` and `flyway-database-postgresql` | schema migrations, rather than `schema.sql` |
 | `spring-boot-starter-test`, `org.testcontainers:testcontainers-junit-jupiter`, `-kafka`, `-postgresql` at test scope | the tests |
 
@@ -93,10 +93,10 @@ Cloud resource names come from environment variables named `<SERVICE>_<RESOURCE>
 - **Values only a deployment knows have no default:** endpoints, accounts, bootstrap servers
   (`endpoint: ${ORDERS_CACHE_ENDPOINT}`). A deployment that forgets one then fails at startup, instead of quietly
   using a placeholder such as `redis://memory:6379`; the `local` profile sets its own.
-- **Optional provider or resource `properties` that only some deployments set** (a Memorystore CA file in
-  `redis.ca-certificate`, a Cloud SQL `gcp.sql.instance`) never go in `application.yml` as `${VAR:}`: Halyx reads the
-  empty string as a value, a file path or an instance name. They belong in the deployment's configuration (the Helm
-  chart's `config` and `files`), next to the file they name.
+- **Optional provider or resource `properties` that only some deployments set** (a Cloud SQL `gcp.sql.instance`)
+  can be `${VAR:}`: a blank value is no value. A file a property names, such as a Memorystore CA in
+  `redis.ca-certificate`, goes in the deployment's configuration (the Helm chart's `config` and `files`), next to the
+  file.
 
 ## application.yml
 
@@ -193,7 +193,7 @@ Per cloud, the settings that differ:
 | Event bus | the bus name | `properties.azure.eventgrid.endpoint` on the bus, and on its subscription with `topic: <namespace topic>` | `projects/<p>/locations/<l>/messageBuses/<id>`, or the id with `properties.gcp.eventarc.location` |
 | Parameter store `location` | none | the App Configuration endpoint (`parameters`), the Key Vault URL (`secrets`) | `global` or a region (`parameters`) |
 | Cache `auth` | `type: iam`, `username` the ElastiCache user id, `properties.aws.elasticache.cache-name` | `type: iam`, `username` the identity's object id | `type: iam`; a `rediss://` endpoint, and `properties.redis.ca-certificate` with the instance's CA file, in the deployment's configuration |
-| Database | `host`, `auth: { type: iam, username }` | `host`, `auth: { type: iam, username }` (the Entra ID name) | `host`, or through the Cloud SQL connector `properties.gcp.sql.instance: <project>:<region>:<instance>` in the deployment's configuration; `auth: { type: iam, username }` |
+| Database | `host`, `auth: { type: iam, username }` | `host`, `auth: { type: iam, username }` (the Entra ID name) | `host`, or through the Cloud SQL connector `properties.gcp.sql.instance: ${<SERVICE>_SQL_INSTANCE:}` (`<project>:<region>:<instance>`) with `host: ${<SERVICE>_DB_HOST:}`; `auth: { type: iam, username }` |
 | Stream cluster | `bootstrap-servers` (port 9098) | `<namespace>.servicebus.windows.net:9093` | the cluster's bootstrap address |
 
 The `local` profile: the memory provider has every service but SQL, and its streams run in process. Keep

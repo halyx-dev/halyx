@@ -647,12 +647,15 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
             if (database == null) {
                 throw new IllegalStateException(prefix + ".database is required");
             }
-            if (host == null && !properties.containsKey("gcp.sql.instance")) {
+            // Blank is unset, as an empty ${VAR:} gives: a deployment through the Cloud SQL connector sets no host.
+            boolean hasHost = host != null && !host.isBlank();
+            String instance = properties.get("gcp.sql.instance");
+            if (!hasHost && (instance == null || instance.isBlank())) {
                 throw new IllegalStateException(prefix + ".host is required");
             }
             SqlConfig.Builder config = SqlConfig.builder(engine).name(name).database(database).auth(resolvedAuth)
                     .pool(pool.toPoolSettings());
-            if (host != null) {
+            if (hasHost) {
                 config.host(host);
             }
             if (port != null) {

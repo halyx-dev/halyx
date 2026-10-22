@@ -22,6 +22,8 @@ import dev.halyx.parameters.ParameterStore;
 import dev.halyx.spring.messaging.HalyxListenerRegistrar;
 import dev.halyx.spring.autoconfigure.HalyxAutoConfiguration;
 import dev.halyx.spring.autoconfigure.HalyxResourcesCondition;
+import dev.halyx.spring.autoconfigure.cache.HalyxCacheManager;
+import dev.halyx.spring.autoconfigure.cache.HalyxCacheManagerAutoConfiguration;
 import dev.halyx.storage.BlobStore;
 import dev.halyx.stream.StreamConsumer;
 import dev.halyx.stream.StreamProducer;
@@ -42,11 +44,11 @@ import java.util.TreeMap;
 /**
  * Spring Boot 4 ({@code org.springframework.boot.health}): a {@code halyx} health contributor with
  * one entry per blob store, cache, parameter store, document store and stream producer bean, plus the
- * {@code messaging} and {@code streams} listeners. On Boot 3 these classes are absent and
+ * {@code messaging} and {@code streams} listeners and the {@code cache-manager}. On Boot 3 these classes are absent and
  * {@code actuate.HalyxActuatorHealthContributorAutoConfiguration} applies instead. Disable with
  * {@code management.health.halyx.enabled=false}.
  */
-@AutoConfiguration(after = HalyxAutoConfiguration.class)
+@AutoConfiguration(after = {HalyxAutoConfiguration.class, HalyxCacheManagerAutoConfiguration.class})
 @ConditionalOnClass({HealthIndicator.class, ConditionalOnEnabledHealthIndicator.class, BlobStore.class})
 @Conditional(HalyxResourcesCondition.class)
 @ConditionalOnEnabledHealthIndicator("halyx")
@@ -60,13 +62,16 @@ public class HalyxHealthContributorAutoConfiguration {
                                                       Map<String, DocumentStore> documentStores,
                                                       Map<String, StreamProducer> streamProducers,
                                                       Map<String, StreamConsumer> streamConsumers,
-                                                      ObjectProvider<HalyxListenerRegistrar> listeners) {
+                                                      ObjectProvider<HalyxListenerRegistrar> listeners,
+                                                      ObjectProvider<HalyxCacheManager> cacheManager) {
         Map<String, HealthContributor> contributors = new TreeMap<>();
         blobStores.forEach((name, store) -> contributors.put(name, new BlobStoreHealthIndicator(store)));
         caches.forEach((name, cache) -> contributors.put(name, new CacheHealthIndicator(cache)));
         parameterStores.forEach((name, store) -> contributors.put(name, new ParameterStoreHealthIndicator(store)));
         documentStores.forEach((name, store) -> contributors.put(name, new DocumentStoreHealthIndicator(store)));
         streamProducers.forEach((name, producer) -> contributors.put(name, new StreamProducerHealthIndicator(producer)));
+        cacheManager.ifAvailable(manager -> putEntry(contributors, "cache-manager", new CacheManagerHealthIndicator(manager),
+                "reports halyx.cache-manager"));
         if (!streamConsumers.isEmpty()) {
             listeners.ifAvailable(registrar -> putListenerEntry(contributors, "streams", new StreamListenersHealthIndicator(registrar)));
         }
@@ -76,12 +81,17 @@ public class HalyxHealthContributorAutoConfiguration {
         return CompositeHealthContributor.fromMap(contributors);
     }
 
-    /** The listener entries share the contributor with the beans, so a bean of the same name would hide one. */
     private static void putListenerEntry(Map<String, HealthContributor> contributors, String name,
                                          HealthContributor indicator) {
+        putEntry(contributors, name, indicator, "reports the " + name + " listeners");
+    }
+
+    /** These entries share the contributor with the beans, so a bean of the same name would hide one. */
+    private static void putEntry(Map<String, HealthContributor> contributors, String name, HealthContributor indicator,
+                                 String what) {
         if (contributors.containsKey(name)) {
             throw new IllegalStateException("The Halyx bean '" + name + "' clashes with the halyx health entry of the "
-                    + "same name, which reports the " + name + " listeners: rename the bean");
+                    + "same name, which " + what + ": rename the bean");
         }
         contributors.put(name, indicator);
     }

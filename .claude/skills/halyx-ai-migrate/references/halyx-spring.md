@@ -40,7 +40,7 @@ old library is still there, list the SDK's BOM first:
 ```
 
 Spring Boot's own dependency management wins for the libraries it manages. On Boot 3.5, Lettuce resolves to 6.6
-(Halyx is built with 6.8), and caches work on it; check `mvn dependency:list` for anything else that resolves lower
+(Halyx is built with 6.9), and caches work on it; check `mvn dependency:list` for anything else that resolves lower
 than Halyx's `pom.xml` says.
 
 The provider modules bring the cloud SDKs, the Redis and Valkey driver, SQL IAM login and the Kafka login, so the

@@ -266,8 +266,9 @@ Read every hit before recording it (see SKILL.md). "All clouds" means AWS, Azure
 - **Why:** emulator tests override the endpoints and logins, so a typo in a production profile shows first in
   production.
 - **Severity:** hygiene.
-- **Fix:** a test that resolves each profile's environment without connecting, binds it to
-  `dev.halyx.spring.autoconfigure.HalyxProperties`, and asserts the logins and names.
+- **Fix:** a test that resolves each profile's environment without connecting
+  (`--halyx.config-import.enabled=false`, so a `halyx:` import doesn't reach the cloud with the machine's
+  credentials), binds it to `dev.halyx.spring.autoconfigure.HalyxProperties`, and asserts the logins and names.
 
 ### T4. The packaged service
 - **Find:** any test or CI step that starts the built jar or image.

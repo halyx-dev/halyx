@@ -30,10 +30,15 @@ import java.util.Map;
  * Resolves {@code spring.config.import=halyx:<store>[/<prefix>]}, where {@code <store>} names an entry
  * of {@code halyx.parameter-stores} (defined earlier in the same or a previous config file) and the
  * optional {@code <prefix>} narrows what is loaded.
+ * <p>
+ * {@code halyx.config-import.enabled=false} (on the command line, in the environment, or in a document read before
+ * the import) makes every {@code halyx:} import load nothing, optional or not, without connecting: for tests that
+ * resolve a cloud profile as written, and for tools that start the application with no cloud.
  */
 public class HalyxConfigDataLocationResolver implements ConfigDataLocationResolver<HalyxConfigDataResource> {
 
     static final String PREFIX = "halyx:";
+    static final String ENABLED = "halyx.config-import.enabled";
 
     @Override
     public boolean isResolvable(ConfigDataLocationResolverContext context, ConfigDataLocation location) {
@@ -42,6 +47,10 @@ public class HalyxConfigDataLocationResolver implements ConfigDataLocationResolv
 
     @Override
     public List<HalyxConfigDataResource> resolve(ConfigDataLocationResolverContext context, ConfigDataLocation location) {
+        if (!context.getBinder().bind(ENABLED, Boolean.class).orElse(true)) {
+            // A resource that loads nothing, rather than none: Spring reports a mandatory location without one
+            return List.of(HalyxConfigDataResource.switchedOff(location.toString(), location.isOptional()));
+        }
         String spec = location.getNonPrefixedValue(PREFIX);
         int slash = spec.indexOf('/');
         String storeName = slash < 0 ? spec : spec.substring(0, slash);

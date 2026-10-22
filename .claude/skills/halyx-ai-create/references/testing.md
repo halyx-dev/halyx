@@ -130,10 +130,9 @@ Emulator tests override endpoints and logins, so the production profiles are nev
 without connecting.
 
 **A cloud profile's `halyx:` config import connects while the environment is prepared, with the machine's own
-credentials**, and overriding `spring.config.import` doesn't stop it: each document's import is its own. In a trial,
-a profile test written that way reached the developer's real AWS account. So when the profiles import a store,
-swap the cloud's provider for the memory provider in the test (the import then reads an empty memory store), and
-check the provider type the YAML declares in application.yml's own property source:
+credentials**, and overriding `spring.config.import` doesn't stop it. In a trial, a profile test reached the
+developer's real AWS account that way. Start every profile test with `--halyx.config-import.enabled=false`, which
+makes the imports load nothing:
 
 ```java
 @Configuration(proxyBeanMethods = false)
@@ -143,21 +142,14 @@ static class NoBeans {}
 @ValueSource(strings = {"aws", "azure", "gcp"})
 void cloudProfileResolves(String cloud) {
     try (var context = new SpringApplicationBuilder(NoBeans.class).web(WebApplicationType.NONE).profiles(cloud).run(
-            "--halyx.providers." + cloud + ".type=memory",          // the import reads memory, never the cloud
+            "--halyx.config-import.enabled=false",                   // imports load nothing, connect nowhere
             "--ORDERS_CACHE_ENDPOINT=rediss://cache.example:6379",  // what each deployment sets, where there's no default
             "--GOOGLE_CLOUD_PROJECT=acme-prod")) {
-        ConfigurableEnvironment env = context.getEnvironment();
+        Environment env = context.getEnvironment();
         Binder.get(env).bind("halyx", dev.halyx.spring.autoconfigure.HalyxProperties.class).get();
-        assertThat(fromApplicationYml(env, "halyx.providers." + cloud + ".type")).isEqualTo(cloud);
+        assertThat(env.getProperty("halyx.providers." + cloud + ".type")).isEqualTo(cloud);
         assertThat(env.getProperty("halyx.caches.idempotency.auth.type")).isEqualTo("iam");
     }
-}
-
-/** A value as application.yml's documents set it, ignoring the test's overrides. */
-static String fromApplicationYml(ConfigurableEnvironment env, String key) {
-    return env.getPropertySources().stream().filter(source -> source.getName().contains("application.yml"))
-            .map(source -> source.getProperty(key)).filter(Objects::nonNull).map(Object::toString)
-            .findFirst().orElse(null);
 }
 ```
 

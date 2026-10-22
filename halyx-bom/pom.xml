@@ -23,7 +23,8 @@
 
     <!--
       Deliberately has no parent: importing this BOM must only bring in Halyx's own
-      artifacts, not the cloud SDK BOMs managed by halyx-parent.
+      artifacts, not the cloud SDK BOMs managed by halyx-parent. The one exception is the
+      Cloud SQL connector, which applications declare themselves.
     -->
     <groupId>dev.halyx</groupId>
     <artifactId>halyx-bom</artifactId>
@@ -31,7 +32,7 @@
     <packaging>pom</packaging>
 
     <name>Halyx :: BOM</name>
-    <description>Halyx, the multi-cloud Java library: bill of materials that aligns the versions of every Halyx module.</description>
+    <description>Halyx, the multi-cloud Java library: bill of materials that aligns the versions of every Halyx module, and of the Cloud SQL connector an application adds for SQL on Google Cloud.</description>
 
     <licenses>
         <license>
@@ -59,6 +60,11 @@
         <url>https://github.com/halyx-dev/halyx</url>
         <tag>HEAD</tag>
     </scm>
+
+    <properties>
+        <!-- Kept in step with halyx-parent's cloud-sql-connector.version, the one Halyx is tested with -->
+        <cloud-sql-connector.version>1.30.0</cloud-sql-connector.version>
+    </properties>
 
     <dependencyManagement>
         <dependencies>
@@ -136,6 +142,20 @@
                 <groupId>dev.halyx</groupId>
                 <artifactId>halyx-spring-boot-starter</artifactId>
                 <version>${project.version}</version>
+            </dependency>
+            <!--
+              The Cloud SQL connector, which an application adds at runtime scope for SQL on Google Cloud through
+              halyx.databases.*.properties.gcp.sql.instance: the version Halyx is tested with.
+            -->
+            <dependency>
+                <groupId>com.google.cloud.sql</groupId>
+                <artifactId>postgres-socket-factory</artifactId>
+                <version>${cloud-sql-connector.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.google.cloud.sql</groupId>
+                <artifactId>mysql-socket-factory-connector-j-8</artifactId>
+                <version>${cloud-sql-connector.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

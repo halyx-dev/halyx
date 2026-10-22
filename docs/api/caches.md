@@ -147,7 +147,7 @@ outage. Spring Boot's health check uses it.
 
 ## Implementation
 
-The shared `halyx-redis` module uses Lettuce 6.8, which stays on Netty 4.1 like the AWS and Azure SDKs.
+The shared `halyx-redis` module uses Lettuce 6.9, which stays on Netty 4.1 like the AWS and Azure SDKs.
 It runs standalone or in cluster mode, with one connection per endpoint and credentials.
 
 Not included yet: endpoint discovery by cache name (you configure the endpoint URI), stampede protection

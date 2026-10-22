@@ -32,8 +32,8 @@ for each area; check names there.
   records. The memory provider has no SQL, so the `local` profile then needs PostgreSQL in a container.
 - **`Cache` or `@Cacheable`.** `Cache<V>` for data the service owns in the cache (idempotency keys, counters, locks).
   `cache-manager` with `@Cacheable` for results computed elsewhere: set `fail-open: true`, so an unreachable cache
-  makes them uncached rather than failing the writes that evict them. Halyx's health covers `Cache` beans, not the
-  cache manager, so a broken `@Cacheable` backend doesn't show in `/actuator/health`.
+  makes them uncached rather than failing the writes that evict them. Health still shows the outage: the `halyx`
+  contributor's `cache-manager` entry pings the server even when fail-open.
 
 ## Document keys
 

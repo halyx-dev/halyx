@@ -151,7 +151,12 @@ public final class StreamConsumerConfig {
 
         /** Provider and driver settings, or Kafka consumer settings prefixed with {@code kafka.}. */
         public Builder property(String key, String value) {
-            properties.put(Objects.requireNonNull(key, "key"), Objects.requireNonNull(value, "value"));
+            Objects.requireNonNull(key, "key");
+            if (Objects.requireNonNull(value, "value").isBlank()) {
+                properties.remove(key); // blank is unset, as an empty ${VAR:} in Spring configuration gives
+            } else {
+                properties.put(key, value);
+            }
             return this;
         }
 

@@ -19,13 +19,17 @@ import dev.halyx.cache.Cache;
 import dev.halyx.messaging.Subscription;
 import dev.halyx.nosql.DocumentStore;
 import dev.halyx.parameters.ParameterStore;
+import dev.halyx.spring.autoconfigure.cache.HalyxCacheManager;
 import dev.halyx.storage.BlobStore;
 import dev.halyx.stream.StreamConsumer;
 import dev.halyx.stream.StreamProducer;
 import org.springframework.boot.autoconfigure.condition.AnyNestedCondition;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 
-/** Matches when the context has at least one Halyx service bean, such as a {@link BlobStore} or {@link Cache}. */
+/**
+ * Matches when the context has at least one Halyx service bean, such as a {@link BlobStore} or {@link Cache}, or
+ * Halyx's cache manager.
+ */
 public class HalyxResourcesCondition extends AnyNestedCondition {
 
     public HalyxResourcesCondition() {
@@ -58,5 +62,9 @@ public class HalyxResourcesCondition extends AnyNestedCondition {
 
     @ConditionalOnBean(StreamConsumer.class)
     static class HasStreamConsumer {
+    }
+
+    @ConditionalOnBean(HalyxCacheManager.class)
+    static class HasCacheManager {
     }
 }

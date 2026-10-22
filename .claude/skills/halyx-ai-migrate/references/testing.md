@@ -148,13 +148,15 @@ shows up there as `NoClassDefFoundError` at startup. In a trial it showed up onl
 
 No container or emulator test runs the cloud profile itself, so a typo there (a wrong key, an anchor that doesn't
 merge, an old `spring.*` setting left behind) would first show in production. Check what it resolves to without
-connecting anywhere:
+connecting anywhere. A `halyx:` config import in the profile would connect while the environment is prepared, with
+the machine's own credentials, so switch imports off:
 
 ```java
 @Configuration(proxyBeanMethods = false)
 static class NoBeans {}
 
-try (var context = new SpringApplicationBuilder(NoBeans.class).web(WebApplicationType.NONE).profiles("aws").run()) {
+try (var context = new SpringApplicationBuilder(NoBeans.class).web(WebApplicationType.NONE).profiles("aws")
+        .run("--halyx.config-import.enabled=false")) {
     Environment env = context.getEnvironment();
     Binder.get(env).bind("halyx", dev.halyx.spring.autoconfigure.HalyxProperties.class).get();   // binds
     assertThat(env.getProperty("halyx.databases.orders-db.auth.type")).isEqualTo("iam");

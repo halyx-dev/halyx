@@ -299,6 +299,16 @@
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <testExcludes>
+                        <!-- Spring Boot 3's actuator health API, which Boot 4 removed; health/ tests Boot 4's -->
+                        <testExclude>dev/halyx/spring/autoconfigure/actuate/**</testExclude>
+                    </testExcludes>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-failsafe-plugin</artifactId>
             </plugin>
         </plugins>

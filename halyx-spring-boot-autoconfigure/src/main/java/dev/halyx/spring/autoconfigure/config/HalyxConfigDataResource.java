@@ -51,6 +51,15 @@ public final class HalyxConfigDataResource extends ConfigDataResource {
         this.startupAttempts = startupAttempts;
     }
 
+    /** An import with {@code halyx.config-import.enabled=false}: it loads nothing and connects nowhere. */
+    static HalyxConfigDataResource switchedOff(String location, boolean optional) {
+        return new HalyxConfigDataResource(location, null, null, null, null, "", optional, false, null, 1);
+    }
+
+    boolean isSwitchedOff() {
+        return providerName == null;
+    }
+
     public String storeName() {
         return storeName;
     }

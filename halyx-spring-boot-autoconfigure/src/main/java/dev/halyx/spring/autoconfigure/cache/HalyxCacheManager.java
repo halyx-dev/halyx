@@ -42,6 +42,8 @@ public class HalyxCacheManager implements CacheManager {
     private final Executor executor;
     private final Map<String, HalyxSpringCache> caches = new ConcurrentHashMap<>();
     private final List<BiConsumer<String, dev.halyx.cache.Cache<?>>> listeners = new CopyOnWriteArrayList<>();
+    /** Opened by the first {@link #ping()}, so health is checked before any cache exists. */
+    private volatile dev.halyx.cache.Cache<Object> probe;
 
     public HalyxCacheManager(Halyx halyx, String provider, HalyxProperties.CacheManagerProperties properties,
                                Codec<Object> codec) {
@@ -83,6 +85,30 @@ public class HalyxCacheManager implements CacheManager {
     @Override
     public Collection<String> getCacheNames() {
         return List.copyOf(caches.keySet());
+    }
+
+    /**
+     * Sends an authenticated command to the server, as every cache would, through a cache of the manager's settings
+     * that is opened for it on first use. Throws when the server is unreachable or refuses the login, even with
+     * {@code fail-open}, so health shows an outage that cached methods would only log.
+     */
+    public void ping() {
+        dev.halyx.cache.Cache<Object> current = probe;
+        if (current == null) {
+            synchronized (this) {
+                current = probe;
+                if (current == null) {
+                    current = halyx.provider(provider).cache(properties.toCacheConfig("halyx-health"), codec);
+                    probe = current;
+                }
+            }
+        }
+        current.ping();
+    }
+
+    /** The provider the caches log in through, such as {@code aws}, as {@code Cache.provider()} names it. */
+    public String provider() {
+        return halyx.provider(provider).providerId();
     }
 
     /** Called for every cache, including those created before registration (used for metrics). */

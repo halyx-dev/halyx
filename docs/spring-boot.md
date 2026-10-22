@@ -390,6 +390,9 @@ halyx:
     trusted-packages: com.example.orders
 ```
 
+The `halyx` health contributor has a `cache-manager` entry, which pings the server with the manager's login, even
+with `fail-open`, so an outage shows as DOWN rather than as cached methods quietly running uncached.
+
 It supports `allEntries` evictions, `sync = true`, per-cache TTLs and cached nulls. The JSON codec stores
 `{"@class", "v"}` and only reads back types from `trusted-packages`, with no unsafe polymorphic typing.
 The JDK codec applies the same allow-list through an `ObjectInputFilter`.
@@ -439,6 +442,10 @@ spring:
   `EnvironmentChangeEvent` when Spring Cloud Context is present. `@ConfigurationProperties` and
   `@RefreshScope` beans then follow. Without Spring Cloud, `Environment` reads and event listeners see
   changes, and `@Value` fields keep their startup values.
+- `halyx.config-import.enabled=false` makes every `halyx:` import load nothing, optional or not, without
+  connecting. Imports run while Spring prepares the environment, with the machine's own credentials, so a test that
+  resolves a cloud profile as written, or a tool that starts the application with no cloud, sets it on the command
+  line or in the environment (`HALYX_CONFIGIMPORT_ENABLED=false`).
 
 ## Reactive applications
 
@@ -512,7 +519,7 @@ reports in reactive applications as in servlet ones.
 | Feature | Details |
 |---|---|
 | Observations | With Micrometer, every operation records a `halyx.operation` observation (a timer and a span) tagged with `halyx.service`, `halyx.operation`, `halyx.provider` and `error`. Turn off with `halyx.observations.enabled=false`. |
-| Health | A `halyx` health contributor with one indicator per blob store (lists one item), cache (runs an authenticated command, even when fail-open), parameter store (an authenticated read, past its cache), document store and stream producer (reads the topic's partitions), plus the `messaging` consumers and `streams` listeners. Turn off with `management.health.halyx.enabled=false`. |
+| Health | A `halyx` health contributor with one indicator per blob store (lists one item), cache (runs an authenticated command, even when fail-open), parameter store (an authenticated read, past its cache), document store and stream producer (reads the topic's partitions), plus the `messaging` consumers, the `streams` listeners and the `cache-manager` (an authenticated command, even when fail-open). Turn off with `management.health.halyx.enabled=false`. |
 | Cache metrics | Micrometer's standard `cache.gets{result=hit\|miss}`, `cache.puts` and `cache.evictions`, plus `cache.loads{result}` and `cache.fail.open`, tagged `cache=<name>`, for `Cache` beans and `CacheManager` caches. |
 | Messaging metrics | `halyx.messaging.messages{subscription, listener, result}`, `halyx.messaging.in.flight` and `halyx.messaging.receive.errors`. |
 | Stream metrics | `halyx.stream.records{consumer, listener, result=received\|handled\|failed\|dead-lettered}`, `halyx.stream.poll.errors`, `halyx.stream.in.flight` and `halyx.stream.assigned.partitions`. |
@@ -558,7 +565,7 @@ Startup fails with a message naming the property for:
   `spring.kafka.bootstrap-servers` instead
 - a `@HalyxListener` naming no subscription or stream consumer, a second listener on one stream consumer, or
   `concurrency` on a stream consumer's listener
-- a bean named `messaging` or `streams`, which would hide a health entry of the same name
+- a bean named `messaging`, `streams` or `cache-manager`, which would hide a health entry of the same name
 - a `halyx.*` key that is already a bean name: another entry's, in any group, or one of your beans
 
 Spring Boot settings that a Halyx bean makes ineffective are logged as warnings at startup: `spring.datasource.*`

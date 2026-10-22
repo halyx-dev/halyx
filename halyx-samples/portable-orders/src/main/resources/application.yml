@@ -18,7 +18,9 @@
 #   the cloud:     local (in-memory, no cloud), aws, azure or gcp
 #   the features:  events, streams, cache, sql (each optional; see the feature documents below)
 # for example SPRING_PROFILES_ACTIVE=aws,events,cache,sql. Cloud resource names come from ORDERS_* environment
-# variables, with defaults for a deployment that uses the sample's names.
+# variables, with defaults for a deployment that uses the sample's names. Endpoints only a deployment knows (the
+# cache, the Kafka bootstrap servers, the database host) have no default, so a deployment that leaves one out fails
+# at startup rather than reaching for a placeholder.
 spring:
   application:
     name: portable-orders
@@ -199,7 +201,7 @@ spring:
 halyx:
   stream-clusters:
     audit:
-      bootstrap-servers: ${ORDERS_KAFKA_BOOTSTRAP_SERVERS:memory:9092}
+      bootstrap-servers: ${ORDERS_KAFKA_BOOTSTRAP_SERVERS}
       auth:
         type: ${ORDERS_KAFKA_AUTH:iam}
   stream-producers:
@@ -220,6 +222,7 @@ spring:
 halyx:
   stream-clusters:
     audit:
+      bootstrap-servers: memory:9092
       auth:
         type: none
 
@@ -232,7 +235,7 @@ spring:
 halyx:
   caches:
     idempotency:
-      endpoint: ${ORDERS_CACHE_ENDPOINT:redis://memory:6379}
+      endpoint: ${ORDERS_CACHE_ENDPOINT}
       auth:
         type: ${ORDERS_CACHE_AUTH:iam}
 
@@ -244,6 +247,7 @@ spring:
 halyx:
   caches:
     idempotency:
+      endpoint: redis://memory:6379
       auth:
         type: none
 
@@ -284,7 +288,7 @@ halyx:
   databases:
     ledger:
       engine: postgresql
-      host: ${ORDERS_DB_HOST:localhost}
+      host: ${ORDERS_DB_HOST:}                        # none through the Cloud SQL connector (gcp.sql.instance)
       port: ${ORDERS_DB_PORT:5432}
       database: ${ORDERS_DB_NAME:orders}
       auth:

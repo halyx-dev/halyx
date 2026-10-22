@@ -37,6 +37,9 @@ public class HalyxConfigDataLoader implements ConfigDataLoader<HalyxConfigDataRe
 
     @Override
     public ConfigData load(ConfigDataLoaderContext context, HalyxConfigDataResource resource) {
+        if (resource.isSwitchedOff()) {
+            return ConfigData.EMPTY;
+        }
         try (Halyx halyx = Halyx.builder()
                 .classLoader(HalyxConfigDataLoader.class.getClassLoader())
                 .register(resource.providerName(), resource.providerConfig())

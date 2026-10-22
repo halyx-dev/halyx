@@ -101,10 +101,10 @@ findings are left and why. Then report:
 - **Portable by construction.** Shared settings in the base document, cloud settings in the cloud's document, and
   the code free of cloud SDKs. A need with no portable form is isolated, `@Profile`'d per cloud and named in the plan.
 - **Every handler can run twice.** Messages, events and records are delivered at least once.
-- **No defaults for what only a deployment knows**, and no empty defaults for optional provider properties: a
-  missing endpoint should fail at startup, and Halyx reads `""` as a value ([project.md](references/project.md#names)).
+- **No defaults for what only a deployment knows:** a missing endpoint should fail at startup, not reach a
+  placeholder ([project.md](references/project.md#names)).
 - **Tests never reach a cloud.** A profile's `halyx:` import connects with the machine's credentials: the profile
-  test swaps the provider for memory ([testing.md](references/testing.md#the-profiles-themselves)).
+  test runs with `--halyx.config-import.enabled=false` ([testing.md](references/testing.md#the-profiles-themselves)).
 - **Leave credentials to the default chain.** Workload identity, IAM roles, managed identities and gcloud logins
   need no configuration. Keys belong only in emulator tests.
 - **Keep it the size of the request.** Generate what the plan lists, not every Halyx feature: the sample uses all of
