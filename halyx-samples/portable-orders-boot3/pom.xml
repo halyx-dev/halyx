@@ -38,7 +38,8 @@
         <image.name>halyx/portable-orders-boot3:${project.version}</image.name>
         <!-- Security fixes over Boot 3.5's versions -->
         <tomcat10.version>10.1.61</tomcat10.version>
-        <logback.version>1.5.38</logback.version>
+        <logback.version>1.6.5</logback.version>
+        <slf4j.version>2.0.19</slf4j.version>
         <micrometer-bom.version>1.16.8</micrometer-bom.version>
         <opentelemetry.version>1.67.0</opentelemetry.version>
         <httpclient5.version>5.6.5</httpclient5.version>
@@ -113,7 +114,10 @@
                 <artifactId>tomcat-embed-websocket</artifactId>
                 <version>${tomcat10.version}</version>
             </dependency>
-            <!-- Security fixes: Logback, and the Apache HttpClient the AWS SDK uses (Boot 3.5 would downgrade it) -->
+            <!--
+              Security fixes: Logback (1.6.5 fixes two directory traversals in SiftingAppender's MDC discriminator),
+              with the SLF4J it is built against
+            -->
             <dependency>
                 <groupId>ch.qos.logback</groupId>
                 <artifactId>logback-core</artifactId>
@@ -124,6 +128,17 @@
                 <artifactId>logback-classic</artifactId>
                 <version>${logback.version}</version>
             </dependency>
+            <dependency>
+                <groupId>org.slf4j</groupId>
+                <artifactId>slf4j-api</artifactId>
+                <version>${slf4j.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.slf4j</groupId>
+                <artifactId>jul-to-slf4j</artifactId>
+                <version>${slf4j.version}</version>
+            </dependency>
+            <!-- Security fixes: the Apache HttpClient the AWS SDK uses (Boot 3.5 would downgrade it) -->
             <dependency>
                 <groupId>org.apache.httpcomponents.client5</groupId>
                 <artifactId>httpclient5</artifactId>

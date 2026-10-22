@@ -41,6 +41,8 @@
         <!-- Security fixes over Boot 4.1's versions -->
         <netty42.version>4.2.19.Final</netty42.version>
         <tomcat11.version>11.0.27</tomcat11.version>
+        <logback.version>1.6.5</logback.version>
+        <slf4j.version>2.0.19</slf4j.version>
     </properties>
 
     <dependencyManagement>
@@ -109,6 +111,30 @@
                 <groupId>org.apache.tomcat.embed</groupId>
                 <artifactId>tomcat-embed-websocket</artifactId>
                 <version>${tomcat11.version}</version>
+            </dependency>
+            <!--
+              Security fixes: Logback (1.6.5 fixes two directory traversals in SiftingAppender's MDC discriminator),
+              with the SLF4J it is built against
+            -->
+            <dependency>
+                <groupId>ch.qos.logback</groupId>
+                <artifactId>logback-core</artifactId>
+                <version>${logback.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>ch.qos.logback</groupId>
+                <artifactId>logback-classic</artifactId>
+                <version>${logback.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.slf4j</groupId>
+                <artifactId>slf4j-api</artifactId>
+                <version>${slf4j.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.slf4j</groupId>
+                <artifactId>jul-to-slf4j</artifactId>
+                <version>${slf4j.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
