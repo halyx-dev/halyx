@@ -14,6 +14,10 @@ Thanks for your interest in Halyx. Bug reports, documentation fixes, samples and
   self-contained, and [`help wanted`](https://github.com/halyx-dev/halyx/labels/help%20wanted) issues are larger.
   The [roadmap](https://halyx.dev/docs/roadmap.html) lists what's planned.
 
+To take an issue, comment `/assign` on it (or just ask). Each contributor has one issue at a time. Open a draft pull
+request within a week, even if it's not finished: issues without a linked pull request after 10 days are unassigned so
+someone else can pick them up. Larger `help wanted` issues need a short plan in the issue before they're assigned.
+
 For anything larger than a small fix, comment on the issue or start a discussion first, so we can agree on the
 approach before you write the code.
 
