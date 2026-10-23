@@ -9,7 +9,7 @@
   ██╔══██║██╔══██║██║       ╚██╔╝   ██╔██╗ 
   ██║  ██║██║  ██║███████╗   ██║   ██╔╝ ██╗
   ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝   ╚═╝   ╚═╝  ╚═╝
-                                            
+&nbsp;
         the multi-cloud Java library        
      one Java API for AWS · Azure · GCP     
 </pre>
