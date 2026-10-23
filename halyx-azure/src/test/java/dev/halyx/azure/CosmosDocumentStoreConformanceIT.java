@@ -49,8 +49,6 @@ import org.junit.jupiter.api.Nested;
 import dev.halyx.tck.DocumentRepositoryConformanceTest;
 import dev.halyx.tck.ReactiveDocumentRepositoryConformanceTest;
 
-import static org.assertj.core.api.Assertions.assertThat;
-
 /** The document store TCK on Cosmos DB (NoSQL API) emulated by Floci-az. */
 @Testcontainers(disabledWithoutDocker = true)
 class CosmosDocumentStoreConformanceIT extends DocumentStoreConformanceTest {

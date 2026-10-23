@@ -45,8 +45,6 @@ import org.junit.jupiter.api.Nested;
 import dev.halyx.tck.DocumentRepositoryConformanceTest;
 import dev.halyx.tck.ReactiveDocumentRepositoryConformanceTest;
 
-import static org.assertj.core.api.Assertions.assertThat;
-
 /** The document store TCK on Google's Firestore emulator (native mode). */
 @Testcontainers(disabledWithoutDocker = true)
 class FirestoreEmulatorDocumentStoreIT extends DocumentStoreConformanceTest {

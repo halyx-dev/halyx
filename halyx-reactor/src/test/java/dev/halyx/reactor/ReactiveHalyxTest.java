@@ -15,7 +15,6 @@
  */
 package dev.halyx.reactor;
 
-import dev.halyx.cache.CacheLock;
 import dev.halyx.Halyx;
 import dev.halyx.config.ProviderConfig;
 import dev.halyx.error.NotFoundException;
@@ -37,7 +36,6 @@ import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Scheduler;
-import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
 import reactor.util.context.Context;
 

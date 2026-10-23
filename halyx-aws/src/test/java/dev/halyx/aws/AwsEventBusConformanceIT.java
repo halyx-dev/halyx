@@ -41,8 +41,6 @@ import software.amazon.awssdk.services.sqs.model.QueueAttributeName;
 import java.net.URI;
 import java.util.concurrent.TimeUnit;
 
-import static org.assertj.core.api.Assertions.assertThat;
-
 /**
  * The event bus kit on EventBridge emulated by Floci: an event bus with a rule that routes the kit's events (their
  * source starts with {@code /halyx-tck/}) to an SQS queue, which the kit receives from.

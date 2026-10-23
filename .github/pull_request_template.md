@@ -12,3 +12,4 @@
 - [ ] Tests cover the change, in the conformance kit where it's portable behaviour
 - [ ] Documentation in `docs/` is updated if users see the change
 - [ ] New files have the license header (`mvn -N com.mycila:license-maven-plugin:format`)
+- [ ] Follows the [code conventions](https://github.com/halyx-dev/halyx/blob/main/CONTRIBUTING.md#code-conventions); `mvn validate` passes

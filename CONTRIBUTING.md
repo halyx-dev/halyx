@@ -48,11 +48,37 @@ The integration tests are skipped when Docker isn't available. See
   header, and the build fails without it. `mvn -N com.mycila:license-maven-plugin:format` adds any missing ones.
 - **Match the surrounding code** in naming, structure and comments.
 
+## Code conventions
+
+The build checks the first group in `mvn validate`, and fails on any of them. Your editor follows most of them through
+[`.editorconfig`](.editorconfig).
+
+- No wildcard imports, and no unused ones.
+- Tests assert with AssertJ (`assertThat(...)`), not JUnit's `Assertions`.
+- No `System.out` or `System.err` in the library: it logs. Samples, benchmarks and tests may print.
+- UTF-8, spaces rather than tabs, and a newline at the end of every file.
+
+Reviews check the rest:
+
+- **The public API is the same on every cloud.** Errors are Halyx's exceptions in `dev.halyx.error`, never a cloud
+  SDK's; provider differences are capabilities; anything provider-specific goes through `unwrap`.
+- **Configuration is immutable.** A method that changes a setting returns a new instance, as `ProviderConfig` does;
+  types with several options have a builder.
+- **No nulls in the API.** A value that may be missing is an `Optional`. Records are preferred for plain data.
+- **Versions live in one place.** Each dependency and plugin version is a property in the parent `pom.xml`, such as
+  `${kafka4.version}`; a module refers to the property rather than writing a number. A `dev.halyx` module is either
+  managed by the parent or uses `${project.version}`.
+- **Every code snippet compiles.** Docs, READMEs and samples use only the public API; check each snippet against the
+  code before adding it.
+- **Comments say why**, not what the code already says, and are as dense as the code around them.
+
 ## Pull requests
 
 - Keep each pull request to one change, with a title that says what it does, such as "Retry Pub/Sub publishes
-  on UNAVAILABLE".
+  on UNAVAILABLE": a sentence, without prefixes such as `docs:` or `fix:`.
 - Say what you changed, why, and how you tested it.
-- CI must pass: the build, the license headers, and the unit and emulator tests.
+- Start from an up-to-date `main`, and rebase if it moves on. After a release, the project version changes in every
+  `pom.xml`, so a new module must use the current one.
+- CI must pass: the build, the license headers, the code conventions, and the unit and emulator tests.
 
 By contributing, you agree that your contribution is licensed under the [Apache License 2.0](LICENSE).

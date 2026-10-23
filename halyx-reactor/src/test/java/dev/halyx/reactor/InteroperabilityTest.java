@@ -18,7 +18,6 @@ package dev.halyx.reactor;
 import dev.halyx.Halyx;
 import dev.halyx.config.ProviderConfig;
 import dev.halyx.error.NotFoundException;
-import dev.halyx.messaging.ConsumerOptions;
 import dev.halyx.messaging.OutgoingMessage;
 import dev.halyx.messaging.SubscriptionConfig;
 import dev.halyx.nosql.Document;
