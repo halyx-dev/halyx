@@ -193,6 +193,8 @@ class ReactiveHalyxTest {
                 .then(() -> assertThat(count("list")).as("fifteen items: two pages, and one ahead").isBetween(2, 3))
                 .thenCancel()
                 .verify(Duration.ofSeconds(5));
+        // A page read already started on the scheduler when the subscriber cancelled still finishes
+        Thread.sleep(200);
         int afterCancel = count("list");
         Thread.sleep(200);
         assertThat(count("list")).as("nothing after cancel").isEqualTo(afterCancel);
