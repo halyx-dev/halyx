@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.1 (unreleased)
+
+### Fixes
+
+- **Gradle with Spring Boot 3.5:** `halyx-aws`, `halyx-azure` and `halyx-gcp` failed to resolve, because `halyx-kafka`
+  brought both the patched `at.yawk.lz4:lz4-java` and the `org.lz4:lz4-java` that Boot 3.5's `kafka-clients` depends
+  on, and Gradle refuses two modules with the same capability. `halyx-kafka` now excludes `org.lz4:lz4-java`, so
+  only the patched one is on the classpath, with Maven too.
+- **`ReactiveBlobStore.getBody`** closes the blob before the completion or error reaches the subscriber, as
+  documented, rather than just after it.
+
 ## 1.0.0 (2026-10-23)
 
 The first release: one Java API for object storage, NoSQL documents, messaging, events, streams, SQL databases,
