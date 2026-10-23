@@ -23,6 +23,7 @@
 #   TIER=2 cloud-testing/scripts/gcp-real-cloud.sh                            # Cloud SQL PostgreSQL and MySQL with IAM auth
 #   TIER=3 cloud-testing/scripts/gcp-real-cloud.sh                            # Memorystore for Valkey with IAM auth
 #   TIER=4 cloud-testing/scripts/gcp-real-cloud.sh                            # streams on Managed Kafka with IAM, plus Spring Boot
+#   TIER=5 cloud-testing/scripts/gcp-real-cloud.sh                            # cloud logins: an impersonated service account
 #
 # The tests and Terraform act as the test service account (GCP_IMPERSONATE, default halyx-test@<project>),
 # through Application Default Credentials that impersonate it:
@@ -52,6 +53,11 @@
 # broker by name, so the tests run on the runner: the script builds them here, copies them with their
 # classpath, and runs RealGcpStreamIT there, then RealSpringStreamIT on Spring Boot 3 and 4 (the starter, and
 # Spring for Apache Kafka through halyx.spring-kafka). Creating and deleting the cluster takes 20-30 minutes each way.
+#
+# Tier 5: Terraform creates a bucket that the login target may use: a standing service account the test service
+# account may impersonate (GCP_LOGIN_TARGET, default halyx-login-target@<project>), set up once. RealGcpLoginIT
+# impersonates it through Halyx and checks Google sees the target's token, and that impersonating an account the
+# test service account has no rights on (GCP_LOGIN_DENIED, default the Compute Engine default service account) fails.
 set -uo pipefail
 
 PROJECT="${GCP_PROJECT:-$(gcloud config get-value project 2>/dev/null)}"
@@ -84,6 +90,11 @@ if [[ "$TIER" == 3 || "$TIER" == 4 ]]; then
 fi
 if [[ "$TIER" == 1 || "$TIER" == 4 ]]; then
   TF_VARS+=(-var "service_account=$IMPERSONATE")
+fi
+if [[ "$TIER" == 5 ]]; then
+  LOGIN_TARGET="${GCP_LOGIN_TARGET:-halyx-login-target@$PROJECT.iam.gserviceaccount.com}"
+  LOGIN_DENIED="${GCP_LOGIN_DENIED:-$(gcloud projects describe "$PROJECT" --format='value(projectNumber)')-compute@developer.gserviceaccount.com}"
+  TF_VARS+=(-var "login_target=$LOGIN_TARGET")
 fi
 if [[ "$TIER" == 2 ]]; then
   TF_VARS+=(-var "iam_service_account=$IMPERSONATE")
@@ -215,6 +226,27 @@ terraform -chdir="$TF_DIR" init -input=false >/dev/null || exit 1
 terraform -chdir="$TF_DIR" apply -auto-approve -input=false "${TF_VARS[@]}" || exit 1
 
 cd "$ROOT"
+if [[ "$TIER" == 5 ]]; then
+  BUCKET="$(terraform -chdir="$TF_DIR" output -raw bucket)"
+  log "Running the cloud login tests against real GCP"
+  mvn -o verify -pl halyx-gcp -Dit.test="${IT_TEST:-RealGcpLoginIT}" -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+      -Dhalyx.real.gcp.logins=true -Dhalyx.real.gcp.run="$RUN" -Dhalyx.real.gcp.project="$PROJECT" \
+      -Dhalyx.real.gcp.logins.bucket="$BUCKET" -Dhalyx.real.gcp.logins.target="$LOGIN_TARGET" \
+      -Dhalyx.real.gcp.logins.target-id="$("${GCLOUD[@]}" iam service-accounts describe "$LOGIN_TARGET" --format='value(uniqueId)')" \
+      -Dhalyx.real.gcp.logins.denied-target="$LOGIN_DENIED"
+  status=$?
+  [[ -n "${IT_TEST:-}" ]] && exit $status
+  # Spring Boot 3 and 4: credentials.type impersonate.
+  mvn -o -q install -DskipTests -pl halyx-spring-boot-autoconfigure -am || exit 1
+  for module in halyx-spring-boot-autoconfigure halyx-spring-boot4-tests; do
+    log "Running the Spring Boot login test ($module) against real GCP"
+    mvn -o verify -pl "$module" -Dit.test=RealSpringLoginIT -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+        -Dhalyx.real.spring.logins=true -Dhalyx.real.spring.provider=gcp -Dhalyx.real.spring.bucket="$BUCKET" \
+        -Dhalyx.real.spring.provider-properties="gcp.project-id=$PROJECT" \
+        -Dhalyx.real.spring.credentials="type=impersonate,target=$LOGIN_TARGET" || status=1
+  done
+  exit $status
+fi
 if [[ "$TIER" == 4 ]]; then
   RUNNER="halyx@$(terraform -chdir="$TF_DIR" output -raw runner_ip)"
   SPRING_MODULES=(halyx-spring-boot-autoconfigure halyx-spring-boot4-tests)

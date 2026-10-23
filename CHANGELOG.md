@@ -47,7 +47,7 @@ Each jar has a Java module name, such as `dev.halyx` for `halyx-core` and `dev.h
 - **Parameters and secrets** from SSM Parameter Store, Secrets Manager, App Configuration, Key Vault, Parameter
   Manager, Secret Manager and Vault, with Spring configuration import (`halyx:`) and reload.
 - **Credentials:** each cloud's default chain, plus assumed AWS roles, impersonated Google service accounts and
-  Entra ID service principals.
+  Entra ID service principals, including a federated token from another cloud, with no stored secret.
 - **Spring Boot:** properties for every service, health indicators, Micrometer metrics, and `@HalyxListener` methods.
 - **Reactive and asynchronous APIs** for every service, non-blocking where the SDK's async client allows.
 - **A portable microservice sample** that runs one image unchanged on EKS, GKE and AKS.
@@ -62,7 +62,7 @@ clouds, with Spring Boot 3.5 and 4. The latest results are in the
 ### Known limitations
 
 - Not yet run on real clouds: MSK Serverless (the test account's plan doesn't allow it), Azure Database for MySQL with
-  Entra ID, and the assumed-role, impersonation and service-principal logins.
+  Entra ID, and the service principal's certificate login.
 - Some calls still block underneath, on a virtual thread: Cloud Storage, Service Bus receives, and Cosmos DB and
   Firestore read-then-write calls.
 - R2DBC to SQL Server is password-only, because its driver takes no access tokens.

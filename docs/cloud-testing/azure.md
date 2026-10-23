@@ -489,6 +489,30 @@ The same kit, with idempotence on, also passed 24/25 on Kafka 4.2.1 clients (`r2
 Topics per namespace in the passing run: 11, 11 and 4, with one listed before each creation, so deletes do
 take effect.
 
+## Tier 5: latest result
+
+```bash
+TIER=5 AZURE_FEDERATED_GOOGLE_SA=<Google Cloud test service account> cloud-testing/scripts/azure-real-cloud.sh
+```
+
+Terraform (`cloud-testing/infra/azure/tier5`) creates a storage account with shared keys off, and gives the
+principal Storage Blob Data Contributor on it. For the federated login, the script gets a Google ID token for the
+Google Cloud test service account, with the audience `api://AzureADTokenExchange`, which the `halyx-test`
+application trusts through a federated identity credential ([set up once](#iam)). That is code on Google Cloud
+logging in to Azure with no stored secret.
+
+`RealAzureLoginIT` names the principal explicitly:
+
+| Test | Checks | Result |
+|---|---|---|
+| `aServicePrincipalLogsInWithItsSecret` | `Credentials.servicePrincipal(tenant, client, secret)`: a blob written and read | passed |
+| `aWrongSecretIsRefused` | the first call fails with `AADSTS7000215`, so the explicit credentials are what logs in, not the environment | passed |
+| `aServicePrincipalLogsInWithAFederatedTokenFromGoogleCloud` | `Credentials.servicePrincipalWithFederatedToken(tenant, client, tokenFile)` with the Google ID token: a blob written and read | passed |
+| `aTokenFromAnUntrustedIssuerIsRefused` | a token from an issuer the application doesn't trust is refused | passed |
+
+Then Spring Boot 3.5 and 4, each twice: `credentials.type: service-principal` with `secret` (from the
+environment), and with `token-file`. **4/4; Spring 4/4**, run `r26102311158b75`, nothing left after teardown.
+
 ## Run history
 
 | Run id | Scope | Result | Teardown | Notes |
@@ -530,6 +554,7 @@ take effect.
 | `r2610221751dbfa` | tier 4, plus Spring Boot 3 and 4 | **27 passed, 2 skipped**; Spring **2/2** | clean | Full regression before 1.0.0, at `be792e3`. The skips are the claim-check tests, plain and asynchronous: the kit run has no blob store for the claim check. |
 | `r26102222164336` | tier 1, plus Spring Boot 3 and 4 | **207 passed, 1 skipped**; Spring **16/16** | clean | Latest tier 1 result, after the dependency security fixes: Reactor 3.8.7 under the Azure SDK, and Micrometer 1.16.8 under Cosmos DB. |
 | `r26102222414536` | tier 2, plus Spring Boot 3 and 4 | **13/13**; Spring **2/2** | clean | Latest tier 2 result, after the dependency security fixes: R2DBC with Entra ID on Reactor 3.8.7. |
+| `r26102311158b75` | tier 5, plus Spring Boot 3 and 4 | **4/4**; Spring **4/4** | clean | The first tier 5 run: a service principal with a secret, and with a federated Google ID token. |
 
 ## What real Azure found
 
@@ -570,6 +595,23 @@ Event Hubs' Kafka endpoint found these:
 
 Tiers 2 and 3 need nothing beyond tier 1's setup: Contributor covers registering their resource providers,
 creating the servers and caches, and naming the principal as their Entra admin or access-policy holder.
+
+Tier 5 needs nothing beyond tier 1's setup for its secret login. Its federated login needs a federated identity
+credential on the `halyx-test` application, created once, that trusts Google ID tokens for the Google Cloud test
+service account:
+
+```bash
+az ad app federated-credential create --id <application id> --parameters '{
+  "name": "google-halyx-test",
+  "issuer": "https://accounts.google.com",
+  "subject": "<the service account unique id: gcloud iam service-accounts describe <email> --format=value(uniqueId)>",
+  "audiences": ["api://AzureADTokenExchange"]
+}'
+```
+
+The run then gets a token with `gcloud auth print-identity-token --impersonate-service-account`, for the service
+account in `AZURE_FEDERATED_GOOGLE_SA`, so the person running it needs `roles/iam.serviceAccountTokenCreator` on
+that account, as for the Google Cloud runs. Without `AZURE_FEDERATED_GOOGLE_SA`, the federated test is skipped.
 
 ### IAM for the AKS run
 

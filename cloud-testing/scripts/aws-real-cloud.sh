@@ -22,6 +22,7 @@
 #   TIER=2 cloud-testing/scripts/aws-real-cloud.sh                                  # RDS PostgreSQL and MySQL with IAM auth
 #   TIER=3 cloud-testing/scripts/aws-real-cloud.sh                                  # ElastiCache for Valkey with IAM auth
 #   TIER=4 cloud-testing/scripts/aws-real-cloud.sh                                  # streams on MSK Serverless with IAM
+#   TIER=5 cloud-testing/scripts/aws-real-cloud.sh                                  # cloud logins: an assumed role
 #
 # Tier 1 (the default):
 # 1. Terraform creates an S3 bucket and two DynamoDB tables named after a fresh run id (tagged halyx-test=<id>).
@@ -45,6 +46,10 @@
 # endpoint and Kafka clients connect to each broker by name, so the tests run on the runner: the script builds
 # them here, copies them with their classpath, and runs RealAwsStreamIT there with temporary credentials of the
 # test identity (sts get-session-token, passed over SSH and never written to the runner's disk).
+#
+# Tier 5: Terraform creates an IAM role that the test identity may assume only with an external ID generated for
+# the run (passed through the environment only), and a bucket the role may use. RealAwsLoginIT assumes the role
+# through Halyx and checks STS sees the role's session, and that a wrong external ID is refused.
 set -uo pipefail
 
 export AWS_PROFILE="${AWS_PROFILE:-default}"
@@ -72,6 +77,10 @@ if [[ "$TIER" == 3 || "$TIER" == 4 ]]; then
   TF_VARS+=(-var "ssh_public_key=$(cat "$WORK/key.pub")")
   SSH_OPTS=(-i "$WORK/key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new
             -o UserKnownHostsFile="$WORK/known_hosts" -o ConnectTimeout=10 -o BatchMode=yes)
+fi
+if [[ "$TIER" == 5 ]]; then
+  export TF_VAR_external_id="$(openssl rand -hex 16)"
+  export HALYX_LOGIN_EXTERNAL_ID="$TF_VAR_external_id"
 fi
 if [[ "$TIER" == 3 ]]; then
   export TF_VAR_default_user_password="$(openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | head -c 32)"
@@ -165,6 +174,9 @@ teardown() {
         --query 'SecurityGroups[].GroupId' --output text)
     left+=$(aws s3api head-bucket --bucket "halyx-$RUN-claims" 2>/dev/null && echo " bucket halyx-$RUN-claims")
   fi
+  if [[ "$TIER" == 5 ]]; then
+    left+=$(aws iam get-role --role-name "halyx-$RUN-orders" --query 'Role.Arn' --output text 2>/dev/null)
+  fi
   left+=$(aws s3api head-bucket --bucket "halyx-$RUN-blobs" 2>/dev/null && echo " bucket halyx-$RUN-blobs")
   for table in items items-sorted; do
     left+=$(aws dynamodb describe-table --table-name "halyx-$RUN-$table" --query 'Table.TableStatus' --output text 2>/dev/null \
@@ -204,6 +216,25 @@ if [[ "$TIER" == 2 ]]; then
         -Dhalyx.real.spring.r2dbc=true -Dhalyx.real.spring.provider=aws \
         -Dhalyx.real.spring.r2dbc.host="$(terraform -chdir="$TF_DIR" output -raw postgres_host)" \
         -Dhalyx.real.spring.r2dbc.user=halyx_iam || status=1
+  done
+  exit $status
+fi
+if [[ "$TIER" == 5 ]]; then
+  ROLE="$(terraform -chdir="$TF_DIR" output -raw role_arn)"
+  BUCKET="$(terraform -chdir="$TF_DIR" output -raw bucket)"
+  log "Running the cloud login tests against real AWS"
+  mvn -o verify -pl halyx-aws -Dit.test="${IT_TEST:-RealAwsLoginIT}" -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+      -Dhalyx.real.aws.logins=true -Dhalyx.real.aws.run="$RUN" \
+      -Dhalyx.real.aws.logins.role="$ROLE" -Dhalyx.real.aws.logins.bucket="$BUCKET"
+  status=$?
+  [[ -n "${IT_TEST:-}" ]] && exit $status
+  # Spring Boot 3 and 4: credentials.type impersonate, with the external ID from the environment.
+  mvn -o -q install -DskipTests -pl halyx-spring-boot-autoconfigure -am || exit 1
+  for module in halyx-spring-boot-autoconfigure halyx-spring-boot4-tests; do
+    log "Running the Spring Boot login test ($module) against real AWS"
+    mvn -o verify -pl "$module" -Dit.test=RealSpringLoginIT -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+        -Dhalyx.real.spring.logins=true -Dhalyx.real.spring.provider=aws -Dhalyx.real.spring.bucket="$BUCKET" \
+        -Dhalyx.real.spring.credentials="type=impersonate,target=$ROLE,session-name=halyx-$RUN,external-id=\${HALYX_LOGIN_EXTERNAL_ID}" || status=1
   done
   exit $status
 fi

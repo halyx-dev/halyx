@@ -186,7 +186,7 @@
                         <version>0.12.0</version>
                         <extensions>true</extensions>
                         <configuration>
-                            <publishingServerId>central</publishingServerId>
+                            <publishingServerId>central-halyx</publishingServerId>
                             <autoPublish>false</autoPublish>
                             <deploymentName>Halyx ${project.version}</deploymentName>
                             <!-- The plugin ignores maven.deploy.skip, so the unpublished modules are listed here. -->

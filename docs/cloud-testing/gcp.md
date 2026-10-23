@@ -625,6 +625,27 @@ nothing to fix.
 
 </details>
 
+## Tier 5: latest result
+
+```bash
+TIER=5 GCP_PROJECT=<project> cloud-testing/scripts/gcp-real-cloud.sh
+```
+
+Terraform (`cloud-testing/infra/gcp/tier5`) creates a bucket, and grants `roles/storage.objectUser` on it to the
+login target, `halyx-login-target`: a standing service account with no other roles, which the test service account
+may impersonate ([set up once](#iam)).
+
+`RealGcpLoginIT` builds Halyx with `Credentials.impersonate(target)`, starting from Application Default Credentials:
+
+| Test | Checks | Result |
+|---|---|---|
+| `servicesActAsTheImpersonatedServiceAccount` | a blob written and read as the target; Google's token info for the token Cloud Storage uses names the target (its `azp`, the account's unique ID) | passed |
+| `anAccountItMayNotActAsIsRefused` | impersonating the Compute Engine default service account fails with `iam.serviceAccounts.getAccessToken` denied | passed |
+| `theDefaultChainActsAsTheTestIdentity` | without impersonation, the token isn't the target's | passed |
+
+Then Spring Boot 3.5 and 4: a provider with `credentials.type: impersonate` and a `BlobStore` bean that uses it.
+**3/3; Spring 2/2**, run `r2610231129846c`, nothing left after teardown.
+
 ## Run history
 
 | Run id | Scope | Result | Teardown | Notes |
@@ -654,6 +675,8 @@ nothing to fix.
 | `r26102215401be8` | tier 2, plus Spring Boot 3 and 4 | **22/22**; Spring **2/2** | clean | Full regression before 1.0.0, at `be792e3`. |
 | `r2610221559bb6b` | tier 3, plus Spring Boot 3 and 4 | **57/57**; Spring **2/2** | clean | Full regression before 1.0.0, at `be792e3`. |
 | `r2610221620c638` | tier 4, plus Spring Boot 3 and 4 | **29/29**; Spring **2/2** | clean | Full regression before 1.0.0, at `be792e3`, with the kit's new listener tests: a replacement listener carries on where the last stopped, and a joining member waits for the previous owner's partitions. Cluster created in 13m 19s. |
+| `r2610231113261d` | tier 5, plus Spring Boot 3 and 4 | 1/3; Spring **2/2** | clean | The first tier 5 run. Impersonation was refused for a minute after the Token Creator grant on the target was made, then worked, as the Spring tests show. The test's own token check refreshed unscoped credentials, which Google refuses, and looked for an email, which token info leaves out for a cloud-platform-only token. Two runs of `RealGcpLoginIT` alone confirmed the fixes. |
+| `r2610231129846c` | tier 5, plus Spring Boot 3 and 4 | **3/3**; Spring **2/2** | clean | Latest tier 5 result, above. |
 
 ## What real GCP found
 
@@ -694,6 +717,8 @@ The emulators (Floci-gcp, and Google's Pub/Sub and Firestore emulators) missed a
 | | `roles/iam.serviceAccountUser` on itself (tiers 1 and 4) | name itself as the Eventarc pipeline's publishing identity (tier 1); run the runner VM as itself (tier 4) |
 | the Eventarc service agent (`service-<project number>@gcp-sa-eventarc.iam.gserviceaccount.com`) | `roles/iam.serviceAccountTokenCreator` on `halyx-test` | the pipeline publishes to Pub/Sub with an OAuth token for `halyx-test`, which the service agent mints |
 | the person running the tests | `roles/iam.serviceAccountTokenCreator` on `halyx-test` | impersonate it. Project Owner doesn't include this |
+| `halyx-test` service account | `roles/iam.serviceAccountTokenCreator` on `halyx-login-target` (tier 5) | impersonate the login target through Halyx |
+| `halyx-login-target` service account (tier 5) | `roles/storage.objectUser` on each run's bucket (Terraform) | the objects the impersonated tests read and write. It has no other roles |
 
 The project also needs these APIs enabled: the IAM Service Account Credentials API
 (`iamcredentials.googleapis.com`) for impersonation, Eventarc and Eventarc Publishing
@@ -701,6 +726,17 @@ The project also needs these APIs enabled: the IAM Service Account Credentials A
 (`sqladmin.googleapis.com`) for tier 2, and Compute Engine, Memorystore, Network Connectivity and Service
 Consumer Management (`compute`, `memorystore`, `networkconnectivity`, `serviceconsumermanagement`) for tier 3,
 and Managed Service for Apache Kafka (`managedkafka`) for tier 4.
+
+Tier 5 needs a standing service account to impersonate, created once:
+
+```bash
+gcloud iam service-accounts create halyx-login-target --display-name="Halyx tier 5: impersonation target"
+gcloud iam service-accounts add-iam-policy-binding halyx-login-target@<project>.iam.gserviceaccount.com \
+    --member=serviceAccount:halyx-test@<project>.iam.gserviceaccount.com --role=roles/iam.serviceAccountTokenCreator
+```
+
+Its refusal test impersonates the Compute Engine default service account (`<project number>-compute@developer.gserviceaccount.com`),
+on which `halyx-test` has no rights; set `GCP_LOGIN_DENIED` to use another.
 
 ### IAM for the GKE run
 

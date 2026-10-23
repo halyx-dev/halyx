@@ -562,6 +562,29 @@ The runner has no instance profile: it gets two-hour session credentials of the 
 on Spring Boot 3 and 4, as on [Azure](azure.md#tier-4-latest-result) and [Google Cloud](gcp.md#tier-4-latest-result).
 The reports come back into each module's `target/failsafe-reports`.
 
+## Tier 5: latest result
+
+```bash
+TIER=5 AWS_PROFILE=default AWS_REGION=ap-southeast-2 cloud-testing/scripts/aws-real-cloud.sh
+```
+
+Terraform (`cloud-testing/infra/aws/tier5`) creates a bucket and an IAM role, `halyx-<run>-orders`, with an inline
+policy on the bucket. The role's trust policy names the test user and requires an external ID generated for the
+run, which reaches the tests through the environment only. [Its IAM](#iam-for-tier-5).
+
+`RealAwsLoginIT` builds Halyx with `Credentials.impersonate(role).externalId(...).sessionName(...)`, starting
+from the default chain:
+
+| Test | Checks | Result |
+|---|---|---|
+| `servicesActAsTheAssumedRole` | a blob written and read through the role; STS's `GetCallerIdentity`, with the credentials S3 uses, returns `assumed-role/<role>/<session name>` | passed |
+| `aWrongExternalIdIsRefused` | the first call fails with STS's 403 | passed |
+| `theDefaultChainActsAsTheTestIdentity` | without impersonation, the same call is the test user's own | passed |
+
+Then Spring Boot 3.5 and 4: a provider with `credentials.type: impersonate`, `target`, `session-name` and
+`external-id` (from an environment variable), and a `BlobStore` bean that uses it. **3/3; Spring 2/2**, run
+`r2610231127c8d1`, nothing left after teardown.
+
 ## Run history
 
 | Run id | Scope | Result | Teardown | Notes |
@@ -604,6 +627,7 @@ The reports come back into each module's `target/failsafe-reports`.
 | `r26102214425ee1` | tier 3, plus Spring Boot 3 and 4 | 55/56; Spring **2/2** | clean | Full regression before 1.0.0, at `be792e3`. The IAM user without `Connect` permission was let in again. The cause: the test user also had the AWS-managed `AmazonElastiCacheFullAccess` policy, whose `elasticache:*` on `*` includes `Connect` as every user. Replaced with the [tier 3 policy](#iam-for-tier-3). |
 | `r26102220335c55` | tier 3, plus Spring Boot 3 and 4 | 55/56; Spring **2/2** | clean | With the scoped policy, the user without `Connect` permission was refused, a first. `largeValue` timed out instead: a 1 MiB value through the SSH tunnel takes about the 2-second default command timeout (2.3s in earlier passing runs). The tunnelled tests now allow 10 seconds. |
 | `r2610222254a38c` | tier 3, plus Spring Boot 3 and 4 | **56/56**; Spring **2/2** | clean | Latest tier 3 result: the scoped policy and the 10-second command timeout. Every test passed for the first time, including the IAM user without `Connect` permission being refused. |
+| `r2610231127c8d1` | tier 5, plus Spring Boot 3 and 4 | **3/3**; Spring **2/2** | clean | The first tier 5 run: an assumed role with an external ID. |
 
 ## What real AWS found
 
@@ -791,6 +815,32 @@ bucket.
   ]
 }
 ```
+
+## IAM for tier 5
+
+Tier 5 creates and deletes one role per run, named `halyx-<run>-orders`, with an inline policy on the run's bucket.
+It also needs tier 1's S3 permissions, for the bucket.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole", "iam:GetRole", "iam:DeleteRole", "iam:TagRole", "iam:UntagRole", "iam:ListRoleTags",
+        "iam:PutRolePolicy", "iam:GetRolePolicy", "iam:DeleteRolePolicy", "iam:ListRolePolicies",
+        "iam:ListAttachedRolePolicies", "iam:ListInstanceProfilesForRole"
+      ],
+      "Resource": "arn:aws:iam::<account>:role/halyx-*"
+    },
+    { "Effect": "Allow", "Action": "sts:AssumeRole", "Resource": "arn:aws:iam::<account>:role/halyx-*" }
+  ]
+}
+```
+
+The role's trust policy names the test user and requires the run's external ID, so the user can assume only the
+run's own role, and only with that ID.
 
 ## IAM for the EKS run
 

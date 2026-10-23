@@ -21,9 +21,9 @@ end.
 
 | Stage | Work |
 |---|---|
-| **In progress** | [Release 1.0.0](#release-100) on Maven Central, and [cloud logins](#cloud-logins-assumed-roles-impersonation-and-service-principals) (assumed roles, impersonation and service principals) |
+| **In progress** | [Release 1.0.0](#release-100) on Maven Central |
 | **Open items** | [Gaps in delivered milestones](#open-items), mostly real-cloud runs and platform limits |
-| **Delivered** | [15 milestones](#delivered): every service on AWS, Azure and Google Cloud, Spring Boot 3.5 and 4, reactive and asynchronous APIs, and a portable microservice on EKS, GKE and AKS |
+| **Delivered** | [16 milestones](#delivered): every service on AWS, Azure and Google Cloud, Spring Boot 3.5 and 4, reactive and asynchronous APIs, a portable microservice on EKS, GKE and AKS, and cloud logins across clouds |
 
 ## In progress
 
@@ -45,22 +45,6 @@ The first release on Maven Central.
 | The release: version 1.0.0, a `v1.0.0` tag, the upload to Maven Central, and a GitHub release | To do |
 | `module-info.java` descriptors | Later: most of the cloud SDKs ship without them |
 | API compatibility checks with japicmp | From the release after 1.0.0 |
-
-### Cloud logins: assumed roles, impersonation and service principals
-
-**Goal:** log in as the identity each deployment needs, not only through the default chain: an IAM role in another
-AWS account, a Google service account, or an Entra ID application for code running outside Azure. Code on one
-cloud can then log in to another through federation rather than keys. See [Provider configuration](providers.md#assumed-roles-and-impersonated-service-accounts).
-
-| Deliverable | Status |
-|---|---|
-| `Credentials.impersonate(target)`: an AWS IAM role through STS, with an external ID, a session name and a lifetime, from the default chain or an access key | Done |
-| The same on Google Cloud: an impersonated service account for every client, for Cloud SQL, Memorystore and Managed Kafka logins, and for the Cloud SQL connector | Done |
-| `Credentials.servicePrincipal(...)`: an Entra ID application with a client secret, a certificate or a federated token file, for every Azure service, including database, cache and Event Hubs logins | Done |
-| STS, SSO and SSO OIDC in `halyx-aws`, so the default chain's web identity (EKS) and SSO logins work | Done |
-| Spring Boot: `credentials.type: impersonate` and `service-principal`, with startup checks | Done |
-| Tests: assumed roles on Floci, directly and through Spring Boot; credential mapping on Azure and Google Cloud | Done |
-| Real-cloud runs: an assumed role with an external ID on AWS, an impersonated service account on Google Cloud, and a service principal with a secret and with a federated token on Azure | To do, at the end of the phase |
 
 ## Open items
 
@@ -93,6 +77,7 @@ Work left over from delivered milestones.
 | 13 | R2DBC with cloud IAM login | `halyx-r2dbc`: a pooled R2DBC `ConnectionFactory` for PostgreSQL and MySQL whose new connections log in with RDS IAM, Entra ID or Cloud SQL IAM tokens, or a rotating password; Spring Data R2DBC on Boot 3.5 and 4; real-cloud runs on RDS, Azure Database for PostgreSQL and Cloud SQL. SQL Server stays password-only, because its R2DBC driver takes no access tokens | [R2DBC](spring-boot.md#r2dbc-and-spring-data-r2dbc) |
 | 14 | Reactive and asynchronous APIs | `halyx-reactor`: `Mono` and `Flux` for every service with back-pressure and context propagation, reactive repositories, WebFlux and reactive `@Cacheable`, and interoperability with RxJava, Mutiny, `Flow` and `CompletableFuture`. `async()` views of every service, non-blocking where the SDK's async client does it well: S3, Azure Blob Storage, DynamoDB, Cosmos DB, Firestore, SNS, SQS, Service Bus and Pub/Sub publishing, EventBridge, Event Grid, Eventarc, SQS, Pub/Sub and Event Grid receives, Redis and Valkey, Kafka producers, and every parameter backend. The adapters add about 5 µs per call | [Reactive and async](api/reactive.md) |
 | 15 | Portable Spring Boot microservices | `halyx-samples/portable-orders`, an orders service on every Halyx API, built once as one image that runs unchanged on every cloud: the cloud is chosen by Spring profile, and optional features cover services a deployment can't offer. One Helm chart deploys the same image digests on EKS (Pod Identity), GKE (Workload Identity Federation) and AKS (Entra Workload ID), with no stored keys. One end-to-end suite runs in memory, on each cloud's emulators, against the image and on the three clusters, on Boot 4 and 3.5: EKS 8/10 (no MSK), GKE and AKS 9/10 | [Portable microservice](portable-service.md) |
+| 16 | Cloud logins | `Credentials.impersonate(target)`: an AWS IAM role through STS, with an external ID, a session name and a lifetime, or an impersonated Google service account, for every client and for SQL, cache and Kafka logins. `Credentials.servicePrincipal(...)`: an Entra ID application with a client secret, a certificate or a federated token file, for every Azure service. STS, SSO and SSO OIDC in `halyx-aws` for web identity (EKS) and SSO logins. Spring Boot `credentials.type: impersonate` and `service-principal`. Real clouds (tier 5): an assumed role with an external ID, an impersonated service account, and a service principal with a secret and with a federated Google ID token, on Boot 3.5 and 4. The certificate login is tested with unit tests only | [Provider configuration](providers.md#assumed-roles-and-impersonated-service-accounts) |
 
 ## On demand
 

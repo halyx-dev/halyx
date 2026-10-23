@@ -700,7 +700,7 @@ limitations under the License.]]></inlineHeader>
                         <version>${central-publishing-maven-plugin.version}</version>
                         <extensions>true</extensions>
                         <configuration>
-                            <publishingServerId>central</publishingServerId>
+                            <publishingServerId>central-halyx</publishingServerId>
                             <!-- Validated and held on central.sonatype.com until published by hand there. -->
                             <autoPublish>false</autoPublish>
                             <deploymentName>Halyx ${project.version}</deploymentName>

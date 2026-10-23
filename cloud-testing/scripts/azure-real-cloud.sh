@@ -22,6 +22,7 @@
 #   TIER=2 cloud-testing/scripts/azure-real-cloud.sh     # Azure Database for PostgreSQL and Azure SQL with Entra ID login
 #   TIER=3 cloud-testing/scripts/azure-real-cloud.sh     # Azure Managed Redis with Entra ID
 #   TIER=4 cloud-testing/scripts/azure-real-cloud.sh     # Event Hubs (Kafka endpoint) with Entra ID, plus Spring Boot 3 and 4
+#   TIER=5 cloud-testing/scripts/azure-real-cloud.sh     # cloud logins: a service principal with a secret and a federated token
 #
 # Terraform and the tests act as the test service principal, whose credentials are read from
 # AZURE_CREDENTIALS_FILE (default ~/.azure/halyx-test.env, outside the repository):
@@ -45,6 +46,11 @@
 # Tier 4: three Standard Event Hubs namespaces with shared access keys off; the principal is their Data Owner.
 # RealAzureStreamIT runs the stream kit on its Kafka endpoint with Entra tokens, creating and deleting event
 # hubs as it goes.
+# Tier 5: a storage account the principal may use. RealAzureLoginIT names the principal explicitly, logging in
+# with its secret and with a federated token, and checks that a wrong secret and an untrusted token are refused.
+# The federated token is a Google ID token for AZURE_FEDERATED_GOOGLE_SA (a Google Cloud service account you may
+# impersonate), which the application trusts through a federated identity credential set up once; without
+# AZURE_FEDERATED_GOOGLE_SA that test is skipped.
 # Tiers 2, 3 and 4 register their resource providers first, as the principal.
 set -uo pipefail
 
@@ -114,6 +120,7 @@ check() {
 teardown() {
   local status=$?
   trap - EXIT INT TERM
+  [[ -n "${WORK:-}" ]] && rm -rf "$WORK"   # tier 5's federated token
   log "terraform destroy"
   if terraform -chdir="$TF_DIR" destroy -auto-approve -input=false "${TF_VARS[@]}" >/dev/null; then
     echo "  destroyed"
@@ -225,18 +232,59 @@ fi
 
 STORAGE=$(terraform -chdir="$TF_DIR" output -raw storage_account)
 CONTAINER=$(terraform -chdir="$TF_DIR" output -raw container)
+
+# Role assignments take a while to reach the data plane. Wait until the principal can list the container.
+wait_for_blob_access() {
+  log "Waiting for the principal's data-plane roles to take effect"
+  for attempt in $(seq 1 30); do
+    code=$(curl -s -m 20 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $(token https://storage.azure.com/.default)" \
+        -H "x-ms-version: 2023-11-03" "https://$STORAGE.blob.core.windows.net/$CONTAINER?restype=container&comp=list")
+    [[ "$code" == 200 ]] && { echo "  blob access after $attempt attempt(s)"; return; }
+    sleep 10
+  done
+}
+
+if [[ "$TIER" == 5 ]]; then
+  wait_for_blob_access
+  TOKEN_FILE=""
+  if [[ -n "${AZURE_FEDERATED_GOOGLE_SA:-}" ]]; then
+    log "Getting a Google ID token for $AZURE_FEDERATED_GOOGLE_SA"
+    WORK="$(mktemp -d -t "halyx-$RUN")"
+    TOKEN_FILE="$WORK/google-token"
+    (umask 077; gcloud auth print-identity-token --impersonate-service-account="$AZURE_FEDERATED_GOOGLE_SA" \
+        --audiences=api://AzureADTokenExchange --include-email 2>/dev/null > "$TOKEN_FILE") \
+      && [[ -s "$TOKEN_FILE" ]] || { echo "  could not get one"; exit 1; }
+  fi
+  log "Running the cloud login tests against real Azure"
+  mvn -o verify -pl halyx-azure -Dit.test="${IT_TEST:-RealAzureLoginIT}" -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+      -Dhalyx.real.azure.logins=true -Dhalyx.real.azure.run="$RUN" \
+      -Dhalyx.real.azure.logins.storage-account="$STORAGE" -Dhalyx.real.azure.logins.container="$CONTAINER" \
+      -Dhalyx.real.azure.logins.token-file="$TOKEN_FILE"
+  status=$?
+  [[ -n "${IT_TEST:-}" ]] && exit $status
+  # Spring Boot 3 and 4: credentials.type service-principal, with the secret from the environment, and with the
+  # federated token when there is one.
+  PRINCIPAL='type=service-principal,tenant-id=${AZURE_TENANT_ID},client-id=${AZURE_CLIENT_ID}'
+  LOGINS=("$PRINCIPAL,secret=\${AZURE_CLIENT_SECRET}")
+  [[ -n "$TOKEN_FILE" ]] && LOGINS+=("$PRINCIPAL,token-file=$TOKEN_FILE")
+  mvn -o -q install -DskipTests -pl halyx-spring-boot-autoconfigure -am || exit 1
+  for module in halyx-spring-boot-autoconfigure halyx-spring-boot4-tests; do
+    for login in "${LOGINS[@]}"; do
+      log "Running the Spring Boot login test ($module, ${login##*,}) against real Azure"
+      mvn -o verify -pl "$module" -Dit.test=RealSpringLoginIT -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+          -Dhalyx.real.spring.logins=true -Dhalyx.real.spring.provider=azure -Dhalyx.real.spring.bucket="$CONTAINER" \
+          -Dhalyx.real.spring.provider-properties="azure.storage.account=$STORAGE" \
+          -Dhalyx.real.spring.credentials="$login" || status=1
+    done
+  done
+  exit $status
+fi
+
 EVENT_GRID=$(terraform -chdir="$TF_DIR" output -raw eventgrid_endpoint)
 EVENT_GRID_TOPIC=$(terraform -chdir="$TF_DIR" output -raw eventgrid_topic)
 EVENT_GRID_SUBSCRIPTION=$(terraform -chdir="$TF_DIR" output -raw eventgrid_subscription)
 
-# Role assignments take a while to reach the data plane. Wait until the principal can list the container.
-log "Waiting for the principal's data-plane roles to take effect"
-for attempt in $(seq 1 30); do
-  code=$(curl -s -m 20 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $(token https://storage.azure.com/.default)" \
-      -H "x-ms-version: 2023-11-03" "https://$STORAGE.blob.core.windows.net/$CONTAINER?restype=container&comp=list")
-  [[ "$code" == 200 ]] && { echo "  blob access after $attempt attempt(s)"; break; }
-  sleep 10
-done
+wait_for_blob_access
 sleep 30 # the other services' assignments were made at the same time; give them a little longer
 
 log "Running the conformance kits against real Azure"
