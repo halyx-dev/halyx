@@ -49,7 +49,7 @@ need:
 </dependencies>
 ```
 
-### Gradle (Kotlin DSL)
+Gradle (Kotlin DSL):
 
 ```kotlin
 dependencies {
@@ -59,7 +59,7 @@ dependencies {
 }
 ```
 
-### Gradle (Groovy)
+Gradle (Groovy):
 
 ```groovy
 dependencies {

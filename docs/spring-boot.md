@@ -36,6 +36,7 @@ Gradle (Kotlin DSL):
 
 ```kotlin
 dependencies {
+    implementation(platform("dev.halyx:halyx-bom:1.0.0"))
     implementation("dev.halyx:halyx-spring-boot-starter")
     implementation("dev.halyx:halyx-aws")
 }
@@ -45,6 +46,7 @@ Gradle (Groovy):
 
 ```groovy
 dependencies {
+    implementation platform('dev.halyx:halyx-bom:1.0.0')
     implementation 'dev.halyx:halyx-spring-boot-starter'
     implementation 'dev.halyx:halyx-aws'
 }
