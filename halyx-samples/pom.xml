@@ -40,5 +40,6 @@
     <modules>
         <module>portable-orders</module>
         <module>portable-orders-boot3</module>
+        <module>plain-java-quickstart</module>
     </modules>
 </project>
