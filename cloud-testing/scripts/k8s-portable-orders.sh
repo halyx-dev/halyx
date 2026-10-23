@@ -26,7 +26,7 @@
 
 NAMESPACE=portable-orders
 CHART="$ROOT/halyx-samples/portable-orders/deploy/helm/portable-orders"
-IMAGE_VERSION=1.0.0
+IMAGE_VERSION=1.0.1-SNAPSHOT
 LOCAL_PORT="${LOCAL_PORT:-18080}"
 REPORTS="$ROOT/cloud-testing/reports"
 
