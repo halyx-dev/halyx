@@ -6,7 +6,7 @@ nav_order: 11
 # Roadmap
 {: .no_toc }
 
-Halyx 1.0.0 is on Maven Central. This page lists what has been delivered, what is left over, and what
+Halyx 1.0.1 is on Maven Central. This page lists what has been delivered, what is left over, and what
 comes next, in priority order. Work that is planned but waiting for demand, and ideas that were dropped, are at the
 end.
 
@@ -21,11 +21,20 @@ end.
 
 | Stage | Work |
 |---|---|
-| **Released** | [1.0.0](#release-100) on Maven Central, on 23 October 2026 |
+| **Released** | [1.0.1](#release-101), a patch release, and [1.0.0](#release-100), the first release, on Maven Central, both on 23 October 2026 |
 | **Coming next** | [Planned additions](#coming-next): Kotlin coroutines, R2DBC through the Cloud SQL connector, and more real-cloud test runs |
 | **Delivered** | [16 milestones](#delivered): every service on AWS, Azure and Google Cloud, Spring Boot 3.5 and 4, reactive and asynchronous APIs, a portable microservice on EKS, GKE and AKS, and cloud logins across clouds |
 
 ## Released
+
+### Release 1.0.1
+
+A patch release, on 23 October 2026. See the [release notes](https://github.com/halyx-dev/halyx/blob/main/CHANGELOG.md).
+
+| Fix | Who it affects |
+|---|---|
+| `halyx-kafka` excludes the unpatched `org.lz4:lz4-java` that `kafka-clients` brings, leaving only the patched `at.yawk.lz4` one | Gradle builds on Spring Boot 3.5 with `halyx-aws`, `halyx-azure` or `halyx-gcp`, which failed to resolve |
+| `ReactiveBlobStore.getBody` closes the blob before the completion or error reaches the subscriber | Code that checks the blob is closed as soon as the `Flux` completes |
 
 ### Release 1.0.0
 

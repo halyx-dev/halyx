@@ -30,7 +30,7 @@ need:
     <dependency>
       <groupId>dev.halyx</groupId>
       <artifactId>halyx-bom</artifactId>
-      <version>1.0.0</version>
+      <version>1.0.1</version>
       <type>pom</type>
       <scope>import</scope>
     </dependency>
@@ -53,7 +53,7 @@ Gradle (Kotlin DSL):
 
 ```kotlin
 dependencies {
-    implementation(platform("dev.halyx:halyx-bom:1.0.0"))
+    implementation(platform("dev.halyx:halyx-bom:1.0.1"))
     implementation("dev.halyx:halyx-core")
     implementation("dev.halyx:halyx-aws") // and/or halyx-azure, halyx-gcp, halyx-vault
 }
@@ -63,7 +63,7 @@ Gradle (Groovy):
 
 ```groovy
 dependencies {
-    implementation platform('dev.halyx:halyx-bom:1.0.0')
+    implementation platform('dev.halyx:halyx-bom:1.0.1')
     implementation 'dev.halyx:halyx-core'
     implementation 'dev.halyx:halyx-aws' // and/or halyx-azure, halyx-gcp, halyx-vault
 }

@@ -24,7 +24,7 @@
     <parent>
         <groupId>dev.halyx</groupId>
         <artifactId>halyx-parent</artifactId>
-        <version>1.0.1-SNAPSHOT</version>
+        <version>1.0.1</version>
     </parent>
     <!--
       Micrometer observations and trace propagation for any application, with or without Spring: an interceptor

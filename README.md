@@ -51,7 +51,7 @@ Publisher events = halyx.provider("cloud").publisher("order-events");   // SNS, 
 events.publish(OutgoingMessage.builder(json).attribute("type", "invoiced").build());
 ```
 
-Import `dev.halyx:halyx-bom:1.0.0` and add `halyx-core` with a provider module, or `halyx-spring-boot-starter` for
+Import `dev.halyx:halyx-bom:1.0.1` and add `halyx-core` with a provider module, or `halyx-spring-boot-starter` for
 Spring Boot. See [Getting started](https://halyx.dev/docs/getting-started.html).
 
 ## Why Halyx
