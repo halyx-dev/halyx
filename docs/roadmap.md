@@ -6,7 +6,7 @@ nav_order: 11
 # Roadmap
 {: .no_toc }
 
-Halyx has not had its first release yet. This page lists what has been delivered, what is in progress, and what
+Halyx 1.0.0 is on Maven Central. This page lists what has been delivered, what is left over, and what
 comes next, in priority order. Work that is planned but waiting for demand, and ideas that were dropped, are at the
 end.
 
@@ -21,15 +21,15 @@ end.
 
 | Stage | Work |
 |---|---|
-| **In progress** | [Release 1.0.0](#release-100) on Maven Central |
+| **Released** | [1.0.0](#release-100) on Maven Central, on 23 October 2026 |
 | **Open items** | [Gaps in delivered milestones](#open-items), mostly real-cloud runs and platform limits |
 | **Delivered** | [16 milestones](#delivered): every service on AWS, Azure and Google Cloud, Spring Boot 3.5 and 4, reactive and asynchronous APIs, a portable microservice on EKS, GKE and AKS, and cloud logins across clouds |
 
-## In progress
+## Released
 
 ### Release 1.0.0
 
-The first release on Maven Central.
+The first release on Maven Central, on 23 October 2026.
 
 | Task | Status |
 |---|---|
@@ -37,12 +37,12 @@ The first release on Maven Central.
 | The `dev.halyx` group id | Done |
 | A full build and test pass, on emulators and on real clouds | Done |
 | Project metadata: URL, SCM and developers | Done |
-| Source and javadoc jars, signing, and the Central publishing plugin (`mvn -Prelease deploy`) | Done; a dry run without signing or upload builds every published module's jars |
+| Source and javadoc jars, signing, and the Central publishing plugin (`mvn -Prelease deploy`) | Done |
 | Java module names: an `Automatic-Module-Name` in each published jar, such as `dev.halyx` for `halyx-core` and `dev.halyx.aws` for `halyx-aws`, checked together on the module path | Done |
 | Continuous integration: unit and emulator tests on every push, and the documentation site | Done |
 | A security policy ([`SECURITY.md`](https://github.com/halyx-dev/halyx/blob/main/SECURITY.md)) and [release notes](https://github.com/halyx-dev/halyx/blob/main/CHANGELOG.md) | Done |
-| A public repository, and the documentation at halyx.dev | To do |
-| The release: version 1.0.0, a `v1.0.0` tag, the upload to Maven Central, and a GitHub release | To do |
+| A public repository, and the documentation at halyx.dev | Done |
+| The release: version 1.0.0, a `v1.0.0` tag, the upload to Maven Central, and a GitHub release | Done |
 | `module-info.java` descriptors | Later: most of the cloud SDKs ship without them |
 | API compatibility checks with japicmp | From the release after 1.0.0 |
 

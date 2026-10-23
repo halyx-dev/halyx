@@ -24,7 +24,7 @@
     <parent>
         <groupId>dev.halyx</groupId>
         <artifactId>halyx-parent</artifactId>
-        <version>1.0.0-SNAPSHOT</version>
+        <version>1.0.0</version>
     </parent>
 
     <!-- Not published. Sample applications built on Halyx, with their end-to-end tests. -->

@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0 (unreleased)
+## 1.0.0 (2026-10-23)
 
 The first release: one Java API for object storage, NoSQL documents, messaging, events, streams, SQL databases,
 caches, and parameters and secrets on AWS, Azure and Google Cloud, over each cloud's own SDKs.
