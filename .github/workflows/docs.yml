@@ -15,7 +15,7 @@
 #
 
 # Asks halyx-dev/halyx.dev to rebuild and deploy https://halyx.dev when the docs change on main. The site also
-# shows the version from pom.xml, so a version change triggers it too.
+# shows the newest release tag as the version, so pushing a vX.Y.Z tag triggers it too.
 #
 # Secrets:
 #   HALYX_DEV_DISPATCH_TOKEN   fine-grained token on halyx-dev/halyx.dev only, Contents: read and write
@@ -25,9 +25,9 @@ name: Docs
 on:
   push:
     branches: [main]
+    tags: ['v*']
     paths:
       - docs/**
-      - pom.xml
   workflow_dispatch:
 
 permissions: {}
