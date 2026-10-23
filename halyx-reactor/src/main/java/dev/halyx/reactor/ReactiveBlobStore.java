@@ -148,9 +148,10 @@ public final class ReactiveBlobStore {
         }
         return calls.mono(() -> store.get(key, options))
                 .doOnDiscard(Blob.class, Blob::close)
-                .flatMapMany(blob -> Flux.<ByteBuffer>generate(sink -> {
+                // Eager: the blob is closed before the subscriber sees the completion or error, not after it.
+                .flatMapMany(blob -> Flux.using(() -> blob, b -> Flux.<ByteBuffer>generate(sink -> {
                             try {
-                                byte[] chunk = blob.content().readNBytes(chunkSize);
+                                byte[] chunk = b.content().readNBytes(chunkSize);
                                 if (chunk.length == 0) {
                                     sink.complete();
                                 } else {
@@ -159,8 +160,7 @@ public final class ReactiveBlobStore {
                             } catch (IOException e) {
                                 sink.error(new UncheckedIOException("Could not read " + key, e));
                             }
-                        })
-                        .doFinally(signal -> blob.close())
+                        }), Blob::close, true)
                         .subscribeOn(calls.scheduler()));
     }
 

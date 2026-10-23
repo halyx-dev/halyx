@@ -135,10 +135,12 @@ class ReactiveBodiesAndBatchesTest {
         assertThat(closed).as("closed on cancel").isTrue();
 
         closed.set(false);
-        List<ByteBuffer> chunks = store.getBody(BlobKey.of("big")).collectList().block();
+        AtomicBoolean closedOnCompletion = new AtomicBoolean();
+        List<ByteBuffer> chunks = store.getBody(BlobKey.of("big"))
+                .doOnComplete(() -> closedOnCompletion.set(closed.get())).collectList().block();
         assertThat(chunks).hasSize(5);
         assertThat(join(chunks)).isEqualTo(content);
-        assertThat(closed).as("closed on completion").isTrue();
+        assertThat(closedOnCompletion).as("closed before the completion reaches the subscriber").isTrue();
 
         assertThat(join(store.getBody(BlobKey.of("big"), GetOptions.defaults(), 1000).collectList().block())).isEqualTo(content);
         StepVerifier.create(store.getBody(BlobKey.of("missing"))).verifyError(NotFoundException.class);
