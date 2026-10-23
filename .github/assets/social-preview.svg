@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1d2e"/>
+      <stop offset="1" stop-color="#0a3a5c"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="640" fill="url(#bg)"/>
+  <g fill="none" stroke="#5fb3e6" stroke-width="3" opacity="0.55">
+    <path d="M300 150 a28 28 0 0 1 50-18 a34 34 0 0 1 62 10 a22 22 0 0 1 4 44 h-110 a20 20 0 0 1 -6-36z"/>
+    <path d="M580 120 a28 28 0 0 1 50-18 a34 34 0 0 1 62 10 a22 22 0 0 1 4 44 h-110 a20 20 0 0 1 -6-36z"/>
+    <path d="M860 150 a28 28 0 0 1 50-18 a34 34 0 0 1 62 10 a22 22 0 0 1 4 44 h-110 a20 20 0 0 1 -6-36z"/>
+  </g>
+  <text x="640" y="330" text-anchor="middle" font-family="Helvetica Neue, Arial, sans-serif" font-size="150" font-weight="800" letter-spacing="18" fill="#ffffff">HALYX</text>
+  <text x="640" y="405" text-anchor="middle" font-family="Helvetica Neue, Arial, sans-serif" font-size="44" font-weight="500" fill="#cfe8f7">One Java API for AWS · Azure · Google Cloud</text>
+  <text x="640" y="470" text-anchor="middle" font-family="Helvetica Neue, Arial, sans-serif" font-size="28" fill="#8fc4e4">Storage · NoSQL · Messaging · Events · Kafka · SQL · Caches · Secrets</text>
+  <text x="640" y="575" text-anchor="middle" font-family="Menlo, Courier, monospace" font-size="28" fill="#5fb3e6">halyx.dev  ·  Spring Boot 3.5 | 4  ·  Apache-2.0</text>
+</svg>

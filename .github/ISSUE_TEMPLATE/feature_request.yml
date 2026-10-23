@@ -1,0 +1,46 @@
+#
+# Copyright 2026 Kamran Zafar
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+name: Feature request
+description: Something Halyx could do, on one cloud or all of them
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check the [roadmap](https://halyx.dev/docs/roadmap.html) first: the feature may already be planned.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you're trying to do
+      description: The problem or use case, rather than the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you'd like Halyx to do
+      description: An API sketch or configuration example helps.
+  - type: textarea
+    id: clouds
+    attributes:
+      label: Clouds
+      description: Which clouds need it, and how each cloud's service supports it, if you know.
+  - type: textarea
+    id: today
+    attributes:
+      label: What you do today
+      description: Any workaround, such as unwrap and the native SDK client.

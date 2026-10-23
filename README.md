@@ -17,6 +17,7 @@
 
 <p align="center">
   <a href="https://halyx.dev/docs/"><img alt="Documentation" src="https://img.shields.io/badge/docs-halyx.dev-0a7bbb"></a>
+  <a href="https://central.sonatype.com/artifact/dev.halyx/halyx-bom"><img alt="Maven Central" src="https://img.shields.io/maven-central/v/dev.halyx/halyx-bom"></a>
   <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
   <img alt="Java 21+" src="https://img.shields.io/badge/java-21%2B-orange">
   <img alt="Spring Boot 3.5 and 4" src="https://img.shields.io/badge/spring%20boot-3.5%20%7C%204-6db33f">
@@ -40,6 +41,18 @@ in Vault. Each cloud is registered as a named provider and used through the same
 
 **[Documentation](https://halyx.dev/docs/)** · [Getting started](https://halyx.dev/docs/getting-started.html) · [API guide](https://halyx.dev/docs/api/) ·
 [Spring Boot](https://halyx.dev/docs/spring-boot.html) · [Cloud testing](https://halyx.dev/docs/cloud-testing/) · [Roadmap](https://halyx.dev/docs/roadmap.html)
+
+```java
+// The same code on Amazon S3, Azure Blob Storage and Cloud Storage: which cloud is configuration
+BlobStore invoices = halyx.provider("cloud").blobStore("acme-invoices");
+invoices.put(BlobKey.of("2026/42.pdf"), BlobContent.ofFile(pdf));
+
+Publisher events = halyx.provider("cloud").publisher("order-events");   // SNS, Service Bus or Pub/Sub
+events.publish(OutgoingMessage.builder(json).attribute("type", "invoiced").build());
+```
+
+Import `dev.halyx:halyx-bom:1.0.0` and add `halyx-core` with a provider module, or `halyx-spring-boot-starter` for
+Spring Boot. See [Getting started](https://halyx.dev/docs/getting-started.html).
 
 ## Why Halyx
 
@@ -268,6 +281,12 @@ mvn verify      # unit tests and every conformance kit against emulators (needs 
 ```
 
 Java 21+ and Maven 3.9+. See [Design, build and test](https://halyx.dev/docs/design.html#build).
+
+## Contributing
+
+Bug reports, documentation fixes, samples and code are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md), pick up a
+[good first issue](https://github.com/halyx-dev/halyx/labels/good%20first%20issue), or ask in
+[Discussions](https://github.com/halyx-dev/halyx/discussions).
 
 ## License
 
