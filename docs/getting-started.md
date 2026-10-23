@@ -49,6 +49,26 @@ need:
 </dependencies>
 ```
 
+### Gradle (Kotlin DSL)
+
+```kotlin
+dependencies {
+    implementation(platform("dev.halyx:halyx-bom:1.0.0"))
+    implementation("dev.halyx:halyx-core")
+    implementation("dev.halyx:halyx-aws") // and/or halyx-azure, halyx-gcp, halyx-vault
+}
+```
+
+### Gradle (Groovy)
+
+```groovy
+dependencies {
+    implementation platform('dev.halyx:halyx-bom:1.0.0')
+    implementation 'dev.halyx:halyx-core'
+    implementation 'dev.halyx:halyx-aws' // and/or halyx-azure, halyx-gcp, halyx-vault
+}
+```
+
 | Module | What it adds |
 |---|---|
 | `halyx-core` | The portable API, error model, interceptors and an in-memory provider. No cloud SDKs. |

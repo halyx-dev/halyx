@@ -32,6 +32,24 @@ Add the starter plus the provider modules you use:
 </dependency>
 ```
 
+Gradle (Kotlin DSL):
+
+```kotlin
+dependencies {
+    implementation("dev.halyx:halyx-spring-boot-starter")
+    implementation("dev.halyx:halyx-aws")
+}
+```
+
+Gradle (Groovy):
+
+```groovy
+dependencies {
+    implementation 'dev.halyx:halyx-spring-boot-starter'
+    implementation 'dev.halyx:halyx-aws'
+}
+```
+
 (versions come from the `halyx-bom`; see [Getting started](getting-started.md#add-the-dependencies))
 
 Then describe your providers and resources:
