@@ -15,8 +15,9 @@
  */
 
 // Assigns an issue to a contributor who asks for it, following CONTRIBUTING.md: only issues labelled
-// "good first issue" or "help wanted", one open issue per contributor at a time, and a plan first for larger
-// "help wanted" issues. Run by .github/workflows/issue-assign.yml on every new issue comment.
+// "good first issue" or "help wanted", not while someone else's pull request for it is open, one open issue per
+// contributor at a time, and a plan first for larger "help wanted" issues. The author of an open pull request for
+// the issue can always claim it. Run by .github/workflows/issue-assign.yml on every new issue comment.
 
 const GOOD_FIRST = 'good first issue';
 const HELP_WANTED = 'help wanted';
@@ -37,6 +38,18 @@ const CLAIMS = [
 function isClaim(body) {
   const text = String(body || '').toLowerCase().replace(/[‘’]/g, "'");
   return CLAIMS.some((pattern) => pattern.test(text));
+}
+
+// Open pull requests that close the issue when merged: "Closes #N" in their description, or linked by hand.
+async function openClosingPulls(github, owner, repo, number) {
+  const result = await github.graphql(`query($owner: String!, $repo: String!, $number: Int!) {
+    repository(owner: $owner, name: $repo) {
+      issue(number: $number) {
+        closedByPullRequestsReferences(first: 10, includeClosedPrs: false) { nodes { number author { login } } }
+      }
+    }
+  }`, { owner, repo, number });
+  return result.repository.issue.closedByPullRequestsReferences.nodes;
 }
 
 module.exports = async ({ github, context, core }) => {
@@ -69,15 +82,25 @@ module.exports = async ({ github, context, core }) => {
     return;
   }
 
+  // Someone else's open pull request already does this issue; the author of one may still claim it.
+  const pulls = await openClosingPulls(github, owner, repo, issue.number);
+  const ownPull = pulls.some((pull) => pull.author?.login === login);
+  if (pulls.length > 0 && !ownPull) {
+    await reply(`Thanks @${login}! There's already an open pull request for this, #${pulls[0].number} by `
+      + `@${pulls[0].author?.login}. If it's closed without being merged, this issue is open again. Other `
+      + `[good first issues](https://github.com/${owner}/${repo}/labels/good%20first%20issue) may be free.`);
+    return;
+  }
+
   const theirs = (await github.paginate(github.rest.issues.listForRepo, { owner, repo, state: 'open', assignee: login }))
     .filter((other) => other.number !== issue.number && !other.pull_request);
-  if (theirs.length > 0) {
+  if (theirs.length > 0 && !ownPull) {
     await reply(`Thanks @${login}! To give more people a chance, each contributor has one issue at a time, and you `
       + `have #${theirs[0].number}. Once that's merged, you're welcome to take this one if it's still free.`);
     return;
   }
 
-  if (!labels.includes(GOOD_FIRST)) {
+  if (!labels.includes(GOOD_FIRST) && !ownPull) {
     await github.rest.issues.addLabels({ owner, repo, issue_number: issue.number, labels: [NEEDS_PLAN] });
     await reply(`Thanks @${login}! This is a larger change, so before it's assigned, please comment here with a short `
       + `plan: an API sketch and how you'd test it on each provider. The maintainer will assign it once we've agreed `
