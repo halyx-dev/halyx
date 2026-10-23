@@ -22,7 +22,7 @@ end.
 | Stage | Work |
 |---|---|
 | **Released** | [1.0.0](#release-100) on Maven Central, on 23 October 2026 |
-| **Open items** | [Gaps in delivered milestones](#open-items), mostly real-cloud runs and platform limits |
+| **Coming next** | [Planned additions](#coming-next): Kotlin coroutines, R2DBC through the Cloud SQL connector, and more real-cloud test runs |
 | **Delivered** | [16 milestones](#delivered): every service on AWS, Azure and Google Cloud, Spring Boot 3.5 and 4, reactive and asynchronous APIs, a portable microservice on EKS, GKE and AKS, and cloud logins across clouds |
 
 ## Released
@@ -46,17 +46,17 @@ The first release on Maven Central, on 23 October 2026.
 | `module-info.java` descriptors | Later: most of the cloud SDKs ship without them |
 | API compatibility checks with japicmp | From the release after 1.0.0 |
 
-## Open items
+## Coming next
 
-Work left over from delivered milestones.
+Additions planned on top of 1.0.0.
 
-| Item | Milestone | Status |
+| Item | Area | Today |
 |---|---|---|
-| Real-cloud run on MSK Serverless with IAM, including transactions | Streams | **Blocked:** the test account's AWS Free plan doesn't allow MSK. The script, Terraform and runner are ready ([AWS tier 4](cloud-testing/aws.md#tier-4-not-run)) |
-| Real-cloud run on Azure Database for MySQL with Entra ID | SQL databases | **Blocked:** needs a directory-level grant for the server's identity |
-| The Cloud SQL connector's R2DBC adapters | R2DBC | Planned |
-| Kotlin coroutines: `suspend` listeners and coroutine repositories, tested | Reactive | Planned |
-| Calls that still block underneath on a virtual thread: Google Cloud Storage (no asynchronous Java API), Service Bus receives (only its async receiver's own stream can settle its messages), and Cosmos DB and Firestore read-then-write calls | Asynchronous I/O | **Platform limit:** revisited when the SDKs allow |
+| Kotlin coroutines: `suspend` listeners and coroutine repositories | Reactive | Kotlin code can use the blocking, asynchronous and Reactor APIs |
+| R2DBC through the Cloud SQL connector | R2DBC | R2DBC connects to Cloud SQL directly, with IAM login; JDBC also works through the connector |
+| A real-cloud run on MSK Serverless with IAM, including transactions | Streams | Tested on Kafka 3.9 and 4.2.1 brokers, and on real Event Hubs and Managed Kafka. The run is ready ([AWS tier 4](cloud-testing/aws.md#tier-4-not-run)) and needs an AWS account plan that includes MSK |
+| A real-cloud run on Azure Database for MySQL with Entra ID | SQL databases | The run needs a directory-level grant in the test tenant |
+| Fully non-blocking I/O for Google Cloud Storage, Service Bus receives, and Cosmos DB and Firestore read-then-write calls | Asynchronous I/O | These calls work and run on virtual threads, so they hold no platform thread while they wait; they become non-blocking when the SDKs allow it |
 
 ## Delivered
 
