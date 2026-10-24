@@ -38,8 +38,11 @@ import org.springframework.beans.factory.NoSuchBeanDefinitionException;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.context.SmartLifecycle;
+import org.springframework.core.CoroutinesUtils;
+import org.springframework.core.KotlinDetector;
 import org.springframework.core.MethodIntrospector;
 import org.springframework.core.annotation.AnnotatedElementUtils;
+import org.springframework.util.ClassUtils;
 import org.springframework.util.ReflectionUtils;
 
 import java.lang.reflect.InvocationTargetException;
@@ -58,8 +61,13 @@ import java.util.function.Supplier;
  */
 public class HalyxListenerRegistrar implements BeanPostProcessor, SmartLifecycle, BeanFactoryAware {
 
-    private record Endpoint(String key, String subscription, Object bean, Method method, int concurrency) {
+    private record Endpoint(String key, String subscription, Object bean, Method method, int concurrency,
+                            boolean suspending) {
     }
+
+    /** What Spring needs to call a Kotlin {@code suspend fun}: it runs the coroutine as a {@code Mono}. */
+    private static final boolean COROUTINES = ClassUtils.isPresent("kotlinx.coroutines.reactor.MonoKt",
+            HalyxListenerRegistrar.class.getClassLoader());
 
     private final ObjectProvider<HalyxProperties> properties;
     private final ObjectProvider<MessageListenerDecorator> decorators;
@@ -91,14 +99,21 @@ public class HalyxListenerRegistrar implements BeanPostProcessor, SmartLifecycle
                 (MethodIntrospector.MetadataLookup<HalyxListener>) m ->
                         AnnotatedElementUtils.findMergedAnnotation(m, HalyxListener.class));
         methods.forEach((method, annotation) -> {
-            if (method.getParameterCount() != 1 || !supported(method.getParameterTypes()[0])) {
+            // A suspend fun's last parameter is the Continuation the Kotlin compiler adds.
+            boolean suspending = KotlinDetector.isSuspendingFunction(method);
+            if (method.getParameterCount() != (suspending ? 2 : 1) || !supported(method.getParameterTypes()[0])) {
                 throw new IllegalStateException("@HalyxListener method " + type.getName() + "." + method.getName()
                         + " must take one parameter: ReceivedMessage, CloudEvent or ReceivedRecord, String or byte[]");
+            }
+            if (suspending && !COROUTINES) {
+                throw new IllegalStateException("@HalyxListener method " + type.getName() + "." + method.getName()
+                        + " is a suspend fun, which needs org.jetbrains.kotlinx:kotlinx-coroutines-reactor on the "
+                        + "classpath");
             }
             Method invocable = AopUtils.selectInvocableMethod(method, bean.getClass());
             ReflectionUtils.makeAccessible(invocable);
             String key = annotation.value() + "#" + beanName + "." + method.getName();
-            endpoints.add(new Endpoint(key, annotation.value(), bean, invocable, annotation.concurrency()));
+            endpoints.add(new Endpoint(key, annotation.value(), bean, invocable, annotation.concurrency(), suspending));
         });
         return bean;
     }
@@ -233,6 +248,10 @@ public class HalyxListenerRegistrar implements BeanPostProcessor, SmartLifecycle
     }
 
     private static void invoke(Endpoint endpoint, Object argument) throws Exception {
+        if (endpoint.suspending()) {
+            ListenerResults.await(CoroutinesUtils.invokeSuspendingFunction(endpoint.method(), endpoint.bean(), argument));
+            return;
+        }
         Object result;
         try {
             result = endpoint.method().invoke(endpoint.bean(), argument);

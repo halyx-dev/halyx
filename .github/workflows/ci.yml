@@ -78,7 +78,7 @@ jobs:
           - group: drivers
             modules: halyx-redis,halyx-sql,halyx-r2dbc,halyx-kafka,halyx-vault,halyx-reactor-tests
           - group: spring
-            modules: halyx-spring-data-document,halyx-spring-boot-autoconfigure,halyx-spring-boot4-tests
+            modules: halyx-spring-data-document,halyx-spring-boot-autoconfigure,halyx-spring-boot4-tests,halyx-kotlin-tests
           - group: samples
             modules: halyx-samples/portable-orders,halyx-samples/portable-orders-boot3
     steps:

@@ -198,8 +198,29 @@ Flow.Publisher<Item> flow = JdkFlowAdapter.publisherToFlowPublisher(orders.query
 CompletableFuture<byte[]> future = invoices.getBytes(key).toFuture();
 ```
 
-These are tested, with back-pressure through the JDK's `Flow`. Kotlin coroutines (`awaitSingle`, `asFlow` from
-`kotlinx-coroutines-reactor`) work through the same publishers, but aren't tested yet.
+These are tested, with back-pressure through the JDK's `Flow`.
+
+## Kotlin coroutines
+
+`kotlinx-coroutines-reactor` turns the reactive services into `suspend` calls and `Flow`s:
+
+```kotlin
+val body: ByteArray = invoices.getBytes(key).awaitSingle()
+val head: BlobMetadata? = invoices.head(key).awaitSingleOrNull()      // an empty Mono is null
+val names: List<String> = invoices.listAll("2026/").asFlow().map { it.key().value() }.toList()
+```
+
+- A `Flow` pulls as it's collected: `take(n)` stops reading and closes what the call opened, such as the `Stream` of
+  `rx.stream`.
+- Calls see the coroutine's context: the thread locals of the thread it subscribes on, and a `ReactorContext` in the
+  coroutine context, such as `withContext(ReactorContext(Context.of(...)))`.
+- Cancelling the coroutine, by `withTimeout` or `cancel()`, cancels the subscription, and the result is dropped.
+  A call that has started isn't meant to stop, as described under [How calls behave](#how-calls-behave), but today
+  it's interrupted ([#12](https://github.com/halyx-dev/halyx/issues/12)).
+
+These are tested with the kotlinx-coroutines each Boot version manages (1.8 on Boot 3.5, 1.10 on Boot 4). In
+Spring Boot, `@HalyxListener` methods may be `suspend fun`s, and repositories may use `suspend` and `Flow`; see
+[Kotlin coroutines in Spring Boot](../spring-boot.md#reactive-applications).
 
 ## Testing your code
 

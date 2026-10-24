@@ -107,6 +107,12 @@
             <artifactId>micrometer-core</artifactId>
             <optional>true</optional>
         </dependency>
+        <!-- Calling a suspend fun @HalyxListener, through Spring's CoroutinesUtils, in a Kotlin application -->
+        <dependency>
+            <groupId>org.jetbrains.kotlin</groupId>
+            <artifactId>kotlin-stdlib</artifactId>
+            <optional>true</optional>
+        </dependency>
         <!-- JSON cache values: Jackson 2 (Boot 3) or Jackson 3 (Boot 4), whichever the application has -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
