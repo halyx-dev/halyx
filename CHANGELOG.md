@@ -8,6 +8,11 @@
   `halyx.cache-manager.codec=json` and Jackson 2 on the classpath too, as `halyx-azure` brings it, the codec used
   Jackson 2 without Java date/time support, so caching a value with an `Instant` failed. Jackson 3 is now always
   preferred when present.
+- **Cancelling a reactive call** ([#12](https://github.com/halyx-dev/halyx/issues/12)): cancelling a `ReactiveHalyx`
+  call that had started, by `timeout()` for example, interrupted its thread on the default virtual-thread scheduler
+  and on `boundedElastic`, which could abort a blocking SDK call partway through. A started call now runs to
+  completion and its result is dropped, as documented; one cancelled before it starts never runs. The docs now also
+  say that calls on the non-blocking path are cancelled with the subscription, and the driver may abort the request.
 
 ### Samples
 

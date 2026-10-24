@@ -33,9 +33,11 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Scheduler;
+import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
 import reactor.util.context.Context;
 
@@ -43,8 +45,13 @@ import java.lang.reflect.Proxy;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -124,6 +131,88 @@ class ReactiveHalyxTest {
         }
         assertThat(scheduler.isDisposed()).as("the application's scheduler stays the application's").isFalse();
         scheduler.dispose();
+    }
+
+    @Test
+    void aStartedCallRunsToCompletionWhenCancelledOnAnyScheduler() throws Exception {
+        Scheduler threads = ReactiveHalyx.virtualThreadScheduler("app-calls");
+        try (ReactiveHalyx own = ReactiveHalyx.of(halyx, threads);
+             ReactiveHalyx elastic = ReactiveHalyx.of(halyx, Schedulers.boundedElastic());
+             ReactiveHalyx limited = ReactiveHalyx.builder(halyx).maxConcurrency(1).build()) {
+            for (ReactiveHalyx views : List.of(rx, own, elastic, limited)) {
+                CountDownLatch started = new CountDownLatch(1);
+                CountDownLatch release = new CountDownLatch(1);
+                CompletableFuture<String> outcome = new CompletableFuture<>();
+                AtomicReference<Object> delivered = new AtomicReference<>();
+                Disposable subscription = views.call(() -> {
+                    started.countDown();
+                    try {
+                        release.await();
+                        outcome.complete(Thread.currentThread().isInterrupted() ? "flagged" : "finished");
+                    } catch (InterruptedException e) {
+                        outcome.complete("interrupted");
+                    }
+                    return "done";
+                }).subscribe(delivered::set, delivered::set);
+
+                assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
+                subscription.dispose();
+                release.countDown();
+
+                assertThat(outcome.get(5, TimeUnit.SECONDS)).as(views.scheduler().toString()).isEqualTo("finished");
+                Thread.sleep(50);
+                assertThat(delivered.get()).as("the result is dropped").isNull();
+            }
+        } finally {
+            threads.dispose();
+        }
+    }
+
+    @Test
+    void aTimedOutCallFinishesAndTheSubscriberGetsTheTimeout() throws Exception {
+        CountDownLatch release = new CountDownLatch(1);
+        CompletableFuture<Boolean> interrupted = new CompletableFuture<>();
+
+        StepVerifier.create(rx.call(() -> {
+                    try {
+                        release.await();
+                        interrupted.complete(false);
+                    } catch (InterruptedException e) {
+                        interrupted.complete(true);
+                    }
+                    return "late";
+                }).timeout(Duration.ofMillis(50)))
+                .verifyError(TimeoutException.class);
+        release.countDown();
+
+        assertThat(interrupted.get(5, TimeUnit.SECONDS)).isFalse();
+    }
+
+    @Test
+    void aCallCancelledWhileWaitingForMaxConcurrencyNeverRunsAndStopsWaiting() throws Exception {
+        try (ReactiveHalyx limited = ReactiveHalyx.builder(halyx).maxConcurrency(1).build()) {
+            CountDownLatch release = new CountDownLatch(1);
+            CountDownLatch holding = new CountDownLatch(1);
+            Disposable first = limited.call(() -> {
+                holding.countDown();
+                release.await();
+                return "first";
+            }).subscribe();
+            assertThat(holding.await(5, TimeUnit.SECONDS)).isTrue();
+
+            AtomicInteger ran = new AtomicInteger();
+            // Cancelled before it starts and while it waits for the permit: neither ever runs
+            limited.call(ran::incrementAndGet).subscribe().dispose();
+            Disposable waiting = limited.call(ran::incrementAndGet).subscribe();
+            Thread.sleep(100);
+            waiting.dispose();
+
+            release.countDown();
+            StepVerifier.create(limited.call(() -> "next")).expectNext("next").verifyComplete();
+            Thread.sleep(100);
+            assertThat(ran.get()).as("cancelled calls that hadn't started").isZero();
+            first.dispose();
+        }
     }
 
     @Test

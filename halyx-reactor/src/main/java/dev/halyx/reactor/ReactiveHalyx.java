@@ -49,11 +49,14 @@ import java.util.stream.Stream;
  *
  * Every call runs when subscribed, once per subscription ({@code retry()} calls again), on a thread of the
  * scheduler; Halyx's own retries, interceptors and observations still apply inside it. Errors are the blocking
- * API's {@code CloudException}s. Cancelling a call that has started doesn't stop it: it runs to completion and
- * its result is dropped, so a cancelled write may still take effect. The scheduler's threads block for the
- * length of each call, which suits virtual threads; Reactor's {@code boundedElastic} scheduler works too, and
- * {@code Schedulers.parallel()} must not be used. With Micrometer's context-propagation library on the
- * classpath, each call sees the subscriber's context (MDC, the current observation and so on).
+ * API's {@code CloudException}s. Cancelling a blocking call that has started doesn't stop or interrupt it, on
+ * any scheduler: it runs to completion and its result is dropped. A call made through the service's asynchronous
+ * view is cancelled with the subscription instead, and the driver may abort its request. Either way a cancelled
+ * write may still take effect. A call cancelled before it starts, or while it waits for
+ * {@link Builder#maxConcurrency}, never runs. The scheduler's threads block for the length of each blocking call,
+ * which suits virtual threads; Reactor's {@code boundedElastic} scheduler works too, and
+ * {@code Schedulers.parallel()} must not be used. With Micrometer's context-propagation library on the classpath,
+ * each call sees the subscriber's context (MDC, the current observation and so on).
  */
 public final class ReactiveHalyx implements AutoCloseable {
 

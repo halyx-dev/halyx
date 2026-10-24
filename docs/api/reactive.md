@@ -84,7 +84,7 @@ virtual-thread executor.
 | Where | on the scheduler; Halyx's own retries, interceptors and observations still apply inside the call |
 | Results | a `Mono` per call; an empty `Optional` in the blocking API is an empty `Mono`; `void` is `Mono<Void>` |
 | Errors | the blocking API's `CloudException`s, such as `NotFoundException` and `PreconditionFailedException` |
-| Cancelling | a call that has started runs to completion and its result is dropped, so a cancelled write may still take effect; `timeout()` therefore doesn't free the call's thread, which `maxConcurrency` bounds |
+| Cancelling | a call on the scheduler that has started runs to completion, never interrupted, and its result is dropped; `timeout()` therefore doesn't free the call's thread, which `maxConcurrency` bounds. A call on the non-blocking path (above) is cancelled with the subscription, and the driver may abort its request. Either way a cancelled write may still take effect. A call cancelled before it starts, or while it waits for `maxConcurrency`, never runs |
 | Context | with Micrometer's `context-propagation` on the classpath, each call sees the subscriber's context: the Reactor `Context`, then the subscribing thread's thread locals (MDC, the current observation, anything registered with `ContextRegistry`) |
 
 ```java
