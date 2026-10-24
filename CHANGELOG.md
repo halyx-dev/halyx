@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.2 (unreleased)
+
+### Fixes
+
+- **JSON cache codec on Spring Boot 4** ([#9](https://github.com/halyx-dev/halyx/issues/9)): with
+  `halyx.cache-manager.codec=json` and Jackson 2 on the classpath too, as `halyx-azure` brings it, the codec used
+  Jackson 2 without Java date/time support, so caching a value with an `Instant` failed. Jackson 3 is now always
+  preferred when present.
+
 ## 1.0.1 (2026-10-23)
 
 ### Fixes

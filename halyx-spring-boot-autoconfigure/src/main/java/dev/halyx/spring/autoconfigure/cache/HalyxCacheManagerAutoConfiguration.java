@@ -30,6 +30,7 @@ import org.springframework.beans.factory.SmartInitializingSingleton;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.cache.CacheManager;
 import org.springframework.context.annotation.Bean;
@@ -116,8 +117,14 @@ public class HalyxCacheManagerAutoConfiguration {
         }
     }
 
+    /**
+     * Only without Jackson 3: Spring reads nested configurations in bytecode order, not {@code @Import} order, so
+     * {@code @ConditionalOnMissingBean} alone would let this one win when both are present (Boot 4 with a cloud
+     * module that brings Jackson 2).
+     */
     @Configuration(proxyBeanMethods = false)
     @ConditionalOnClass(name = "com.fasterxml.jackson.databind.ObjectMapper")
+    @ConditionalOnMissingClass("tools.jackson.databind.ObjectMapper")
     @ConditionalOnProperty(prefix = "halyx.cache-manager", name = "codec", havingValue = "json")
     static class Jackson2Codec {
         @Bean(CODEC_BEAN)
