@@ -15,9 +15,9 @@
  */
 package dev.halyx.samples.quickstart;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.assertj.core.api.Assertions.assertThat;
 
-import dev.halyx.*;
+import dev.halyx.Halyx;
 import dev.halyx.config.ProviderConfig;
 
 import org.junit.jupiter.api.Test;
@@ -29,9 +29,9 @@ class QuickstartTest {
         try (var halyx = Halyx.builder().register("test", ProviderConfig.of("memory")).build()) {
             Quickstart.Result result = Quickstart.run(halyx.provider("test"));
 
-            assertEquals("hello, blob", result.blob());
-            assertEquals("hello, message", result.message());
-            assertEquals("hello, parameter", result.parameter());
+            assertThat(result.blob()).isEqualTo("hello, blob");
+            assertThat(result.message()).isEqualTo("hello, message");
+            assertThat(result.parameter()).isEqualTo("hello, parameter");
         }
     }
 }

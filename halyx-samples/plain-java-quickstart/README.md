@@ -11,8 +11,9 @@ Halyx without Spring. `Quickstart.main` builds a `Halyx` on the in-memory provid
 ## Run it
 
 ```
-mvn -pl halyx-samples/plain-java-quickstart -am test        # the test
-mvn -pl halyx-samples/plain-java-quickstart -am compile exec:java -Dexec.mainClass=dev.halyx.samples.quickstart.Quickstart
+mvn -pl halyx-samples/plain-java-quickstart -am test
+mvn -pl halyx-samples/plain-java-quickstart -am install -DskipTests
+mvn -pl halyx-samples/plain-java-quickstart exec:java -Dexec.mainClass=dev.halyx.samples.quickstart.Quickstart
 ```
 
 No cloud, account or container is needed: the default provider is `memory`.

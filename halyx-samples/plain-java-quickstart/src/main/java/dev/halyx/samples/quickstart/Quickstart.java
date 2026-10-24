@@ -17,7 +17,8 @@ package dev.halyx.samples.quickstart;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 
-import dev.halyx.*;
+import dev.halyx.CloudContext;
+import dev.halyx.Halyx;
 import dev.halyx.config.ProviderConfig;
 import dev.halyx.messaging.SubscriptionConfig;
 import dev.halyx.parameters.ParameterStoreConfig;
@@ -75,15 +76,19 @@ public final class Quickstart {
             throw new UncheckedIOException(e);
         }
 
-        // Messaging: publish, receive, ack
+        // Messaging: publish, receive, ack. On a real cloud the first receive can come back empty, so keep
+        // receiving for up to 30 seconds.
         orders.publish("hello, message");
         String message = null;
-        for (var received : billing.receive(10, Duration.ofSeconds(5))) {
-            message = received.bodyAsString();
-            received.ack();
+        long deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
+        while (message == null && System.nanoTime() < deadline) {
+            for (var received : billing.receive(10, Duration.ofSeconds(5))) {
+                message = received.bodyAsString();
+                received.ack();
+            }
         }
         if (message == null) {
-            throw new IllegalStateException("no message received from " + billing);
+            throw new IllegalStateException("no message received from " + billing + " within 30 seconds");
         }
 
         // Parameters: write one, read it back
