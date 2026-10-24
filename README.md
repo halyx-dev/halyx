@@ -240,6 +240,8 @@ try (Halyx halyx = Halyx.builder()
 Add `halyx-core` plus the provider modules (`halyx-aws`, `halyx-azure`, `halyx-gcp`, `halyx-vault`)
 to your build, ideally through the `halyx-bom`; add `halyx-reactor` for `Mono` and `Flux` views of every service. See [Getting started](https://halyx.dev/docs/getting-started.html).
 
+For a complete runnable example, see [`halyx-samples/plain-java-quickstart`](halyx-samples/plain-java-quickstart).
+
 ## AI skills
 
 The repository includes skills for AI coding assistants, in [`.claude/skills`](.claude/skills). Each is plain
