@@ -22,6 +22,7 @@ import dev.halyx.storage.BlobContent
 import dev.halyx.storage.BlobKey
 import io.micrometer.context.ContextRegistry
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.map
@@ -33,10 +34,13 @@ import kotlinx.coroutines.reactor.awaitSingle
 import kotlinx.coroutines.reactor.awaitSingleOrNull
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import reactor.util.context.Context
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -87,12 +91,13 @@ class CoroutinesOverReactorTest {
     }
 
     @Test
-    fun cancellingTheCoroutineDropsTheResult() = runBlocking<Unit> {
+    fun cancellingTheCoroutineDropsTheResultAndTheCallFinishes() = runBlocking<Unit> {
         val started = CountDownLatch(1)
         val release = CountDownLatch(1)
+        val outcome = CompletableFuture<String>()
         val call = rx.call {
             started.countDown()
-            release.await()
+            outcome.complete(finishOrInterrupt(release))
             "done"
         }
 
@@ -101,7 +106,26 @@ class CoroutinesOverReactorTest {
         waiting.cancelAndJoin()
         release.countDown()
         assertThat(waiting.isCancelled).isTrue()
-        // That the started call still runs to the end, as documented, is #12.
+        assertThat(outcome.get(5, TimeUnit.SECONDS)).isEqualTo("finished")
+    }
+
+    @Test
+    fun aWithTimeoutThrowsAndTheCallFinishes() = runBlocking<Unit> {
+        val release = CountDownLatch(1)
+        val outcome = CompletableFuture<String>()
+
+        assertThatThrownBy {
+            runBlocking { withTimeout(50) { rx.call { outcome.complete(finishOrInterrupt(release)) }.awaitSingle() } }
+        }.isInstanceOf(TimeoutCancellationException::class.java)
+        release.countDown()
+        assertThat(outcome.get(5, TimeUnit.SECONDS)).isEqualTo("finished")
+    }
+
+    private fun finishOrInterrupt(release: CountDownLatch): String = try {
+        release.await()
+        "finished"
+    } catch (e: InterruptedException) {
+        "interrupted"
     }
 
     @Test

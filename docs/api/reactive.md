@@ -214,9 +214,9 @@ val names: List<String> = invoices.listAll("2026/").asFlow().map { it.key().valu
   `rx.stream`.
 - Calls see the coroutine's context: the thread locals of the thread it subscribes on, and a `ReactorContext` in the
   coroutine context, such as `withContext(ReactorContext(Context.of(...)))`.
-- Cancelling the coroutine, by `withTimeout` or `cancel()`, cancels the subscription, and the result is dropped.
-  A call that has started isn't meant to stop, as described under [How calls behave](#how-calls-behave), but today
-  it's interrupted ([#12](https://github.com/halyx-dev/halyx/issues/12)).
+- Cancelling the coroutine, by `withTimeout` or `cancel()`, cancels the subscription, as described under
+  [How calls behave](#how-calls-behave): a blocking call that has started runs to completion and its result is
+  dropped.
 
 These are tested with the kotlinx-coroutines each Boot version manages (1.8 on Boot 3.5, 1.10 on Boot 4). In
 Spring Boot, `@HalyxListener` methods may be `suspend fun`s, and repositories may use `suspend` and `Flow`; see
