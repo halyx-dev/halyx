@@ -17,6 +17,7 @@ package dev.halyx.reactor;
 
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.MonoSink;
 import reactor.core.scheduler.Scheduler;
 
 import java.util.Iterator;
@@ -25,7 +26,9 @@ import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Stream;
 
@@ -55,7 +58,15 @@ final class Calls {
             // Captured on the subscribing thread, before moving to the scheduler: its thread locals and the
             // subscriber's Reactor context.
             Object snapshot = context.capture(subscriberContext);
-            return Mono.fromCallable(() -> context.call(snapshot, () -> limited(call))).subscribeOn(scheduler);
+            return Mono.<T>create(sink -> {
+                Call<T> running = new Call<>(sink, () -> context.call(snapshot, call));
+                sink.onCancel(running::cancel);
+                try {
+                    scheduler.schedule(running);
+                } catch (RejectedExecutionException e) {
+                    sink.error(e);
+                }
+            });
         });
     }
 
@@ -177,6 +188,96 @@ final class Calls {
             return call.call();
         } finally {
             limit.release();
+        }
+    }
+
+    /**
+     * One call on the scheduler. Cancelled before it starts, it never runs, and a wait for the concurrency limit is
+     * interrupted; once started, it runs to completion and its result or error is dropped. Its task is never disposed,
+     * since that would interrupt the call (with {@code Schedulers.fromExecutorService} and {@code boundedElastic})
+     * and could abort a blocking SDK call partway through.
+     */
+    private final class Call<T> implements Runnable {
+
+        private static final int NEW = 0, WAITING = 1, RUNNING = 2, CANCELLED = 3;
+
+        private final MonoSink<T> sink;
+        private final Callable<T> call;
+        private final AtomicInteger state = new AtomicInteger(NEW);
+        private volatile boolean cancelled;
+        private Thread waiter;
+
+        Call(MonoSink<T> sink, Callable<T> call) {
+            this.sink = sink;
+            this.call = call;
+        }
+
+        @Override
+        public void run() {
+            if (limit == null ? !state.compareAndSet(NEW, RUNNING) : !acquire()) {
+                return;
+            }
+            T result;
+            try {
+                result = call.call();
+            } catch (Throwable e) {
+                if (!cancelled) {
+                    sink.error(e);
+                }
+                return;
+            } finally {
+                if (limit != null) {
+                    limit.release();
+                }
+            }
+            if (!cancelled) {
+                sink.success(result);
+            }
+        }
+
+        /** Takes a permit, unless cancelled first or while waiting. */
+        private boolean acquire() {
+            synchronized (this) {
+                waiter = Thread.currentThread();
+                if (!state.compareAndSet(NEW, WAITING)) {
+                    return false;
+                }
+            }
+            boolean acquired = false;
+            try {
+                limit.acquire();
+                acquired = true;
+            } catch (InterruptedException e) {
+                // From cancel(), which has set CANCELLED; any other interrupt fails the call
+                if (state.get() != CANCELLED) {
+                    Thread.currentThread().interrupt();
+                    sink.error(e);
+                    return false;
+                }
+            }
+            synchronized (this) {
+                waiter = null;
+                if (state.compareAndSet(WAITING, RUNNING)) {
+                    return true;
+                }
+                // Cancelled while waiting, or just after the permit came: give it back, and clear cancel()'s interrupt
+                if (acquired) {
+                    limit.release();
+                }
+                Thread.interrupted();
+                return false;
+            }
+        }
+
+        void cancel() {
+            cancelled = true;
+            synchronized (this) {
+                if (state.compareAndSet(WAITING, CANCELLED)) {
+                    waiter.interrupt();
+                } else {
+                    state.compareAndSet(NEW, CANCELLED);
+                }
+            }
         }
     }
 
