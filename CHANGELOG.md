@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.1.0 (unreleased)
+
+### Features
+
+- **Kotlin coroutines** ([#11](https://github.com/halyx-dev/halyx/issues/11)):
+  - `@HalyxListener` methods may be `suspend fun`s, for subscriptions and stream consumers. Returning acks or
+    commits, and throwing retries, as with any listener. Needs `kotlinx-coroutines-reactor`.
+  - Reactive repositories take `suspend` CRUD methods and derived queries, and `Flow` results: a `Flow` query reads
+    every match, page by page, and a `suspend` query may return a `Window`. Entities are `@JvmRecord data class`es.
+  - Tested on Boot 3.5 (Kotlin 1.9) and Boot 4 (Kotlin 2.3), in memory and on Kafka, SQS and DynamoDB emulators,
+    with `awaitSingle` and `asFlow` over the reactive services.
+
 ## 1.0.2 (unreleased)
 
 ### Fixes

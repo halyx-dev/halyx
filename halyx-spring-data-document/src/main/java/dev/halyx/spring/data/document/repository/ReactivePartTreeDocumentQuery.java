@@ -17,6 +17,8 @@ package dev.halyx.spring.data.document.repository;
 
 import dev.halyx.nosql.DocumentStore;
 import dev.halyx.reactor.ReactiveHalyx;
+import org.springframework.core.KotlinDetector;
+import org.springframework.core.MethodParameter;
 import org.springframework.core.ResolvableType;
 import org.springframework.data.domain.Window;
 import org.springframework.data.repository.query.QueryMethod;
@@ -28,7 +30,8 @@ import java.util.stream.Stream;
 /**
  * A derived query of a reactive repository: the blocking {@link PartTreeDocumentQuery}, with the same supported
  * shapes and failures, run on {@code ReactiveHalyx}'s scheduler. A {@code Flux} reads page by page as the
- * subscriber asks; a {@code Mono} holds one entity, an {@code existsBy...} answer, or a {@code Window}.
+ * subscriber asks; a {@code Mono} holds one entity, an {@code existsBy...} answer, or a {@code Window}. In Kotlin,
+ * a {@code Flow} reads like a {@code Flux}, and a {@code suspend fun} returns what the {@code Mono} would hold.
  */
 final class ReactivePartTreeDocumentQuery<T extends Record> implements RepositoryQuery {
 
@@ -41,12 +44,16 @@ final class ReactivePartTreeDocumentQuery<T extends Record> implements Repositor
     }
 
     private static PartTreeDocumentQuery.Kind kind(QueryMethod method) {
-        ResolvableType returned = ResolvableType.forMethodReturnType(methodOf(method));
+        java.lang.reflect.Method javaMethod = methodOf(method);
+        // For a suspend fun, whose Java return type is Object, MethodParameter resolves the type Kotlin declares.
+        ResolvableType returned = ResolvableType.forMethodParameter(new MethodParameter(javaMethod, -1));
         Class<?> type = returned.resolve(Object.class);
-        if (Flux.class.isAssignableFrom(type) || org.reactivestreams.Publisher.class == type) {
+        if (Flux.class.isAssignableFrom(type) || org.reactivestreams.Publisher.class == type
+                || type.getName().equals("kotlinx.coroutines.flow.Flow")) {
             return PartTreeDocumentQuery.Kind.STREAM;
         }
-        if (returned.getGeneric(0).resolve(Object.class) == Window.class) {
+        Class<?> held = KotlinDetector.isSuspendingFunction(javaMethod) ? type : returned.getGeneric(0).resolve(Object.class);
+        if (held == Window.class) {
             return PartTreeDocumentQuery.Kind.WINDOW;
         }
         return PartTreeDocumentQuery.Kind.SINGLE;

@@ -528,6 +528,42 @@ interface Orders extends ReactiveDocumentRepository<Order, Key> {
 }
 ```
 
+**Kotlin coroutines.** With `kotlinx-coroutines-reactor` on the classpath, as well as the `kotlin-reflect` every Spring
+Kotlin application has, a `@HalyxListener` may be a `suspend fun`. Returning acks the message (or commits the
+record) and throwing retries it, as with any listener, wherever the coroutine resumes.
+
+```kotlin
+@HalyxListener("billing")
+suspend fun onOrder(placed: CloudEvent) {
+    invoices.put(BlobKey.of(placed.subject().orElseThrow()), render(placed)).awaitSingle()
+}
+```
+
+A coroutine repository is a reactive one. Extend Spring Data's `Repository` and declare the CRUD methods you use as
+`suspend` functions, with derived queries returning `Flow` for many results, or as `suspend` functions for one
+result, an `existsBy...` answer or a `Window`. A missing entity is `null`. Entities are records, so a Kotlin entity
+is a `@JvmRecord data class`. Spring Data's `CoroutineCrudRepository` doesn't work, because it declares `findAll`,
+`count` and `deleteAll()`, which would scan the table. Mixing styles works too: an interface extending
+`ReactiveDocumentRepository` may add `Flow` and `suspend` queries.
+
+```kotlin
+@JvmRecord
+@DocumentTable("orders")
+data class Order(@PartitionKey val customerId: String, @SortKey val orderId: String, val status: String)
+
+interface Orders : Repository<Order, Key> {
+    suspend fun save(order: Order): Order
+    suspend fun findById(id: Key): Order?
+    suspend fun deleteById(id: Key)
+    fun findByCustomerIdOrderByOrderIdDesc(customerId: String): Flow<Order>      // read page by page as collected
+    suspend fun findFirstByCustomerIdOrderByOrderIdDesc(customerId: String): Order?
+    suspend fun findByCustomerId(customerId: String, position: ScrollPosition, limit: Limit): Window<Order>
+}
+```
+
+Both are tested on Boot 3.5 (Kotlin 1.9) and Boot 4 (Kotlin 2.3), in memory and on Kafka, SQS and DynamoDB
+emulators. For the reactive beans themselves, see [Kotlin coroutines](api/reactive.md#kotlin-coroutines).
+
 **Tracing.** With Micrometer's `context-propagation` library on the classpath (Micrometer Tracing brings
 it), Halyx's observations join the request's: WebFlux keeps the request's observation in the Reactor
 context, and each reactive call restores it. **Caching**: `@Cacheable` methods returning `Mono` or `Flux` work
