@@ -9,6 +9,13 @@
   Jackson 2 without Java date/time support, so caching a value with an `Instant` failed. Jackson 3 is now always
   preferred when present.
 
+### Samples
+
+- **Plain Java quickstart** ([#2](https://github.com/halyx-dev/halyx/issues/2)): `halyx-samples/plain-java-quickstart`
+  object storage, messaging and parameters without Spring, on the in-memory provider by default or on a cloud through
+  system properties; linked from the README and Getting started. Contributed in
+  [#8](https://github.com/halyx-dev/halyx/pull/8).
+
 ## 1.0.1 (2026-10-23)
 
 ### Fixes
