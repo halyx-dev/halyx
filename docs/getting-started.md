@@ -175,3 +175,4 @@ The [Spring Boot](spring-boot.md) page covers every resource type, listeners, he
 - [API guide](api/index.md): every service in depth.
 - [Errors and retries](api/errors.md): handling failures the same way on every cloud.
 - [Capabilities and native clients](api/capabilities-and-unwrap.md): provider-specific features.
+- [Plain Java quickstart](https://github.com/halyx-dev/halyx/tree/main/halyx-samples/plain-java-quickstart): a complete runnable example without Spring.
