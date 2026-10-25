@@ -56,7 +56,7 @@ One profile names the cloud, and up to four more turn on optional features:
 
 ```bash
 SPRING_PROFILES_ACTIVE=aws,events,cache,sql java -jar portable-orders.jar
-docker run -e SPRING_PROFILES_ACTIVE=gcp,events,streams,cache,sql -e GOOGLE_CLOUD_PROJECT=acme halyx/portable-orders:1.0.1
+docker run -e SPRING_PROFILES_ACTIVE=gcp,events,streams,cache,sql -e GOOGLE_CLOUD_PROJECT=acme halyx/portable-orders:1.0.2
 ```
 
 Each feature is a document in `application.yml`, gated with `spring.config.activate.on-profile`, and its components
