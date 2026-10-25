@@ -16,7 +16,7 @@ curl -s localhost:8080/customers/ada/orders
 
 # the image, then on a cloud
 mvn -pl halyx-samples/portable-orders spring-boot:build-image
-docker run -p 8080:8080 -e SPRING_PROFILES_ACTIVE=aws,events,cache,sql -e AWS_REGION=eu-west-2 ... halyx/portable-orders:1.0.2-SNAPSHOT
+docker run -p 8080:8080 -e SPRING_PROFILES_ACTIVE=aws,events,cache,sql -e AWS_REGION=eu-west-2 ... halyx/portable-orders:1.1.0-SNAPSHOT
 ```
 
 The tests are in `src/test/java/.../e2e`: one suite (`PortableOrdersSuite`) over the HTTP API, run in memory, on each
