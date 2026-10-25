@@ -802,6 +802,7 @@ limitations under the License.]]></inlineHeader>
                                 <excludeArtifact>halyx-samples</excludeArtifact>
                                 <excludeArtifact>portable-orders</excludeArtifact>
                                 <excludeArtifact>portable-orders-boot3</excludeArtifact>
+                                <excludeArtifact>plain-java-quickstart</excludeArtifact>
                             </excludeArtifacts>
                         </configuration>
                     </plugin>

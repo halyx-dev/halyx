@@ -6,7 +6,7 @@ nav_order: 11
 # Roadmap
 {: .no_toc }
 
-Halyx 1.0.1 is on Maven Central. This page lists what has been delivered, what is left over, and what
+Halyx 1.0.2 is on Maven Central. This page lists what has been delivered, what is left over, and what
 comes next, in priority order. Work that is planned but waiting for demand, and ideas that were dropped, are at the
 end.
 
@@ -21,11 +21,22 @@ end.
 
 | Stage | Work |
 |---|---|
-| **Released** | [1.0.1](#release-101), a patch release, and [1.0.0](#release-100), the first release, on Maven Central, both on 23 October 2026 |
+| **Released** | [1.0.2](#release-102), a patch release, on 25 October 2026; [1.0.1](#release-101), a patch release, and [1.0.0](#release-100), the first release, both on 23 October 2026; all on Maven Central |
 | **Coming next** | [Planned additions](#coming-next): R2DBC through the Cloud SQL connector, and more real-cloud test runs |
 | **Delivered** | [17 milestones](#delivered): every service on AWS, Azure and Google Cloud, Spring Boot 3.5 and 4, reactive and asynchronous APIs, Kotlin coroutines, a portable microservice on EKS, GKE and AKS, and cloud logins across clouds |
 
 ## Released
+
+### Release 1.0.2
+
+A patch release, on 25 October 2026. See the [release notes](https://github.com/halyx-dev/halyx/blob/main/CHANGELOG.md).
+
+| Fix | Who it affects |
+|---|---|
+| The JSON cache codec prefers Jackson 3 whenever it's present | Spring Boot 4 applications with `halyx.cache-manager.codec=json` and Jackson 2 on the classpath too, as `halyx-azure` brings it, where caching a value with an `Instant` failed |
+| A started `ReactiveHalyx` call runs to completion when it's cancelled, and its result is dropped, instead of having its thread interrupted | Code that cancels reactive calls, by `timeout()` for example, on the default virtual-thread scheduler or `boundedElastic` |
+
+It also adds a [plain Java quickstart](https://github.com/halyx-dev/halyx/tree/main/halyx-samples/plain-java-quickstart) sample, without Spring, contributed in [#8](https://github.com/halyx-dev/halyx/pull/8).
 
 ### Release 1.0.1
 

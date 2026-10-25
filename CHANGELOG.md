@@ -12,7 +12,7 @@
   - Tested on Boot 3.5 (Kotlin 1.9) and Boot 4 (Kotlin 2.3), in memory and on Kafka, SQS and DynamoDB emulators,
     with `awaitSingle` and `asFlow` over the reactive services.
 
-## 1.0.2 (unreleased)
+## 1.0.2 (2026-10-25)
 
 ### Fixes
 
