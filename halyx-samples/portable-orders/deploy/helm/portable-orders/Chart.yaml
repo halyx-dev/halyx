@@ -2,5 +2,5 @@ apiVersion: v2
 name: portable-orders
 description: The Halyx portable orders service. The same chart and image on EKS, GKE and AKS; values pick the cloud.
 type: application
-version: 1.0.2
-appVersion: 1.0.2
+version: 1.0.3-SNAPSHOT
+appVersion: 1.0.3-SNAPSHOT
