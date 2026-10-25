@@ -20,7 +20,8 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # main and the maintenance branches, such as 1.0.x
+    branches: [main, '[0-9]+.[0-9]+.x']
   pull_request:
   workflow_dispatch:
 
