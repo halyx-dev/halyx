@@ -23,7 +23,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-VERSION=1.0.2-SNAPSHOT
+VERSION=$(sed -n 's/^-Drevision=//p' "$ROOT/.mvn/maven.config")
 LOGS="$(mktemp -d -t halyx-images)"
 
 printf '\n== %s\n' "Building the Spring Boot 4 and 3.5 images"

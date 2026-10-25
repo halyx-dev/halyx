@@ -8,7 +8,7 @@ optional features (`events`, `streams`, `cache` and `sql`). The guide is
 ```bash
 # in memory, no cloud
 mvn -pl halyx-samples/portable-orders -am package -DskipTests
-SPRING_PROFILES_ACTIVE=local,events,streams,cache java -jar halyx-samples/portable-orders/target/portable-orders-1.0.2-SNAPSHOT.jar
+SPRING_PROFILES_ACTIVE=local,events,streams,cache java -jar halyx-samples/portable-orders/target/portable-orders-*.jar
 
 curl -s -XPOST localhost:8080/customers/ada/orders -H 'Content-Type: application/json' \
      -d '{"lines":[{"sku":"tea","quantity":2,"unitPrice":3.50}]}'
