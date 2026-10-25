@@ -1,6 +1,9 @@
 ## What this changes
 
-<!-- What the change does and why. Link the issue it fixes, such as "Fixes #12". -->
+<!-- What the change does and why. Link the issue it fixes, such as "Fixes #12".
+     Fixes go to the maintenance branch of the oldest line they apply to, such as 1.0.x; features go to main.
+     See https://github.com/halyx-dev/halyx/blob/main/CONTRIBUTING.md#branches -->
+
 
 ## How it was tested
 

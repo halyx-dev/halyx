@@ -67,18 +67,35 @@ Reviews check the rest:
 - **No nulls in the API.** A value that may be missing is an `Optional`. Records are preferred for plain data.
 - **Versions live in one place.** Each dependency and plugin version is a property in the parent `pom.xml`, such as
   `${kafka4.version}`; a module refers to the property rather than writing a number. A `dev.halyx` module is either
-  managed by the parent or uses `${project.version}`.
+  managed by the parent or uses `${project.version}`. The project's own version is `revision` in
+  `.mvn/maven.config`, and every `pom.xml`, a new module's included, gives its parent's version as `${revision}`.
 - **Every code snippet compiles.** Docs, READMEs and samples use only the public API; check each snippet against the
   code before adding it.
 - **Comments say why**, not what the code already says, and are as dense as the code around them.
+
+## Branches
+
+- **`main`** is the next minor release. New features, and anything that adds to or changes the API, go here.
+- **Maintenance branches**, one per released line, such as `1.0.x`, take bug fixes and documentation fixes for that
+  line. Patch releases (1.0.3, 1.0.4) are tagged on them.
+- **A fix goes to the oldest maintained line it applies to.** The maintainers then merge that branch forward into each
+  newer one and into `main`, so a fix is written once and nothing is cherry-picked. Only the
+  [supported versions](SECURITY.md#supported-versions) are maintained.
+- **The issue's milestone says which branch:** a patch milestone such as `1.0.3` means `1.0.x`, and a minor one such
+  as `1.1.0` means `main`. If there's no milestone yet, ask on the issue.
+- **The docs at halyx.dev come from the newest release's branch**, so documentation for something on `main` goes live
+  with the release that has it.
+
+Merging forward is always a merge commit, never a squash or rebase: the merge records that the fix is already in the
+newer branch, so the next merge forward doesn't bring it again.
 
 ## Pull requests
 
 - Keep each pull request to one change, with a title that says what it does, such as "Retry Pub/Sub publishes
   on UNAVAILABLE": a sentence, without prefixes such as `docs:` or `fix:`.
 - Say what you changed, why, and how you tested it.
-- Start from an up-to-date `main`, and rebase if it moves on. After a release, the project version changes in every
-  `pom.xml`, so a new module must use the current one.
+- Start from an up-to-date copy of the [branch](#branches) your change belongs on, open the pull request against it,
+  and rebase if it moves on.
 - CI must pass: the build, the license headers, the code conventions, and the unit and emulator tests.
 
 By contributing, you agree that your contribution is licensed under the [Apache License 2.0](LICENSE).
