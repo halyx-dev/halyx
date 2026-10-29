@@ -22,7 +22,7 @@ end.
 | Stage | Work |
 |---|---|
 | **Released** | [1.0.2](#release-102), a patch release, on 25 October 2026; [1.0.1](#release-101), a patch release, and [1.0.0](#release-100), the first release, both on 23 October 2026; all on Maven Central |
-| **Coming next** | [Planned additions](#coming-next): R2DBC through the Cloud SQL connector, and more real-cloud test runs |
+| **Coming next** | [Planned additions](#coming-next): function invocation on Lambda, Azure Functions and Cloud Run functions for 1.1.0, R2DBC through the Cloud SQL connector, and more real-cloud test runs |
 | **Delivered** | [17 milestones](#delivered): every service on AWS, Azure and Google Cloud, Spring Boot 3.5 and 4, reactive and asynchronous APIs, Kotlin coroutines, a portable microservice on EKS, GKE and AKS, and cloud logins across clouds |
 
 ## Released
@@ -72,6 +72,7 @@ Additions planned on top of 1.0.0.
 
 | Item | Area | Today |
 |---|---|---|
+| Function invocation (FaaS), for 1.1.0: a portable `FunctionInvoker` and an SPI driver per cloud, invoking AWS Lambda functions, Azure Functions and Cloud Run functions by name with a payload and a response, with cloud logins (IAM, Entra ID, Google ID tokens), async and reactive views, Spring Boot properties, a conformance kit, and tests on the memory provider, the emulators and real clouds | Functions | Not offered: applications call each cloud's SDK or HTTP endpoint themselves |
 | R2DBC through the Cloud SQL connector | R2DBC | R2DBC connects to Cloud SQL directly, with IAM login; JDBC also works through the connector |
 | A real-cloud run on MSK Serverless with IAM, including transactions | Streams | Tested on Kafka 3.9 and 4.2.1 brokers, and on real Event Hubs and Managed Kafka. The run is ready ([AWS tier 4](cloud-testing/aws.md#tier-4-not-run)) and needs an AWS account plan that includes MSK |
 | A real-cloud run on Azure Database for MySQL with Entra ID | SQL databases | The run needs a directory-level grant in the test tenant |
