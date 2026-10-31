@@ -92,14 +92,15 @@ databases, caches and Event Hubs.
 
 ## HTTP connections
 
-Each provider connection shares one pooled HTTP client across its services: S3, SSM and Secrets Manager
-on AWS; Blob Storage, Key Vault and App Configuration on Azure; Cloud Storage on Google Cloud.
+Each provider connection shares one pooled HTTP client across its services: S3, SSM, Secrets Manager and
+Lambda on AWS; Blob Storage, Key Vault, App Configuration and Azure Functions on Azure; Cloud Storage and Cloud
+Run functions on Google Cloud.
 
 | Property | Default | Meaning |
 |---|---|---|
 | `http.max-connections` | 200 | pooled connections, which bound concurrent requests |
 | `http.connect-timeout` | 10s | TCP and TLS connect timeout |
-| `http.read-timeout` | 60s | maximum wait for response data |
+| `http.read-timeout` | 60s | maximum wait for response data; a function's own timeout applies to its invocations instead (on AWS, a longer one gets a Lambda connection pool with that read timeout) |
 | `http.idle-timeout` | 60s | idle connections are closed after this |
 | `http.acquire-timeout` | 10s | maximum wait for a free connection (AWS) |
 
@@ -132,6 +133,7 @@ rather than on the provider.
 | `aws.elasticache.serverless` | `CacheConfig` | `true` for ElastiCache Serverless |
 | `aws.rds.region` | `SqlConfig` | the database's region, if it differs from the provider's |
 | `aws.msk.region` | `StreamConfig` | the MSK cluster's region, for IAM tokens, if it differs from the provider's |
+| `aws.lambda.qualifier` | `FunctionConfig` | the Lambda version or alias to invoke; the unpublished version if unset |
 
 ## Azure
 
@@ -157,6 +159,10 @@ ProviderConfig.of("azure")
 | `azure.event-hubs.scope` | on a `StreamConfig`: the Entra ID scope, if not the namespace of the first bootstrap server |
 | `azure.appconfig.connection-string` | on a `ParameterStoreConfig`: a connection string instead of Entra ID |
 | `azure.appconfig.label` | on a `ParameterStoreConfig`: the App Configuration label to use |
+| `azure.functions.endpoint` | on a `FunctionConfig`: the function app's URL, such as `https://orders.azurewebsites.net` |
+| `azure.functions.audience` | on a `FunctionConfig`: the Entra ID app that App Service Authentication checks; tokens are for `<audience>/.default` |
+| `azure.functions.key` | on a `FunctionConfig`: a function key, sent as `x-functions-key`, instead of an Entra ID token |
+| `azure.functions.route` | on a `FunctionConfig`: the function's path on the app, if it isn't `api/<name>` |
 
 Key Vault and App Configuration take their URL as the store's `location`; see
 [Parameters and secrets](api/parameters.md).
@@ -175,6 +181,9 @@ ProviderConfig.of("gcp").property(GcpProperties.PROJECT_ID, "acme-prod")
 | `gcp.parametermanager.render` | on a `ParameterStoreConfig`: `true` to resolve Secret Manager references |
 | `gcp.sql.instance` | on a `SqlConfig`: connect through the Cloud SQL Java connector (`project:region:instance`) |
 | `gcp.kafka.principal` | on a `StreamConfig`: the principal's email for Managed Kafka IAM login, when the credentials don't name one |
+| `gcp.functions.region` | on a `FunctionConfig`: the function's region, for its default URL `https://<region>-<project>.cloudfunctions.net/<name>` |
+| `gcp.functions.url` | on a `FunctionConfig`: the function's URL, such as a `run.app` URL, instead of the default |
+| `gcp.functions.audience` | on a `FunctionConfig`: the ID tokens' audience, if it isn't the function's URL |
 
 ## HashiCorp Vault
 
@@ -205,5 +214,6 @@ The KV v2 mount is the parameter store's `location` (`secret` by default).
 ProviderConfig.of("memory")
 ```
 
-No settings. Object storage, NoSQL, messaging, caches, and parameters and secrets live in the JVM. It's
+No settings. Object storage, NoSQL, messaging, events, streams, functions, caches, and parameters and secrets
+live in the JVM; functions are handlers registered with `InMemoryFunctions`. It's
 ideal for unit tests.

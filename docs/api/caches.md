@@ -1,7 +1,7 @@
 ---
 title: Caches
 parent: API guide
-nav_order: 7
+nav_order: 8
 ---
 
 # Caches: `Cache<V>`

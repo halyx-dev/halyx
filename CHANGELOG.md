@@ -12,6 +12,23 @@
   - Tested on Boot 3.5 (Kotlin 1.9) and Boot 4 (Kotlin 2.3), in memory and on Kafka, SQS and DynamoDB emulators,
     with `awaitSingle` and `asFlow` over the reactive services.
 
+- **Function invocation** ([#22](https://github.com/halyx-dev/halyx/issues/22)):
+  - `FunctionInvoker` invokes AWS Lambda functions, Azure Functions and Cloud Run functions by name, with a payload,
+    configured and per-request headers, and a timeout, through `CloudContext.functionInvoker`. Each cloud's login is
+    handled: IAM on Lambda, an Entra ID token or a function key on Azure, a Google ID token on Cloud Run.
+  - A function that throws raises `UnavailableException` on every cloud, a missing one `NotFoundException`, and
+    other statuses map as for every other service. Requests over a cloud's payload or header limit are refused
+    before they're sent.
+  - Invocations run the function, so they're retried only for functions configured `idempotent`; the SDKs retry
+    others only after throttling or a failure to connect.
+  - `trigger` starts a Lambda function without waiting for it (`FunctionCapability.TRIGGER`). `async()` views, and
+    `ReactiveFunctionInvoker` in halyx-reactor.
+  - `TracingFunctionInvoker` carries the trace context into the function, as headers or in Lambda's `ClientContext`.
+  - Spring Boot: `halyx.functions.<key>` registers a `FunctionInvoker` bean, with a reactive view.
+  - A function conformance kit, run on the memory provider (`InMemoryFunctions`), Floci's Lambda, the Azure
+    Functions host and Google's Functions Framework, with tier 1 real-cloud runs on all three clouds.
+  - `AzureErrors.fromStatus` and `GcpErrors.fromStatus` map an HTTP status as the SDK translations do.
+
 ## 1.0.2 (2026-10-25)
 
 ### Fixes

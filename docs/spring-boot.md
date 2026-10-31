@@ -261,6 +261,36 @@ dead-lettered. See [Events](api/events.md).
 void onOrderEvent(CloudEvent event) { ... }
 ```
 
+## Functions
+
+```yaml
+halyx:
+  functions:
+    resize:                        # FunctionInvoker bean name
+      name: resize-image           # Lambda function (name or ARN), Azure function or Cloud Run function; defaults to the key
+      timeout: 2m                  # 60s by default
+      idempotent: true             # false by default: only idempotent functions are retried after a request was sent
+      headers:
+        X-App: orders              # sent on every invocation
+      properties:
+        aws.lambda.qualifier: live
+```
+
+Each entry is a `FunctionInvoker` bean named after its key, and with halyx-reactor a `ReactiveFunctionInvoker` named
+`<key>Reactive`. With Micrometer Tracing, invocations carry the trace context. There's no health indicator: nothing
+can be checked without invoking the function. On Azure, a function key can come from a parameter store:
+
+```yaml
+halyx:
+  functions:
+    resize:
+      properties:
+        azure.functions.endpoint: https://orders.azurewebsites.net
+        azure.functions.key: ${resize-function-key}    # from spring.config.import
+```
+
+See [Functions](api/functions.md).
+
 ## Streams
 
 ```yaml
@@ -580,7 +610,7 @@ reports in reactive applications as in servlet ones.
 | Messaging metrics | `halyx.messaging.messages{subscription, listener, result}`, `halyx.messaging.in.flight` and `halyx.messaging.receive.errors`. |
 | Stream metrics | `halyx.stream.records{consumer, listener, result=received\|handled\|failed\|dead-lettered}`, `halyx.stream.poll.errors`, `halyx.stream.in.flight` and `halyx.stream.assigned.partitions`. |
 | Parameter metrics | `halyx.parameters.reads{store, source=cache\|backend}`, `halyx.parameters.changes{store}` and `halyx.parameters.watch.failures{store}`. |
-| Tracing | With Micrometer Tracing, publishers, event publishers and stream producers add the current trace context to message attributes, CloudEvent extensions (`traceparent`, `tracestate`) and record headers, and each listener invocation runs in a consumer span that continues the trace. Without Spring, `halyx-micrometer` does the same: see [Observations and tracing](api/errors.md#observations-and-tracing). |
+| Tracing | With Micrometer Tracing, publishers, event publishers, stream producers and function invokers add the current trace context to message attributes, CloudEvent extensions (`traceparent`, `tracestate`), record headers and invocation headers, and each listener invocation runs in a consumer span that continues the trace. Without Spring, `halyx-micrometer` does the same: see [Observations and tracing](api/errors.md#observations-and-tracing). |
 
 ## Customising
 

@@ -49,6 +49,7 @@ checks that for every provider, against emulators on every build and
 | [Messaging](api/messaging.md) | `Publisher`, `Subscription` | SNS, SQS | Service Bus | Pub/Sub | in-memory |
 | [Events](api/events.md) | `CloudEvent`, `EventPublisher` | EventBridge | Event Grid namespaces | Eventarc Advanced | in-memory |
 | [Streams](api/streams.md) | `StreamProducer`, `StreamConsumer` | MSK | Event Hubs (Kafka endpoint) | Managed Service for Apache Kafka | any Kafka cluster, in-memory |
+| [Functions](api/functions.md) | `FunctionInvoker` | Lambda | Azure Functions | Cloud Run functions | in-memory |
 | [SQL databases](api/sql.md) | `Database` (a JDBC `DataSource`) | RDS, Aurora | Azure Database for PostgreSQL and MySQL, Azure SQL | Cloud SQL | any PostgreSQL, MySQL or SQL Server |
 | [Caches](api/caches.md) | `Cache` | ElastiCache | Azure Cache for Redis, Azure Managed Redis | Memorystore | any Redis or Valkey server, in-memory |
 | [Parameters and secrets](api/parameters.md) | `ParameterStore` | SSM Parameter Store, Secrets Manager | App Configuration, Key Vault | Parameter Manager, Secret Manager | HashiCorp Vault, in-memory |
