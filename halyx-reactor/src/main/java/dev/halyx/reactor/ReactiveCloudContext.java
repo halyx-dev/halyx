@@ -19,6 +19,7 @@ import dev.halyx.CloudContext;
 import dev.halyx.cache.CacheConfig;
 import dev.halyx.cache.Codec;
 import dev.halyx.events.EventBusConfig;
+import dev.halyx.functions.FunctionConfig;
 import dev.halyx.messaging.SubscriptionConfig;
 import dev.halyx.messaging.TopicConfig;
 import dev.halyx.nosql.TableConfig;
@@ -82,6 +83,14 @@ public final class ReactiveCloudContext {
 
     public ReactiveEventPublisher eventPublisher(EventBusConfig config) {
         return reactive.wrap(context.eventPublisher(config));
+    }
+
+    public ReactiveFunctionInvoker functionInvoker(String function) {
+        return reactive.wrap(context.functionInvoker(function));
+    }
+
+    public ReactiveFunctionInvoker functionInvoker(FunctionConfig config) {
+        return reactive.wrap(context.functionInvoker(config));
     }
 
     public ReactiveStreamProducer streamProducer(StreamProducerConfig config) {
