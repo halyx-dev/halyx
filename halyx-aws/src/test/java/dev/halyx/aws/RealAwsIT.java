@@ -47,9 +47,12 @@ import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import dev.halyx.events.EventPublisher;
+import dev.halyx.functions.FunctionConfig;
+import dev.halyx.functions.FunctionInvoker;
 import dev.halyx.messaging.Subscription;
 import dev.halyx.tck.DocumentRepositoryConformanceTest;
 import dev.halyx.tck.EventBusConformanceTest;
+import dev.halyx.tck.FunctionConformanceTest;
 
 /**
  * The conformance kits against real AWS (tier 1: S3, DynamoDB, SNS, SQS, SSM, Secrets Manager). Runs only with
@@ -66,6 +69,7 @@ class RealAwsIT {
     private static final String ITEMS_SORTED = System.getProperty("halyx.real.aws.items-sorted-table");
     private static final String EVENT_BUS = System.getProperty("halyx.real.aws.event-bus");
     private static final String EVENTS_INBOX = System.getProperty("halyx.real.aws.events-inbox");
+    private static final String FUNCTION = System.getProperty("halyx.real.aws.function");
 
     private static Halyx halyx;
     private static SnsClient sns;
@@ -161,6 +165,45 @@ class RealAwsIT {
                 inbox = aws().subscription(EVENTS_INBOX);
             }
             return inbox;
+        }
+    }
+
+    /** The run's function, with the IAM login, invoked through Lambda's Invoke. */
+    @Nested
+    class Lambda extends FunctionConformanceTest {
+        @Override
+        protected FunctionConfig.Builder function() {
+            return FunctionConfig.builder(FUNCTION);
+        }
+
+        @Override
+        protected FunctionConfig.Builder missingFunction() {
+            return FunctionConfig.builder(FUNCTION + "-missing");
+        }
+
+        @Override
+        protected FunctionInvoker invoker(FunctionConfig config) {
+            return aws().functionInvoker(config);
+        }
+
+        @Override
+        protected long maxPayloadBytes() {
+            return 6L * 1024 * 1024;
+        }
+
+        @Override
+        protected long maxHeaderBytes() {
+            return 3_583;
+        }
+
+        @Override
+        protected boolean returnsHttpStatuses() {
+            return false;
+        }
+
+        @Override
+        protected Duration timeout() {
+            return Duration.ofMinutes(2);
         }
     }
 

@@ -137,6 +137,8 @@ teardown() {
   left+=$(aws sqs list-queues --queue-name-prefix "halyx-$RUN-" --query 'QueueUrls' --output text 2>/dev/null | grep -v None)
   left+=$(aws events list-event-buses --name-prefix "halyx-$RUN-" --query 'EventBuses[].Name' --output text)
   left+=$(aws events list-rules --name-prefix "halyx-$RUN-" --query 'Rules[].Name' --output text)
+  left+=$(aws lambda list-functions --query "Functions[?starts_with(FunctionName, 'halyx-$RUN-')].FunctionName" --output text)
+  left+=$(aws iam list-roles --query "Roles[?starts_with(RoleName, 'halyx-$RUN-')].RoleName" --output text) # not in the tagging index
   if [[ "$TIER" == 2 ]]; then
     for db in pg mysql; do
       left+=$(aws rds describe-db-instances --db-instance-identifier "halyx-$RUN-$db" \
@@ -308,24 +310,28 @@ ITEMS=$(terraform -chdir="$TF_DIR" output -raw items_table)
 ITEMS_SORTED=$(terraform -chdir="$TF_DIR" output -raw items_sorted_table)
 EVENT_BUS=$(terraform -chdir="$TF_DIR" output -raw event_bus)
 EVENTS_INBOX=$(terraform -chdir="$TF_DIR" output -raw events_inbox)
+FUNCTION=$(terraform -chdir="$TF_DIR" output -raw function)
 
 log "Running the conformance kits against real AWS"
 mvn -o verify -pl halyx-aws -Dit.test="${IT_TEST:-RealAwsIT}" -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
     -Dhalyx.real.aws=true -Dhalyx.real.aws.run="$RUN" -Dhalyx.real.aws.bucket="$BUCKET" \
     -Dhalyx.real.aws.items-table="$ITEMS" -Dhalyx.real.aws.items-sorted-table="$ITEMS_SORTED" \
-    -Dhalyx.real.aws.event-bus="$EVENT_BUS" -Dhalyx.real.aws.events-inbox="$EVENTS_INBOX"
+    -Dhalyx.real.aws.event-bus="$EVENT_BUS" -Dhalyx.real.aws.events-inbox="$EVENTS_INBOX" \
+    -Dhalyx.real.aws.function="$FUNCTION"
 status=$?
 [[ -n "${IT_TEST:-}" ]] && exit $status
 # Spring Boot 3 and 4: an auto-configured repository on the run's table with a sort key, the event bus,
 # halyx-reactor's WebFlux, reactive repository and event beans over the bucket, table and bus, @HalyxListener on
-# the run's SNS topic and queue with a claim check, and spring.config.import from SSM and Secrets Manager.
+# the run's SNS topic and queue with a claim check, spring.config.import from SSM and Secrets Manager, and a
+# FunctionInvoker bean on the run's function.
 mvn -o -q install -DskipTests -pl halyx-spring-boot-autoconfigure -am || exit 1
 for module in halyx-spring-boot-autoconfigure halyx-spring-boot4-tests; do
   log "Running the Spring Boot repository, event and reactive tests ($module) against real AWS"
-  mvn -o verify -pl "$module" -Dit.test='RealSpringRepositoryIT,RealSpringEventIT,RealSpringReactiveIT,RealSpringMessagingIT,RealSpringParametersIT' -Dtest=none \
+  mvn -o verify -pl "$module" -Dit.test='RealSpringRepositoryIT,RealSpringEventIT,RealSpringReactiveIT,RealSpringMessagingIT,RealSpringParametersIT,RealSpringFunctionIT' -Dtest=none \
       -Dsurefire.failIfNoSpecifiedTests=false \
       -Dhalyx.real.spring.repositories=true -Dhalyx.real.spring.events=true -Dhalyx.real.spring.reactive=true \
-      -Dhalyx.real.spring.messaging=true -Dhalyx.real.spring.parameters=true \
+      -Dhalyx.real.spring.messaging=true -Dhalyx.real.spring.parameters=true -Dhalyx.real.spring.functions=true \
+      -Dhalyx.real.spring.function="$FUNCTION" \
       -Dhalyx.real.spring.provider=aws -Dhalyx.real.spring.bucket="$BUCKET" \
       -Dhalyx.real.spring.table="$ITEMS_SORTED" \
       -Dhalyx.real.spring.event-bus="$EVENT_BUS" -Dhalyx.real.spring.inbox="$EVENTS_INBOX" \

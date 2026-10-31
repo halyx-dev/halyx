@@ -27,6 +27,8 @@ import dev.halyx.Halyx;
 import dev.halyx.CloudContext;
 import dev.halyx.config.ProviderConfig;
 import dev.halyx.events.EventPublisher;
+import dev.halyx.functions.FunctionConfig;
+import dev.halyx.functions.FunctionInvoker;
 import dev.halyx.messaging.ClaimCheck;
 import dev.halyx.messaging.SubscriptionConfig;
 import dev.halyx.messaging.TopicConfig;
@@ -39,6 +41,7 @@ import dev.halyx.tck.DocumentStoreConformanceTest;
 import dev.halyx.tck.ReactiveDocumentRepositoryConformanceTest;
 import dev.halyx.reactor.ReactiveHalyx;
 import dev.halyx.tck.EventBusConformanceTest;
+import dev.halyx.tck.FunctionConformanceTest;
 import dev.halyx.tck.MessagingConformanceTest;
 import dev.halyx.tck.ParameterStoreConformanceTest;
 
@@ -68,6 +71,8 @@ class RealGcpIT {
     private static final String DATABASE = System.getProperty("halyx.real.gcp.firestore-database");
     private static final String MESSAGE_BUS = System.getProperty("halyx.real.gcp.message-bus");
     private static final String EVENTS_INBOX = System.getProperty("halyx.real.gcp.events-inbox");
+    private static final String FUNCTION = System.getProperty("halyx.real.gcp.function");
+    private static final String FUNCTION_URL = System.getProperty("halyx.real.gcp.function-url");
 
     private static Halyx halyx;
     private static TopicAdminClient topics;
@@ -244,6 +249,38 @@ class RealGcpIT {
         @Override
         protected Duration timeout() {
             return Duration.ofSeconds(120);
+        }
+    }
+
+    /**
+     * The run's function at its {@code run.app} URL, with Google ID tokens from the test identity. A function that
+     * isn't deployed is addressed at its default URL, which Google answers with 404.
+     */
+    @Nested
+    class CloudRunFunctions extends FunctionConformanceTest {
+        @Override
+        protected FunctionConfig.Builder function() {
+            return FunctionConfig.builder(FUNCTION).property(GcpProperties.FUNCTIONS_URL, FUNCTION_URL);
+        }
+
+        @Override
+        protected FunctionConfig.Builder missingFunction() {
+            return FunctionConfig.builder(FUNCTION + "-missing").property(GcpProperties.FUNCTIONS_REGION, REGION);
+        }
+
+        @Override
+        protected FunctionInvoker invoker(FunctionConfig config) {
+            return gcp().functionInvoker(config);
+        }
+
+        @Override
+        protected long maxPayloadBytes() {
+            return 32L * 1024 * 1024;
+        }
+
+        @Override
+        protected Duration timeout() {
+            return Duration.ofMinutes(2);
         }
     }
 

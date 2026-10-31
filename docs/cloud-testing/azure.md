@@ -53,6 +53,9 @@ application would.
 - a free App Configuration store
 - a Standard Event Grid namespace with an `orders` topic and an `inbox` pull (queue) subscription; azurerm
   has no resources for namespace topics, so those two go through the `azapi` provider
+- the function kit's function app (the emulator tests' Python app) on a Basic plan's single instance, so the runs
+  it counts in memory hold for every invocation, with a storage account its host reaches with its managed
+  identity; the tests call the function with its function key
 
 Shared keys and local auth are **off everywhere**, so only Entra ID works. The principal gets Storage Blob
 Data Contributor, Service Bus Data Owner, Key Vault Secrets Officer, App Configuration Data Owner, EventGrid Data

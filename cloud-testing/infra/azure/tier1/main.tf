@@ -15,8 +15,8 @@
 #
 
 # Tier 1 real-cloud test resources on Azure: Blob Storage, Service Bus, Cosmos DB, Key Vault, App
-# Configuration and an Event Grid namespace in a resource group of the run's own. Entra ID only: shared keys and local auth are off,
-# and the test service principal gets data-plane roles on each resource.
+# Configuration, an Event Grid namespace and a function app in a resource group of the run's own. Entra ID only: shared keys and local auth are off,
+# and the test service principal gets data-plane roles on each resource. The function is invoked with its function key.
 
 terraform {
   required_version = ">= 1.5"
@@ -28,6 +28,10 @@ terraform {
     azapi = {
       source  = "Azure/azapi"
       version = "~> 2.0"
+    }
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.4"
     }
   }
 }
@@ -270,6 +274,86 @@ resource "azurerm_role_assignment" "events" {
   scope                = azurerm_eventgrid_namespace.events.id
   role_definition_name = each.key
   principal_id         = local.me
+}
+
+# --- Function app -----------------------------------------------------------------------------------------
+
+# The function kit invokes this function: the same function app the emulator tests serve with the Functions host.
+# A Basic plan's single instance, so the runs it counts in memory are the same for every invocation. The host reaches
+# its storage with the app's managed identity, as shared keys are off.
+data "archive_file" "tck" {
+  type        = "zip"
+  source_dir  = "${path.module}/../../../../halyx-azure/src/test/resources/functions/azure"
+  output_path = "${path.module}/.build/tck.zip"
+}
+
+resource "azurerm_storage_account" "functions" {
+  name                            = replace("halyx${var.run_id}fn", "-", "")
+  resource_group_name             = azurerm_resource_group.run.name
+  location                        = var.location
+  account_tier                    = "Standard"
+  account_replication_type        = "LRS"
+  account_kind                    = "StorageV2"
+  min_tls_version                 = "TLS1_2"
+  shared_access_key_enabled       = false
+  allow_nested_items_to_be_public = false
+  tags                            = local.tags
+}
+
+resource "azurerm_service_plan" "functions" {
+  name                = "${local.name}-functions"
+  resource_group_name = azurerm_resource_group.run.name
+  location            = var.location
+  os_type             = "Linux"
+  sku_name            = "B1"
+  worker_count        = 1
+  tags                = local.tags
+}
+
+resource "azurerm_linux_function_app" "tck" {
+  name                          = "${local.name}-tck"
+  resource_group_name           = azurerm_resource_group.run.name
+  location                      = var.location
+  service_plan_id               = azurerm_service_plan.functions.id
+  storage_account_name          = azurerm_storage_account.functions.name
+  storage_uses_managed_identity = true
+  zip_deploy_file               = data.archive_file.tck.output_path
+  https_only                    = true
+  identity {
+    type = "SystemAssigned"
+  }
+  site_config {
+    always_on = true
+    application_stack {
+      python_version = "3.12"
+    }
+  }
+  app_settings = {
+    SCM_DO_BUILD_DURING_DEPLOYMENT = "false" # the Python worker provides azure.functions
+  }
+  tags = local.tags
+}
+
+resource "azurerm_role_assignment" "functions_storage" {
+  for_each             = toset(["Storage Blob Data Owner", "Storage Queue Data Contributor", "Storage Table Data Contributor"])
+  scope                = azurerm_storage_account.functions.id
+  role_definition_name = each.key
+  principal_id         = azurerm_linux_function_app.tck.identity[0].principal_id
+}
+
+data "azurerm_function_app_host_keys" "tck" {
+  name                = azurerm_linux_function_app.tck.name
+  resource_group_name = azurerm_resource_group.run.name
+  depends_on          = [azurerm_role_assignment.functions_storage]
+}
+
+output "function_endpoint" {
+  value = "https://${azurerm_linux_function_app.tck.default_hostname}"
+}
+
+output "function_key" {
+  value     = data.azurerm_function_app_host_keys.tck.default_function_key
+  sensitive = true
 }
 
 output "storage_account" {

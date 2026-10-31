@@ -33,8 +33,10 @@ AWS_PROFILE=default AWS_REGION=ap-southeast-2 cloud-testing/scripts/aws-real-clo
 IT_TEST='RealAwsIT$SecretsManager' AWS_PROFILE=default AWS_REGION=ap-southeast-2 cloud-testing/scripts/aws-real-cloud.sh
 ```
 
-1. **Provision.** Terraform (`cloud-testing/infra/aws/tier1`) creates one S3 bucket, two DynamoDB tables, and an EventBridge
-   event bus with a rule that delivers the kit's events to an SQS inbox queue. Their names
+1. **Provision.** Terraform (`cloud-testing/infra/aws/tier1`) creates one S3 bucket, two DynamoDB tables, an EventBridge
+   event bus with a rule that delivers the kit's events to an SQS inbox queue, and the function kit's Lambda function
+   (the emulator tests' `tck.py`, on `python3.13`) with its execution role and a DynamoDB table it counts runs in,
+   since Lambda may serve invocations from several instances. Their names
    include a fresh run id (`r<yyMMddHHmm><hex>`), and everything is tagged `halyx-test=<run id>`.
 2. **Test.** `RealAwsIT` runs the conformance kits, and is enabled only by `-Dhalyx.real.aws=true`.
    The tests create SNS topics, SQS queues, SSM parameters and secrets themselves, then delete them.

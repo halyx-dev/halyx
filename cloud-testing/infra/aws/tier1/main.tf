@@ -25,6 +25,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.80"
     }
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.4"
+    }
   }
 }
 
@@ -206,6 +210,66 @@ resource "aws_sns_topic_subscription" "spring" {
   endpoint             = aws_sqs_queue.spring.arn
   raw_message_delivery = true
   depends_on           = [aws_sqs_queue_policy.spring]
+}
+
+# --- function ---------------------------------------------------------------------------------------------
+
+# The function kit invokes this function: the same file the emulator tests deploy. Lambda may run invocations on
+# several instances, so the runs it counts are kept in a table rather than in memory.
+data "archive_file" "tck" {
+  type        = "zip"
+  source_file = "${path.module}/../../../../halyx-aws/src/test/resources/functions/lambda/tck.py"
+  output_path = "${path.module}/.build/tck.zip"
+}
+
+resource "aws_dynamodb_table" "function_runs" {
+  name         = "halyx-${var.run_id}-function-runs"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "id"
+
+  attribute {
+    name = "id"
+    type = "S"
+  }
+}
+
+resource "aws_iam_role" "function" {
+  name = "halyx-${var.run_id}-function"
+  assume_role_policy = jsonencode({
+    Version   = "2012-10-17"
+    Statement = [{ Effect = "Allow", Principal = { Service = "lambda.amazonaws.com" }, Action = "sts:AssumeRole" }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "function_logs" {
+  role       = aws_iam_role.function.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+resource "aws_iam_role_policy" "function_runs" {
+  role = aws_iam_role.function.id
+  policy = jsonencode({
+    Version   = "2012-10-17"
+    Statement = [{ Effect = "Allow", Action = ["dynamodb:UpdateItem", "dynamodb:GetItem"], Resource = aws_dynamodb_table.function_runs.arn }]
+  })
+}
+
+resource "aws_lambda_function" "tck" {
+  function_name    = "halyx-${var.run_id}-tck"
+  role             = aws_iam_role.function.arn
+  runtime          = "python3.13"
+  handler          = "tck.handler"
+  filename         = data.archive_file.tck.output_path
+  source_code_hash = data.archive_file.tck.output_base64sha256
+  timeout          = 60
+  environment {
+    variables = { COUNTS_TABLE = aws_dynamodb_table.function_runs.name }
+  }
+  depends_on = [aws_iam_role_policy_attachment.function_logs, aws_iam_role_policy.function_runs]
+}
+
+output "function" {
+  value = aws_lambda_function.tck.function_name
 }
 
 output "event_bus" {

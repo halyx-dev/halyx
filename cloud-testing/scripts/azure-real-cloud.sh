@@ -283,6 +283,9 @@ fi
 EVENT_GRID=$(terraform -chdir="$TF_DIR" output -raw eventgrid_endpoint)
 EVENT_GRID_TOPIC=$(terraform -chdir="$TF_DIR" output -raw eventgrid_topic)
 EVENT_GRID_SUBSCRIPTION=$(terraform -chdir="$TF_DIR" output -raw eventgrid_subscription)
+FUNCTION_ENDPOINT=$(terraform -chdir="$TF_DIR" output -raw function_endpoint)
+# Read by the tests from the environment, so the key stays off the command line
+export HALYX_FUNCTION_KEY="$(terraform -chdir="$TF_DIR" output -raw function_key)"
 
 wait_for_blob_access
 sleep 30 # the other services' assignments were made at the same time; give them a little longer
@@ -296,19 +299,22 @@ mvn -o verify -pl halyx-azure -Dit.test="${IT_TEST:-RealAzureIT}" -Dtest=none -D
     -Dhalyx.real.azure.key-vault-url="$(terraform -chdir="$TF_DIR" output -raw key_vault_url)" \
     -Dhalyx.real.azure.appconfig-endpoint="$(terraform -chdir="$TF_DIR" output -raw appconfig_endpoint)" \
     -Dhalyx.real.azure.eventgrid-endpoint="$EVENT_GRID" -Dhalyx.real.azure.eventgrid-topic="$EVENT_GRID_TOPIC" \
-    -Dhalyx.real.azure.eventgrid-subscription="$EVENT_GRID_SUBSCRIPTION"
+    -Dhalyx.real.azure.eventgrid-subscription="$EVENT_GRID_SUBSCRIPTION" \
+    -Dhalyx.real.azure.function-endpoint="$FUNCTION_ENDPOINT"
 status=$?
 [[ -n "${IT_TEST:-}" ]] && exit $status
 # Spring Boot 3 and 4: an auto-configured repository on the run's table with a sort key, the event bus, the
-# reactive beans, @HalyxListener on the run's Service Bus topic with a claim check, and spring.config.import from
-# Key Vault and App Configuration.
+# reactive beans, @HalyxListener on the run's Service Bus topic with a claim check, spring.config.import from
+# Key Vault and App Configuration, and a FunctionInvoker bean on the run's function with its function key.
 mvn -o -q install -DskipTests -pl halyx-spring-boot-autoconfigure -am || exit 1
 for module in halyx-spring-boot-autoconfigure halyx-spring-boot4-tests; do
   log "Running the Spring Boot repository, event and reactive tests ($module) against real Azure"
-  mvn -o verify -pl "$module" -Dit.test='RealSpringRepositoryIT,RealSpringEventIT,RealSpringReactiveIT,RealSpringMessagingIT,RealSpringParametersIT' -Dtest=none \
+  mvn -o verify -pl "$module" -Dit.test='RealSpringRepositoryIT,RealSpringEventIT,RealSpringReactiveIT,RealSpringMessagingIT,RealSpringParametersIT,RealSpringFunctionIT' -Dtest=none \
       -Dsurefire.failIfNoSpecifiedTests=false \
       -Dhalyx.real.spring.repositories=true -Dhalyx.real.spring.events=true -Dhalyx.real.spring.reactive=true \
-      -Dhalyx.real.spring.messaging=true -Dhalyx.real.spring.parameters=true \
+      -Dhalyx.real.spring.messaging=true -Dhalyx.real.spring.parameters=true -Dhalyx.real.spring.functions=true \
+      -Dhalyx.real.spring.function=tck \
+      -Dhalyx.real.spring.function-properties="azure.functions.endpoint=$FUNCTION_ENDPOINT,azure.functions.key=\${HALYX_FUNCTION_KEY}" \
       -Dhalyx.real.spring.provider=azure -Dhalyx.real.spring.bucket="$CONTAINER" \
       -Dhalyx.real.spring.table="items-sorted" \
       -Dhalyx.real.spring.provider-properties="azure.cosmos.endpoint=$(terraform -chdir="$TF_DIR" output -raw cosmos_endpoint),azure.cosmos.database=halyx,azure.storage.account=$STORAGE,azure.servicebus.namespace=$(terraform -chdir="$TF_DIR" output -raw servicebus_namespace)" \

@@ -46,6 +46,9 @@ gcloud auth application-default login --impersonate-service-account=halyx-test@<
   descending, on both test tables, plus a collection-group index on `owner`
 - an Eventarc Advanced message bus, an enrollment matching every event, and a pipeline that publishes them to
   a Pub/Sub topic with an OAuth token for `halyx-test`, and the topic's inbox subscription
+- the function kit's Cloud Run function (the emulator tests' `main.py`, on `python312`), with one instance taking one
+  request at a time so the runs it counts in memory hold for every invocation, its source bucket, and
+  `roles/run.invoker` on it for the test service account only
 
 **Test.** `RealGcpIT` creates Pub/Sub topics and subscriptions named after the run, plus `tck-*` secrets
 and parameters (Parameter Manager both global and regional).

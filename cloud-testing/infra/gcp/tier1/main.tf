@@ -16,8 +16,8 @@
 
 # Tier 1 real-cloud test resources on GCP: a Cloud Storage bucket and a Firestore database of the run's own
 # (so tests never touch the project's (default) database), with the indexes the document store kit queries,
-# and an Eventarc Advanced message bus whose enrollment sends every event through a pipeline to a Pub/Sub
-# topic. Other Pub/Sub topics, secrets and parameters are created by the tests themselves.
+# an Eventarc Advanced message bus whose enrollment sends every event through a pipeline to a Pub/Sub topic,
+# and a Cloud Run function. Other Pub/Sub topics, secrets and parameters are created by the tests themselves.
 
 terraform {
   required_version = ">= 1.5"
@@ -25,6 +25,10 @@ terraform {
     google = {
       source  = "hashicorp/google"
       version = "~> 6.0"
+    }
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.4"
     }
   }
 }
@@ -177,6 +181,77 @@ resource "google_pubsub_subscription" "spring" {
   topic                      = google_pubsub_topic.spring.id
   ack_deadline_seconds       = 20
   message_retention_duration = "3600s"
+}
+
+# --- function ---------------------------------------------------------------------------------------------
+
+# The function kit invokes this function: the same file the emulator tests serve with the Functions Framework.
+# One instance taking one request at a time, so the runs it counts in memory are the same for every invocation.
+data "archive_file" "tck" {
+  type        = "zip"
+  output_path = "${path.module}/.build/tck.zip"
+  source {
+    content  = file("${path.module}/../../../../halyx-gcp/src/test/resources/functions/gcp/main.py")
+    filename = "main.py"
+  }
+  source {
+    content  = "functions-framework==3.*\n"
+    filename = "requirements.txt"
+  }
+}
+
+resource "google_storage_bucket" "functions" {
+  name                        = "halyx-${var.run_id}-functions"
+  location                    = upper(var.region)
+  force_destroy               = true
+  uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
+}
+
+resource "google_storage_bucket_object" "tck" {
+  name   = "tck-${data.archive_file.tck.output_md5}.zip"
+  bucket = google_storage_bucket.functions.name
+  source = data.archive_file.tck.output_path
+}
+
+resource "google_cloudfunctions2_function" "tck" {
+  name     = "halyx-${var.run_id}-tck"
+  location = var.region
+  build_config {
+    runtime     = "python312"
+    entry_point = "tck"
+    source {
+      storage_source {
+        bucket = google_storage_bucket.functions.name
+        object = google_storage_bucket_object.tck.name
+      }
+    }
+  }
+  service_config {
+    min_instance_count               = 0
+    max_instance_count               = 1
+    max_instance_request_concurrency = 1
+    timeout_seconds                  = 60
+    available_memory                 = "256M"
+    ingress_settings                 = "ALLOW_ALL"
+    service_account_email            = var.service_account
+  }
+}
+
+# Only the test service account may invoke it, with a Google ID token.
+resource "google_cloud_run_service_iam_member" "tck_invoker" {
+  location = var.region
+  service  = google_cloudfunctions2_function.tck.service_config[0].service
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${var.service_account}"
+}
+
+output "function" {
+  value = google_cloudfunctions2_function.tck.name
+}
+
+output "function_url" {
+  value = google_cloudfunctions2_function.tck.service_config[0].uri
 }
 
 output "bucket" {
