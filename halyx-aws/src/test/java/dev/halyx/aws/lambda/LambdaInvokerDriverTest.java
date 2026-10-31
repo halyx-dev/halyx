@@ -27,6 +27,7 @@ import dev.halyx.interceptor.InterceptorChain;
 import dev.halyx.json.Json;
 import org.junit.jupiter.api.Test;
 import software.amazon.awssdk.core.SdkBytes;
+import software.amazon.awssdk.core.exception.ApiCallAttemptTimeoutException;
 import software.amazon.awssdk.core.exception.SdkClientException;
 import software.amazon.awssdk.services.lambda.LambdaClient;
 import software.amazon.awssdk.services.lambda.model.InvocationType;
@@ -141,6 +142,31 @@ class LambdaInvokerDriverTest {
                     assertThat(e.getMessage()).contains("Runtime exited without providing a reason");
                     assertThat(e.providerErrorCode()).contains("Unhandled");
                 });
+    }
+
+    @Test
+    void aTimedOutCallIsUnavailable() {
+        LambdaClient slow = new LambdaClient() {
+            @Override
+            public InvokeResponse invoke(InvokeRequest request) {
+                throw ApiCallAttemptTimeoutException.create(2000);
+            }
+
+            @Override
+            public String serviceName() {
+                return "lambda";
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        FunctionConfig config = FunctionConfig.builder("resize-image").timeout(Duration.ofSeconds(2)).build();
+        FunctionInvoker invoker = new DefaultFunctionInvoker(new LambdaInvokerDriver(slow, () -> null, config), config,
+                InterceptorChain.empty());
+
+        assertThatThrownBy(() -> invoker.invoke(FunctionRequest.of("{}"))).isInstanceOf(UnavailableException.class)
+                .hasMessageContaining("PT2S");
     }
 
     @Test

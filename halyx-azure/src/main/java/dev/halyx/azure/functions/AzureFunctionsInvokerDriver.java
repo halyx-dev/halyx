@@ -26,6 +26,7 @@ import dev.halyx.azure.AzureErrors;
 import dev.halyx.azure.AzureProvider;
 import dev.halyx.capability.Capabilities;
 import dev.halyx.error.CloudException;
+import dev.halyx.error.UnavailableException;
 import dev.halyx.functions.FunctionConfig;
 import dev.halyx.functions.FunctionRequest;
 import dev.halyx.functions.FunctionResponse;
@@ -37,6 +38,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Invokes an HTTP-triggered Azure function with a POST to its URL, through a pipeline that logs in with an Entra ID
@@ -128,8 +130,15 @@ public final class AzureFunctionsInvokerDriver extends AbstractFunctionInvokerDr
         return MAX_PAYLOAD_BYTES;
     }
 
+    /** A call that outlasted the function's timeout is unavailable, as on the other clouds. */
     @Override
     protected Optional<CloudException> translateNative(Throwable error) {
+        for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+            if (cause instanceof TimeoutException) {
+                return Optional.of(new UnavailableException("Function " + config.name() + " did not respond within "
+                        + config.timeout(), error, provider, null));
+            }
+        }
         return AzureErrors.translate(error);
     }
 

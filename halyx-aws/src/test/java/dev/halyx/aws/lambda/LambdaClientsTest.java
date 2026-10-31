@@ -89,6 +89,13 @@ class LambdaClientsTest {
     }
 
     @Test
+    void theBeforeSendStrategyLeavesOutTheClientsDefaultRetryConditions() {
+        // With them, a timed-out invocation of a non-idempotent function was sent three times.
+        assertThat(LambdaClients.BEFORE_SEND_RETRIES.retryStrategy()).hasValueSatisfying(strategy ->
+                assertThat(strategy.useClientDefaults()).isFalse());
+    }
+
+    @Test
     void closingClosesOnlyItsOwnHttpClients() {
         clients.client(FunctionConfig.of("a"));
         clients.client(FunctionConfig.builder("b").timeout(Duration.ofMinutes(5)).build());

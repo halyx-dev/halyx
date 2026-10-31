@@ -47,9 +47,13 @@ import java.util.function.Supplier;
  */
 public final class LambdaClients implements AutoCloseable {
 
-    /** Throttled or unconnected attempts that didn't run the function, tried again with the SDK's backoff. */
-    private static final ClientOverrideConfiguration BEFORE_SEND_RETRIES = ClientOverrideConfiguration.builder()
-            .retryStrategy(StandardRetryStrategy.builder().retryOnException(LambdaClients::beforeSend).build())
+    /**
+     * Throttled or unconnected attempts that didn't run the function, tried again with the SDK's backoff. Without
+     * {@code useClientDefaults(false)} the client adds its own conditions, which retry timeouts and 5xx.
+     */
+    static final ClientOverrideConfiguration BEFORE_SEND_RETRIES = ClientOverrideConfiguration.builder()
+            .retryStrategy(StandardRetryStrategy.builder().retryOnException(LambdaClients::beforeSend)
+                    .useClientDefaults(false).build())
             .build();
 
     private final Region region;

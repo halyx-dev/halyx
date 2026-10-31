@@ -28,6 +28,8 @@ import dev.halyx.functions.FunctionResponse;
 import dev.halyx.functions.spi.AbstractFunctionInvokerDriver;
 import dev.halyx.json.Json;
 import software.amazon.awssdk.core.SdkBytes;
+import software.amazon.awssdk.core.exception.ApiCallAttemptTimeoutException;
+import software.amazon.awssdk.core.exception.ApiCallTimeoutException;
 import software.amazon.awssdk.services.lambda.LambdaAsyncClient;
 import software.amazon.awssdk.services.lambda.LambdaClient;
 import software.amazon.awssdk.services.lambda.model.InvocationType;
@@ -170,8 +172,13 @@ public final class LambdaInvokerDriver extends AbstractFunctionInvokerDriver {
         return headers.isEmpty() ? 0 : clientContext(headers).length();
     }
 
+    /** A call that outlasted the function's timeout is unavailable, as on the other clouds. */
     @Override
     protected Optional<CloudException> translateNative(Throwable error) {
+        if (error instanceof ApiCallAttemptTimeoutException || error instanceof ApiCallTimeoutException) {
+            return Optional.of(new UnavailableException("Function " + config.name() + " did not respond within "
+                    + config.timeout(), error, provider, null));
+        }
         return AwsErrors.translate(error);
     }
 

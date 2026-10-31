@@ -44,6 +44,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeoutException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -127,6 +128,28 @@ class AzureFunctionsInvokerDriverTest {
 
         next = new Response(302, new HttpHeaders(), "");
         assertThatThrownBy(() -> invoker.invoke(FunctionRequest.of("{}"))).isInstanceOf(UnknownCloudException.class);
+    }
+
+    @Test
+    void aTimedOutCallIsUnavailable() throws Exception {
+        HttpClient slow = new HttpClient() {
+            @Override
+            public Mono<HttpResponse> send(HttpRequest request) {
+                return send(request, Context.NONE);
+            }
+
+            @Override
+            public Mono<HttpResponse> send(HttpRequest request, Context context) {
+                return Mono.error(new TimeoutException("Channel response timed out after 2000 milliseconds."));
+            }
+        };
+        FunctionConfig config = FunctionConfig.builder("resize-image").timeout(Duration.ofSeconds(2)).build();
+        var driver = new AzureFunctionsInvokerDriver(new HttpPipelineBuilder().httpClient(slow).build(),
+                URI.create("https://orders.azurewebsites.net/api/resize-image").toURL(), config);
+        FunctionInvoker invoker = new DefaultFunctionInvoker(driver, config, InterceptorChain.empty());
+
+        assertThatThrownBy(() -> invoker.invoke(FunctionRequest.of("{}"))).isInstanceOf(UnavailableException.class)
+                .hasMessageContaining("PT2S");
     }
 
     @Test
