@@ -19,6 +19,8 @@ import dev.halyx.aws.dynamodb.DynamoDocumentStoreDriver;
 import dev.halyx.aws.elasticache.ElastiCacheIamTokens;
 import dev.halyx.aws.messaging.SnsPublisherDriver;
 import dev.halyx.aws.events.EventBridgePublisherDriver;
+import dev.halyx.aws.lambda.LambdaClients;
+import dev.halyx.aws.lambda.LambdaInvokerDriver;
 import dev.halyx.aws.msk.MskIamTokens;
 import dev.halyx.aws.messaging.SqsPublisherDriver;
 import dev.halyx.aws.messaging.SqsSubscriptionDriver;
@@ -38,6 +40,8 @@ import dev.halyx.error.UnsupportedFeatureException;
 import dev.halyx.jdbc.JdbcDatabases;
 import dev.halyx.events.EventBusConfig;
 import dev.halyx.events.spi.EventPublisherDriver;
+import dev.halyx.functions.FunctionConfig;
+import dev.halyx.functions.spi.FunctionInvokerDriver;
 import dev.halyx.kafka.KafkaCredentialsSource;
 import dev.halyx.kafka.KafkaStreamClients;
 import dev.halyx.messaging.SubscriptionConfig;
@@ -95,6 +99,7 @@ import software.amazon.awssdk.services.sts.StsClient;
 import software.amazon.awssdk.services.sts.auth.StsAssumeRoleCredentialsProvider;
 import software.amazon.awssdk.services.sts.model.AssumeRoleRequest;
 
+import java.time.Duration;
 import java.util.Locale;
 import java.util.Map;
 
@@ -118,6 +123,7 @@ final class AwsConnection implements ProviderConnection {
     private SnsAsyncClient snsAsync;
     private SqsAsyncClient sqsAsync;
     private EventBridgeAsyncClient eventBridgeAsync;
+    private LambdaClients lambdas;
     private SdkAsyncHttpClient nettyHttp;
     private RedisCaches caches;
     private KafkaStreamClients streams;
@@ -237,16 +243,20 @@ final class AwsConnection implements ProviderConnection {
     /** One Netty connection pool for every non-blocking client, tuned by {@link HttpSettings} as the blocking one is. */
     private synchronized SdkAsyncHttpClient nettyHttp() {
         if (nettyHttp == null) {
-            HttpSettings settings = HttpSettings.from(config);
-            nettyHttp = NettyNioAsyncHttpClient.builder()
-                    .maxConcurrency(settings.maxConnections())
-                    .connectionTimeout(settings.connectTimeout())
-                    .readTimeout(settings.readTimeout())
-                    .connectionMaxIdleTime(settings.idleTimeout())
-                    .connectionAcquisitionTimeout(settings.acquireTimeout())
-                    .build();
+            nettyHttp = newNettyHttp(HttpSettings.from(config).readTimeout());
         }
         return nettyHttp;
+    }
+
+    private SdkAsyncHttpClient newNettyHttp(Duration readTimeout) {
+        HttpSettings settings = HttpSettings.from(config);
+        return NettyNioAsyncHttpClient.builder()
+                .maxConcurrency(settings.maxConnections())
+                .connectionTimeout(settings.connectTimeout())
+                .readTimeout(readTimeout)
+                .connectionMaxIdleTime(settings.idleTimeout())
+                .connectionAcquisitionTimeout(settings.acquireTimeout())
+                .build();
     }
 
     @Override
@@ -384,6 +394,21 @@ final class AwsConnection implements ProviderConnection {
         return new EventBridgePublisherDriver(eventBridge(), bus.name(), this::eventBridgeAsync);
     }
 
+    /** A Lambda function, by name or ARN, at the version or alias {@code aws.lambda.qualifier}. */
+    @Override
+    public synchronized FunctionInvokerDriver functionInvoker(FunctionConfig function) {
+        LambdaClients clients = lambdas();
+        return new LambdaInvokerDriver(clients.client(function), () -> clients.asyncClient(function), function);
+    }
+
+    private LambdaClients lambdas() {
+        if (lambdas == null) {
+            lambdas = new LambdaClients(region(), credentials(), config.endpoint(), overrides(),
+                    HttpSettings.from(config).readTimeout(), this::http, this::nettyHttp, this::newHttp, this::newNettyHttp);
+        }
+        return lambdas;
+    }
+
     private EventBridgeClient eventBridge() {
         if (eventBridge == null) {
             var builder = EventBridgeClient.builder().region(region()).credentialsProvider(credentials())
@@ -486,17 +511,21 @@ final class AwsConnection implements ProviderConnection {
 
     private SdkHttpClient http() {
         if (http == null) {
-            HttpSettings settings = HttpSettings.from(config);
-            http = Apache5HttpClient.builder()
-                    .maxConnections(settings.maxConnections())
-                    .connectionTimeout(settings.connectTimeout())
-                    .socketTimeout(settings.readTimeout())
-                    .connectionMaxIdleTime(settings.idleTimeout())
-                    .connectionAcquisitionTimeout(settings.acquireTimeout())
-                    .tcpKeepAlive(true)
-                    .build();
+            http = newHttp(HttpSettings.from(config).readTimeout());
         }
         return http;
+    }
+
+    private SdkHttpClient newHttp(Duration readTimeout) {
+        HttpSettings settings = HttpSettings.from(config);
+        return Apache5HttpClient.builder()
+                .maxConnections(settings.maxConnections())
+                .connectionTimeout(settings.connectTimeout())
+                .socketTimeout(readTimeout)
+                .connectionMaxIdleTime(settings.idleTimeout())
+                .connectionAcquisitionTimeout(settings.acquireTimeout())
+                .tcpKeepAlive(true)
+                .build();
     }
 
     @Override
@@ -524,6 +553,10 @@ final class AwsConnection implements ProviderConnection {
         if (eventBridge != null) {
             eventBridge.close();
             eventBridge = null;
+        }
+        if (lambdas != null) {
+            lambdas.close(); // before the shared HTTP clients its clients send through
+            lambdas = null;
         }
         if (caches != null) {
             caches.close();

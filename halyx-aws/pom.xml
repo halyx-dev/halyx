@@ -113,6 +113,11 @@
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>eventbridge</artifactId>
         </dependency>
+        <!-- Function invocation: Lambda's Invoke -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>lambda</artifactId>
+        </dependency>
         <!--
           Security fixes: the AWS SDK's Netty and Lettuce's, held at the patched versions halyx-parent manages. Declared here so
           they are nearer than the copies the libraries bring, and win in applications too.

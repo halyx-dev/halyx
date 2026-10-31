@@ -87,7 +87,7 @@ public final class AzureErrors {
     }
 
     /** Azure sends Retry-After (seconds) and, on some services, x-ms-retry-after-ms. */
-    private static Duration retryAfter(HttpResponse response) {
+    public static Duration retryAfter(HttpResponse response) {
         String millis = response.getHeaderValue(RETRY_AFTER_MS);
         if (millis != null) {
             try {

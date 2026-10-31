@@ -53,6 +53,9 @@ public final class AwsProperties {
     /** Cache property: {@code "true"} for ElastiCache Serverless caches. */
     public static final String ELASTICACHE_SERVERLESS = "aws.elasticache.serverless";
 
+    /** Function property: the Lambda version or alias to invoke, such as {@code live}; the unpublished version if unset. */
+    public static final String LAMBDA_QUALIFIER = "aws.lambda.qualifier";
+
     private AwsProperties() {
     }
 }

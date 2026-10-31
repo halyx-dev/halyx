@@ -42,6 +42,18 @@ public final class GcpProperties {
      */
     public static final String EVENTARC_LOCATION = "gcp.eventarc.location";
 
+    /**
+     * Function property: the function's region, such as {@code europe-west2}, for its default URL
+     * {@code https://<region>-<project>.cloudfunctions.net/<name>}.
+     */
+    public static final String FUNCTIONS_REGION = "gcp.functions.region";
+
+    /** Function property: the function's URL, such as a {@code run.app} URL, instead of the default one. */
+    public static final String FUNCTIONS_URL = "gcp.functions.url";
+
+    /** Function property: the audience of the ID tokens sent to the function, when it isn't the function's URL. */
+    public static final String FUNCTIONS_AUDIENCE = "gcp.functions.audience";
+
     private GcpProperties() {
     }
 }
