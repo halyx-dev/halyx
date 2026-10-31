@@ -22,6 +22,7 @@ import dev.halyx.cache.CacheConfig;
 import dev.halyx.cache.Codec;
 import dev.halyx.error.UnsupportedFeatureException;
 import dev.halyx.events.EventPublisher;
+import dev.halyx.functions.FunctionInvoker;
 import dev.halyx.messaging.Publisher;
 import dev.halyx.nosql.DocumentStore;
 import dev.halyx.messaging.Subscription;
@@ -121,6 +122,11 @@ public final class HalyxBlobStores {
     public EventPublisher eventPublisher(String property, String provider, String name,
                                          HalyxProperties.EventBusProperties bus) {
         return context(property, provider).eventPublisher(bus.toEventBusConfig(name));
+    }
+
+    public FunctionInvoker functionInvoker(String property, String provider, String name,
+                                           HalyxProperties.FunctionProperties function) {
+        return context(property, provider).functionInvoker(function.toFunctionConfig(name));
     }
 
     public Publisher publisher(String property, String provider, String name, HalyxProperties.TopicProperties topic) {

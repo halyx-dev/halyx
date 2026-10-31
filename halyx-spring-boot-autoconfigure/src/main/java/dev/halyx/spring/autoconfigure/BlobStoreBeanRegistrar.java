@@ -17,6 +17,7 @@ package dev.halyx.spring.autoconfigure;
 
 import dev.halyx.cache.Cache;
 import dev.halyx.events.EventPublisher;
+import dev.halyx.functions.FunctionInvoker;
 import dev.halyx.messaging.Publisher;
 import dev.halyx.nosql.DocumentStore;
 import dev.halyx.messaging.Subscription;
@@ -160,6 +161,16 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
                     definition.getConstructorArgumentValues().addIndexedArgumentValue(3, bus);
                     definition.setDescription("Halyx event bus " + name);
                     names.register(name, "halyx.event-buses." + name, "name", definition);
+                });
+        binder.bind("halyx.functions", Bindable.mapOf(String.class, HalyxProperties.FunctionProperties.class))
+                .orElse(Map.of())
+                .forEach((name, function) -> {
+                    RootBeanDefinition definition = serviceBean(FunctionInvoker.class, "functionInvoker",
+                            "halyx.functions." + name, function.provider());
+                    definition.getConstructorArgumentValues().addIndexedArgumentValue(2, name);
+                    definition.getConstructorArgumentValues().addIndexedArgumentValue(3, function);
+                    definition.setDescription("Halyx function " + name);
+                    names.register(name, "halyx.functions." + name, "name", definition);
                 });
         binder.bind("halyx.subscriptions", Bindable.mapOf(String.class, HalyxProperties.SubscriptionProperties.class))
                 .orElse(Map.of())

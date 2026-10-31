@@ -22,6 +22,7 @@ import dev.halyx.reactor.ReactiveBlobStore;
 import dev.halyx.reactor.ReactiveCache;
 import dev.halyx.reactor.ReactiveDocumentStore;
 import dev.halyx.reactor.ReactiveEventPublisher;
+import dev.halyx.reactor.ReactiveFunctionInvoker;
 import dev.halyx.reactor.ReactiveHalyx;
 import dev.halyx.reactor.ReactiveParameterStore;
 import dev.halyx.reactor.ReactivePublisher;
@@ -74,6 +75,7 @@ class HalyxReactorTest {
             "halyx.subscriptions.billing.name=orders-billing",
             "halyx.subscriptions.billing.topic=orders",
             "halyx.event-buses.bus.name=events",
+            "halyx.functions.resize.name=resize-image",
             "halyx.caches.sessions.endpoint=redis://localhost:6379",
             "halyx.parameter-stores.config.kind=parameters",
             "halyx.stream-clusters.events.bootstrap-servers=memory:9092",
@@ -118,6 +120,8 @@ class HalyxReactorTest {
             assertThat(context.getBean("billingReactive", ReactiveSubscription.class).blocking())
                     .isSameAs(context.getBean("billing", Subscription.class));
             assertThat(context.getBean("busReactive")).isInstanceOf(ReactiveEventPublisher.class);
+            assertThat(context.getBean("resizeReactive", ReactiveFunctionInvoker.class).function())
+                    .isEqualTo("resize-image");
             assertThat(context.getBean("sessionsReactive")).isInstanceOf(ReactiveCache.class);
             assertThat(context.getBean("configReactive")).isInstanceOf(ReactiveParameterStore.class);
             assertThat(context.getBean("ledger-outReactive")).isInstanceOf(ReactiveStreamProducer.class);
