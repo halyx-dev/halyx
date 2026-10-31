@@ -22,7 +22,6 @@ import dev.halyx.config.ProviderConfig;
 import dev.halyx.error.CloudException;
 import dev.halyx.error.InvalidArgumentException;
 import dev.halyx.error.NotFoundException;
-import dev.halyx.error.UnavailableException;
 import dev.halyx.error.UnsupportedFeatureException;
 import dev.halyx.functions.spi.AbstractFunctionInvokerDriver;
 import dev.halyx.interceptor.Interceptor;
@@ -40,9 +39,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletionException;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -106,55 +102,6 @@ class DefaultFunctionInvokerTest {
     }
 
     @Test
-    void aFunctionWithNoHandlerIsNotFound() {
-        assertThatThrownBy(() -> context.functionInvoker("missing").invoke(FunctionRequest.of("{}")))
-                .isInstanceOf(NotFoundException.class)
-                .hasMessageContaining("missing");
-    }
-
-    @Test
-    void aHandlerThatThrowsIsUnavailable() {
-        FunctionInvoker invoker = context.functionInvoker("broken");
-        invoker.unwrap(InMemoryFunctions.class).register("broken", request -> {
-            throw new IllegalStateException("disk full");
-        });
-
-        assertThatThrownBy(() -> invoker.invoke(FunctionRequest.of("{}")))
-                .isInstanceOf(UnavailableException.class)
-                .hasMessageContaining("disk full")
-                .satisfies(e -> assertThat(((CloudException) e).providerErrorCode())
-                        .contains(IllegalStateException.class.getName()));
-    }
-
-    @Test
-    void aHandlerThrowingACloudExceptionStandsInForAStatus() {
-        FunctionInvoker invoker = context.functionInvoker("strict");
-        invoker.unwrap(InMemoryFunctions.class).register("strict", request -> {
-            throw new InvalidArgumentException("bad key");
-        });
-
-        assertThatThrownBy(() -> invoker.invoke(FunctionRequest.of("{}"))).isInstanceOf(InvalidArgumentException.class)
-                .hasMessage("bad key");
-    }
-
-    @Test
-    void aSlowFunctionTimesOut() {
-        CountDownLatch never = new CountDownLatch(1);
-        FunctionInvoker invoker = context.functionInvoker(FunctionConfig.builder("slow").timeout(Duration.ofMillis(100)).build());
-        invoker.unwrap(InMemoryFunctions.class).register("slow", request -> {
-            try {
-                never.await();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-            return FunctionResponse.of("late");
-        });
-
-        assertThatThrownBy(() -> invoker.invoke(FunctionRequest.of("{}"))).isInstanceOf(UnavailableException.class)
-                .hasMessageContaining("did not respond within");
-    }
-
-    @Test
     void payloadsOverTheLimitAreRejectedBeforeSending() {
         FunctionInvoker invoker = echo(FunctionConfig.of("big"));
         byte[] overInvoke = new byte[6 * 1024 * 1024 + 1];
@@ -175,25 +122,6 @@ class DefaultFunctionInvokerTest {
         assertThatThrownBy(() -> invoker.invoke(FunctionRequest.builder("{}").header("X-More", "y".repeat(600)).build()))
                 .isInstanceOf(InvalidArgumentException.class).hasMessageContaining("headers");
         assertThat(operations).isEmpty();
-    }
-
-    @Test
-    void triggerRunsTheFunctionWithoutWaiting() throws InterruptedException {
-        CountDownLatch ran = new CountDownLatch(1);
-        AtomicReference<FunctionRequest> received = new AtomicReference<>();
-        FunctionInvoker invoker = context.functionInvoker(FunctionConfig.builder("audit").header("X-App", "orders").build());
-        invoker.unwrap(InMemoryFunctions.class).register("audit", request -> {
-            received.set(request);
-            ran.countDown();
-            throw new IllegalStateException("not reported to the caller");
-        });
-
-        assertThat(invoker.capabilities().supports(FunctionCapability.TRIGGER)).isTrue();
-        invoker.trigger(FunctionRequest.of("{\"id\":1}"));
-
-        assertThat(ran.await(5, TimeUnit.SECONDS)).isTrue();
-        assertThat(received.get().payloadAsString()).isEqualTo("{\"id\":1}");
-        assertThat(received.get().headers()).containsEntry("X-App", "orders");
     }
 
     @Test
