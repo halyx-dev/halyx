@@ -1,0 +1,19 @@
+{
+  "masterKey": {
+    "name": "master",
+    "value": "halyx-tck-master-key",
+    "encrypted": false
+  },
+  "functionKeys": [
+    {
+      "name": "default",
+      "value": "halyx-tck-function-key",
+      "encrypted": false
+    }
+  ],
+  "systemKeys": [],
+  "hostName": null,
+  "instanceId": "00000000000000000000000000000000",
+  "source": "runtime",
+  "decryptionKeyId": ""
+}

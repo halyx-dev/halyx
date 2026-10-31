@@ -18,6 +18,7 @@ package dev.halyx.tck;
 import dev.halyx.error.CloudException;
 import dev.halyx.error.InvalidArgumentException;
 import dev.halyx.error.NotFoundException;
+import dev.halyx.error.ThrottledException;
 import dev.halyx.error.UnavailableException;
 import dev.halyx.error.UnsupportedFeatureException;
 import dev.halyx.functions.FunctionCapability;
@@ -47,16 +48,19 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * through the provider's invoker. The function takes a JSON object whose {@code action} says what to do:
  *
  * <ul>
- *   <li>{@code echo}: returns {@code {"body": <the request payload as a string>, "headers": {<name>: <value>}}}, with
+ *   <li>{@code echo}: returns {@code {"body": <the request payload, as JSON>, "headers": {<name>: <value>}}}, with
  *       every header it received (on Lambda, the {@code ClientContext}'s {@code custom} map)</li>
  *   <li>{@code fail}: throws an exception with the request's {@code message}</li>
  *   <li>{@code status}: answers with the HTTP status {@code status} (HTTP functions only)</li>
- *   <li>{@code sleep}: waits {@code millis} milliseconds, then returns {@code {}}</li>
+ *   <li>{@code sleep}: adds one to the count for {@code id}, waits {@code millis} milliseconds, then returns
+ *       {@code {}}</li>
  *   <li>{@code count}: adds one to the count for {@code id}, then throws if {@code fail} is true</li>
  *   <li>{@code read}: returns {@code {"count": <the count for id>}}</li>
  * </ul>
  *
- * Counts may be kept in the function's memory, so the environment should serve the function from one instance.
+ * Counts may be kept in the function's memory, so the environment must serve the function from one instance, such as
+ * with a concurrency or instance limit of one. A function busy with another invocation may then be throttled, so
+ * reads of a count wait for it.
  */
 public abstract class FunctionConformanceTest {
 
@@ -123,8 +127,28 @@ public abstract class FunctionConformanceTest {
         return seen;
     }
 
+    /** The count for {@code id}, once the function's one instance is free to answer. */
     private long count(FunctionInvoker invoker, String id) {
-        return ((Number) json(invoker.invoke(action("read", Map.of("id", id)))).get("count")).longValue();
+        Instant deadline = Instant.now().plus(timeout());
+        while (true) {
+            try {
+                return ((Number) json(invoker.invoke(action("read", Map.of("id", id)))).get("count")).longValue();
+            } catch (ThrottledException busy) {
+                if (Instant.now().isAfter(deadline)) {
+                    throw busy;
+                }
+                pause(Duration.ofMillis(500));
+            }
+        }
+    }
+
+    private static void pause(Duration duration) {
+        try {
+            Thread.sleep(duration);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
     }
 
     @Test
@@ -134,7 +158,8 @@ public abstract class FunctionConformanceTest {
 
         FunctionResponse response = invoker().invoke(request);
 
-        assertThat(json(response).get("body")).isEqualTo(request.payloadAsString());
+        // Compared as JSON: Lambda hands the function its payload parsed, so it can't echo the same bytes.
+        assertThat(json(response).get("body")).isEqualTo(Json.parse(request.payloadAsString()));
         assertThat(response.contentType()).startsWith("application/json");
     }
 
@@ -197,10 +222,14 @@ public abstract class FunctionConformanceTest {
         FunctionInvoker invoker = invoker(function().timeout(Duration.ofSeconds(2)).build());
         invoker.invoke(action("echo", Map.of())); // started, so a cold start doesn't count towards the timeout
 
+        String id = UUID.randomUUID().toString();
         Instant start = Instant.now();
-        assertThatThrownBy(() -> invoker.invoke(action("sleep", Map.of("millis", 15_000))))
+        assertThatThrownBy(() -> invoker.invoke(action("sleep", Map.of("id", id, "millis", 6_000))))
                 .isInstanceOf(UnavailableException.class);
-        assertThat(Duration.between(start, Instant.now())).isLessThan(Duration.ofSeconds(12));
+        // Back before the sleep could have finished, so neither waited for it nor sent again
+        assertThat(Duration.between(start, Instant.now())).isLessThan(Duration.ofSeconds(5));
+        // A non-idempotent function isn't sent again after it timed out: it may still be running.
+        assertThat(count(invoker, id)).as("runs of the timed-out invocation").isEqualTo(1);
     }
 
     @Test
@@ -220,13 +249,13 @@ public abstract class FunctionConformanceTest {
 
         FunctionResponse response = invoker().async().invoke(request).join();
 
-        assertThat(json(response).get("body")).isEqualTo(request.payloadAsString());
+        assertThat(json(response).get("body")).isEqualTo(Json.parse(request.payloadAsString()));
         assertThatThrownBy(() -> invoker(missingFunction().build()).async().invoke(action("echo", Map.of())).join())
                 .isInstanceOf(CompletionException.class).hasCauseInstanceOf(NotFoundException.class);
     }
 
     @Test
-    void triggerRunsTheFunctionWhereDeclared() throws InterruptedException {
+    void triggerRunsTheFunctionWhereDeclared() {
         FunctionInvoker invoker = invoker();
         String id = UUID.randomUUID().toString();
         if (!invoker.capabilities().supports(FunctionCapability.TRIGGER)) {
@@ -241,7 +270,7 @@ public abstract class FunctionConformanceTest {
     }
 
     @Test
-    void triggerHeadersWhereDeclared() throws InterruptedException {
+    void triggerHeadersWhereDeclared() {
         FunctionInvoker invoker = invoker();
         assumeTrue(invoker.capabilities().supports(FunctionCapability.TRIGGER), "no trigger");
         String id = UUID.randomUUID().toString();
@@ -257,10 +286,10 @@ public abstract class FunctionConformanceTest {
         awaitCount(invoker, id);
     }
 
-    private void awaitCount(FunctionInvoker invoker, String id) throws InterruptedException {
+    private void awaitCount(FunctionInvoker invoker, String id) {
         Instant deadline = Instant.now().plus(timeout());
         while (count(invoker, id) < 1 && Instant.now().isBefore(deadline)) {
-            Thread.sleep(200);
+            pause(Duration.ofMillis(200));
         }
         assertThat(count(invoker, id)).as("runs of the triggered invocation").isEqualTo(1);
     }

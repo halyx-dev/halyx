@@ -48,11 +48,13 @@ public final class TckFunction {
     private FunctionResponse handle(FunctionRequest request) {
         Map<String, Object> payload = Json.parseObject(request.payloadAsString()).orElse(Map.of());
         return switch (String.valueOf(payload.get("action"))) {
-            case "echo" -> FunctionResponse.of(Json.write(Map.of("body", request.payloadAsString(),
-                    "headers", request.headers())));
+            case "echo" -> FunctionResponse.of(Json.write(Map.of("body", payload, "headers", request.headers())));
             case "fail" -> throw new IllegalStateException(String.valueOf(payload.get("message")));
             case "status" -> throw status(((Number) payload.get("status")).intValue());
             case "sleep" -> {
+                if (payload.containsKey("id")) {
+                    counts.computeIfAbsent(String.valueOf(payload.get("id")), id -> new AtomicLong()).incrementAndGet();
+                }
                 try {
                     Thread.sleep(((Number) payload.get("millis")).longValue());
                 } catch (InterruptedException e) {
