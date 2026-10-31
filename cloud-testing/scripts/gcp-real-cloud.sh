@@ -20,6 +20,7 @@
 #   cloud-testing/scripts/gcp-real-cloud.sh                                   # project from gcloud config
 #   GCP_PROJECT=my-project GCP_REGION=australia-southeast1 cloud-testing/scripts/gcp-real-cloud.sh
 #   IT_TEST='RealGcpIT$Firestore' cloud-testing/scripts/gcp-real-cloud.sh     # one suite only
+#   IT_TEST='...' SPRING_IT_TEST=RealSpringFunctionIT cloud-testing/scripts/gcp-real-cloud.sh   # one suite, plus Spring ones
 #   TIER=2 cloud-testing/scripts/gcp-real-cloud.sh                            # Cloud SQL PostgreSQL and MySQL with IAM auth
 #   TIER=3 cloud-testing/scripts/gcp-real-cloud.sh                            # Memorystore for Valkey with IAM auth
 #   TIER=4 cloud-testing/scripts/gcp-real-cloud.sh                            # streams on Managed Kafka with IAM, plus Spring Boot
@@ -347,7 +348,8 @@ mvn -o verify -pl halyx-gcp -Dit.test="${IT_TEST:-RealGcpIT}" -Dtest=none -Dsure
     -Dhalyx.real.gcp.message-bus="$MESSAGE_BUS" -Dhalyx.real.gcp.events-inbox="$EVENTS_INBOX" \
     -Dhalyx.real.gcp.function="$FUNCTION" -Dhalyx.real.gcp.function-url="$FUNCTION_URL"
 status=$?
-[[ -n "${IT_TEST:-}" ]] && exit $status
+# With IT_TEST, the Spring tests run only when SPRING_IT_TEST names them.
+[[ -n "${IT_TEST:-}" && -z "${SPRING_IT_TEST:-}" ]] && exit $status
 # Spring Boot 3 and 4: an auto-configured repository on the run's table with a sort key, the event bus,
 # halyx-reactor's WebFlux, reactive repository and event beans over the bucket, table and message bus,
 # @HalyxListener on the run's Pub/Sub topic with a claim check, spring.config.import from Secret Manager and
@@ -355,7 +357,7 @@ status=$?
 mvn -o -q install -DskipTests -pl halyx-spring-boot-autoconfigure -am || exit 1
 for module in halyx-spring-boot-autoconfigure halyx-spring-boot4-tests; do
   log "Running the Spring Boot repository, event and reactive tests ($module) against real GCP"
-  mvn -o verify -pl "$module" -Dit.test='RealSpringRepositoryIT,RealSpringEventIT,RealSpringReactiveIT,RealSpringMessagingIT,RealSpringParametersIT,RealSpringFunctionIT' -Dtest=none \
+  mvn -o verify -pl "$module" -Dit.test="${SPRING_IT_TEST:-RealSpringRepositoryIT,RealSpringEventIT,RealSpringReactiveIT,RealSpringMessagingIT,RealSpringParametersIT,RealSpringFunctionIT}" -Dtest=none \
       -Dsurefire.failIfNoSpecifiedTests=false \
       -Dhalyx.real.spring.repositories=true -Dhalyx.real.spring.events=true -Dhalyx.real.spring.reactive=true \
       -Dhalyx.real.spring.messaging=true -Dhalyx.real.spring.parameters=true -Dhalyx.real.spring.functions=true \

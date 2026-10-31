@@ -241,16 +241,15 @@ resource "aws_iam_role" "function" {
   })
 }
 
-resource "aws_iam_role_policy_attachment" "function_logs" {
-  role       = aws_iam_role.function.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-}
-
-resource "aws_iam_role_policy" "function_runs" {
+# Inline only, as for tier 5's role: the function's logs and its runs table.
+resource "aws_iam_role_policy" "function" {
   role = aws_iam_role.function.id
   policy = jsonencode({
-    Version   = "2012-10-17"
-    Statement = [{ Effect = "Allow", Action = ["dynamodb:UpdateItem", "dynamodb:GetItem"], Resource = aws_dynamodb_table.function_runs.arn }]
+    Version = "2012-10-17"
+    Statement = [
+      { Effect = "Allow", Action = ["dynamodb:UpdateItem", "dynamodb:GetItem"], Resource = aws_dynamodb_table.function_runs.arn },
+      { Effect = "Allow", Action = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"], Resource = "*" },
+    ]
   })
 }
 
@@ -265,7 +264,7 @@ resource "aws_lambda_function" "tck" {
   environment {
     variables = { COUNTS_TABLE = aws_dynamodb_table.function_runs.name }
   }
-  depends_on = [aws_iam_role_policy_attachment.function_logs, aws_iam_role_policy.function_runs]
+  depends_on = [aws_iam_role_policy.function]
 }
 
 output "function" {

@@ -220,6 +220,8 @@ resource "google_cloudfunctions2_function" "tck" {
   build_config {
     runtime     = "python312"
     entry_point = "tck"
+    # Built as the test service account, so the run needs no other identity
+    service_account = "projects/${var.project}/serviceAccounts/${var.service_account}"
     source {
       storage_source {
         bucket = google_storage_bucket.functions.name

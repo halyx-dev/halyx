@@ -16,7 +16,8 @@
 
 # Tier 1 real-cloud test resources on Azure: Blob Storage, Service Bus, Cosmos DB, Key Vault, App
 # Configuration, an Event Grid namespace and a function app in a resource group of the run's own. Entra ID only: shared keys and local auth are off,
-# and the test service principal gets data-plane roles on each resource. The function is invoked with its function key.
+# and the test service principal gets data-plane roles on each resource; the one exception is the function host's own
+# storage account. The function is invoked with its function key.
 
 terraform {
   required_version = ">= 1.5"
@@ -136,12 +137,12 @@ resource "azurerm_servicebus_subscription" "spring" {
 # --- Cosmos DB (NoSQL API, serverless) -----------------------------------------------------------------
 
 resource "azurerm_cosmosdb_account" "docs" {
-  name                          = local.name
-  resource_group_name           = azurerm_resource_group.run.name
-  location                      = var.location
-  offer_type                    = "Standard"
-  kind                          = "GlobalDocumentDB"
-  local_authentication_enabled  = false
+  name                         = local.name
+  resource_group_name          = azurerm_resource_group.run.name
+  location                     = var.location
+  offer_type                   = "Standard"
+  kind                         = "GlobalDocumentDB"
+  local_authentication_enabled = false
   capabilities {
     name = "EnableServerless"
   }
@@ -279,14 +280,16 @@ resource "azurerm_role_assignment" "events" {
 # --- Function app -----------------------------------------------------------------------------------------
 
 # The function kit invokes this function: the same function app the emulator tests serve with the Functions host.
-# A Basic plan's single instance, so the runs it counts in memory are the same for every invocation. The host reaches
-# its storage with the app's managed identity, as shared keys are off.
+# A Basic plan's single instance, so the runs it counts in memory are the same for every invocation.
 data "archive_file" "tck" {
   type        = "zip"
   source_dir  = "${path.module}/../../../../halyx-azure/src/test/resources/functions/azure"
   output_path = "${path.module}/.build/tck.zip"
 }
 
+# The function host's own storage, which the azurerm provider requires. Its one exception to Entra ID only: the
+# host gets the account key, since the test principal may not give the app's identity storage roles. Nothing under
+# test uses it.
 resource "azurerm_storage_account" "functions" {
   name                            = replace("halyx${var.run_id}fn", "-", "")
   resource_group_name             = azurerm_resource_group.run.name
@@ -295,7 +298,7 @@ resource "azurerm_storage_account" "functions" {
   account_replication_type        = "LRS"
   account_kind                    = "StorageV2"
   min_tls_version                 = "TLS1_2"
-  shared_access_key_enabled       = false
+  shared_access_key_enabled       = true
   allow_nested_items_to_be_public = false
   tags                            = local.tags
 }
@@ -311,17 +314,14 @@ resource "azurerm_service_plan" "functions" {
 }
 
 resource "azurerm_linux_function_app" "tck" {
-  name                          = "${local.name}-tck"
-  resource_group_name           = azurerm_resource_group.run.name
-  location                      = var.location
-  service_plan_id               = azurerm_service_plan.functions.id
-  storage_account_name          = azurerm_storage_account.functions.name
-  storage_uses_managed_identity = true
-  zip_deploy_file               = data.archive_file.tck.output_path
-  https_only                    = true
-  identity {
-    type = "SystemAssigned"
-  }
+  name                       = "${local.name}-tck"
+  resource_group_name        = azurerm_resource_group.run.name
+  location                   = var.location
+  service_plan_id            = azurerm_service_plan.functions.id
+  storage_account_name       = azurerm_storage_account.functions.name
+  storage_account_access_key = azurerm_storage_account.functions.primary_access_key
+  zip_deploy_file            = data.archive_file.tck.output_path
+  https_only                 = true
   site_config {
     always_on = true
     application_stack {
@@ -334,17 +334,9 @@ resource "azurerm_linux_function_app" "tck" {
   tags = local.tags
 }
 
-resource "azurerm_role_assignment" "functions_storage" {
-  for_each             = toset(["Storage Blob Data Owner", "Storage Queue Data Contributor", "Storage Table Data Contributor"])
-  scope                = azurerm_storage_account.functions.id
-  role_definition_name = each.key
-  principal_id         = azurerm_linux_function_app.tck.identity[0].principal_id
-}
-
 data "azurerm_function_app_host_keys" "tck" {
   name                = azurerm_linux_function_app.tck.name
   resource_group_name = azurerm_resource_group.run.name
-  depends_on          = [azurerm_role_assignment.functions_storage]
 }
 
 output "function_endpoint" {

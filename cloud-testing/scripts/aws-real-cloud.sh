@@ -19,6 +19,7 @@
 #
 #   AWS_PROFILE=default AWS_REGION=ap-southeast-2 cloud-testing/scripts/aws-real-cloud.sh
 #   IT_TEST='RealAwsIT$SecretsManager' cloud-testing/scripts/aws-real-cloud.sh     # one suite only
+#   IT_TEST='...' SPRING_IT_TEST=RealSpringFunctionIT cloud-testing/scripts/aws-real-cloud.sh   # one suite, plus Spring ones
 #   TIER=2 cloud-testing/scripts/aws-real-cloud.sh                                  # RDS PostgreSQL and MySQL with IAM auth
 #   TIER=3 cloud-testing/scripts/aws-real-cloud.sh                                  # ElastiCache for Valkey with IAM auth
 #   TIER=4 cloud-testing/scripts/aws-real-cloud.sh                                  # streams on MSK Serverless with IAM
@@ -319,7 +320,8 @@ mvn -o verify -pl halyx-aws -Dit.test="${IT_TEST:-RealAwsIT}" -Dtest=none -Dsure
     -Dhalyx.real.aws.event-bus="$EVENT_BUS" -Dhalyx.real.aws.events-inbox="$EVENTS_INBOX" \
     -Dhalyx.real.aws.function="$FUNCTION"
 status=$?
-[[ -n "${IT_TEST:-}" ]] && exit $status
+# With IT_TEST, the Spring tests run only when SPRING_IT_TEST names them.
+[[ -n "${IT_TEST:-}" && -z "${SPRING_IT_TEST:-}" ]] && exit $status
 # Spring Boot 3 and 4: an auto-configured repository on the run's table with a sort key, the event bus,
 # halyx-reactor's WebFlux, reactive repository and event beans over the bucket, table and bus, @HalyxListener on
 # the run's SNS topic and queue with a claim check, spring.config.import from SSM and Secrets Manager, and a
@@ -327,7 +329,7 @@ status=$?
 mvn -o -q install -DskipTests -pl halyx-spring-boot-autoconfigure -am || exit 1
 for module in halyx-spring-boot-autoconfigure halyx-spring-boot4-tests; do
   log "Running the Spring Boot repository, event and reactive tests ($module) against real AWS"
-  mvn -o verify -pl "$module" -Dit.test='RealSpringRepositoryIT,RealSpringEventIT,RealSpringReactiveIT,RealSpringMessagingIT,RealSpringParametersIT,RealSpringFunctionIT' -Dtest=none \
+  mvn -o verify -pl "$module" -Dit.test="${SPRING_IT_TEST:-RealSpringRepositoryIT,RealSpringEventIT,RealSpringReactiveIT,RealSpringMessagingIT,RealSpringParametersIT,RealSpringFunctionIT}" -Dtest=none \
       -Dsurefire.failIfNoSpecifiedTests=false \
       -Dhalyx.real.spring.repositories=true -Dhalyx.real.spring.events=true -Dhalyx.real.spring.reactive=true \
       -Dhalyx.real.spring.messaging=true -Dhalyx.real.spring.parameters=true -Dhalyx.real.spring.functions=true \

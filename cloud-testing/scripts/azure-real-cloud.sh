@@ -19,6 +19,7 @@
 #
 #   cloud-testing/scripts/azure-real-cloud.sh
 #   AZURE_LOCATION=australiaeast IT_TEST='RealAzureIT$Cosmos' cloud-testing/scripts/azure-real-cloud.sh   # one suite only
+#   IT_TEST='...' SPRING_IT_TEST=RealSpringFunctionIT cloud-testing/scripts/azure-real-cloud.sh   # one suite, plus Spring ones
 #   TIER=2 cloud-testing/scripts/azure-real-cloud.sh     # Azure Database for PostgreSQL and Azure SQL with Entra ID login
 #   TIER=3 cloud-testing/scripts/azure-real-cloud.sh     # Azure Managed Redis with Entra ID
 #   TIER=4 cloud-testing/scripts/azure-real-cloud.sh     # Event Hubs (Kafka endpoint) with Entra ID, plus Spring Boot 3 and 4
@@ -157,7 +158,7 @@ trap teardown EXIT INT TERM
 
 log "Subscription $AZURE_SUBSCRIPTION_ID, location $LOCATION, acting as principal $AZURE_CLIENT_ID, run $RUN"
 case "$TIER" in
-  1) log "Registering resource providers"; register Microsoft.EventGrid ;;
+  1) log "Registering resource providers"; register Microsoft.EventGrid Microsoft.Web ;;
   2) log "Registering resource providers"; register Microsoft.DBforPostgreSQL Microsoft.Sql ;;
   3) log "Registering resource providers"; register Microsoft.Cache ;;
   4) log "Registering resource providers"; register Microsoft.EventHub ;;
@@ -302,14 +303,15 @@ mvn -o verify -pl halyx-azure -Dit.test="${IT_TEST:-RealAzureIT}" -Dtest=none -D
     -Dhalyx.real.azure.eventgrid-subscription="$EVENT_GRID_SUBSCRIPTION" \
     -Dhalyx.real.azure.function-endpoint="$FUNCTION_ENDPOINT"
 status=$?
-[[ -n "${IT_TEST:-}" ]] && exit $status
+# With IT_TEST, the Spring tests run only when SPRING_IT_TEST names them.
+[[ -n "${IT_TEST:-}" && -z "${SPRING_IT_TEST:-}" ]] && exit $status
 # Spring Boot 3 and 4: an auto-configured repository on the run's table with a sort key, the event bus, the
 # reactive beans, @HalyxListener on the run's Service Bus topic with a claim check, spring.config.import from
 # Key Vault and App Configuration, and a FunctionInvoker bean on the run's function with its function key.
 mvn -o -q install -DskipTests -pl halyx-spring-boot-autoconfigure -am || exit 1
 for module in halyx-spring-boot-autoconfigure halyx-spring-boot4-tests; do
   log "Running the Spring Boot repository, event and reactive tests ($module) against real Azure"
-  mvn -o verify -pl "$module" -Dit.test='RealSpringRepositoryIT,RealSpringEventIT,RealSpringReactiveIT,RealSpringMessagingIT,RealSpringParametersIT,RealSpringFunctionIT' -Dtest=none \
+  mvn -o verify -pl "$module" -Dit.test="${SPRING_IT_TEST:-RealSpringRepositoryIT,RealSpringEventIT,RealSpringReactiveIT,RealSpringMessagingIT,RealSpringParametersIT,RealSpringFunctionIT}" -Dtest=none \
       -Dsurefire.failIfNoSpecifiedTests=false \
       -Dhalyx.real.spring.repositories=true -Dhalyx.real.spring.events=true -Dhalyx.real.spring.reactive=true \
       -Dhalyx.real.spring.messaging=true -Dhalyx.real.spring.parameters=true -Dhalyx.real.spring.functions=true \
