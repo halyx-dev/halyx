@@ -54,6 +54,7 @@ lists the predefined roles that cover the same calls.
 | Cache | `elasticache:Connect` on the replication group and the IAM user | a Redis data access policy assignment for the identity's object id | `roles/memorystore.dbConnectionUser` |
 | Database | `rds-db:connect` on `dbuser:<resource id>/<user>` | the identity as an Entra ID database user (or admin) | `roles/cloudsql.client` and `roles/cloudsql.instanceUser`; an IAM database user |
 | Parameter store, parameters | `ssm:GetParameter`, `GetParameters`, `GetParametersByPath` on the prefix | App Configuration Data Reader | `roles/parametermanager.parameterAccessor` |
+| Function | `lambda:InvokeFunction` on the function (and its qualifier, `function:<name>:<alias>`) | a function key from Key Vault (Key Vault Secrets User covers reading it), or the identity allowed by App Service Authentication's Entra ID app | `roles/run.invoker` on the function's Cloud Run service |
 | Parameter store, secrets | `secretsmanager:GetSecretValue`, `DescribeSecret` on `secret:<prefix>/*`; `ListSecrets` and `BatchGetSecretValue` on `*` for config imports with reload | Key Vault Secrets User | `roles/secretmanager.secretAccessor`; `roles/secretmanager.viewer` to list them for config imports with reload |
 
 - **Health reads a probe name.** Each parameter store's health check reads `<prefix>/halyx-ping` and expects "not
@@ -87,4 +88,7 @@ Required settings that are easy to miss:
 - **Eventarc Advanced:** a bus, an enrollment with a CEL match, and a pipeline to a Pub/Sub topic.
 - **Memorystore:** Private Service Connect, IAM auth and in-transit encryption; the chart mounts the CA file
   (`files`) and sets `halyx.caches.<key>.properties.redis.ca-certificate` to its path (`config`).
+- **Functions:** deployed with the function's own tooling, per cloud; the service's Terraform only grants the
+  invoke. On Azure, either store a function key (`azurerm_function_app_host_keys`, or a function-level key) as a Key
+  Vault secret, or turn on App Service Authentication with an Entra ID app whose audience the service names.
 - **Cloud SQL:** IAM database authentication on, an IAM user, and the connector's instance connection name.

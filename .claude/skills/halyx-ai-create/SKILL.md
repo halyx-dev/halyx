@@ -1,6 +1,6 @@
 ---
 name: halyx-ai-create
-description: Create a new Spring Boot microservice on Halyx that runs unchanged on AWS, Azure and Google Cloud, following the patterns of Halyx's portable orders sample - object storage, document stores and Spring Data repositories, messaging, events, Kafka streams, Redis and Valkey caches, SQL with IAM login, parameters and secrets - with a profile per cloud, a no-cloud local profile, tests on the memory provider and each cloud's emulators, and optionally a Helm chart and the IAM each cloud needs. Use when asked to create, scaffold, generate, bootstrap or start a new service, microservice or API on Halyx, or a new cloud-agnostic, multi-cloud or portable Spring Boot service.
+description: Create a new Spring Boot microservice on Halyx that runs unchanged on AWS, Azure and Google Cloud, following the patterns of Halyx's portable orders sample - object storage, document stores and Spring Data repositories, messaging, events, Kafka streams, Redis and Valkey caches, SQL with IAM login, parameters and secrets, serverless function invocation - with a profile per cloud, a no-cloud local profile, tests on the memory provider and each cloud's emulators, and optionally a Helm chart and the IAM each cloud needs. Use when asked to create, scaffold, generate, bootstrap or start a new service, microservice or API on Halyx, or a new cloud-agnostic, multi-cloud or portable Spring Boot service.
 ---
 
 # Create a portable Spring Boot service on Halyx
@@ -26,6 +26,8 @@ Ask only what you can't infer from the request. Cover:
   queries or reports, which points to SQL.
 - **What happens asynchronously:** work handed to another component, events other services consume, high-volume
   ordered records, scheduled or retried work.
+- **What it calls:** serverless functions whose answers it needs (Lambda, Azure Functions, Cloud Run functions), and
+  who deploys them on each cloud.
 - **Settings and secrets:** values that change without a deploy, keys and passwords.
 - **Targets:** the clouds (all three by default), Spring Boot 4 or 3.5 (4 by default), Java 21 or later, Maven.
 - **The deployment pieces wanted:** none, a Helm chart, the IAM each cloud needs, or infrastructure as code.
@@ -41,7 +43,8 @@ resource and to the service on each cloud, with what differs. Present:
    against the repository method that serves it. Amounts as `BigDecimal` formatted explicitly, or minor units.
 3. **The flows:** each asynchronous step, what triggers it, what it writes, and why a redelivery does no harm.
 4. **What differs per cloud:** anything [building-blocks.md](references/building-blocks.md#what-differs) flags for the
-   plan (message size, delays, ordering, presigned URLs, transactions, services with no emulator), and how the
+   plan (message size, delays, ordering, presigned URLs, transactions, function payloads and retries, services with
+   no emulator), and how the
    service stays correct on each.
 5. **The profiles:** the cloud profiles (`local`, `aws`, `azure`, `gcp`), and any optional feature profiles, only for
    resources a deployment may leave out.

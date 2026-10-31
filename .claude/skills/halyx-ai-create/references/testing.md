@@ -110,6 +110,23 @@ Copy the provisioning from the sample's `AwsResources`, `AzureEmulatorIT.provisi
   its partition and sort attributes (string types, projection `ALL`). Cosmos DB and the Firestore emulator need
   nothing; real Firestore needs a composite index (see deploy).
 
+**Functions** run in a container of their own on each emulator IT: the function's real code if the service's
+repository holds it, otherwise a stand-in that keeps its contract (the same payloads and errors). Halyx's
+`AwsFunctionConformanceIT`, `AzureFunctionConformanceIT` and `GcpFunctionConformanceIT` are working setups:
+- **AWS:** Floci's Lambda, which starts the function in a container of its own. Floci needs the Docker socket
+  (`withFileSystemBind("/var/run/docker.sock", ...)`), a Testcontainers `Network` with the alias `floci`, and
+  `FLOCI_SERVICES_LAMBDA_DOCKER_NETWORK` (the network's id) and `FLOCI_SERVICES_LAMBDA_DOCKER_HOST_OVERRIDE=floci`.
+  Create the function with the `LambdaClient` `halyx-aws` brings, from a zip of the handler, and wait with
+  `waitUntilFunctionActiveV2`. Nothing else changes: the provider's `endpoint` reaches Lambda too.
+- **Azure:** the Functions host image (`mcr.microsoft.com/azure-functions/python:4-python3.12`, or the function's
+  language) with the function copied to `/home/site/wwwroot`; `properties.azure.functions.endpoint` at the
+  container. On the anonymous provider, Halyx sends no login: give the function `authLevel: anonymous`, or set
+  `azure.functions.key` with a key from `/azure-functions-host/Secrets/host.json` and
+  `AzureWebJobsSecretStorageType=files`.
+- **Google Cloud:** the function under Google's Functions Framework (`functions-framework` on a `python:3.12-slim`
+  image, or the function's language), and `properties.gcp.functions.url` at the container. On the anonymous
+  provider, Halyx sends no ID token.
+
 **Emulator quirk:** Floci-gcp replaces the whole Firestore document when an update holds only increments
 (`DocumentUpdate.builder().increment(...)` alone), dropping the other fields and the hidden sort field, so the item
 falls out of queries. Real Firestore and Google's own emulator keep them. Put a `set` of an unchanging field in the

@@ -96,6 +96,26 @@ Read every hit before recording it (see SKILL.md). "All clouds" means AWS, Azure
 - **Severity:** blocker (on every cloud, so usually found already; check keys that only some profiles define).
 - **Fix:** rename the key, such as `bookings-db` for `bookings`.
 
+### C11. Function invocations a cloud handles differently
+- **Find:** `grep -rnE "FunctionInvoker|\.trigger\(|executedVersion\(|idempotent" src/main` and
+  `halyx.functions.*` in the configuration.
+- **Why:** from `docs/api/functions.md`:
+  - `trigger` holds only on Lambda (`FunctionCapability.TRIGGER`), and there without headers, configured or per
+    request. On Azure and Google Cloud it fails with `UnsupportedFeatureException`.
+  - The largest `invoke` payload is 6 MB on Lambda, 100 MB on Azure Functions and 32 MiB on Cloud Run functions;
+    Lambda's headers must fit in 3,583 bytes once encoded.
+  - Response headers are empty on Lambda, and `executedVersion()` is Lambda's alone.
+  - `idempotent: true` lets Halyx's retry interceptor and the connection's retries run the function again after a
+    timeout or a 5xx.
+  - The function itself is deployed per cloud, outside Halyx: a profile whose cloud has no deployment of it fails on
+    the first call with `NotFoundException`.
+- **Severity:** blocker for an unguarded `trigger` on Azure or Google Cloud; risk for payloads that can grow, for
+  reading response headers or the executed version, and for `idempotent: true` on a function with side effects;
+  blocker where a target cloud has no deployment of the function.
+- **Fix:** publish a message for fire-and-forget work, or check `capabilities().supports(FunctionCapability.TRIGGER)`
+  and fall back to `invoke`; send keys rather than content; carry what the caller needs in the payload; keep
+  `idempotent` false unless a second run is harmless; record where the function is deployed on each cloud.
+
 ## G: configuration
 
 ### G1. Cloud settings in the shared configuration
@@ -118,11 +138,14 @@ Read every hit before recording it (see SKILL.md). "All clouds" means AWS, Azure
   cloud.
 
 ### G3. Resource naming that differs per cloud
-- **Find:** `halyx.subscriptions.*.name`, `halyx.event-buses.*.name`, and their `topic` settings.
+- **Find:** `halyx.subscriptions.*.name`, `halyx.event-buses.*.name`, and their `topic` settings;
+  `halyx.functions.*.name` and `properties`.
 - **Why:** the names have different shapes on each cloud:
   - Service Bus subscriptions are `<topic>/subscriptions/<name>`.
   - Eventarc buses are `projects/<p>/locations/<l>/messageBuses/<id>`.
   - Event Grid needs `properties.azure.eventgrid.endpoint`.
+  - Functions need `azure.functions.endpoint` on Azure and `gcp.functions.region` or `gcp.functions.url` on Google
+    Cloud; a Lambda ARN in `name` fits AWS only.
   - SNS topics named, not given as ARNs, need `sns:ListTopics`.
 
   One value can't be right on every cloud.
@@ -140,7 +163,7 @@ Read every hit before recording it (see SKILL.md). "All clouds" means AWS, Azure
 
 ### G5. Credentials in configuration
 - **Find:** `credentials: { type: static ... }`, `access-key`, `secret`, `password:`, connection strings, or
-  `azure.*.key` in profiles that real deployments use.
+  `azure.*.key` (`azure.functions.key` included) set to a literal in profiles that real deployments use.
 - **Why:** keys in configuration tie a deployment to one account and are a secret to rotate. Each cloud's default
   chain covers IAM roles, workload identity, managed identities and gcloud.
 - **Severity:** risk (security); fine for emulator profiles.
@@ -215,6 +238,8 @@ Read every hit before recording it (see SKILL.md). "All clouds" means AWS, Azure
   - **config import with reload:** `ListSecrets` and `BatchGetSecretValue`
   - **Memorystore:** `roles/memorystore.dbConnectionUser`
   - **Azure caches:** a data access policy assignment
+  - **functions:** `lambda:InvokeFunction` on the function and its qualifier, `roles/run.invoker` on a Cloud Run
+    function, and on Azure read access to the Key Vault secret holding the function key
 - **Severity:** blocker where it fails; risk where only health is affected.
 - **Fix:** grant them, scoped to the service's resources.
 

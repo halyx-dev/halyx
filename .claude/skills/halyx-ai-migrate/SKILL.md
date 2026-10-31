@@ -1,6 +1,6 @@
 ---
 name: halyx-ai-migrate
-description: Migrate an existing Spring Boot microservice from AWS, Azure or Google Cloud SDKs (Spring Cloud AWS, Spring Cloud Azure, Spring Cloud GCP, or the raw SDKs) to Halyx, so it runs unchanged on any cloud. Use when asked to migrate, port or convert a service to Halyx, to make a service cloud-agnostic or portable, to assess how much work a migration is, or to replace S3Template, SqsTemplate, @SqsListener, DynamoDbTemplate, ServiceBusTemplate, @ServiceBusListener, CosmosRepository, PubSubTemplate, Firestore repositories, aws-parameterstore:, sm:// or Key Vault property sources with Halyx.
+description: Migrate an existing Spring Boot microservice from AWS, Azure or Google Cloud SDKs (Spring Cloud AWS, Spring Cloud Azure, Spring Cloud GCP, or the raw SDKs) to Halyx, so it runs unchanged on any cloud. Use when asked to migrate, port or convert a service to Halyx, to make a service cloud-agnostic or portable, to assess how much work a migration is, or to replace S3Template, SqsTemplate, @SqsListener, DynamoDbTemplate, ServiceBusTemplate, @ServiceBusListener, CosmosRepository, PubSubTemplate, Firestore repositories, LambdaClient and HTTP calls to Azure Functions or Cloud Run functions, aws-parameterstore:, sm:// or Key Vault property sources with Halyx.
 ---
 
 # Migrate a Spring Boot service to Halyx
@@ -66,10 +66,12 @@ Order, from lowest to highest risk (skip what the service doesn't use):
 4. **Documents:** a Spring Data `DocumentRepository`, or `DocumentStore`
 5. **Messaging:** `Publisher` and `@HalyxListener`
 6. **Events:** `EventPublisher` and CloudEvents
-7. **Streams:** `halyx.spring-kafka` (keeps `KafkaTemplate` and `@KafkaListener`), or `StreamProducer` and
+7. **Functions:** `FunctionInvoker`, for `LambdaClient.invoke` and HTTP calls to Azure Functions and Cloud Run
+   functions
+8. **Streams:** `halyx.spring-kafka` (keeps `KafkaTemplate` and `@KafkaListener`), or `StreamProducer` and
    `@HalyxListener`
-8. **Caches:** `halyx.caches` beans, or `halyx.cache-manager` behind `@Cacheable`
-9. **SQL:** `halyx.databases`, which gives JPA, JDBC and Flyway a `DataSource` with IAM login
+9. **Caches:** `halyx.caches` beans, or `halyx.cache-manager` behind `@Cacheable`
+10. **SQL:** `halyx.databases`, which gives JPA, JDBC and Flyway a `DataSource` with IAM login
 
 For each area:
 - Replace the code with the Halyx API and the configuration with `halyx.*` properties
@@ -120,8 +122,8 @@ Only do this phase if the user wants the service portable, not just migrated.
 
 ## Rules
 
-- Don't change behaviour silently. If Halyx works differently, such as nack delays, ordering or decimals, say so in
-  the plan and in the code review, and keep the service correct.
+- Don't change behaviour silently. If Halyx works differently, such as nack delays, ordering, decimals or function
+  retries, say so in the plan and in the code review, and keep the service correct.
 - Don't invent API. Check method and property names against the Halyx docs (`docs/api/*.md`,
   `docs/spring-boot.md`, `docs/providers.md`) or the source, and not against memory.
 - A `halyx.*` key is a bean name. It must not clash with the service's own beans: a class `OrderListener` and a

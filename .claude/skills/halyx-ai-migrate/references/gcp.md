@@ -94,6 +94,29 @@ Keep the type, source, subject and data, and the enrollments' CEL filters and th
 `PublisherClient` bean goes. Eventarc Standard triggers, and events
 published straight to Pub/Sub as a CloudEvents convention, aren't a bus: keep those as messaging.
 
+## Functions: Cloud Run functions
+
+Services call a function's URL with an ID token: `IdTokenCredentials` with `HttpRequestFactory`, or a
+`RestClient`/`WebClient` whose interceptor adds `Authorization: Bearer <id token>`.
+
+```java
+// Before
+IdTokenCredentials token = IdTokenCredentials.newBuilder().setIdTokenProvider((IdTokenProvider) adc)
+        .setTargetAudience(url).build();
+HttpResponse r = new NetHttpTransport().createRequestFactory(new HttpCredentialsAdapter(token))
+        .buildPostRequest(new GenericUrl(url), ByteArrayContent.fromString("application/json", json)).execute();
+
+// After: halyx.functions.resize: { name: resize-image, properties: { gcp.functions.region: europe-west2 } }
+String out = resize.invoke(FunctionRequest.of(json)).payloadAsString();
+```
+
+- The default URL is `https://<region>-<project>.cloudfunctions.net/<name>`; a `run.app` URL goes in
+  `gcp.functions.url`, and an audience other than the URL in `gcp.functions.audience`.
+- The ID tokens come from the provider's identity (ADC, or the service account it impersonates). User credentials
+  from `gcloud auth application-default login` can't get ID tokens for the function's audience, so Cloud Run rejects
+  them: impersonate a service account locally (`credentials: { type: impersonate, target: <email> }`).
+- `HttpResponseException` handling becomes Halyx's exceptions, as on Azure.
+
 ## Streams: Managed Service for Apache Kafka
 
 Spring Kafka with Google's login callback handler (`GcpLoginCallbackHandler`, `SASL_SSL` with `OAUTHBEARER`):
@@ -124,5 +147,5 @@ and no connector. MySQL takes the full email as the username.
 ## No Halyx equivalent
 
 Datastore mode, Spanner, Bigtable, BigQuery, Cloud Tasks, Cloud Scheduler, Firebase Auth, the Firestore real-time
-listeners, Storage notifications configuration, and Eventarc Standard triggers. Keep these on the client libraries and
-list them.
+listeners, deploying functions, Storage notifications configuration, and Eventarc Standard triggers. Keep these on
+the client libraries and list them.

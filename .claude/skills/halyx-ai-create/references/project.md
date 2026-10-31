@@ -195,6 +195,11 @@ Per cloud, the settings that differ:
 | Cache `auth` | `type: iam`, `username` the ElastiCache user id, `properties.aws.elasticache.cache-name` | `type: iam`, `username` the identity's object id | `type: iam`; a `rediss://` endpoint, and `properties.redis.ca-certificate` with the instance's CA file, in the deployment's configuration |
 | Database | `host`, `auth: { type: iam, username }` | `host`, `auth: { type: iam, username }` (the Entra ID name) | `host`, or through the Cloud SQL connector `properties.gcp.sql.instance: ${<SERVICE>_SQL_INSTANCE:}` (`<project>:<region>:<instance>`) with `host: ${<SERVICE>_DB_HOST:}`; `auth: { type: iam, username }` |
 | Stream cluster | `bootstrap-servers` (port 9098) | `<namespace>.servicebus.windows.net:9093` | the cluster's bootstrap address |
+| Function `properties` | none; optional `aws.lambda.qualifier` (a version or alias) | `azure.functions.endpoint` (the function app's URL, no default), and `azure.functions.audience` (App Service Authentication's Entra ID app) or `azure.functions.key: ${<function>-key}` from a secrets store's config import | `gcp.functions.region` for the default URL, or `gcp.functions.url` (a `run.app` URL) |
+
+A function's `name` and `timeout` go in the base document (`name: ${<SERVICE>_RESIZE_FUNCTION:<service>-resize}`),
+its login and location in each cloud's document. On `local`, the function is a handler registered at startup
+([code.md](code.md#functions)).
 
 The `local` profile: the memory provider has every service but SQL, and its streams run in process. Keep
 `halyx.databases` and `halyx.spring-kafka` out of what `local` sees. When SQL is optional, a feature document holds
@@ -233,6 +238,8 @@ The checks `halyx-ai-review` runs, in short. Each should hold:
 - Halyx exceptions caught (`NotFoundException`, `PreconditionFailedException`), never SDK ones.
 - No messaging feature a target cloud lacks (delays, deduplication, ordering without the entity set up for it), no
   stream transactions on Azure, and presigned URLs only with the Google Cloud grant.
+- No function `trigger` (Lambda only), function keys only from a secrets store, and `idempotent: true` only on
+  functions that are.
 - Decimals formatted explicitly and compared with `compareTo`.
 - Event listeners check the event's type and source.
 - No `halyx.*` key equal to a bean name.

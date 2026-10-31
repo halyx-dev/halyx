@@ -85,6 +85,7 @@ resource's name, but set `bucket`, `table` or `name` explicitly when migrating, 
 | `halyx.caches.<key>: { endpoint, auth, namespace, default-ttl, codec }` | `Cache<V>` | `get`, `put(key, value[, ttl])`, `putIfAbsent`, `delete`, `increment(key, delta[, ttl])`, `getOrLoad`, `tryLock`. Keys are `<namespace>:<key>`, the namespace defaulting to the bean name: set `namespace: ""` to keep existing keys |
 | `halyx.cache-manager: { endpoint, auth, default-ttl, ttl, codec, trusted-packages }` | Spring `CacheManager` | `@Cacheable`, `@CachePut`, `@CacheEvict` unchanged. `codec: jdk` (the default, as Spring's) reads any class unless `trusted-packages` is set: set it. `json` requires it |
 | `halyx.parameter-stores.<key>: { kind: secrets\|parameters, prefix, location }` | `ParameterStore` | `get`, `require(name[, field])`, `getAll(prefix)`, `put`, `watch` |
+| `halyx.functions.<key>: { name, timeout, idempotent, headers, properties }` | `FunctionInvoker` | `invoke(FunctionRequest)` returning a `FunctionResponse` (`payload()`, `payloadAsString()`, `headers()`), `trigger` (Lambda only), `async()`. Requests: `FunctionRequest.of(json)`, or `builder(json).header(k, v)`. Retried after sending only with `idempotent: true` |
 | `halyx.databases.<key>: { engine, host, database, auth: { type: iam\|password, username } }` | `DataSource` (primary if only one) | JPA, `JdbcTemplate`, Flyway and Liquibase unchanged |
 | `halyx.r2dbc-databases.<key>` | R2DBC `ConnectionFactory` | Spring Data R2DBC unchanged |
 | `halyx.spring-kafka.cluster: <stream cluster key>` | (configures Spring Kafka's factories) | `KafkaTemplate` and `@KafkaListener` unchanged |
@@ -96,7 +97,8 @@ each `@Bean` method). A class `Bookings` and `halyx.databases.bookings` clash; `
 Imports: `dev.halyx.spring.messaging.HalyxListener`; `dev.halyx.cache.Cache`; `dev.halyx.events.CloudEvent`,
 `EventPublisher` and `CloudEvents`; `dev.halyx.messaging.Publisher`, `Subscription`, `ReceivedMessage` and
 `OutgoingMessage`; `dev.halyx.storage.BlobStore`; `dev.halyx.nosql.DocumentStore`;
-`dev.halyx.parameters.ParameterStore`; and, for configuration tests, `dev.halyx.spring.autoconfigure.HalyxProperties`.
+`dev.halyx.parameters.ParameterStore`; `dev.halyx.functions.FunctionInvoker`, `FunctionRequest` and
+`FunctionResponse`; and, for configuration tests, `dev.halyx.spring.autoconfigure.HalyxProperties`.
 
 ```java
 @Component
