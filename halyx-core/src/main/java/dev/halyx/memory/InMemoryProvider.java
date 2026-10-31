@@ -21,6 +21,8 @@ import dev.halyx.config.ProviderConfig;
 import dev.halyx.messaging.SubscriptionConfig;
 import dev.halyx.events.EventBusConfig;
 import dev.halyx.events.spi.EventPublisherDriver;
+import dev.halyx.functions.FunctionConfig;
+import dev.halyx.functions.spi.FunctionInvokerDriver;
 import dev.halyx.messaging.TopicConfig;
 import dev.halyx.messaging.spi.PublisherDriver;
 import dev.halyx.messaging.spi.SubscriptionDriver;
@@ -47,6 +49,7 @@ import java.util.concurrent.ConcurrentSkipListMap;
  * The {@code "memory"} provider: a Service Stub that keeps everything in the JVM heap. Use it for unit
  * tests and local development, with {@code ProviderConfig.of("memory")}. Buckets, caches and stream topics
  * are created on first use (any {@code redis://} endpoint works), and each connection has its own isolated data.
+ * Functions are handlers registered with {@link InMemoryFunctions}.
  */
 public final class InMemoryProvider implements CloudProvider {
 
@@ -71,6 +74,7 @@ public final class InMemoryProvider implements CloudProvider {
         private final Map<String, ConcurrentSkipListMap<String, List<Parameter>>> parameters = new ConcurrentHashMap<>();
         private final InMemoryBroker broker = new InMemoryBroker();
         private final InMemoryStreams streams = new InMemoryStreams();
+        private final InMemoryFunctions functions = new InMemoryFunctions();
         private final Map<String, InMemoryDocumentStoreDriver.Table> tables = new ConcurrentHashMap<>();
 
         @Override
@@ -107,6 +111,11 @@ public final class InMemoryProvider implements CloudProvider {
         }
 
         @Override
+        public FunctionInvokerDriver functionInvoker(FunctionConfig config) {
+            return new InMemoryFunctionInvokerDriver(config, functions);
+        }
+
+        @Override
         public ProducerDriver streamProducer(StreamProducerConfig config) {
             return streams.producer(config);
         }
@@ -127,6 +136,7 @@ public final class InMemoryProvider implements CloudProvider {
             tables.clear();
             broker.clear();
             streams.clear();
+            functions.clear();
             buckets.clear();
             caches.clear();
             parameters.clear();

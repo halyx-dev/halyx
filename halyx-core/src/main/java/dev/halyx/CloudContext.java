@@ -30,6 +30,9 @@ import dev.halyx.interceptor.InterceptorChain;
 import dev.halyx.events.DefaultEventPublisher;
 import dev.halyx.events.EventBusConfig;
 import dev.halyx.events.EventPublisher;
+import dev.halyx.functions.DefaultFunctionInvoker;
+import dev.halyx.functions.FunctionConfig;
+import dev.halyx.functions.FunctionInvoker;
 import dev.halyx.messaging.DefaultPublisher;
 import dev.halyx.messaging.DefaultSubscription;
 import dev.halyx.messaging.Publisher;
@@ -84,6 +87,7 @@ public final class CloudContext implements AutoCloseable {
     private final Map<TopicConfig, Publisher> publishers = new ConcurrentHashMap<>();
     private final Map<SubscriptionConfig, Subscription> subscriptions = new ConcurrentHashMap<>();
     private final Map<EventBusConfig, EventPublisher> eventPublishers = new ConcurrentHashMap<>();
+    private final Map<FunctionConfig, FunctionInvoker> functionInvokers = new ConcurrentHashMap<>();
     private final Map<StreamProducerConfig, StreamProducer> streamProducers = new ConcurrentHashMap<>();
     /** Stream consumers created here, closed with this context; one running a listener is held by its poller. */
     private final Set<StreamConsumer> streamConsumers =
@@ -190,6 +194,19 @@ public final class CloudContext implements AutoCloseable {
     }
 
     /**
+     * An invoker of a function: an AWS Lambda function, an Azure function or a Cloud Run function. Asking again with
+     * an equal configuration returns the same invoker.
+     */
+    public FunctionInvoker functionInvoker(FunctionConfig config) {
+        return functionInvokers.computeIfAbsent(config,
+                c -> new DefaultFunctionInvoker(connection().functionInvoker(c), c, interceptors));
+    }
+
+    public FunctionInvoker functionInvoker(String function) {
+        return functionInvoker(FunctionConfig.of(function));
+    }
+
+    /**
      * A producer for an existing stream topic: Amazon MSK, Azure Event Hubs or Google Cloud Managed Service for
      * Apache Kafka. Thread-safe: asking again with an equal configuration returns the same producer.
      */
@@ -274,6 +291,7 @@ public final class CloudContext implements AutoCloseable {
         publishers.clear();
         subscriptions.clear();
         eventPublishers.clear();
+        functionInvokers.clear();
         streamProducers.clear();
         if (open != null) {
             open.close();
