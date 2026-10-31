@@ -1,7 +1,7 @@
 ---
 title: Capabilities and native clients
 parent: API guide
-nav_order: 10
+nav_order: 11
 ---
 
 # Capabilities and native clients
@@ -60,6 +60,13 @@ provider: GCS can presign only with credentials that can sign.
 | `IDEMPOTENCE` | yes | yes | yes |
 | `TRANSACTIONS` | yes | no | yes |
 
+### Functions
+
+| `FunctionCapability` | AWS | Azure | Google Cloud |
+|---|---|---|---|
+| `TRIGGER` | yes | no | no |
+| `TRIGGER_HEADERS` | no | no | no |
+
 ### Parameters and secrets
 
 | `ParameterCapability` | Supported by |
@@ -87,6 +94,7 @@ for one cloud fails clearly on another instead of misbehaving. Prefer the portab
 | `Publisher` | `SnsClient` (`SqsClient` with `aws.target=sqs`) | `ServiceBusSenderClient` | `TopicAdminClient` |
 | `Subscription` | `SqsClient` | `ServiceBusReceiverClient` (`ServiceBusSessionReceiverClient` for session entities) | `SubscriptionAdminClient` |
 | `ParameterStore` | `SsmClient`, `SecretsManagerClient` | `ConfigurationClient`, `SecretClient` | `ParameterManagerClient`, `SecretManagerServiceClient` |
+| `FunctionInvoker` | `LambdaClient` | `HttpPipeline` | `HttpRequestFactory` |
 | `StreamProducer` | Kafka's `Producer` | (same) | (same) |
 | `StreamConsumer` | Kafka's `Consumer`, used only from the polling thread | (same) | (same) |
 | `Cache` | Lettuce `StatefulRedisConnection` / `StatefulRedisClusterConnection`, `RedisClient` / `RedisClusterClient` | (same) | (same) |

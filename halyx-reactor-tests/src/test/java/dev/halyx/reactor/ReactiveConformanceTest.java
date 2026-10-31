@@ -22,6 +22,8 @@ import dev.halyx.cache.CacheConfig;
 import dev.halyx.cache.Codec;
 import dev.halyx.config.ProviderConfig;
 import dev.halyx.events.EventPublisher;
+import dev.halyx.functions.FunctionConfig;
+import dev.halyx.functions.FunctionInvoker;
 import dev.halyx.messaging.ClaimCheck;
 import dev.halyx.messaging.Subscription;
 import dev.halyx.messaging.SubscriptionConfig;
@@ -40,9 +42,11 @@ import dev.halyx.tck.BlobStoreConformanceTest;
 import dev.halyx.tck.CacheConformanceTest;
 import dev.halyx.tck.DocumentStoreConformanceTest;
 import dev.halyx.tck.EventBusConformanceTest;
+import dev.halyx.tck.FunctionConformanceTest;
 import dev.halyx.tck.MessagingConformanceTest;
 import dev.halyx.tck.ParameterStoreConformanceTest;
 import dev.halyx.tck.StreamConformanceTest;
+import dev.halyx.tck.TckFunction;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Nested;
@@ -129,6 +133,38 @@ class ReactiveConformanceTest {
         @Override
         protected Subscription inbox() {
             return inbox;
+        }
+    }
+
+    @Nested
+    class Functions extends FunctionConformanceTest {
+        Functions() {
+            TckFunction.register(context(), "tck");
+        }
+
+        @Override
+        protected FunctionConfig.Builder function() {
+            return FunctionConfig.builder("tck");
+        }
+
+        @Override
+        protected FunctionConfig.Builder missingFunction() {
+            return FunctionConfig.builder("tck-missing");
+        }
+
+        @Override
+        protected FunctionInvoker invoker(FunctionConfig config) {
+            return BlockingViews.of(rx.provider("test").functionInvoker(config));
+        }
+
+        @Override
+        protected long maxPayloadBytes() {
+            return 6L * 1024 * 1024;
+        }
+
+        @Override
+        protected long maxHeaderBytes() {
+            return 3_583;
         }
     }
 

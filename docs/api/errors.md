@@ -1,7 +1,7 @@
 ---
 title: Errors and retries
 parent: API guide
-nav_order: 9
+nav_order: 10
 ---
 
 # Errors and retries
@@ -172,13 +172,15 @@ Halyx halyx = Halyx.builder()
 ```
 
 With Micrometer Tracing, `HalyxTracing` carries the trace from senders to listeners: publishers add it to message
-attributes, event publishers to the CloudEvents `traceparent` and `tracestate` extensions, and stream producers to
-record headers. Wrapped listeners run each delivery in a consumer span that continues it:
+attributes, event publishers to the CloudEvents `traceparent` and `tracestate` extensions, stream producers to
+record headers, and function invokers to invocation headers (on Lambda, in the `ClientContext`). Wrapped listeners
+run each delivery in a consumer span that continues it:
 
 ```java
 HalyxTracing tracing = new HalyxTracing(tracer, propagator);
 Publisher orders = tracing.publisher(context.publisher("orders"));
 EventPublisher events = tracing.eventPublisher(context.eventPublisher("orders"));
+FunctionInvoker resize = tracing.functionInvoker(context.functionInvoker("resize-image"));
 subscription.listen(tracing.listener("billing", message -> bill(message)), ConsumerOptions.DEFAULTS);
 consumer.listen(tracing.recordListener("ledger", record -> post(record)), ListenerOptions.DEFAULTS);
 ```

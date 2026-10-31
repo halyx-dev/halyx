@@ -24,6 +24,7 @@ import dev.halyx.messaging.ClaimCheck;
 import dev.halyx.messaging.ConsumerOptions;
 import dev.halyx.messaging.SubscriptionConfig;
 import dev.halyx.events.EventBusConfig;
+import dev.halyx.functions.FunctionConfig;
 import dev.halyx.messaging.TopicConfig;
 import dev.halyx.nosql.TableConfig;
 import dev.halyx.parameters.ParameterKind;
@@ -376,6 +377,41 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
 
         EventBusConfig toEventBusConfig(String key) {
             EventBusConfig.Builder config = EventBusConfig.builder(name == null || name.isBlank() ? key : name);
+            properties.forEach(config::property);
+            return config.build();
+        }
+    }
+
+    /**
+     * A function to invoke, from {@code halyx.functions.<key>}, registered as a {@code FunctionInvoker} bean named
+     * after its key.
+     *
+     * @param provider   the provider name; may be omitted when exactly one provider is configured
+     * @param name       the function: a Lambda function (name or ARN), an Azure function, or a Cloud Run function;
+     *                   defaults to the key
+     * @param timeout    how long an invocation may take; 60 seconds by default
+     * @param idempotent whether an invocation may be retried after it was sent; false by default
+     * @param headers    headers sent on every invocation; a request's own headers replace those with the same name
+     * @param properties provider-specific settings, such as {@code aws.lambda.qualifier},
+     *                   {@code azure.functions.endpoint} or {@code gcp.functions.url}
+     */
+    public record FunctionProperties(String provider, String name, Duration timeout, Boolean idempotent,
+                                     Map<String, String> headers, Map<String, String> properties) {
+
+        public FunctionProperties {
+            headers = ordered(headers);
+            properties = ordered(properties);
+        }
+
+        FunctionConfig toFunctionConfig(String key) {
+            FunctionConfig.Builder config = FunctionConfig.builder(name == null || name.isBlank() ? key : name)
+                    .headers(headers);
+            if (timeout != null) {
+                config.timeout(timeout);
+            }
+            if (idempotent != null) {
+                config.idempotent(idempotent);
+            }
             properties.forEach(config::property);
             return config.build();
         }

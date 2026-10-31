@@ -72,12 +72,12 @@ dependencies {
 | Module | What it adds |
 |---|---|
 | `halyx-core` | The portable API, error model, interceptors and an in-memory provider. No cloud SDKs. |
-| `halyx-aws` | Amazon S3, DynamoDB, SNS, SQS, EventBridge, SSM Parameter Store, Secrets Manager, ElastiCache and RDS IAM login |
-| `halyx-azure` | Blob Storage, Cosmos DB, Service Bus, Event Grid namespaces, Key Vault, App Configuration, and Entra ID login for caches and databases |
-| `halyx-gcp` | Cloud Storage, Firestore, Pub/Sub, Eventarc Advanced, Secret Manager, Parameter Manager, and IAM login for Memorystore and Cloud SQL |
+| `halyx-aws` | Amazon S3, DynamoDB, SNS, SQS, EventBridge, Lambda, SSM Parameter Store, Secrets Manager, ElastiCache and RDS IAM login |
+| `halyx-azure` | Blob Storage, Cosmos DB, Service Bus, Event Grid namespaces, Azure Functions, Key Vault, App Configuration, and Entra ID login for caches and databases |
+| `halyx-gcp` | Cloud Storage, Firestore, Pub/Sub, Eventarc Advanced, Cloud Run functions, Secret Manager, Parameter Manager, and IAM login for Memorystore and Cloud SQL |
 | `halyx-vault` | HashiCorp Vault KV v2 parameters and secrets |
 | `halyx-reactor` | `Mono` and `Flux` views of every service, for Reactor, WebFlux and other reactive code (see [Reactive and async code](api/reactive.md)) |
-| `halyx-micrometer` | Micrometer observations of every operation, and trace context carried through messages, events and stream records, without Spring (see [Errors, retries and interceptors](api/errors.md#observations-and-tracing)) |
+| `halyx-micrometer` | Micrometer observations of every operation, and trace context carried through messages, events, stream records and function invocations, without Spring (see [Errors, retries and interceptors](api/errors.md#observations-and-tracing)) |
 | `halyx-spring-boot-starter` | Spring Boot auto-configuration (see [Spring Boot](spring-boot.md)) |
 
 Providers are discovered with `ServiceLoader`: a module on the classpath is all it takes. SQL databases

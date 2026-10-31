@@ -181,6 +181,9 @@
         <floci.aws.image>floci/floci:2.2.0</floci.aws.image>
         <floci.azure.image>floci/floci-az:0.14.0</floci.azure.image>
         <floci.gcp.image>floci/floci-gcp:0.10.0</floci.gcp.image>
+        <!-- Hosts for the function conformance tests' test functions -->
+        <azure.functions.image>mcr.microsoft.com/azure-functions/python:4-python3.12</azure.functions.image>
+        <python.image>python:3.12-slim</python.image>
 
         <!-- Plugins -->
         <maven-compiler-plugin.version>3.15.0</maven-compiler-plugin.version>
@@ -516,6 +519,8 @@
                             <floci.aws.image>${floci.aws.image}</floci.aws.image>
                             <floci.azure.image>${floci.azure.image}</floci.azure.image>
                             <floci.gcp.image>${floci.gcp.image}</floci.gcp.image>
+                            <azure.functions.image>${azure.functions.image}</azure.functions.image>
+                            <python.image>${python.image}</python.image>
                             <valkey.image>${valkey.image}</valkey.image>
                             <vault.image>${vault.image}</vault.image>
                             <kafka.image>${kafka.image}</kafka.image>

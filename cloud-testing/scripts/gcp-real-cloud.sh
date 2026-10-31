@@ -20,6 +20,7 @@
 #   cloud-testing/scripts/gcp-real-cloud.sh                                   # project from gcloud config
 #   GCP_PROJECT=my-project GCP_REGION=australia-southeast1 cloud-testing/scripts/gcp-real-cloud.sh
 #   IT_TEST='RealGcpIT$Firestore' cloud-testing/scripts/gcp-real-cloud.sh     # one suite only
+#   IT_TEST='...' SPRING_IT_TEST=RealSpringFunctionIT cloud-testing/scripts/gcp-real-cloud.sh   # one suite, plus Spring ones
 #   TIER=2 cloud-testing/scripts/gcp-real-cloud.sh                            # Cloud SQL PostgreSQL and MySQL with IAM auth
 #   TIER=3 cloud-testing/scripts/gcp-real-cloud.sh                            # Memorystore for Valkey with IAM auth
 #   TIER=4 cloud-testing/scripts/gcp-real-cloud.sh                            # streams on Managed Kafka with IAM, plus Spring Boot
@@ -174,7 +175,8 @@ teardown() {
   log "Checking nothing of run $RUN remains"
   local left=""
   # A missing bucket makes describe fail, so check it by listing instead.
-  left+=$(check buckets "${GCLOUD[@]}" storage buckets list --filter="name=halyx-$RUN-blobs" --format='value(name)')
+  left+=$(check buckets "${GCLOUD[@]}" storage buckets list --filter="name~^halyx-$RUN-(blobs|functions)\$" --format='value(name)')
+  left+=$(check functions "${GCLOUD[@]}" functions list --regions="$REGION" --filter="name~/halyx-$RUN-" --format='value(name)')
   left+=$(check firestore "${GCLOUD[@]}" firestore databases list --filter="name~/halyx-$RUN\$" --format='value(name)')
   left+=$(check topics "${GCLOUD[@]}" pubsub topics list --filter="name~/halyx-$RUN-" --format='value(name)')
   left+=$(check subscriptions "${GCLOUD[@]}" pubsub subscriptions list --filter="name~/halyx-$RUN-" --format='value(name)')
@@ -335,26 +337,31 @@ if [[ "$TIER" == 2 ]]; then
 fi
 MESSAGE_BUS=$(terraform -chdir="$TF_DIR" output -raw message_bus)
 EVENTS_INBOX=$(terraform -chdir="$TF_DIR" output -raw events_inbox)
+FUNCTION=$(terraform -chdir="$TF_DIR" output -raw function)
+FUNCTION_URL=$(terraform -chdir="$TF_DIR" output -raw function_url)
 log "Running the conformance kits against real GCP"
 mvn -o verify -pl halyx-gcp -Dit.test="${IT_TEST:-RealGcpIT}" -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
     -Dhalyx.real.gcp=true -Dhalyx.real.gcp.run="$RUN" -Dhalyx.real.gcp.project="$PROJECT" \
     -Dhalyx.real.gcp.region="$REGION" \
     -Dhalyx.real.gcp.bucket="$(terraform -chdir="$TF_DIR" output -raw bucket)" \
     -Dhalyx.real.gcp.firestore-database="$(terraform -chdir="$TF_DIR" output -raw firestore_database)" \
-    -Dhalyx.real.gcp.message-bus="$MESSAGE_BUS" -Dhalyx.real.gcp.events-inbox="$EVENTS_INBOX"
+    -Dhalyx.real.gcp.message-bus="$MESSAGE_BUS" -Dhalyx.real.gcp.events-inbox="$EVENTS_INBOX" \
+    -Dhalyx.real.gcp.function="$FUNCTION" -Dhalyx.real.gcp.function-url="$FUNCTION_URL"
 status=$?
-[[ -n "${IT_TEST:-}" ]] && exit $status
+# With IT_TEST, the Spring tests run only when SPRING_IT_TEST names them.
+[[ -n "${IT_TEST:-}" && -z "${SPRING_IT_TEST:-}" ]] && exit $status
 # Spring Boot 3 and 4: an auto-configured repository on the run's table with a sort key, the event bus,
 # halyx-reactor's WebFlux, reactive repository and event beans over the bucket, table and message bus,
-# @HalyxListener on the run's Pub/Sub topic with a claim check, and spring.config.import from Secret Manager and
-# Parameter Manager.
+# @HalyxListener on the run's Pub/Sub topic with a claim check, spring.config.import from Secret Manager and
+# Parameter Manager, and a FunctionInvoker bean on the run's function at its default cloudfunctions.net URL.
 mvn -o -q install -DskipTests -pl halyx-spring-boot-autoconfigure -am || exit 1
 for module in halyx-spring-boot-autoconfigure halyx-spring-boot4-tests; do
   log "Running the Spring Boot repository, event and reactive tests ($module) against real GCP"
-  mvn -o verify -pl "$module" -Dit.test='RealSpringRepositoryIT,RealSpringEventIT,RealSpringReactiveIT,RealSpringMessagingIT,RealSpringParametersIT' -Dtest=none \
+  mvn -o verify -pl "$module" -Dit.test="${SPRING_IT_TEST:-RealSpringRepositoryIT,RealSpringEventIT,RealSpringReactiveIT,RealSpringMessagingIT,RealSpringParametersIT,RealSpringFunctionIT}" -Dtest=none \
       -Dsurefire.failIfNoSpecifiedTests=false \
       -Dhalyx.real.spring.repositories=true -Dhalyx.real.spring.events=true -Dhalyx.real.spring.reactive=true \
-      -Dhalyx.real.spring.messaging=true -Dhalyx.real.spring.parameters=true \
+      -Dhalyx.real.spring.messaging=true -Dhalyx.real.spring.parameters=true -Dhalyx.real.spring.functions=true \
+      -Dhalyx.real.spring.function="$FUNCTION" -Dhalyx.real.spring.function-properties="gcp.functions.region=$REGION" \
       -Dhalyx.real.spring.provider=gcp -Dhalyx.real.spring.bucket="$(terraform -chdir="$TF_DIR" output -raw bucket)" \
       -Dhalyx.real.spring.table="items-sorted" \
       -Dhalyx.real.spring.provider-properties="gcp.project-id=$PROJECT,gcp.firestore.database=$(terraform -chdir="$TF_DIR" output -raw firestore_database)" \

@@ -46,6 +46,9 @@ gcloud auth application-default login --impersonate-service-account=halyx-test@<
   descending, on both test tables, plus a collection-group index on `owner`
 - an Eventarc Advanced message bus, an enrollment matching every event, and a pipeline that publishes them to
   a Pub/Sub topic with an OAuth token for `halyx-test`, and the topic's inbox subscription
+- the function kit's Cloud Run function (the emulator tests' `main.py`, on `python312`), with one instance taking one
+  request at a time so the runs it counts in memory hold for every invocation, its source bucket, and
+  `roles/run.invoker` on it for the test service account only
 
 **Test.** `RealGcpIT` creates Pub/Sub topics and subscriptions named after the run, plus `tck-*` secrets
 and parameters (Parameter Manager both global and regional).
@@ -677,6 +680,8 @@ Then Spring Boot 3.5 and 4: a provider with `credentials.type: impersonate` and 
 | `r2610221620c638` | tier 4, plus Spring Boot 3 and 4 | **29/29**; Spring **2/2** | clean | Full regression before 1.0.0, at `be792e3`, with the kit's new listener tests: a replacement listener carries on where the last stopped, and a joining member waits for the previous owner's partitions. Cluster created in 13m 19s. |
 | `r2610231113261d` | tier 5, plus Spring Boot 3 and 4 | 1/3; Spring **2/2** | clean | The first tier 5 run. Impersonation was refused for a minute after the Token Creator grant on the target was made, then worked, as the Spring tests show. The test's own token check refreshed unscoped credentials, which Google refuses, and looked for an email, which token info leaves out for a cloud-platform-only token. Two runs of `RealGcpLoginIT` alone confirmed the fixes. |
 | `r2610231129846c` | tier 5, plus Spring Boot 3 and 4 | **3/3**; Spring **2/2** | clean | Latest tier 5 result, above. |
+| `r26103118357945` | tier 1, functions only (`IT_TEST='RealGcpIT$CloudRunFunctions'`, `SPRING_IT_TEST=RealSpringFunctionIT`) | not run | clean | Stopped at `terraform apply`: the test service account had no `cloudfunctions.functions.create`. It was granted Cloud Functions Developer, Cloud Run Admin (to grant `run.invoker` on the function) and Cloud Build Service Account, and the function is now built as the test service account. The Cloud Functions, Cloud Build and Cloud Run APIs were enabled first. |
+| `r2610312021456e` | tier 1, functions only | **10 passed, 2 skipped** (expected: no `trigger` and no header limit on Cloud Run functions); Spring **4/4** | clean | First function run: the function kit at the function's `run.app` URL with Google ID tokens, one instance taking one request at a time; a missing function at its default URL answered 404. `RealSpringFunctionIT` 2/2 on Boot 3.5 and 4, at the default `cloudfunctions.net` URL. |
 
 ## What real GCP found
 

@@ -31,6 +31,8 @@ import dev.halyx.CloudContext;
 import dev.halyx.config.ProviderConfig;
 import dev.halyx.events.EventBusConfig;
 import dev.halyx.events.EventPublisher;
+import dev.halyx.functions.FunctionConfig;
+import dev.halyx.functions.FunctionInvoker;
 import dev.halyx.messaging.ClaimCheck;
 import dev.halyx.messaging.OutgoingMessage;
 import dev.halyx.messaging.ReceivedMessage;
@@ -43,6 +45,7 @@ import dev.halyx.parameters.ParameterStoreConfig;
 import dev.halyx.storage.BlobStore;
 import dev.halyx.tck.BlobStoreConformanceTest;
 import dev.halyx.tck.EventBusConformanceTest;
+import dev.halyx.tck.FunctionConformanceTest;
 import dev.halyx.tck.DocumentStoreConformanceTest;
 import dev.halyx.tck.ReactiveDocumentRepositoryConformanceTest;
 import dev.halyx.reactor.ReactiveHalyx;
@@ -78,6 +81,7 @@ class RealAzureIT {
     private static final String EVENT_GRID = System.getProperty("halyx.real.azure.eventgrid-endpoint");
     private static final String EVENT_GRID_TOPIC = System.getProperty("halyx.real.azure.eventgrid-topic");
     private static final String EVENT_GRID_SUBSCRIPTION = System.getProperty("halyx.real.azure.eventgrid-subscription");
+    private static final String FUNCTION_ENDPOINT = System.getProperty("halyx.real.azure.function-endpoint");
 
     private static Halyx halyx;
     private static ServiceBusAdministrationClient admin;
@@ -262,6 +266,37 @@ class RealAzureIT {
                         .property(AzureProperties.EVENT_GRID_ENDPOINT, EVENT_GRID).build());
             }
             return inbox;
+        }
+    }
+
+    /** The run's function app, called with its function key from the environment ({@code HALYX_FUNCTION_KEY}). */
+    @Nested
+    class AzureFunctions extends FunctionConformanceTest {
+        @Override
+        protected FunctionConfig.Builder function() {
+            return FunctionConfig.builder("tck").property(AzureProperties.FUNCTIONS_ENDPOINT, FUNCTION_ENDPOINT)
+                    .property(AzureProperties.FUNCTIONS_KEY, System.getenv("HALYX_FUNCTION_KEY"));
+        }
+
+        @Override
+        protected FunctionConfig.Builder missingFunction() {
+            return FunctionConfig.builder("tck-missing").property(AzureProperties.FUNCTIONS_ENDPOINT, FUNCTION_ENDPOINT)
+                    .property(AzureProperties.FUNCTIONS_KEY, System.getenv("HALYX_FUNCTION_KEY"));
+        }
+
+        @Override
+        protected FunctionInvoker invoker(FunctionConfig config) {
+            return azure().functionInvoker(config);
+        }
+
+        @Override
+        protected long maxPayloadBytes() {
+            return 100L * 1024 * 1024;
+        }
+
+        @Override
+        protected Duration timeout() {
+            return Duration.ofMinutes(2);
         }
     }
 

@@ -57,6 +57,8 @@ graphify-out/
 *.tfstate.*
 .terraform.lock.hcl
 crash.log
+# Function packages the tier 1 runs build from the test functions
+cloud-testing/infra/*/tier1/.build/
 
 # Real-cloud end-to-end reports, kept locally
 cloud-testing/reports/

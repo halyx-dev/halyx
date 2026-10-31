@@ -23,6 +23,7 @@ import dev.halyx.config.ProviderConfig;
 import dev.halyx.error.CloudException;
 import dev.halyx.error.UnavailableException;
 import dev.halyx.events.EventBusConfig;
+import dev.halyx.functions.FunctionConfig;
 import dev.halyx.messaging.MessageConsumer;
 import dev.halyx.messaging.SubscriptionConfig;
 import dev.halyx.messaging.TopicConfig;
@@ -69,6 +70,8 @@ class CloudContextTest {
             assertThat(context.publisher(TopicConfig.of("orders"))).isSameAs(context.publisher("orders"));
             assertThat(context.subscription(SubscriptionConfig.of("billing"))).isSameAs(context.subscription("billing"));
             assertThat(context.eventPublisher(EventBusConfig.of("bus"))).isSameAs(context.eventPublisher("bus"));
+            assertThat(context.functionInvoker(FunctionConfig.of("resize"))).isSameAs(context.functionInvoker("resize"))
+                    .isNotSameAs(context.functionInvoker(FunctionConfig.builder("resize").idempotent(true).build()));
         }
     }
 

@@ -30,6 +30,7 @@ Halyx                                   one per application
  │     ├── eventPublisher("orders")         → EventPublisher   (EventBridge)
  │     ├── streamProducer(StreamProducerConfig) → StreamProducer (MSK)
  │     ├── streamConsumer(StreamConsumerConfig) → StreamConsumer (MSK)
+ │     ├── functionInvoker("resize-image")  → FunctionInvoker  (Lambda)
  │     ├── database(SqlConfig)              → Database         (RDS)
  │     ├── cache(CacheConfig)               → Cache<V>         (ElastiCache)
  │     └── parameterStore(ParameterStoreConfig) → ParameterStore (Secrets Manager, SSM)
@@ -42,7 +43,7 @@ Halyx                                   one per application
 | `Halyx` | The registry of named providers. Build it once, share it, and close it on shutdown. |
 | `ProviderConfig` | Which cloud (`aws`, `azure`, `gcp`, `vault`, `memory`), plus region, endpoint, credentials and provider properties. See [Provider configuration](../providers.md). |
 | `CloudContext` | One provider connection: an account and region with its credentials. It hands out services, which share its HTTP clients and connection pools. Asking again with an equal configuration returns the same service (with its caches and statistics), except stream consumers and databases, which are new each time. |
-| Service interfaces | `BlobStore`, `DocumentStore`, `Publisher` and `Subscription`, `EventPublisher`, `StreamProducer` and `StreamConsumer`, `Database`, `Cache<V>`, `ParameterStore`. |
+| Service interfaces | `BlobStore`, `DocumentStore`, `Publisher` and `Subscription`, `EventPublisher`, `StreamProducer` and `StreamConsumer`, `FunctionInvoker`, `Database`, `Cache<V>`, `ParameterStore`. |
 
 ```java
 Halyx halyx = Halyx.builder()
@@ -64,6 +65,7 @@ halyx.names();   // [orders, analytics]
 | [Messaging](messaging.md) | `Publisher`, `Subscription` | publishing, listeners, manual receive, ordering, deduplication, delays, claim checks |
 | [Events](events.md) | `CloudEvent`, `EventPublisher` | CloudEvents to EventBridge, Event Grid and Eventarc Advanced, and decoding what their rules deliver |
 | [Streams](streams.md) | `StreamProducer`, `StreamConsumer` | Kafka topics on MSK, Event Hubs and Managed Kafka: keys and order, consumer groups, listeners, commits, dead letters, transactions |
+| [Functions](functions.md) | `FunctionInvoker` | invoking Lambda functions, Azure Functions and Cloud Run functions with each cloud's login, errors, retries and fire-and-forget triggers |
 | [SQL databases](sql.md) | `Database` | a pooled JDBC `DataSource` with IAM, Entra ID or password login |
 | [Caches](caches.md) | `Cache<V>` | Redis and Valkey operations, atomic updates, counters, locks, fail-open |
 | [Parameters and secrets](parameters.md) | `ParameterStore` | configuration values and secrets, versions, JSON fields, watching for changes |

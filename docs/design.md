@@ -42,16 +42,16 @@ that.
 
 | Pattern | Where |
 |---|---|
-| Bridge | each API (`BlobStore`, `DefaultBlobStore`) and its SPI (`BlobStoreDriver`) |
+| Bridge | each API (`BlobStore`, `DefaultBlobStore`; `FunctionInvoker`, `DefaultFunctionInvoker`) and its SPI (`BlobStoreDriver`, `FunctionInvokerDriver`) |
 | Plugin, Separated Interface | `CloudProvider` in core, discovered from provider jars through `ServiceLoader` |
 | Abstract Factory | `ProviderConnection` creates the family of drivers for one account and region |
 | Registry, Facade | `Halyx` holds the named `CloudContext`s |
 | Gateway, Adapter | each driver wraps a native SDK client |
-| Template Method | an `Abstract*Driver` base per SPI, which every driver extends: blob stores, document stores, publishers and subscriptions, event publishers, stream producers and consumers, caches and parameter stores (translation fallback, `unwrap`) |
+| Template Method | an `Abstract*Driver` base per SPI, which every driver extends: blob stores, document stores, publishers and subscriptions, event publishers, stream producers and consumers, function invokers, caches and parameter stores (translation fallback, `unwrap`) |
 | Chain of Responsibility | `Interceptor` and `InterceptorChain` (`RetryInterceptor` included) |
 | Value Object | `BlobKey`, `ETag`, `Key`, `Version`, `ProviderConfig`: immutable |
-| Service Stub | the `memory` provider, for tests |
-| Exception Translation | the sealed `CloudException` hierarchy with `isRetryable()` |
+| Service Stub | the `memory` provider, for tests, with `InMemoryFunctions` serving registered handlers |
+| Exception Translation | the sealed `CloudException` hierarchy with `isRetryable()`; HTTP statuses through `AzureErrors.fromStatus` and `GcpErrors.fromStatus`, shared by the SDK translations and the HTTP function drivers |
 
 ### Principles
 
@@ -76,11 +76,11 @@ that.
 | `halyx-sql` | the shared HikariCP pool with per-connection credentials (passwords, cloud IAM tokens) |
 | `halyx-r2dbc` | pooled R2DBC connections with the same password and cloud IAM logins, for reactive code and Spring Data R2DBC |
 | `halyx-reactor` | Project Reactor views of every service on the application's scheduler: `Mono` and `Flux`, streams in and out, subscriptions and stream consumers as a `Flux` of deliveries |
-| `halyx-micrometer` | Micrometer observations of every operation, and trace context through messages, events and stream records, for any application; the starter applies them |
+| `halyx-micrometer` | Micrometer observations of every operation, and trace context through messages, events, stream records and function invocations, for any application; the starter applies them |
 | `halyx-kafka` | the shared Kafka stream driver, with password and cloud IAM login (SASL `OAUTHBEARER`), used by every provider |
-| `halyx-aws` | AWS SDK v2: S3, DynamoDB, SNS, SQS, EventBridge, SSM Parameter Store, Secrets Manager, ElastiCache and RDS IAM login |
-| `halyx-azure` | Azure SDK: Blob Storage, Cosmos DB, Service Bus, Event Grid namespaces, Key Vault, App Configuration, Entra ID login for caches and databases |
-| `halyx-gcp` | Google Cloud: Cloud Storage, Firestore, Pub/Sub, Eventarc Advanced, Secret Manager, Parameter Manager, Memorystore and Cloud SQL IAM login |
+| `halyx-aws` | AWS SDK v2: S3, DynamoDB, SNS, SQS, EventBridge, Lambda, SSM Parameter Store, Secrets Manager, ElastiCache and RDS IAM login |
+| `halyx-azure` | Azure SDK: Blob Storage, Cosmos DB, Service Bus, Event Grid namespaces, Azure Functions, Key Vault, App Configuration, Entra ID login for caches and databases |
+| `halyx-gcp` | Google Cloud: Cloud Storage, Firestore, Pub/Sub, Eventarc Advanced, Cloud Run functions, Secret Manager, Parameter Manager, Memorystore and Cloud SQL IAM login |
 | `halyx-vault` | HashiCorp Vault KV v2 parameters and secrets |
 | `halyx-spring-data-document` | Spring Data repositories over document stores: records as entities, derived queries on keys and indexes, optimistic locking, keyset scrolling |
 | `halyx-spring-boot-autoconfigure` | Spring Boot auto-configuration, properties, health and observations |
@@ -124,6 +124,7 @@ either portable or explicitly declared as a capability:
 | Reactive document repositories | 10 | the document repository cases through `ReactiveDocumentRepository`: `Mono` and `Flux` results, saves from a `Publisher`, `Mono<Window>` scrolling, and `Flux` queries that stop early |
 | Document store | 26 | the asynchronous view, every value type, versions and conditions, partial updates with concurrent increments, batches beyond provider limits, sort-key queries both ways with paging, secondary indexes, transactions with rollback, keys with `/ ? # % \`, expiry |
 | Event bus | 9 | asynchronous publishes, every CloudEvent attribute through the router to its queue, text and binary data, events without data, batches across requests, republished ids, oversized events refused, listeners |
+| Functions | 12 | one test function per environment: the payload round trip, configured and per-request headers reaching the function, a function that throws, 400 and 404, a missing function, payload and header limits, timeouts, a failed or timed-out non-idempotent invocation running once, the asynchronous view, and `trigger` where declared |
 | Messaging | 21 | round trips, asynchronous publishes and receives, binary bodies, ack and nack, lease expiry and extension, batches, listener retries and concurrency, claim checks, ordering, deduplication, delays |
 | Streams | 28 | asynchronous sends and polls, keys, headers, partitions and offsets, order per key, committed positions, uncommitted records read again, groups sharing partitions, start positions, listener retries holding only their partition, dead letters, commits on close, claim checks, idempotence and transactions |
 | Cache | 52 | ping, the asynchronous view, basic and bulk operations, cache-aside, atomic operations, counters, locks, namespaces, expiry (fail-open has its own test against an unreachable server) |
@@ -137,7 +138,9 @@ Google Cloud), Google's Pub/Sub and Firestore emulators, Microsoft's Service Bus
 TLS with a private CA, and a 3-master cluster), HashiCorp Vault, PostgreSQL, MySQL and Apache Kafka. Image
 versions are pinned in the parent POM. `halyx-kafka` runs its broker tests twice, on Kafka 3.9 and on Kafka 4.
 The event bus kit runs on Floci's EventBridge; Event Grid namespaces and Eventarc Advanced have no emulator, so
-their kits run on the real clouds only.
+their kits run on the real clouds only. The function kit's test function, in Python, runs on Floci's Lambda (in a
+Lambda runtime container, with the Docker socket), on the Azure Functions host container
+(`mcr.microsoft.com/azure-functions/python`), and on Google's Functions Framework built from `python:3.12-slim`.
 
 Behaviour an emulator doesn't implement is declared per provider in `knownEnvironmentGaps()`, each case
 confirmed with raw HTTP requests against the emulator. Those tests are reported as skipped with the

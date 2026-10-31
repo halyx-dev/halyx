@@ -33,8 +33,10 @@ AWS_PROFILE=default AWS_REGION=ap-southeast-2 cloud-testing/scripts/aws-real-clo
 IT_TEST='RealAwsIT$SecretsManager' AWS_PROFILE=default AWS_REGION=ap-southeast-2 cloud-testing/scripts/aws-real-cloud.sh
 ```
 
-1. **Provision.** Terraform (`cloud-testing/infra/aws/tier1`) creates one S3 bucket, two DynamoDB tables, and an EventBridge
-   event bus with a rule that delivers the kit's events to an SQS inbox queue. Their names
+1. **Provision.** Terraform (`cloud-testing/infra/aws/tier1`) creates one S3 bucket, two DynamoDB tables, an EventBridge
+   event bus with a rule that delivers the kit's events to an SQS inbox queue, and the function kit's Lambda function
+   (the emulator tests' `tck.py`, on `python3.13`) with its execution role and a DynamoDB table it counts runs in,
+   since Lambda may serve invocations from several instances. Their names
    include a fresh run id (`r<yyMMddHHmm><hex>`), and everything is tagged `halyx-test=<run id>`.
 2. **Test.** `RealAwsIT` runs the conformance kits, and is enabled only by `-Dhalyx.real.aws=true`.
    The tests create SNS topics, SQS queues, SSM parameters and secrets themselves, then delete them.
@@ -628,6 +630,9 @@ Then Spring Boot 3.5 and 4: a provider with `credentials.type: impersonate`, `ta
 | `r26102220335c55` | tier 3, plus Spring Boot 3 and 4 | 55/56; Spring **2/2** | clean | With the scoped policy, the user without `Connect` permission was refused, a first. `largeValue` timed out instead: a 1 MiB value through the SSH tunnel takes about the 2-second default command timeout (2.3s in earlier passing runs). The tunnelled tests now allow 10 seconds. |
 | `r2610222254a38c` | tier 3, plus Spring Boot 3 and 4 | **56/56**; Spring **2/2** | clean | Latest tier 3 result: the scoped policy and the 10-second command timeout. Every test passed for the first time, including the IAM user without `Connect` permission being refused. |
 | `r2610231127c8d1` | tier 5, plus Spring Boot 3 and 4 | **3/3**; Spring **2/2** | clean | The first tier 5 run: an assumed role with an external ID. |
+| `r26103118264f82` | tier 1, functions only (`IT_TEST='RealAwsIT$Lambda'`, `SPRING_IT_TEST=RealSpringFunctionIT`) | not run | clean | Stopped at `terraform apply`: the test user may not attach a managed policy to a role (`iam:AttachRolePolicy`). The function's role now has an inline policy only, as tier 5's does. |
+| `r26103118314607` | tier 1, functions only | not run | clean | Stopped at `terraform apply`: no `iam:PassRole` to give the role to Lambda. The test user was granted `iam:PassRole` on `halyx-*` roles for Lambda, and the Lambda actions on `halyx-*` functions. |
+| `r2610311838d2b2` | tier 1, functions only | **11 passed, 1 skipped** (expected: Lambda functions return no HTTP status); Spring **4/4** | clean | First function run: the function kit on a real Lambda function, with IAM, the `ClientContext` headers, the function error, the 2-second timeout not retried, and `trigger`. `RealSpringFunctionIT` 2/2 on Boot 3.5 and 4. |
 
 ## What real AWS found
 

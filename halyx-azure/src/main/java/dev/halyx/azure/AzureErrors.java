@@ -28,6 +28,7 @@ import dev.halyx.error.NotFoundException;
 import dev.halyx.error.PreconditionFailedException;
 import dev.halyx.error.ThrottledException;
 import dev.halyx.error.UnavailableException;
+import dev.halyx.error.UnknownCloudException;
 import dev.halyx.error.UnsupportedFeatureException;
 
 import java.io.IOException;
@@ -47,19 +48,8 @@ public final class AzureErrors {
         String provider = AzureProvider.ID;
         if (error instanceof HttpResponseException e && e.getResponse() != null) {
             String code = e instanceof BlobStorageException b && b.getErrorCode() != null ? b.getErrorCode().toString() : null;
-            String message = e.getMessage();
-            CloudException mapped = switch (e.getResponse().getStatusCode()) {
-                case 404 -> new NotFoundException(message, e, provider, code);
-                case 412 -> new PreconditionFailedException(message, e, provider, code);
-                case 409 -> new AlreadyExistsException(message, e, provider, code);
-                case 401, 403 -> new AccessDeniedException(message, e, provider, code);
-                case 400, 416 -> new InvalidArgumentException(message, e, provider, code);
-                case 501 -> new UnsupportedFeatureException(message, e, provider, code);
-                // Azure Storage signals throttling with 503 ServerBusy as well as 429.
-                case 429, 503 -> new ThrottledException(message, e, provider, code, retryAfter(e.getResponse()));
-                default -> e.getResponse().getStatusCode() >= 500 ? new UnavailableException(message, e, provider, code) : null;
-            };
-            return Optional.ofNullable(mapped);
+            return Optional.ofNullable(mapStatus(e.getResponse().getStatusCode(), e.getMessage(), e, code,
+                    retryAfter(e.getResponse())));
         }
         // An Entra ID token request that failed before any service call, such as a missing managed identity.
         if (error instanceof ClientAuthenticationException) {
@@ -71,8 +61,33 @@ public final class AzureErrors {
         return Optional.empty();
     }
 
+    /**
+     * Maps an HTTP status from an Azure service, for drivers that make HTTP calls themselves, as {@link #translate}
+     * maps the SDKs' exceptions; a status with no portable meaning is an {@link UnknownCloudException}.
+     */
+    public static CloudException fromStatus(int status, String message, Throwable cause, String code, Duration retryAfter) {
+        CloudException mapped = mapStatus(status, message, cause, code, retryAfter);
+        return mapped != null ? mapped : new UnknownCloudException(message, cause, AzureProvider.ID, code);
+    }
+
+    /** The portable error for {@code status}, or null if it has none. */
+    private static CloudException mapStatus(int status, String message, Throwable cause, String code, Duration retryAfter) {
+        String provider = AzureProvider.ID;
+        return switch (status) {
+            case 404 -> new NotFoundException(message, cause, provider, code);
+            case 412 -> new PreconditionFailedException(message, cause, provider, code);
+            case 409 -> new AlreadyExistsException(message, cause, provider, code);
+            case 401, 403 -> new AccessDeniedException(message, cause, provider, code);
+            case 400, 416 -> new InvalidArgumentException(message, cause, provider, code);
+            case 501 -> new UnsupportedFeatureException(message, cause, provider, code);
+            // Azure Storage signals throttling with 503 ServerBusy as well as 429.
+            case 429, 503 -> new ThrottledException(message, cause, provider, code, retryAfter);
+            default -> status >= 500 ? new UnavailableException(message, cause, provider, code) : null;
+        };
+    }
+
     /** Azure sends Retry-After (seconds) and, on some services, x-ms-retry-after-ms. */
-    private static Duration retryAfter(HttpResponse response) {
+    public static Duration retryAfter(HttpResponse response) {
         String millis = response.getHeaderValue(RETRY_AFTER_MS);
         if (millis != null) {
             try {

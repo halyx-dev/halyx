@@ -18,6 +18,7 @@ package dev.halyx.reactor;
 import dev.halyx.Halyx;
 import dev.halyx.cache.Cache;
 import dev.halyx.events.EventPublisher;
+import dev.halyx.functions.FunctionInvoker;
 import dev.halyx.messaging.Publisher;
 import dev.halyx.messaging.Subscription;
 import dev.halyx.nosql.DocumentStore;
@@ -150,6 +151,10 @@ public final class ReactiveHalyx implements AutoCloseable {
 
     public ReactiveEventPublisher wrap(EventPublisher publisher) {
         return new ReactiveEventPublisher(publisher, calls);
+    }
+
+    public ReactiveFunctionInvoker wrap(FunctionInvoker invoker) {
+        return new ReactiveFunctionInvoker(invoker, calls);
     }
 
     public ReactiveStreamProducer wrap(StreamProducer producer) {

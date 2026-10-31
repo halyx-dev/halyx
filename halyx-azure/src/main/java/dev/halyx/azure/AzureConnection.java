@@ -35,12 +35,22 @@ import com.azure.storage.common.StorageSharedKeyCredential;
 import com.azure.core.credential.AccessToken;
 import com.azure.core.credential.TokenCredential;
 import com.azure.core.http.HttpClient;
+import com.azure.core.http.HttpHeaderName;
+import com.azure.core.http.HttpHeaders;
+import com.azure.core.http.HttpPipelineBuilder;
+import com.azure.core.http.policy.AddHeadersPolicy;
+import com.azure.core.http.policy.BearerTokenAuthenticationPolicy;
+import com.azure.core.http.policy.ExponentialBackoffOptions;
+import com.azure.core.http.policy.HttpPipelinePolicy;
+import com.azure.core.http.policy.RetryOptions;
+import com.azure.core.http.policy.RetryPolicy;
 import com.azure.core.util.HttpClientOptions;
 import com.azure.data.appconfiguration.ConfigurationClientBuilder;
 import com.azure.security.keyvault.secrets.SecretClientBuilder;
 import dev.halyx.azure.blob.AzureBlobStoreDriver;
 import dev.halyx.azure.cosmos.CosmosDocumentStoreDriver;
 import dev.halyx.azure.eventhubs.EventHubsEntraTokens;
+import dev.halyx.azure.functions.AzureFunctionsInvokerDriver;
 import dev.halyx.azure.parameters.AppConfigurationDriver;
 import dev.halyx.azure.parameters.AzureParameterProperties;
 import dev.halyx.azure.parameters.ForceHttpPolicy;
@@ -59,6 +69,9 @@ import dev.halyx.cache.spi.CacheDriver;
 import dev.halyx.config.Credentials;
 import dev.halyx.config.HttpSettings;
 import dev.halyx.config.ProviderConfig;
+import dev.halyx.functions.FunctionConfig;
+import dev.halyx.functions.spi.ConnectFailures;
+import dev.halyx.functions.spi.FunctionInvokerDriver;
 import dev.halyx.jdbc.JdbcDatabases;
 import dev.halyx.kafka.KafkaCredentialsSource;
 import dev.halyx.kafka.KafkaStreamClients;
@@ -83,6 +96,9 @@ import dev.halyx.stream.StreamProducerConfig;
 import dev.halyx.stream.spi.ConsumerDriver;
 import dev.halyx.stream.spi.ProducerDriver;
 
+import java.net.MalformedURLException;
+import java.net.URI;
+import java.net.URL;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -334,6 +350,71 @@ final class AzureConnection implements ProviderConnection {
         bus.property(AzureProperties.EVENT_GRID_ACCESS_KEY).ifPresentOrElse(
                 key -> sender.credential(new AzureKeyCredential(key)), () -> sender.credential(tokenCredential(false)));
         return new EventGridPublisherDriver(sender.buildClient(), sender.buildAsyncClient(), bus.name());
+    }
+
+    /**
+     * Function invocations that may run the function twice are retried only after a 429 or a failure to connect,
+     * when the Functions host hasn't run it.
+     */
+    private static final HttpHeaderName FUNCTIONS_KEY_HEADER = HttpHeaderName.fromString("x-functions-key");
+
+    private static final RetryOptions BEFORE_SEND_RETRIES = new RetryOptions(new ExponentialBackoffOptions())
+            .setShouldRetryCondition(attempt -> attempt.getResponse() != null && attempt.getResponse().getStatusCode() == 429
+                    || attempt.getThrowable() != null && ConnectFailures.isConnectFailure(attempt.getThrowable()));
+
+    /**
+     * An HTTP-triggered function on the app at {@code azure.functions.endpoint}, logging in with an Entra ID token for
+     * {@code azure.functions.audience} or with the function key {@code azure.functions.key}.
+     */
+    @Override
+    public synchronized FunctionInvokerDriver functionInvoker(FunctionConfig function) {
+        String endpoint = function.property(AzureProperties.FUNCTIONS_ENDPOINT).orElseThrow(() -> new IllegalArgumentException(
+                "Azure function " + function.name() + " needs its function app's URL: property " + AzureProperties.FUNCTIONS_ENDPOINT));
+        String route = function.property(AzureProperties.FUNCTIONS_ROUTE).orElse("api/" + function.name());
+        URL url;
+        try {
+            url = URI.create(endpoint.replaceAll("/+$", "") + "/" + route.replaceAll("^/+", "")).toURL();
+        } catch (MalformedURLException | IllegalArgumentException e) {
+            throw new IllegalArgumentException("Azure function " + function.name() + " has no valid URL from "
+                    + AzureProperties.FUNCTIONS_ENDPOINT + " '" + endpoint + "' and route '" + route + "'", e);
+        }
+        List<HttpPipelinePolicy> policies = new ArrayList<>();
+        policies.add(functionRetries(function.idempotent()));
+        functionLogin(function).ifPresent(policies::add);
+        var pipeline = new HttpPipelineBuilder().httpClient(http()).policies(policies.toArray(HttpPipelinePolicy[]::new)).build();
+        return new AzureFunctionsInvokerDriver(pipeline, url, function);
+    }
+
+    /** The connection's SDK clients use the default retry policy; idempotent functions do too. */
+    static RetryPolicy functionRetries(boolean idempotent) {
+        return idempotent ? new RetryPolicy() : new RetryPolicy(BEFORE_SEND_RETRIES);
+    }
+
+    /** An Entra ID token for the audience, or the function key; neither for an anonymous provider, such as an emulator. */
+    private Optional<HttpPipelinePolicy> functionLogin(FunctionConfig function) {
+        Optional<String> audience = function.property(AzureProperties.FUNCTIONS_AUDIENCE);
+        Optional<String> key = function.property(AzureProperties.FUNCTIONS_KEY);
+        if (audience.isPresent() && key.isPresent()) {
+            throw new IllegalArgumentException("Azure function " + function.name() + " has both "
+                    + AzureProperties.FUNCTIONS_AUDIENCE + " and " + AzureProperties.FUNCTIONS_KEY + ": set one");
+        }
+        if (key.isPresent()) {
+            return Optional.of(new AddHeadersPolicy(new HttpHeaders().set(FUNCTIONS_KEY_HEADER, key.get())));
+        }
+        if (audience.isPresent()) {
+            if (!entraId()) {
+                throw new IllegalArgumentException("Azure function " + function.name() + " logs in to "
+                        + AzureProperties.FUNCTIONS_AUDIENCE + " with Entra ID: configure the provider with "
+                        + "Credentials.defaultChain() or a service principal, or use " + AzureProperties.FUNCTIONS_KEY);
+            }
+            String scope = audience.get().endsWith("/.default") ? audience.get() : audience.get() + "/.default";
+            return Optional.of(new BearerTokenAuthenticationPolicy(entraCredential(), scope));
+        }
+        if (config.credentials() instanceof Credentials.Anonymous) {
+            return Optional.empty();
+        }
+        throw new IllegalArgumentException("Azure function " + function.name() + " needs a login: property "
+                + AzureProperties.FUNCTIONS_AUDIENCE + " (Entra ID) or " + AzureProperties.FUNCTIONS_KEY + " (a function key)");
     }
 
     /** A Service Bus topic, or with {@code azure.servicebus.entity=queue} a queue. */

@@ -22,8 +22,8 @@ end.
 | Stage | Work |
 |---|---|
 | **Released** | [1.0.2](#release-102), a patch release, on 25 October 2026; [1.0.1](#release-101), a patch release, and [1.0.0](#release-100), the first release, both on 23 October 2026; all on Maven Central |
-| **Coming next** | [Planned additions](#coming-next): function invocation on Lambda, Azure Functions and Cloud Run functions for 1.1.0, R2DBC through the Cloud SQL connector, and more real-cloud test runs |
-| **Delivered** | [17 milestones](#delivered): every service on AWS, Azure and Google Cloud, Spring Boot 3.5 and 4, reactive and asynchronous APIs, Kotlin coroutines, a portable microservice on EKS, GKE and AKS, and cloud logins across clouds |
+| **Coming next** | [Planned additions](#coming-next): R2DBC through the Cloud SQL connector, and more real-cloud test runs |
+| **Delivered** | [18 milestones](#delivered): every service on AWS, Azure and Google Cloud, Spring Boot 3.5 and 4, reactive and asynchronous APIs, Kotlin coroutines, function invocation, a portable microservice on EKS, GKE and AKS, and cloud logins across clouds |
 
 ## Released
 
@@ -72,7 +72,6 @@ Additions planned on top of 1.0.0.
 
 | Item | Area | Today |
 |---|---|---|
-| Function invocation (FaaS), for 1.1.0: a portable `FunctionInvoker` and an SPI driver per cloud, invoking AWS Lambda functions, Azure Functions and Cloud Run functions by name with a payload and a response, with cloud logins (IAM, Entra ID, Google ID tokens), async and reactive views, Spring Boot properties, a conformance kit, and tests on the memory provider, the emulators and real clouds | Functions | Not offered: applications call each cloud's SDK or HTTP endpoint themselves |
 | R2DBC through the Cloud SQL connector | R2DBC | R2DBC connects to Cloud SQL directly, with IAM login; JDBC also works through the connector |
 | A real-cloud run on MSK Serverless with IAM, including transactions | Streams | Tested on Kafka 3.9 and 4.2.1 brokers, and on real Event Hubs and Managed Kafka. The run is ready ([AWS tier 4](cloud-testing/aws.md#tier-4-not-run)) and needs an AWS account plan that includes MSK |
 | A real-cloud run on Azure Database for MySQL with Entra ID | SQL databases | The run needs a directory-level grant in the test tenant |
@@ -99,6 +98,8 @@ Additions planned on top of 1.0.0.
 | 15 | Portable Spring Boot microservices | `halyx-samples/portable-orders`, an orders service on every Halyx API, built once as one image that runs unchanged on every cloud: the cloud is chosen by Spring profile, and optional features cover services a deployment can't offer. One Helm chart deploys the same image digests on EKS (Pod Identity), GKE (Workload Identity Federation) and AKS (Entra Workload ID), with no stored keys. One end-to-end suite runs in memory, on each cloud's emulators, against the image and on the three clusters, on Boot 4 and 3.5: EKS 8/10 (no MSK), GKE and AKS 9/10 | [Portable microservice](portable-service.md) |
 | 16 | Cloud logins | `Credentials.impersonate(target)`: an AWS IAM role through STS, with an external ID, a session name and a lifetime, or an impersonated Google service account, for every client and for SQL, cache and Kafka logins. `Credentials.servicePrincipal(...)`: an Entra ID application with a client secret, a certificate or a federated token file, for every Azure service. STS, SSO and SSO OIDC in `halyx-aws` for web identity (EKS) and SSO logins. Spring Boot `credentials.type: impersonate` and `service-principal`. Real clouds (tier 5): an assumed role with an external ID, an impersonated service account, and a service principal with a secret and with a federated Google ID token, on Boot 3.5 and 4. The certificate login is tested with unit tests only | [Provider configuration](providers.md#assumed-roles-and-impersonated-service-accounts) |
 | 17 | Kotlin coroutines | `suspend fun` `@HalyxListener` methods for subscriptions and stream consumers; coroutine repositories with `suspend` CRUD and queries and `Flow` results, on `@JvmRecord` entities; `awaitSingle` and `asFlow` over the reactive services, with back-pressure and context. Tested on Boot 3.5 (Kotlin 1.9) and Boot 4 (Kotlin 2.3), in memory and on Kafka, SQS and DynamoDB emulators. Not yet released | [Kotlin coroutines](spring-boot.md#reactive-applications) |
+
+| 18 | Function invocation | `FunctionInvoker`: AWS Lambda functions, Azure Functions and Cloud Run functions invoked by name with a payload and headers, with each cloud's login (IAM, Entra ID tokens or function keys, Google ID tokens) and the same exceptions on all three. Configured timeouts and headers, retries only for functions marked idempotent, fire-and-forget `trigger` on Lambda, `async()` and `ReactiveFunctionInvoker` views, trace context into the function, and Spring Boot `halyx.functions`. A function conformance kit on the memory provider, Floci's Lambda, the Azure Functions host and Google's Functions Framework. Real clouds (tier 1): Lambda 11/12, Cloud Run functions and Azure Functions 10/12 each, the skips expected; Spring 4/4 on each. Not yet released | [Functions](api/functions.md) |
 
 ## On demand
 

@@ -41,6 +41,9 @@ and Azure services.
 | [Azure](azure.md) | 4 | Event Hubs through its Kafka endpoint, with Entra ID (shared access keys off), plus Spring Boot 3 and 4 | **27/29** passed, 2 skipped (expected); Spring **2/2** |
 | [Azure](azure.md) | 5 | Cloud logins: a service principal with a secret and with a federated Google ID token; Spring Boot `credentials` | **4/4**; Spring **4/4** |
 
+Function invocation (tier 1) was first run on its own on 2026-10-31: Lambda **11/12**, 1 skipped (expected);
+Cloud Run functions **10/12** and Azure Functions **10/12**, 2 skipped each (expected); Spring **4/4** on each cloud.
+
 The skipped tests are features a service doesn't offer, such as per-message delays on SNS or Pub/Sub,
 and the driver declares them as missing [capabilities](../api/capabilities-and-unwrap.md). Azure tier 4's two
 skips are the claim-check tests instead: that run has no blob store for the claim check.
@@ -73,6 +76,7 @@ cloud-testing/scripts/aws-real-cloud.sh                 # TIER=1 by default; TIE
 cloud-testing/scripts/gcp-real-cloud.sh                 # TIER=1 to 4
 cloud-testing/scripts/azure-real-cloud.sh               # TIER=1 to 4
 IT_TEST='RealAwsIT$SecretsManager' cloud-testing/scripts/aws-real-cloud.sh     # a single suite
+IT_TEST='RealAwsIT$Lambda' SPRING_IT_TEST=RealSpringFunctionIT cloud-testing/scripts/aws-real-cloud.sh   # a suite, plus Spring ones
 ```
 
 1. **Provision.** Terraform in `cloud-testing/infra/<cloud>/tier<n>/` creates the run's resources. Every name includes

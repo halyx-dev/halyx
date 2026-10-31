@@ -17,6 +17,7 @@ package dev.halyx.spring.autoconfigure.reactor;
 
 import dev.halyx.cache.Cache;
 import dev.halyx.events.EventPublisher;
+import dev.halyx.functions.FunctionInvoker;
 import dev.halyx.messaging.Publisher;
 import dev.halyx.messaging.Subscription;
 import dev.halyx.nosql.DocumentStore;
@@ -25,6 +26,7 @@ import dev.halyx.reactor.ReactiveBlobStore;
 import dev.halyx.reactor.ReactiveCache;
 import dev.halyx.reactor.ReactiveDocumentStore;
 import dev.halyx.reactor.ReactiveEventPublisher;
+import dev.halyx.reactor.ReactiveFunctionInvoker;
 import dev.halyx.reactor.ReactiveHalyx;
 import dev.halyx.reactor.ReactiveParameterStore;
 import dev.halyx.reactor.ReactivePublisher;
@@ -69,6 +71,7 @@ final class ReactiveServiceBeans implements BeanDefinitionRegistryPostProcessor 
         REACTIVE_TYPES.put(Publisher.class, ResolvableType.forClass(ReactivePublisher.class));
         REACTIVE_TYPES.put(Subscription.class, ResolvableType.forClass(ReactiveSubscription.class));
         REACTIVE_TYPES.put(EventPublisher.class, ResolvableType.forClass(ReactiveEventPublisher.class));
+        REACTIVE_TYPES.put(FunctionInvoker.class, ResolvableType.forClass(ReactiveFunctionInvoker.class));
         REACTIVE_TYPES.put(StreamProducer.class, ResolvableType.forClass(ReactiveStreamProducer.class));
         REACTIVE_TYPES.put(StreamConsumer.class, ResolvableType.forClass(ReactiveStreamConsumer.class));
         REACTIVE_TYPES.put(ParameterStore.class, ResolvableType.forClass(ReactiveParameterStore.class));

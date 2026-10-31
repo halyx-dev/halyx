@@ -25,7 +25,7 @@
 </p>
 
 **Halyx** is a Java API that gives microservices one consistent way to use Cloud Native services like Storage, SQL, NoSQL,
-Caches, Messaging, Streams (managed Kafka), and Parameters and Secrets across **AWS**, **Azure** and **GCP**.
+Caches, Messaging, Streams (managed Kafka), Functions, and Parameters and Secrets across **AWS**, **Azure** and **GCP**.
 
 With Halyx you can build **portable multi-cloud microservices and applications**. A single microservice or application can work with
 services on several clouds at once, such as files on S3, a cache on Azure, events on Pub/Sub and secrets
@@ -33,7 +33,7 @@ in Vault. Each cloud is registered as a named provider and used through the same
 
 | | |
 |---|---|
-| **8 services, 3 clouds, 1 API** | storage, NoSQL, messaging, events, Kafka streams, SQL, caches, parameters and secrets on AWS, Azure and Google Cloud |
+| **9 services, 3 clouds, 1 API** | storage, NoSQL, messaging, events, Kafka streams, functions, SQL, caches, parameters and secrets on AWS, Azure and Google Cloud |
 | **Same behaviour, proven** | one conformance kit per service, run against every provider on emulators and [on real cloud accounts, with published results](https://halyx.dev/docs/cloud-testing/) |
 | **No passwords** | databases, caches and Kafka log in with AWS IAM, Microsoft Entra ID or Google IAM |
 | **A library, not a platform** | runs inside your application: no sidecar, no agent, and the native SDK client is one `unwrap` away |
@@ -139,6 +139,7 @@ service below, built once as one image, which runs on AWS, Azure or Google Cloud
 | Messaging | `Publisher`, `Subscription` | SNS, SQS | Service Bus | Pub/Sub | in-memory |
 | Events | `CloudEvent`, `EventPublisher` | EventBridge | Event Grid namespaces | Eventarc Advanced | in-memory |
 | Streams | `StreamProducer`, `StreamConsumer` | MSK | Event Hubs (Kafka endpoint) | Managed Service for Apache Kafka | any Kafka cluster, in-memory |
+| Functions | `FunctionInvoker` | Lambda | Azure Functions | Cloud Run functions | in-memory |
 | SQL databases | `Database` (JDBC `DataSource`) | RDS, Aurora | Azure Database for PostgreSQL and MySQL, Azure SQL | Cloud SQL | any PostgreSQL, MySQL, SQL Server |
 | Caches | `Cache` | ElastiCache | Azure Cache for Redis, Azure Managed Redis | Memorystore | any Redis or Valkey, in-memory |
 | Parameters and secrets | `ParameterStore` | SSM Parameter Store, Secrets Manager | App Configuration, Key Vault | Parameter Manager, Secret Manager | HashiCorp Vault, in-memory |

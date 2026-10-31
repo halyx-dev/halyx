@@ -76,6 +76,21 @@ public final class AzureProperties {
     /** Subscription property: the pull subscription's lock duration, ISO-8601 (default PT60S, Event Grid's). */
     public static final String EVENT_GRID_LOCK_DURATION = "azure.eventgrid.lock-duration";
 
+    /** Function property: the function app's URL, such as {@code https://orders.azurewebsites.net}. */
+    public static final String FUNCTIONS_ENDPOINT = "azure.functions.endpoint";
+
+    /**
+     * Function property: the application ID URI of the Entra ID app that App Service Authentication checks, such as
+     * {@code api://orders-functions}; the provider's credential gets tokens for it.
+     */
+    public static final String FUNCTIONS_AUDIENCE = "azure.functions.audience";
+
+    /** Function property: a function key, sent as {@code x-functions-key}, instead of an Entra ID token. */
+    public static final String FUNCTIONS_KEY = "azure.functions.key";
+
+    /** Function property: the function's path on the app, when it isn't {@code api/<name>}, such as {@code images/resize}. */
+    public static final String FUNCTIONS_ROUTE = "azure.functions.route";
+
     private AzureProperties() {
     }
 }

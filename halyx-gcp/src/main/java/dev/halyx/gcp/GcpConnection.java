@@ -17,12 +17,20 @@ package dev.halyx.gcp;
 
 import com.google.api.gax.core.FixedCredentialsProvider;
 import com.google.api.gax.core.NoCredentialsProvider;
+import com.google.api.client.http.GenericUrl;
+import com.google.api.client.http.HttpRequestInitializer;
+import com.google.auth.http.HttpCredentialsAdapter;
 import com.google.auth.oauth2.GoogleCredentials;
+import com.google.auth.oauth2.IdTokenCredentials;
+import com.google.auth.oauth2.IdTokenProvider;
 import com.google.cloud.eventarc.publishing.v1.PublisherClient;
 import com.google.cloud.eventarc.publishing.v1.PublisherSettings;
 import dev.halyx.events.EventBusConfig;
 import dev.halyx.events.spi.EventPublisherDriver;
 import dev.halyx.gcp.eventarc.EventarcPublisherDriver;
+import dev.halyx.gcp.functions.CloudRunFunctionsInvokerDriver;
+import dev.halyx.functions.FunctionConfig;
+import dev.halyx.functions.spi.FunctionInvokerDriver;
 import com.google.api.gax.grpc.GrpcTransportChannel;
 import com.google.api.gax.rpc.ClientSettings;
 import com.google.api.gax.rpc.FixedTransportChannelProvider;
@@ -92,6 +100,8 @@ import dev.halyx.stream.spi.ProducerDriver;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.net.MalformedURLException;
+import java.net.URI;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Optional;
@@ -123,15 +133,9 @@ final class GcpConnection implements ProviderConnection {
     public synchronized BlobStoreDriver blobStore(String bucket) {
         if (storage == null) {
             HttpSettings settings = HttpSettings.from(config);
-            httpTransport = new ApacheHttpTransport(ApacheHttpTransport.newDefaultHttpClientBuilder()
-                    .setMaxConnTotal(settings.maxConnections())
-                    .setMaxConnPerRoute(settings.maxConnections())
-                    .evictIdleConnections(settings.idleTimeout().toMillis(), TimeUnit.MILLISECONDS)
-                    // Return bytes exactly as stored: never inflate gzip-encoded objects in the client.
-                    .disableContentCompression()
-                    .build());
+            ApacheHttpTransport transport = httpTransport();
             var builder = StorageOptions.http().setTransportOptions(HttpTransportOptions.newBuilder()
-                    .setHttpTransportFactory(() -> httpTransport)
+                    .setHttpTransportFactory(() -> transport)
                     .setConnectTimeout(Math.toIntExact(settings.connectTimeout().toMillis()))
                     .setReadTimeout(Math.toIntExact(settings.readTimeout().toMillis()))
                     .build());
@@ -145,6 +149,21 @@ final class GcpConnection implements ProviderConnection {
             storage = builder.build().getService();
         }
         return new GcsBlobStoreDriver(bucket, storage, config.endpoint().isPresent());
+    }
+
+    /** One pooled HTTP transport, shared by Cloud Storage and function invocations, tuned by {@link HttpSettings}. */
+    private ApacheHttpTransport httpTransport() {
+        if (httpTransport == null) {
+            HttpSettings settings = HttpSettings.from(config);
+            httpTransport = new ApacheHttpTransport(ApacheHttpTransport.newDefaultHttpClientBuilder()
+                    .setMaxConnTotal(settings.maxConnections())
+                    .setMaxConnPerRoute(settings.maxConnections())
+                    .evictIdleConnections(settings.idleTimeout().toMillis(), TimeUnit.MILLISECONDS)
+                    // Return bytes exactly as stored: never inflate gzip-encoded objects in the client.
+                    .disableContentCompression()
+                    .build());
+        }
+        return httpTransport;
     }
 
     @Override
@@ -260,6 +279,50 @@ final class GcpConnection implements ProviderConnection {
             }
         }
         return new EventarcPublisherDriver(eventarc, name);
+    }
+
+    /**
+     * A Cloud Run function at {@code gcp.functions.url}, or at {@code https://<region>-<project>.cloudfunctions.net/<name>},
+     * called with Google ID tokens for {@code gcp.functions.audience}, or for its URL.
+     */
+    @Override
+    public synchronized FunctionInvokerDriver functionInvoker(FunctionConfig function) {
+        String url = function.property(GcpProperties.FUNCTIONS_URL).orElseGet(() -> defaultFunctionUrl(function));
+        try {
+            URI.create(url).toURL();
+        } catch (MalformedURLException | IllegalArgumentException e) {
+            throw new IllegalArgumentException("Cloud Run function " + function.name() + " has no valid URL: '" + url + "'", e);
+        }
+        String audience = function.property(GcpProperties.FUNCTIONS_AUDIENCE).orElse(url);
+        HttpSettings settings = HttpSettings.from(config);
+        return new CloudRunFunctionsInvokerDriver(httpTransport().createRequestFactory(functionLogin(function, audience)),
+                new GenericUrl(url), function, settings.connectTimeout());
+    }
+
+    private String defaultFunctionUrl(FunctionConfig function) {
+        String region = function.property(GcpProperties.FUNCTIONS_REGION).orElseThrow(() -> new IllegalArgumentException(
+                "Cloud Run function " + function.name() + " needs its region: property " + GcpProperties.FUNCTIONS_REGION
+                        + ", or its URL: property " + GcpProperties.FUNCTIONS_URL));
+        String project = config.property(GcpProperties.PROJECT_ID).orElseGet(ServiceOptions::getDefaultProjectId);
+        if (project == null) {
+            throw new IllegalArgumentException("Cloud Run function " + function.name() + " needs a project: set the '"
+                    + GcpProperties.PROJECT_ID + "' property, or the function's " + GcpProperties.FUNCTIONS_URL);
+        }
+        return "https://" + region + "-" + project + ".cloudfunctions.net/" + function.name();
+    }
+
+    /** Google ID tokens for the audience, from the provider's identity; none for an anonymous provider, such as an emulator. */
+    private HttpRequestInitializer functionLogin(FunctionConfig function, String audience) {
+        if (config.credentials() instanceof Credentials.Anonymous) {
+            return null;
+        }
+        if (!GoogleIdentity.isIdentity(config.credentials())
+                || !(googleCredentials() instanceof IdTokenProvider idTokens)) {
+            throw new IllegalArgumentException("Cloud Run function " + function.name() + " is called with a Google ID "
+                    + "token: configure the provider with Credentials.defaultChain() or impersonation");
+        }
+        return new HttpCredentialsAdapter(IdTokenCredentials.newBuilder().setIdTokenProvider(idTokens)
+                .setTargetAudience(audience).build());
     }
 
     private String qualified(String name, String collection) {
@@ -497,13 +560,16 @@ final class GcpConnection implements ProviderConnection {
                 shutdownTransport();
             }
         }
+        if (httpTransport != null) {
+            shutdownTransport(); // made for function invocations alone
+        }
     }
 
     private void shutdownTransport() {
         try {
             httpTransport.shutdown();
         } catch (IOException e) {
-            throw new UncheckedIOException("Failed to close GCS HTTP transport", e);
+            throw new UncheckedIOException("Failed to close the HTTP transport", e);
         } finally {
             httpTransport = null;
         }

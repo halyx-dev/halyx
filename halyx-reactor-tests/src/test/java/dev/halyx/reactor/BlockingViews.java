@@ -22,6 +22,9 @@ import dev.halyx.cache.CacheStatistics;
 import dev.halyx.capability.Capabilities;
 import dev.halyx.events.CloudEvent;
 import dev.halyx.events.EventPublisher;
+import dev.halyx.functions.FunctionInvoker;
+import dev.halyx.functions.FunctionRequest;
+import dev.halyx.functions.FunctionResponse;
 import dev.halyx.messaging.ConsumerOptions;
 import dev.halyx.messaging.MessageConsumer;
 import dev.halyx.messaging.MessageListener;
@@ -193,6 +196,17 @@ final class BlockingViews {
             public String bus() { return rx.bus(); }
             public void publish(CloudEvent event) { await(rx.publish(event)); }
             public void publishAll(List<CloudEvent> events) { await(rx.publishAll(events)); }
+            public <T> T unwrap(Class<T> nativeType) { return rx.unwrap(nativeType); }
+        };
+    }
+
+    static FunctionInvoker of(ReactiveFunctionInvoker rx) {
+        return new FunctionInvoker() {
+            public String provider() { return rx.provider(); }
+            public String function() { return rx.function(); }
+            public FunctionResponse invoke(FunctionRequest request) { return await(rx.invoke(request)); }
+            public void trigger(FunctionRequest request) { await(rx.trigger(request)); }
+            public Capabilities capabilities() { return rx.capabilities(); }
             public <T> T unwrap(Class<T> nativeType) { return rx.unwrap(nativeType); }
         };
     }

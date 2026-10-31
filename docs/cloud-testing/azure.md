@@ -53,8 +53,12 @@ application would.
 - a free App Configuration store
 - a Standard Event Grid namespace with an `orders` topic and an `inbox` pull (queue) subscription; azurerm
   has no resources for namespace topics, so those two go through the `azapi` provider
+- the function kit's function app (the emulator tests' Python app) on a Basic plan's single instance, so the runs
+  it counts in memory hold for every invocation; the tests call the function with its function key. Its host has a
+  storage account of its own, which the azurerm provider requires, reached with the account key: the principal may
+  not give the app's managed identity storage roles. Nothing under test uses that account
 
-Shared keys and local auth are **off everywhere**, so only Entra ID works. The principal gets Storage Blob
+Shared keys and local auth are **off everywhere**, so only Entra ID works, except on the function host's own storage account (see below). The principal gets Storage Blob
 Data Contributor, Service Bus Data Owner, Key Vault Secrets Officer, App Configuration Data Owner, EventGrid Data
 Sender and Receiver, and Cosmos DB's built-in Data Contributor. The script waits until the blob role reaches
 the data plane (one attempt this run) and gives the rest 30 seconds more.
@@ -555,6 +559,8 @@ environment), and with `token-file`. **4/4; Spring 4/4**, run `r26102311158b75`,
 | `r26102222164336` | tier 1, plus Spring Boot 3 and 4 | **207 passed, 1 skipped**; Spring **16/16** | clean | Latest tier 1 result, after the dependency security fixes: Reactor 3.8.7 under the Azure SDK, and Micrometer 1.16.8 under Cosmos DB. |
 | `r26102222414536` | tier 2, plus Spring Boot 3 and 4 | **13/13**; Spring **2/2** | clean | Latest tier 2 result, after the dependency security fixes: R2DBC with Entra ID on Reactor 3.8.7. |
 | `r26102311158b75` | tier 5, plus Spring Boot 3 and 4 | **4/4**; Spring **4/4** | clean | The first tier 5 run: a service principal with a secret, and with a federated Google ID token. |
+| `r26103118516ad7` | tier 1, functions only (`IT_TEST='RealAzureIT$AzureFunctions'`, `SPRING_IT_TEST=RealSpringFunctionIT`) | not run | clean | Stopped at `terraform apply`: the principal's role-assignment rights don't allow giving the function app's managed identity storage roles. The function host now has a storage account of its own with an account key, the one exception to Entra ID only. |
+| `r26103120092661` | tier 1, functions only | **10 passed, 2 skipped** (expected: no `trigger` and no header limit on Azure Functions); Spring **4/4** | clean | First function run: the function kit on a function app's single Basic instance, with its function key. `RealSpringFunctionIT` 2/2 on Boot 3.5 and 4. |
 
 ## What real Azure found
 
