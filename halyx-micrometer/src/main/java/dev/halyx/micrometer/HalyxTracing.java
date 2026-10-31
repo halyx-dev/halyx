@@ -18,6 +18,7 @@ package dev.halyx.micrometer;
 import dev.halyx.events.CloudEvent;
 import dev.halyx.events.CloudEvents;
 import dev.halyx.events.EventPublisher;
+import dev.halyx.functions.FunctionInvoker;
 import dev.halyx.messaging.MessageListener;
 import dev.halyx.messaging.Publisher;
 import dev.halyx.messaging.ReceivedMessage;
@@ -32,8 +33,9 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * Carries the trace through Halyx' messages, events and stream records with Micrometer Tracing, with or without
- * Spring: wrap publishers and producers to send the current trace context, and listeners to continue it.
+ * Carries the trace through Halyx' messages, events, stream records and function invocations with Micrometer Tracing,
+ * with or without Spring: wrap publishers, producers and function invokers to send the current trace context, and
+ * listeners to continue it.
  *
  * <pre>{@code
  * HalyxTracing tracing = new HalyxTracing(tracer, propagator);
@@ -68,6 +70,12 @@ public final class HalyxTracing {
     public StreamProducer streamProducer(StreamProducer producer) {
         return producer instanceof TracingStreamProducer ? producer
                 : new TracingStreamProducer(producer, tracer, propagator);
+    }
+
+    /** Adds the current trace context to each invocation's headers, and to a trigger's where it takes headers. */
+    public FunctionInvoker functionInvoker(FunctionInvoker invoker) {
+        return invoker instanceof TracingFunctionInvoker ? invoker
+                : new TracingFunctionInvoker(invoker, tracer, propagator);
     }
 
     /**

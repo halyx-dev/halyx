@@ -17,10 +17,21 @@ package dev.halyx.micrometer;
 
 import dev.halyx.CloudContext;
 import dev.halyx.Halyx;
+import dev.halyx.capability.Capabilities;
 import dev.halyx.config.ProviderConfig;
+import dev.halyx.error.CloudException;
 import dev.halyx.events.CloudEvent;
 import dev.halyx.events.CloudEvents;
 import dev.halyx.events.EventPublisher;
+import dev.halyx.functions.DefaultFunctionInvoker;
+import dev.halyx.functions.FunctionCapability;
+import dev.halyx.functions.FunctionConfig;
+import dev.halyx.functions.FunctionInvoker;
+import dev.halyx.functions.FunctionRequest;
+import dev.halyx.functions.FunctionResponse;
+import dev.halyx.functions.spi.AbstractFunctionInvokerDriver;
+import dev.halyx.interceptor.InterceptorChain;
+import dev.halyx.memory.InMemoryFunctions;
 import dev.halyx.messaging.MessageListener;
 import dev.halyx.messaging.Publisher;
 import dev.halyx.messaging.ReceivedMessage;
@@ -41,6 +52,11 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -141,11 +157,68 @@ class HalyxTracingTest {
     }
 
     @Test
+    void functionInvocationsCarryTheTraceInTheirHeaders() {
+        List<Map<String, String>> received = new ArrayList<>();
+        FunctionInvoker resize = tracing.functionInvoker(echo(memory(), "resize", received));
+
+        String traceId = inSpan(() -> resize.invoke(FunctionRequest.of("{}")));
+        String asyncTraceId = inSpan(() -> resize.async().invoke(FunctionRequest.of("{}")).join());
+
+        assertThat(received).extracting(headers -> headers.get("traceparent").split("-")[0])
+                .containsExactly(traceId, asyncTraceId);
+    }
+
+    @Test
+    void theCallersOwnHeadersWin() {
+        List<Map<String, String>> received = new ArrayList<>();
+        FunctionInvoker resize = tracing.functionInvoker(echo(memory(), "resize", received));
+
+        inSpan(() -> resize.invoke(FunctionRequest.builder("{}").header("traceparent", "mine").build()));
+
+        assertThat(received.getFirst()).containsEntry("traceparent", "mine");
+    }
+
+    @Test
+    void aTriggerCarriesTheTraceOnlyWhereItTakesHeaders() throws InterruptedException {
+        CountDownLatch ran = new CountDownLatch(1);
+        List<Map<String, String>> received = new CopyOnWriteArrayList<>();
+        FunctionInvoker withHeaders = tracing.functionInvoker(memory().functionInvoker("audit"));
+        withHeaders.unwrap(InMemoryFunctions.class).register("audit", request -> {
+            received.add(request.headers());
+            ran.countDown();
+            return FunctionResponse.of("");
+        });
+        TriggerOnly driver = new TriggerOnly();
+        FunctionInvoker withoutHeaders = tracing.functionInvoker(new DefaultFunctionInvoker(driver,
+                FunctionConfig.of("audit"), InterceptorChain.empty()));
+
+        inSpan(() -> withHeaders.trigger(FunctionRequest.of("{}")));
+        inSpan(() -> withoutHeaders.trigger(FunctionRequest.of("{}")));
+        inSpan(() -> withoutHeaders.async().trigger(FunctionRequest.of("{}")).join());
+
+        assertThat(driver.triggered).hasSize(2).allSatisfy(request -> assertThat(request.headers()).isEmpty());
+        assertThat(ran.await(5, TimeUnit.SECONDS)).isTrue();
+        assertThat(received.getFirst()).containsKey("traceparent");
+    }
+
+    @Test
     void wrappingTwiceWrapsOnce() {
         CloudContext context = memory();
         Publisher once = tracing.publisher(context.publisher("orders"));
 
         assertThat(tracing.publisher(once)).isSameAs(once);
+    }
+
+    /** A memory function that records the headers it was invoked with. */
+    private static FunctionInvoker echo(CloudContext context, String name, List<Map<String, String>> received) {
+        FunctionInvoker invoker = context.functionInvoker(name);
+        invoker.unwrap(InMemoryFunctions.class).register(name, request -> {
+            synchronized (received) {
+                received.add(request.headers());
+            }
+            return FunctionResponse.of(request.payload());
+        });
+        return invoker;
     }
 
     private String inSpan(Runnable work) {
@@ -168,6 +241,51 @@ class HalyxTracingTest {
                 m -> seen.add(tracer.currentTraceContext().context().traceId()));
         listener.onMessage(message);
         return seen.getFirst();
+    }
+
+    /** A provider that triggers functions but takes no headers on a trigger, as Lambda. */
+    private static final class TriggerOnly extends AbstractFunctionInvokerDriver {
+
+        final List<FunctionRequest> triggered = new CopyOnWriteArrayList<>();
+
+        TriggerOnly() {
+            super("fake");
+        }
+
+        @Override
+        public String function() {
+            return "audit";
+        }
+
+        @Override
+        public FunctionResponse invoke(FunctionRequest request) {
+            return FunctionResponse.of(request.payload());
+        }
+
+        @Override
+        public void trigger(FunctionRequest request) {
+            triggered.add(request);
+        }
+
+        @Override
+        public Capabilities capabilities() {
+            return Capabilities.of(FunctionCapability.TRIGGER);
+        }
+
+        @Override
+        public long maxPayloadBytes() {
+            return 1024;
+        }
+
+        @Override
+        protected Optional<CloudException> translateNative(Throwable error) {
+            return Optional.empty();
+        }
+
+        @Override
+        protected List<Object> nativeClients() {
+            return List.of();
+        }
     }
 
     /** Carries the trace and span ids in one {@code traceparent} field, enough to check propagation end to end. */
