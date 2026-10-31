@@ -106,6 +106,35 @@ and `detail` as the data. During the rollout both formats are on the bus: change
 tierEvents.publish(CloudEvent.builder("TierChanged", "acme.loyalty").subject(memberId).json(json).build());
 ```
 
+## Functions: Lambda
+
+```java
+// Before: LambdaClient (or AWSLambda in SDK v1)
+InvokeResponse r = lambda.invoke(b -> b.functionName("resize-image").qualifier("live")
+        .payload(SdkBytes.fromUtf8String(json)));
+if (r.functionError() != null) { throw new ResizeFailed(r.payload().asUtf8String()); }
+String out = r.payload().asUtf8String();
+lambda.invoke(b -> b.functionName("audit").invocationType(InvocationType.EVENT).payload(...));
+
+// After: halyx.functions.resize: { name: resize-image, properties: { aws.lambda.qualifier: live } }
+@Qualifier("resize") FunctionInvoker resize;
+String out = resize.invoke(FunctionRequest.of(json)).payloadAsString();   // a function error: UnavailableException
+audit.trigger(FunctionRequest.of(json));                                 // InvocationType.EVENT: Lambda only
+```
+
+- `FunctionError` checks go: a function that throws raises `UnavailableException`, with the error payload's
+  `errorMessage` as the message and its `errorType` as `providerErrorCode()`. `ResourceNotFoundException` becomes
+  `NotFoundException`, throttling `ThrottledException`.
+- A `ClientContext` with a `custom` map becomes headers (`FunctionRequest.builder(json).header(k, v)`, or `headers`
+  on the function), which arrive in `context.getClientContext().getCustom()` as before; other `ClientContext` fields
+  have no equivalent. Lambda takes no `ClientContext` on `EVENT` invocations, so a `trigger` with headers fails.
+- `executedVersion()` replaces `InvokeResponse.executedVersion`. `LogType.TAIL` and `DryRun` have no equivalent:
+  keep them on `unwrap(LambdaClient.class)` if the service relies on them.
+- The SDK client's API call timeout becomes the function's `timeout`. Halyx retries a non-idempotent function only
+  where it can't have run (throttling, a failed connect), unlike the SDK's default retries: set `idempotent: true`
+  where the old retries were wanted.
+- `trigger` is Lambda's alone. For a portable service, publish a message that the function's trigger consumes.
+
 ## Streams: MSK
 
 - Spring Kafka with `aws-msk-iam-auth` (`sasl.jaas.config: ...IAMLoginModule required;`): drop the SASL settings and
@@ -137,6 +166,6 @@ JDBC Wrapper's failover plugins have no Halyx equivalent yet: point `host` at th
 
 ## No Halyx equivalent
 
-Kinesis Data Streams, Step Functions, Lambda invocations, SES, Cognito, KMS encrypt and decrypt, S3 Select, S3 event
-notifications configuration, DynamoDB Streams, scans and PartiQL. Keep these on the SDK, behind one class per feature,
-and list them in the report.
+Kinesis Data Streams, Step Functions, Lambda management (creating and updating functions), SES, Cognito, KMS encrypt
+and decrypt, S3 Select, S3 event notifications configuration, DynamoDB Streams, scans and PartiQL. Keep these on the
+SDK, behind one class per feature, and list them in the report.

@@ -28,6 +28,9 @@
   - A function conformance kit, run on the memory provider (`InMemoryFunctions`), Floci's Lambda, the Azure
     Functions host and Google's Functions Framework, with tier 1 real-cloud runs on all three clouds.
   - `AzureErrors.fromStatus` and `GcpErrors.fromStatus` map an HTTP status as the SDK translations do.
+  - The AI skills know functions: `halyx-ai-create` plans, writes and tests function calls, `halyx-ai-migrate` maps
+    `LambdaClient` and HTTP calls to Azure Functions and Cloud Run functions, and `halyx-ai-review` checks them
+    (rule C11).
 
 ## 1.0.2 (2026-10-25)
 

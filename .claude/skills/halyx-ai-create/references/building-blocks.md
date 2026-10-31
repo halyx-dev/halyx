@@ -16,6 +16,7 @@ for each area; check names there.
 | Joins, reports, constraints, transactions across rows | `databases.<key>: { engine, host, database, auth }`, a `DataSource` for JDBC, JPA and Flyway; or `r2dbc-databases` | RDS or Aurora (IAM login) | Azure Database for PostgreSQL or Azure SQL (Entra ID) | Cloud SQL (IAM login, the Cloud SQL connector) |
 | Settings that change without a deploy | `parameter-stores.<key>: { kind: parameters, prefix }`, and `spring.config.import: halyx:<key>` with `reload-interval` | SSM Parameter Store | App Configuration | Parameter Manager |
 | Secrets: keys, passwords, tokens | `parameter-stores.<key>: { kind: secrets, prefix }` | Secrets Manager | Key Vault | Secret Manager |
+| Calling a serverless function and using its answer | `functions.<key>: { name, timeout, idempotent }`, a `FunctionInvoker` | Lambda function | HTTP-triggered function in a function app | Cloud Run function (HTTP) |
 
 ## Choosing between neighbours
 
@@ -30,6 +31,12 @@ for each area; check names there.
   query must name a partition, or a declared index's partition: anything else would scan, and Spring Data
   repositories refuse it at startup. Choose SQL when the plan has joins, ad hoc filters, reports or constraints across
   records. The memory provider has no SQL, so the `local` profile then needs PostgreSQL in a container.
+- **A function or messaging.** Invoke a function when the service needs its answer now, within one request; the
+  call blocks for as long as the function runs. Hand work off through messaging when no answer is needed: the
+  function's own trigger can be the subscription, and nothing waits. Halyx invokes functions that are already
+  deployed; it doesn't deploy them or give a model for writing them, so the function itself is deployed to each
+  target cloud separately, and the plan says who owns it. Fire-and-forget `trigger` is Lambda's alone: portable code
+  uses messaging instead.
 - **`Cache` or `@Cacheable`.** `Cache<V>` for data the service owns in the cache (idempotency keys, counters, locks).
   `cache-manager` with `@Cacheable` for results computed elsewhere: set `fail-open: true`, so an unreachable cache
   makes them uncached rather than failing the writes that evict them. Health still shows the outage: the `halyx`
@@ -75,11 +82,16 @@ Each of these goes in the plan when the service uses it, with how the service st
 | Decimals | document stores keep the value, not the scale (`3.50` reads back as `3.5`); Firestore and Cosmos DB repositories keep doubles | format amounts explicitly (`setScale(2)`, `toPlainString()`), compare with `compareTo`, or store minor units as `long` |
 | Event routing | rules filter in the cloud; the memory provider's buses deliver every event | check the event's type and source in the listener too |
 | Reads after writes | Cosmos DB follows the account's consistency; DynamoDB indexes are eventually consistent | a listener that can't read what it was told about throws, so the message is redelivered |
+| Function payloads | `invoke`: 6 MB on Lambda, 100 MB on Azure Functions, 32 MiB on Cloud Run functions; Lambda headers fit in 3,583 bytes once encoded | send keys, not content; the function reads the content from a blob store |
+| Function `trigger` | Lambda only (`FunctionCapability.TRIGGER`), and without headers | publish a message instead, or check the capability and fall back to `invoke` |
+| Function retries | a non-idempotent function (the default) is retried only when it can't have run (throttling, a failed connect); a timeout throws `UnavailableException` while the function may still be running | mark a function `idempotent: true` only when running it twice is harmless; make it idempotent, or key its writes by a request id |
+| Function login | IAM on AWS; on Azure, an Entra ID audience (App Service Authentication) or a function key; a Google ID token on Google Cloud | set them in the cloud's document: a function key from a secrets store, never inline |
 | No emulator | Event Grid namespaces, Eventarc Advanced, Parameter Manager | test them on the memory provider; the emulator runs read settings from Secret Manager on Google Cloud (`kind: secrets`) and leave events off on Azure and Google Cloud |
 
 ## Not covered by Halyx
 
-Workflows (Step Functions, Durable Functions, Workflows), email (SES, Communication Services), search, analytics
+Deploying or writing functions, function triggers and bindings (the function's own code stays per cloud), Workflows
+(Step Functions, Durable Functions, Workflows), email (SES, Communication Services), search, analytics
 stores (BigQuery, Synapse), change feeds (DynamoDB Streams, the Cosmos DB change feed), Spanner, Bigtable, Cloud
 Tasks and Event Grid basic topics. Propose a portable alternative from the table above where one fits (a scheduled
 job publishing messages; a stream instead of a change feed), or the native SDK behind an interface with one

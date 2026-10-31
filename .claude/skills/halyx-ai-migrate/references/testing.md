@@ -40,6 +40,11 @@ class BillingTest { ... }
   `halyx.subscriptions.<key>.topic: <bus name>`.
 - Parameter stores start empty. Write what the test needs through the `ParameterStore` bean, or set the properties
   directly; a `spring.config.import` of an empty store adds nothing, so make it `optional:` in that profile.
+- Functions on `memory` are handlers registered by name:
+  `invoker.unwrap(InMemoryFunctions.class).register("resize-image", request -> FunctionResponse.of(...))`. Tests
+  that mocked `LambdaClient` or a `RestClient` to the function register a handler instead, so the real
+  `FunctionInvoker` runs. A handler that throws raises `UnavailableException`; one that throws a Halyx exception has
+  it passed through, standing in for a status.
 - Listeners are asynchronous: wait for the effect with a deadline, and don't sleep a fixed time.
 - When there's no SQL stub: exclude Boot's `DataSourceAutoConfiguration` where the service has no database in that
   profile, or run PostgreSQL in a container.
@@ -113,6 +118,11 @@ plain port. Spring Cloud GCP's storage client has no emulator switch and uses th
 Credentials, so baseline tests of a Spring Cloud GCP service should define their own `Storage` bean with
 `NoCredentials`. A Spring Cloud Azure blob client builds its endpoint from `account-name` even when a connection
 string is set, so set the endpoint too.
+
+Functions on emulators: Floci runs Lambda functions (it needs the Docker socket), and Azure and Google Cloud
+functions run in the Functions host image and under the Functions Framework, called on an anonymous provider by
+URL. Halyx's `AwsFunctionConformanceIT`, `AzureFunctionConformanceIT` and `GcpFunctionConformanceIT` are working
+setups. A service that doesn't own the function's code runs a stand-in with the same contract.
 
 Azure emulators take connection strings or keys as provider and store properties (`azure.cosmos.key`,
 `azure.servicebus.connection-string`, `azure.appconfig.connection-string`, and `azure.emulator.insecure-http` for

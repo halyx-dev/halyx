@@ -104,6 +104,30 @@ bookingEvents.publish(CloudEvent.builder("com.acme.booking.confirmed", "/booking
 Both are CloudEvents 1.0 on the namespace topic, so subscribers see the same type, source, subject and data. The
 `EventGridSenderClient` bean and its `TokenCredential` go.
 
+## Functions: calling HTTP functions
+
+Azure has no SDK for invoking a function: services call its URL with `RestClient`, `WebClient` or `RestTemplate`,
+sending a function key (`x-functions-key` or `?code=`) or an Entra ID token they get themselves.
+
+```java
+// Before
+String out = restClient.post().uri("https://orders-fn.azurewebsites.net/api/resize")
+        .header("x-functions-key", functionKey).body(json).retrieve().body(String.class);
+
+// After: halyx.functions.resize: { name: resize, properties: {
+//          azure.functions.endpoint: https://orders-fn.azurewebsites.net, azure.functions.key: "${resize-function-key}" } }
+String out = resize.invoke(FunctionRequest.of(json)).payloadAsString();
+```
+
+- The key comes from Key Vault through `spring.config.import: halyx:secrets`, as other secrets do; with App
+  Service Authentication, `azure.functions.audience: api://<app>` replaces the key, and the provider's Entra ID
+  credential gets the tokens. A hand-built `TokenCredential` call for the token goes.
+- A route other than `api/<name>` (`"route": "..."` in `function.json`, or `@HttpTrigger(route = ...)`):
+  `azure.functions.route`.
+- `HttpClientErrorException` and `WebClientResponseException` handling becomes Halyx's exceptions: 404
+  `NotFoundException`, 400 `InvalidArgumentException`, 429 and 503 `ThrottledException`, 500 `UnavailableException`.
+- Halyx sends only `POST`. A function called with `GET` and query parameters needs to accept `POST`.
+
 ## Streams: Event Hubs (Kafka endpoint)
 
 Spring Kafka against `<namespace>.servicebus.windows.net:9093` with OAUTHBEARER (Spring Cloud Azure's passwordless
@@ -130,5 +154,6 @@ serializer, and `trusted-packages`). Keep existing `StringRedisTemplate` keys wi
 
 ## No Halyx equivalent
 
-Queue Storage, Table Storage, Azure Files, Event Grid basic topics and system topics, Functions bindings, Cosmos DB
-change feed, Gremlin, Cassandra and MongoDB APIs, Notification Hubs, and SignalR. Keep these on the SDK and list them.
+Queue Storage, Table Storage, Azure Files, Event Grid basic topics and system topics, Functions bindings and triggers
+(the function's own side), Durable Functions, Cosmos DB change feed, Gremlin, Cassandra and MongoDB APIs,
+Notification Hubs, and SignalR. Keep these on the SDK and list them.

@@ -39,6 +39,7 @@ the entity is changed.
 | **Listener errors** | returning acks; throwing redelivers with backoff until the entity's dead-letter rule takes over. There's no "ack and log" by default, so catch what shouldn't be retried |
 | **Consistency** | DynamoDB index queries and Secrets Manager listings are eventually consistent; Halyx never waits on the caller's behalf. Retry `UnavailableException` |
 | **Events** | Halyx sends CloudEvents 1.0. On EventBridge, `detail` is the whole CloudEvent, so rules and consumers matching on the old detail move to `detail.data` |
+| **Functions** | a function error (Lambda's `FunctionError`, a 500 from an HTTP function) raises `UnavailableException`, not a response to inspect. A non-idempotent function is retried only where it can't have run; the SDKs' and HTTP clients' own retries go. A timeout throws while the function may still run. `trigger` is Lambda's alone, and response headers are empty on Lambda. Payloads: 6 MB on Lambda, 100 MB on Azure, 32 MiB on Cloud Run functions |
 | **Bean names** | every `halyx.*` key is a bean name. Classes named like a key (`Receipts` next to `halyx.blob-stores.receipts`) fail at startup, naming both |
 
 ## Rollout: old and new instances side by side
@@ -70,6 +71,9 @@ Halyx needs a few permissions the old code may not have. Grant them when the IAM
 - **Blob store health** lists one item: `s3:ListBucket`, or the equivalent.
 - **SNS topics named, not ARNs:** resolving a name calls `sns:ListTopics`. Configure the topic's ARN to avoid that.
 - **SQS:** `GetQueueUrl` and `GetQueueAttributes` alongside receive, delete and change-visibility.
+- **Functions:** `lambda:InvokeFunction` on the function and its qualifier; `roles/run.invoker` on a Cloud Run
+  function; on Azure, read access to the Key Vault secret holding the function key, or the identity allowed by App
+  Service Authentication.
 - **Secrets Manager `getAll`** (config imports with reload): `ListSecrets` and, for batches, `BatchGetSecretValue`.
 
 ## Runtime

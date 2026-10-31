@@ -5,7 +5,8 @@ are `dev.halyx.*`: `nosql.Key`, `nosql.Version`, `nosql.DocumentStore`, `nosql.D
 `spring.data.document.{DocumentRepository, DocumentTable, PartitionKey, SortKey}`, `messaging.{Publisher,
 OutgoingMessage}`, `spring.messaging.HalyxListener`, `events.{EventPublisher, CloudEvent}`, `stream.StreamProducer`,
 `cache.Cache`, `storage.{BlobStore, BlobKey, BlobContent, PutOptions}`, `parameters.ParameterStore`,
-`error.NotFoundException`, `json.Json`.
+`functions.{FunctionInvoker, FunctionRequest, FunctionResponse}`, `memory.InMemoryFunctions`,
+`error.{NotFoundException, UnavailableException}`, `json.Json`.
 
 ## Records and repositories (`Order`, `OrderRepository`)
 
@@ -172,6 +173,53 @@ String signingKey = secrets.require("receipt-signing-key");   // cached for the 
 ```
 
 Format amounts explicitly before signing or comparing: `amount.setScale(2, RoundingMode.HALF_UP).toPlainString()`.
+
+## Functions
+
+The sample calls no function, so this pattern comes from `docs/api/functions.md`. A `FunctionInvoker` calls a
+deployed function and returns its answer; the service owns the call, not the function.
+
+```java
+@Service
+class ImageService {
+    ImageService(@Qualifier("resize") FunctionInvoker resize) { ... }   // a halyx.functions key
+
+    String thumbnail(String imageKey) {
+        FunctionResponse response = resize.invoke(FunctionRequest.builder(ImageMessages.resize(imageKey))
+                .header("X-Request-Id", requestId)          // per call, added to the configured headers
+                .build());
+        return ImageMessages.thumbnailKey(response.payloadAsString());
+    }
+}
+```
+
+- The payload carries keys, not content, as messages do: the function reads the image from the blob store, and the
+  request stays under Lambda's 6 MB.
+- A function that throws, or answers 5xx, raises `UnavailableException`; 404 or a missing function
+  `NotFoundException`; 400 `InvalidArgumentException`. Map them at the API's edge, as the other errors are.
+- A timeout raises `UnavailableException`, and the function may still be running. Leave `idempotent` false unless
+  running it twice is harmless; only then does a retry run it again.
+- No `trigger`: it's Lambda's alone. Work that needs no answer goes through a topic.
+- Response headers are empty on Lambda: carry what the caller needs in the payload.
+
+On the `local` profile, the function is a handler registered with the memory provider, standing in for the deployed
+function's contract:
+
+```java
+@Component
+@Profile("local")
+class LocalDevelopment implements ApplicationRunner {
+    LocalDevelopment(@Qualifier("resize") FunctionInvoker resize) { ... }
+
+    public void run(ApplicationArguments args) {
+        resize.unwrap(InMemoryFunctions.class).register("resize-image", request ->     // the function's name
+                FunctionResponse.of(ImageMessages.resized(request.payloadAsString())));
+    }
+}
+```
+
+A handler that throws raises `UnavailableException`, as on the clouds; one that throws a Halyx exception, such as
+`InvalidArgumentException`, has it passed through, standing in for the status the function returns.
 
 ## Settings that change without a deploy
 
