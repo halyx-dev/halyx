@@ -26,6 +26,7 @@ import dev.halyx.error.NotFoundException;
 import dev.halyx.error.PreconditionFailedException;
 import dev.halyx.error.ThrottledException;
 import dev.halyx.error.UnavailableException;
+import dev.halyx.error.UnknownCloudException;
 import dev.halyx.error.UnsupportedFeatureException;
 
 import java.io.UncheckedIOException;
@@ -41,21 +42,7 @@ public final class GcpErrors {
     public static Optional<CloudException> translate(Throwable error) {
         String provider = GcpProvider.ID;
         if (error instanceof BaseServiceException e) {
-            String reason = e.getReason();
-            String message = e.getMessage();
-            CloudException mapped = switch (statusOf(e)) {
-                case 404 -> new NotFoundException(message, e, provider, reason);
-                case 412 -> new PreconditionFailedException(message, e, provider, reason);
-                case 409 -> new AlreadyExistsException(message, e, provider, reason);
-                case 401, 403 -> new AccessDeniedException(message, e, provider, reason);
-                case 400, 416 -> new InvalidArgumentException(message, e, provider, reason);
-                case 429 -> new ThrottledException(message, e, provider, reason, retryAfter(e));
-                case 501 -> new UnsupportedFeatureException(message, e, provider, reason);
-                // Code 0 means the request never got an HTTP response (network failure).
-                case 0 -> new UnavailableException(message, e, provider, reason);
-                default -> statusOf(e) >= 500 ? new UnavailableException(message, e, provider, reason) : null;
-            };
-            return Optional.ofNullable(mapped);
+            return Optional.ofNullable(mapStatus(statusOf(e), e.getMessage(), e, e.getReason(), retryAfter(e)));
         }
         if (error instanceof ApiException e) {
             String reason = e.getStatusCode().getCode().name();
@@ -76,6 +63,33 @@ public final class GcpErrors {
             return Optional.of(new UnavailableException(error.getMessage(), error, provider, null));
         }
         return Optional.empty();
+    }
+
+    /**
+     * Maps an HTTP status from a Google Cloud service, for drivers that make HTTP calls themselves, as
+     * {@link #translate} maps the clients' exceptions; a status with no portable meaning is an
+     * {@link UnknownCloudException}.
+     */
+    public static CloudException fromStatus(int status, String message, Throwable cause, String code, Duration retryAfter) {
+        CloudException mapped = mapStatus(status, message, cause, code, retryAfter);
+        return mapped != null ? mapped : new UnknownCloudException(message, cause, GcpProvider.ID, code);
+    }
+
+    /** The portable error for {@code status}, or null if it has none. */
+    private static CloudException mapStatus(int status, String message, Throwable cause, String code, Duration retryAfter) {
+        String provider = GcpProvider.ID;
+        return switch (status) {
+            case 404 -> new NotFoundException(message, cause, provider, code);
+            case 412 -> new PreconditionFailedException(message, cause, provider, code);
+            case 409 -> new AlreadyExistsException(message, cause, provider, code);
+            case 401, 403 -> new AccessDeniedException(message, cause, provider, code);
+            case 400, 416 -> new InvalidArgumentException(message, cause, provider, code);
+            case 429 -> new ThrottledException(message, cause, provider, code, retryAfter);
+            case 501 -> new UnsupportedFeatureException(message, cause, provider, code);
+            // Code 0 means the request never got an HTTP response (network failure).
+            case 0 -> new UnavailableException(message, cause, provider, code);
+            default -> status >= 500 ? new UnavailableException(message, cause, provider, code) : null;
+        };
     }
 
     /**
