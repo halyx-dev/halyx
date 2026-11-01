@@ -200,6 +200,9 @@
         <maven-javadoc-plugin.version>3.12.0</maven-javadoc-plugin.version>
         <maven-gpg-plugin.version>3.2.8</maven-gpg-plugin.version>
         <central-publishing-maven-plugin.version>0.12.0</central-publishing-maven-plugin.version>
+        <!-- API compatibility: each published module is compared with this release from Maven Central -->
+        <japicmp-maven-plugin.version>0.26.5</japicmp-maven-plugin.version>
+        <japicmp.baseline>1.0.0</japicmp.baseline>
     </properties>
 
     <dependencyManagement>
@@ -705,6 +708,54 @@ limitations under the License.]]></inlineHeader>
                         <phase>validate</phase>
                         <goals>
                             <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <!--
+              API compatibility with the baseline release: a change that breaks code compiled against it, or its source,
+              fails verify. Unpublished modules set japicmp.skip; a module the baseline didn't publish yet is skipped.
+            -->
+            <plugin>
+                <groupId>com.github.siom79.japicmp</groupId>
+                <artifactId>japicmp-maven-plugin</artifactId>
+                <version>${japicmp-maven-plugin.version}</version>
+                <configuration>
+                    <oldVersion>
+                        <dependency>
+                            <groupId>${project.groupId}</groupId>
+                            <artifactId>${project.artifactId}</artifactId>
+                            <version>${japicmp.baseline}</version>
+                            <type>jar</type>
+                        </dependency>
+                    </oldVersion>
+                    <parameter>
+                        <breakBuildOnBinaryIncompatibleModifications>true</breakBuildOnBinaryIncompatibleModifications>
+                        <breakBuildOnSourceIncompatibleModifications>true</breakBuildOnSourceIncompatibleModifications>
+                        <onlyModified>true</onlyModified>
+                        <ignoreMissingOldVersion>true</ignoreMissingOldVersion>
+                        <skipPomModules>true</skipPomModules>
+                        <overrideCompatibilityChangeParameters>
+                            <!--
+                              Reported on every class implementing an interface that gained an abstract method, and on
+                              new classes implementing a new interface, which no old code can use. The interface's own
+                              change is reported where it's defined.
+                            -->
+                            <overrideCompatibilityChangeParameter>
+                                <compatibilityChange>METHOD_ABSTRACT_ADDED_IN_IMPLEMENTED_INTERFACE</compatibilityChange>
+                                <binaryCompatible>true</binaryCompatible>
+                                <sourceCompatible>true</sourceCompatible>
+                                <semanticVersionLevel>MINOR</semanticVersionLevel>
+                            </overrideCompatibilityChangeParameter>
+                        </overrideCompatibilityChangeParameters>
+                    </parameter>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>check-api-compatibility</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>cmp</goal>
                         </goals>
                     </execution>
                 </executions>

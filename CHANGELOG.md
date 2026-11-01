@@ -58,6 +58,12 @@
   unchanged and still cut long bodies. On the memory provider, a handler's exception is now the `FunctionError`'s
   cause rather than the `UnavailableException`'s.
 
+### Build
+
+- **API compatibility checks** ([#4](https://github.com/halyx-dev/halyx/issues/4)): `mvn verify` compares each
+  published module with 1.0.0 from Maven Central using japicmp, and fails on a binary- or source-incompatible change
+  to the public API, the provider SPI included. CI runs it on every push.
+
 ## 1.0.2 (2026-10-25)
 
 ### Fixes
