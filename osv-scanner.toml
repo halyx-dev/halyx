@@ -1,0 +1,208 @@
+#
+# Copyright 2026 Kamran Zafar
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# OSV-Scanner findings that Halyx can't fix itself, each with the reason. They expire so they are looked at again.
+# The Vulnerabilities workflow scans SBOMs of every published module (test scope included) and of the samples
+# (runtime) with this file; see SECURITY.md.
+#
+# Spring Boot 3.5 line: the auto-configuration, the starter and the Spring Data module are built and tested against
+# the versions Boot 3.5 manages, so they work in Boot 3.5 applications, and an application's own Boot BOM decides the
+# versions it runs.
+
+# Spring Framework 6.2, the Boot 3.5 line: in the auto-configuration's Boot 3.5 tests and the Boot 3.5 sample. Fixed
+# only in Spring Framework 7 (Boot 4); a Boot 3.5 application's Boot BOM decides.
+
+[[IgnoredVulns]]
+id = "GHSA-9qf2-26p9-2q2q"
+ignoreUntil = 2027-05-02
+reason = "Spring Framework 6.2 (Boot 3.5 line); fixed only in 7. The application's Boot BOM decides."
+
+[[IgnoredVulns]]
+id = "GHSA-j9f9-w8pj-32f8"
+ignoreUntil = 2027-05-02
+reason = "Spring Framework 6.2 (Boot 3.5 line); fixed only in 7. The application's Boot BOM decides."
+
+[[IgnoredVulns]]
+id = "GHSA-pc63-qcmh-9cmg"
+ignoreUntil = 2027-05-02
+reason = "Spring Framework 6.2 (Boot 3.5 line, the Boot 3.5 sample only); fixed only in 7."
+
+# The versions Boot 3.5.16 manages, which the auto-configuration tests against on purpose. Halyx's own modules bring
+# patched versions (Jackson 2.22.4, Netty 4.1.139, OpenTelemetry 1.67.0); a Boot 3.5 application gets Boot's unless
+# it overrides them, as the Boot 3.5 sample shows.
+
+[[IgnoredVulns]]
+id = "GHSA-7hhh-6rmp-j9qf"
+ignoreUntil = 2027-05-02
+reason = "Jackson 2.21.4 as Boot 3.5 manages it, for the auto-configuration's tests; Halyx brings 2.22.4."
+
+[[IgnoredVulns]]
+id = "GHSA-p6pp-m3f8-5c89"
+ignoreUntil = 2027-05-02
+reason = "Jackson 2.21.4 as Boot 3.5 manages it, for the auto-configuration's tests; Halyx brings 2.22.4."
+
+[[IgnoredVulns]]
+id = "GHSA-5gvw-p9qm-jgwh"
+ignoreUntil = 2027-05-02
+reason = "Jackson 2.21.4 as Boot 3.5 manages it, for the auto-configuration's tests; Halyx brings 2.22.4."
+
+[[IgnoredVulns]]
+id = "GHSA-5jmj-h7xm-6q6v"
+ignoreUntil = 2027-05-02
+reason = "Jackson 2.21.4 as Boot 3.5 manages it, for the auto-configuration's tests; Halyx brings 2.22.4."
+
+[[IgnoredVulns]]
+id = "GHSA-cxp5-3px4-pw24"
+ignoreUntil = 2027-05-02
+reason = "Jackson 2.21.4 as Boot 3.5 manages it, for the auto-configuration's tests; Halyx brings 2.22.4."
+
+[[IgnoredVulns]]
+id = "GHSA-gx83-3vf8-gh7j"
+ignoreUntil = 2027-05-02
+reason = "Jackson 2.21.4 as Boot 3.5 manages it, for the auto-configuration's tests; Halyx brings 2.22.4."
+
+[[IgnoredVulns]]
+id = "GHSA-mhm7-754m-9p8w"
+ignoreUntil = 2027-05-02
+reason = "Jackson 2.21.4 as Boot 3.5 manages it, for the auto-configuration's tests; Halyx brings 2.22.4."
+
+[[IgnoredVulns]]
+id = "GHSA-q4xh-88c3-wmh7"
+ignoreUntil = 2027-05-02
+reason = "Jackson 2.21.4 as Boot 3.5 manages it, for the auto-configuration's tests; Halyx brings 2.22.4."
+
+[[IgnoredVulns]]
+id = "GHSA-vvgp-rfg2-7rr6"
+ignoreUntil = 2027-05-02
+reason = "Jackson 2.21.4 as Boot 3.5 manages it, for the auto-configuration's tests; Halyx brings 2.22.4."
+
+[[IgnoredVulns]]
+id = "GHSA-wjgm-6hv5-3cvf"
+ignoreUntil = 2027-05-02
+reason = "Jackson 2.21.4 as Boot 3.5 manages it, for the auto-configuration's tests; Halyx brings 2.22.4."
+
+[[IgnoredVulns]]
+id = "GHSA-wv8q-qhhj-9h54"
+ignoreUntil = 2027-05-02
+reason = "Jackson 2.21.4 as Boot 3.5 manages it, for the auto-configuration's tests; Halyx brings 2.22.4."
+
+[[IgnoredVulns]]
+id = "GHSA-558v-64gr-wgg4"
+ignoreUntil = 2027-05-02
+reason = "Netty 4.1.135 as Boot 3.5 manages it, for the auto-configuration's tests; Halyx brings 4.1.139."
+
+[[IgnoredVulns]]
+id = "GHSA-mfg7-5gfp-c4w3"
+ignoreUntil = 2027-05-02
+reason = "Netty 4.1.135 as Boot 3.5 manages it, for the auto-configuration's tests; Halyx brings 4.1.139."
+
+[[IgnoredVulns]]
+id = "GHSA-4mp9-239f-g9hg"
+ignoreUntil = 2027-05-02
+reason = "Netty 4.1.135 as Boot 3.5 manages it, for the auto-configuration's tests; Halyx brings 4.1.139."
+
+[[IgnoredVulns]]
+id = "GHSA-6cqp-g7gg-8hr5"
+ignoreUntil = 2027-05-02
+reason = "Netty 4.1.135 as Boot 3.5 manages it, for the auto-configuration's tests; Halyx brings 4.1.139."
+
+[[IgnoredVulns]]
+id = "GHSA-6jqx-86gh-f27w"
+ignoreUntil = 2027-05-02
+reason = "Netty 4.1.135 as Boot 3.5 manages it, for the auto-configuration's tests; Halyx brings 4.1.139."
+
+[[IgnoredVulns]]
+id = "GHSA-8c42-7qj2-3j46"
+ignoreUntil = 2027-05-02
+reason = "Netty 4.1.135 as Boot 3.5 manages it, for the auto-configuration's tests; Halyx brings 4.1.139."
+
+[[IgnoredVulns]]
+id = "GHSA-gcjf-9mgh-3p7g"
+ignoreUntil = 2027-05-02
+reason = "Netty 4.1.135 as Boot 3.5 manages it, for the auto-configuration's tests; Halyx brings 4.1.139."
+
+[[IgnoredVulns]]
+id = "GHSA-jppx-w49h-x2qq"
+ignoreUntil = 2027-05-02
+reason = "Netty 4.1.135 as Boot 3.5 manages it, for the auto-configuration's tests; Halyx brings 4.1.139."
+
+[[IgnoredVulns]]
+id = "GHSA-mvh2-crg5-v77c"
+ignoreUntil = 2027-05-02
+reason = "Netty 4.1.135 as Boot 3.5 manages it, for the auto-configuration's tests; Halyx brings 4.1.139."
+
+[[IgnoredVulns]]
+id = "GHSA-q4f6-jm68-57ww"
+ignoreUntil = 2027-05-02
+reason = "Netty 4.1.135 as Boot 3.5 manages it, for the auto-configuration's tests; Halyx brings 4.1.139."
+
+[[IgnoredVulns]]
+id = "GHSA-93wv-jw9v-4972"
+ignoreUntil = 2027-05-02
+reason = "Netty 4.1.135 as Boot 3.5 manages it, for the auto-configuration's tests; Halyx brings 4.1.139."
+
+[[IgnoredVulns]]
+id = "GHSA-c69g-56f8-xwqj"
+ignoreUntil = 2027-05-02
+reason = "Netty 4.1.135 as Boot 3.5 manages it, for the auto-configuration's tests; Halyx brings 4.1.139."
+
+[[IgnoredVulns]]
+id = "GHSA-c4c3-7fpv-j4q5"
+ignoreUntil = 2027-05-02
+reason = "Netty 4.1.135 as Boot 3.5 manages it, for the auto-configuration's tests; Halyx brings 4.1.139."
+
+[[IgnoredVulns]]
+id = "GHSA-fccg-mwvh-qqg4"
+ignoreUntil = 2027-05-02
+reason = "Netty 4.1.135 as Boot 3.5 manages it, for the auto-configuration's tests; Halyx brings 4.1.139."
+
+[[IgnoredVulns]]
+id = "GHSA-ccrj-gw8r-854m"
+ignoreUntil = 2027-05-02
+reason = "OpenTelemetry API 1.49 as Boot 3.5 manages it, for the auto-configuration's tests; Halyx brings 1.67.0."
+
+[[IgnoredVulns]]
+id = "GHSA-rcgg-9c38-7xpx"
+ignoreUntil = 2027-05-02
+reason = "OpenTelemetry API 1.49 as Boot 3.5 manages it, for the auto-configuration's tests; Halyx brings 1.67.0."
+
+[[IgnoredVulns]]
+id = "GHSA-j288-q9x7-2f5v"
+ignoreUntil = 2027-05-02
+reason = "commons-lang3 3.17.0 as Boot 3.5 manages it, for the auto-configuration's tests."
+
+[[IgnoredVulns]]
+id = "GHSA-hjcp-jmpx-g3qm"
+ignoreUntil = 2027-05-02
+reason = "HttpClient 5.5.2 as Boot 3.5 manages it, for the auto-configuration's tests."
+
+[[IgnoredVulns]]
+id = "GHSA-hf6x-8p5f-cgmf"
+ignoreUntil = 2027-05-02
+reason = "HttpCore 5.3.6 as Boot 3.5 manages it, for the auto-configuration's tests."
+
+[[IgnoredVulns]]
+id = "GHSA-v3jc-474w-2wm6"
+ignoreUntil = 2027-05-02
+reason = "HttpCore 5.3.6 as Boot 3.5 manages it, for the auto-configuration's tests."
+
+# Log4j API 2.24.3 through spring-boot-starter 3.5.16, which the starter depends on; the application's Boot BOM decides.
+# The Boot 3.5 sample brings 2.25.5.
+
+[[IgnoredVulns]]
+id = "GHSA-qv9r-c865-cp47"
+ignoreUntil = 2027-05-02
+reason = "Log4j API 2.24.3 through spring-boot-starter 3.5.16; Boot decides it. The Boot 3.5 sample brings 2.25.5."
