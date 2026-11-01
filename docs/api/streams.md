@@ -46,8 +46,21 @@ StreamConfig events = StreamConfig.builder("boot-abc123.c2.kafka-serverless.eu-w
 | Auth | What it does |
 |---|---|
 | `StreamAuth.iam()` | Short-lived tokens from the provider's credentials, over TLS (SASL `OAUTHBEARER`). Clients fetch a new token before the current one expires. |
-| `StreamAuth.password(mechanism, username, password)` | A username and password over TLS: `PLAIN`, `SCRAM_SHA_256` or `SCRAM_SHA_512`. |
+| `StreamAuth.password(mechanism, username, password)` | A username and password over TLS: `PLAIN`, `SCRAM_SHA_256` or `SCRAM_SHA_512`. The password can be a supplier, asked each time a connection logs in. |
 | `StreamAuth.none()` | No login: a plaintext listener, or TLS with `kafka.security.protocol=SSL`. |
+
+A supplied password, such as a read from a [parameter store](parameters.md), takes effect without a restart:
+
+```java
+StreamConfig.builder(bootstrapServers)
+        .auth(StreamAuth.password(SaslMechanism.SCRAM_SHA_512, "orders-app",
+                () -> secrets.require("AmazonMSK_orders-app", "password")))
+        .build();
+```
+
+New connections log in with the current password, and open ones when the broker has them log in again
+(`connections.max.reauth.ms`, off by default). Without re-authentication, open connections stay logged in until
+they're replaced. The password never goes into `sasl.jaas.config`.
 
 Cluster, producer and consumer properties that start with `kafka.` go to the Kafka clients without the
 prefix, so any client setting can be tuned: `kafka.linger.ms`, `kafka.compression.type`,

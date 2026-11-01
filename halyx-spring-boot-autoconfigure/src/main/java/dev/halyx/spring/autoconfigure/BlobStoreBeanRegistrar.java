@@ -27,6 +27,8 @@ import dev.halyx.stream.StreamConfig;
 import dev.halyx.stream.StreamConsumer;
 import dev.halyx.stream.StreamProducer;
 import org.springframework.beans.factory.BeanClassLoaderAware;
+import org.springframework.beans.factory.BeanFactory;
+import org.springframework.beans.factory.BeanFactoryAware;
 import org.springframework.beans.factory.support.AbstractBeanDefinition;
 import org.springframework.beans.factory.config.ConstructorArgumentValues;
 import org.springframework.beans.factory.config.RuntimeBeanReference;
@@ -63,18 +65,30 @@ import java.util.regex.Pattern;
  * <p>Providers are resolved when each bean is created, against the {@code Halyx} bean, so resources can use
  * providers that a {@code HalyxBuilderCustomizer} or an application's own {@code Halyx} bean registers.
  */
-class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, EnvironmentAware, BeanClassLoaderAware {
+class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, EnvironmentAware, BeanClassLoaderAware,
+        BeanFactoryAware {
 
     static final String FACTORY_BEAN = HalyxBlobStores.BEAN_NAME;
 
     private static final Pattern PLACEHOLDER = Pattern.compile("\\$\\{[^}]*}");
 
     private Environment environment;
+    private BeanFactory beanFactory;
     private ClassLoader classLoader = BlobStoreBeanRegistrar.class.getClassLoader();
 
     @Override
     public void setEnvironment(Environment environment) {
         this.environment = environment;
+    }
+
+    /** The factory that cache and stream logins find their {@code auth.secret} stores in, when they're read. */
+    @Override
+    public void setBeanFactory(BeanFactory beanFactory) {
+        this.beanFactory = beanFactory;
+    }
+
+    private ParameterStore secretStore(String name) {
+        return beanFactory.getBean(name, ParameterStore.class);
     }
 
     @Override
@@ -90,9 +104,17 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
         Map<String, HalyxProperties.BlobStoreProperties> stores = binder
                 .bind("halyx.blob-stores", Bindable.mapOf(String.class, HalyxProperties.BlobStoreProperties.class))
                 .orElse(Map.of());
+        Set<String> secretStores = binder
+                .bind("halyx.parameter-stores", Bindable.mapOf(String.class, HalyxProperties.ParameterStoreProperties.class))
+                .orElse(Map.of()).keySet();
         binder.bind("halyx.caches", Bindable.mapOf(String.class, HalyxProperties.CacheProperties.class))
                 .orElse(Map.of())
-                .forEach((name, cache) -> names.register(name, "halyx.caches." + name, "namespace", cacheBean(name, cache)));
+                .forEach((name, cache) -> {
+                    RootBeanDefinition definition = cacheBean(name, cache);
+                    definition.setDependsOn(authSecretStore("halyx.caches." + name + ".auth.secret", cache.auth().secret(),
+                            secretStores));
+                    names.register(name, "halyx.caches." + name, "namespace", definition);
+                });
         binder.bind("halyx.parameter-stores", Bindable.mapOf(String.class, HalyxProperties.ParameterStoreProperties.class))
                 .orElse(Map.of())
                 .forEach((name, store) -> {
@@ -206,6 +228,10 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
         Map<String, HalyxProperties.StreamClusterProperties> clusters = binder
                 .bind("halyx.stream-clusters", Bindable.mapOf(String.class, HalyxProperties.StreamClusterProperties.class))
                 .orElse(Map.of());
+        clusters.forEach((name, cluster) -> authSecretStore("halyx.stream-clusters." + name + ".auth.secret",
+                cluster.auth().secret(), secretStores));
+        binder.bind("halyx.cache-manager.auth", Bindable.of(HalyxProperties.CacheAuthProperties.class))
+                .ifBound(auth -> authSecretStore("halyx.cache-manager.auth.secret", auth.secret(), secretStores));
         binder.bind("halyx.stream-producers", Bindable.mapOf(String.class, HalyxProperties.StreamProducerProperties.class))
                 .orElse(Map.of())
                 .forEach((name, producer) -> names.register(name, "halyx.stream-producers." + name, "topic",
@@ -261,6 +287,18 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
         return stores.toArray(String[]::new);
     }
 
+    /** The store an {@code auth.secret} reads from, as a bean name to depend on, after checking it's one of the stores. */
+    private static String[] authSecretStore(String property, HalyxProperties.SecretReference secret,
+                                            Set<String> parameterStores) {
+        if (secret == null) {
+            return new String[0];
+        }
+        if (secret.store() == null || !parameterStores.contains(secret.store())) {
+            throw new IllegalStateException(property + ".store must name one of halyx.parameter-stores " + parameterStores);
+        }
+        return new String[] {secret.store()};
+    }
+
     /**
      * Fails on any {@code halyx.*} value whose placeholder didn't resolve. Spring leaves such a value as written, so a
      * missing secret would otherwise be sent as the key, and fail every call instead of the start.
@@ -298,12 +336,12 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
     }
 
     /** A {@code Cache} whose value type follows its codec: strings, bytes, objects, or a {@code Codec} bean's type. */
-    private static RootBeanDefinition cacheBean(String name, HalyxProperties.CacheProperties cache) {
+    private RootBeanDefinition cacheBean(String name, HalyxProperties.CacheProperties cache) {
         String property = "halyx.caches." + name;
         String codec = cache.codec() == null || cache.codec().isBlank() ? "string" : cache.codec();
         RootBeanDefinition definition = serviceBean(Cache.class, "cache", property, cache.provider());
         var args = definition.getConstructorArgumentValues();
-        args.addIndexedArgumentValue(2, cache.toCacheConfig(name));
+        args.addIndexedArgumentValue(2, cache.toCacheConfig(name, this::secretStore));
         switch (codec) {
             case "string" -> definition.setTargetType(ResolvableType.forClassWithGenerics(Cache.class, String.class));
             case "bytes" -> {
@@ -349,16 +387,20 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
     }
 
     /** A StreamProducer or StreamConsumer bean on its cluster; with a claim check, its blob store bean is injected too. */
-    private static RootBeanDefinition streamBean(Class<?> type, String property, String name, String cluster,
+    private RootBeanDefinition streamBean(Class<?> type, String property, String name, String cluster,
                                                  Object properties, HalyxProperties.ClaimCheckProperties claimCheck,
                                                  String factoryMethod,
                                                  Map<String, HalyxProperties.StreamClusterProperties> clusters,
                                                  Set<String> blobStores) {
         String clusterName = resolveCluster(property, cluster, clusters);
         HalyxProperties.StreamClusterProperties clusterProperties = clusters.get(clusterName);
-        StreamConfig streamConfig = clusterProperties.toStreamConfig(clusterName);
+        StreamConfig streamConfig = clusterProperties.toStreamConfig(clusterName, this::secretStore);
         RootBeanDefinition definition = serviceBean(type, factoryMethod, "halyx.stream-clusters." + clusterName,
                 clusterProperties.provider());
+        HalyxProperties.SecretReference secret = clusterProperties.auth().secret();
+        if (secret != null) {
+            definition.setDependsOn(secret.store());
+        }
         var args = definition.getConstructorArgumentValues();
         args.addIndexedArgumentValue(2, name);
         args.addIndexedArgumentValue(3, properties);

@@ -113,8 +113,8 @@ public final class RedisCaches implements AutoCloseable {
     }
 
     /**
-     * Maps a {@link CacheAuth} to a credentials source: none, a fixed password, or the provider's IAM
-     * token source.
+     * Maps a {@link CacheAuth} to a credentials source: none, a fixed password, a supplied password asked for on
+     * every login, or the provider's IAM token source.
      *
      * @return null for {@link CacheAuth.None}
      */
@@ -122,6 +122,17 @@ public final class RedisCaches implements AutoCloseable {
                                                      Function<CacheAuth.Iam, RedisCredentialsSource> iamTokens) {
         return switch (auth) {
             case CacheAuth.None ignored -> null;
+            case CacheAuth.Password p when p.supplied() -> new RedisCredentialsSource() {
+                @Override
+                public RedisLogin login() {
+                    return RedisLogin.of(p.username().orElse(null), p.password());
+                }
+
+                @Override
+                public boolean reusesLogins() {
+                    return false;
+                }
+            };
             case CacheAuth.Password p -> {
                 RedisLogin login = RedisLogin.of(p.username().orElse(null), p.password());
                 yield () -> login;

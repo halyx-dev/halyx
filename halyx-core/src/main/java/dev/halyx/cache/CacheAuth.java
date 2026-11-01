@@ -17,6 +17,7 @@ package dev.halyx.cache;
 
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 /**
  * How to log in to the cache server. Separate from the provider's cloud credentials, which are used
@@ -39,6 +40,20 @@ public sealed interface CacheAuth {
     }
 
     /**
+     * A password asked for each time a connection logs in, so a rotated secret takes effect without a restart on new
+     * connections and reconnects. For example, from a cached parameter store:
+     * <pre>{@code CacheAuth.password(() -> secrets.require("cache/auth-token"))}</pre>
+     */
+    static CacheAuth password(Supplier<String> password) {
+        return new Password(Optional.empty(), password);
+    }
+
+    /** ACL login with a password asked for each time a connection logs in. */
+    static CacheAuth password(String username, Supplier<String> password) {
+        return new Password(Optional.of(username), password);
+    }
+
+    /**
      * Short-lived tokens from the provider's cloud identity: ElastiCache IAM (the username is the
      * ElastiCache user id), Entra ID for Azure (the username defaults to the token's object id) and
      * Memorystore IAM on GCP (no username).
@@ -55,10 +70,25 @@ public sealed interface CacheAuth {
         static final None INSTANCE = new None();
     }
 
-    record Password(Optional<String> username, String password) implements CacheAuth {
+    /** @param passwordSupplier asked for the password; equal for equal fixed passwords */
+    record Password(Optional<String> username, Supplier<String> passwordSupplier) implements CacheAuth {
         public Password {
             Objects.requireNonNull(username, "username");
-            Objects.requireNonNull(password, "password");
+            Objects.requireNonNull(passwordSupplier, "passwordSupplier");
+        }
+
+        public Password(Optional<String> username, String password) {
+            this(username, new FixedPassword(Objects.requireNonNull(password, "password")));
+        }
+
+        /** The password; a supplied one is asked now. */
+        public String password() {
+            return passwordSupplier.get();
+        }
+
+        /** Whether the password was given as a supplier, so it may change while connections are open. */
+        public boolean supplied() {
+            return !(passwordSupplier instanceof FixedPassword);
         }
 
         @Override

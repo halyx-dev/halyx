@@ -17,6 +17,7 @@ package dev.halyx.spring.autoconfigure.cache;
 
 import dev.halyx.Halyx;
 import dev.halyx.cache.Codec;
+import dev.halyx.parameters.ParameterStore;
 import dev.halyx.spring.autoconfigure.HalyxAutoConfiguration;
 import dev.halyx.spring.autoconfigure.HalyxBlobStores;
 import dev.halyx.spring.autoconfigure.HalyxProperties;
@@ -73,10 +74,10 @@ public class HalyxCacheManagerAutoConfiguration {
             throw new IllegalStateException("halyx.cache-manager.codec=json needs Jackson (3 on Boot 4, 2 on Boot 3) "
                     + "on the classpath");
         });
-        if (beans.containsBean(EXECUTOR_BEAN)) {
-            return new HalyxCacheManager(halyx, provider, manager, valueCodec, beans.getBean(EXECUTOR_BEAN, Executor.class));
-        }
-        return new HalyxCacheManager(halyx, provider, manager, valueCodec);
+        Executor executor = beans.containsBean(EXECUTOR_BEAN) ? beans.getBean(EXECUTOR_BEAN, Executor.class)
+                : task -> Thread.ofVirtual().name("halyx-cache").start(task);
+        return new HalyxCacheManager(halyx, provider, manager, valueCodec, executor,
+                store -> beans.getBean(store, ParameterStore.class));
     }
 
     /**

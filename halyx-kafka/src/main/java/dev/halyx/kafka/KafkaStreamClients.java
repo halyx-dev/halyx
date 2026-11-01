@@ -66,6 +66,8 @@ public final class KafkaStreamClients implements AutoCloseable {
 
     /** The client property carrying the {@link KafkaCredentialsSource} to {@link OAuthBearerLoginHandler}. */
     public static final String CREDENTIALS = "halyx.kafka.credentials";
+    /** The client property carrying a supplied {@code StreamAuth.Password} to {@link PasswordCallbackHandler}. */
+    public static final String PASSWORD = "halyx.kafka.password";
     /** Prefix of properties passed to the Kafka clients, without it. */
     public static final String CLIENT_PREFIX = "kafka.";
     /** Kafka's default {@code max.request.size}. */
@@ -181,6 +183,15 @@ public final class KafkaStreamClients implements AutoCloseable {
         properties.put(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, cluster.bootstrapServers());
         switch (cluster.auth()) {
             case StreamAuth.None ignored -> {
+            }
+            case StreamAuth.Password password when password.supplied() -> {
+                // The password stays out of sasl.jaas.config: the handler asks for it each time a connection logs in.
+                properties.put(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "SASL_SSL");
+                properties.put(SaslConfigs.SASL_MECHANISM, password.mechanism().kafkaName());
+                properties.put(SaslConfigs.SASL_CLIENT_CALLBACK_HANDLER_CLASS, PasswordCallbackHandler.class.getName());
+                properties.put(SaslConfigs.SASL_JAAS_CONFIG, jaas(loginModule(password.mechanism()),
+                        Map.of("username", password.username())));
+                properties.put(PASSWORD, password);
             }
             case StreamAuth.Password password -> {
                 properties.put(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "SASL_SSL");

@@ -15,8 +15,11 @@
  */
 package dev.halyx.config;
 
+import dev.halyx.cache.CacheAuth;
 import dev.halyx.events.EventBusConfig;
 import dev.halyx.messaging.SubscriptionConfig;
+import dev.halyx.stream.SaslMechanism;
+import dev.halyx.stream.StreamAuth;
 import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.atomic.AtomicReference;
@@ -24,8 +27,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * A property given as a supplier is asked each time it's read, in the provider config and the resource configs that
- * carry keys; the last setting of a property, fixed or supplied, wins.
+ * A property or password given as a supplier is asked each time it's read, in the provider config, the resource configs
+ * that carry keys, and stream and cache logins; one given as a value stays fixed.
  */
 class SuppliedPropertiesTest {
 
@@ -51,6 +54,37 @@ class SuppliedPropertiesTest {
         assertThat(supplied.properties()).isEmpty();
         assertThat(fixed.propertySupplier("k")).hasValueSatisfying(s -> assertThat(s.get()).isEqualTo("fixed"));
         assertThat(fixed.suppliedProperties()).isEmpty();
+    }
+
+    @Test
+    void streamAndCachePasswordsCanBeSuppliedOrFixed() {
+        AtomicReference<String> password = new AtomicReference<>("first");
+        var suppliedStream = (StreamAuth.Password) StreamAuth.password(SaslMechanism.SCRAM_SHA_512, "app", password::get);
+        var suppliedCache = (CacheAuth.Password) CacheAuth.password("app", password::get);
+        var fixedStream = (StreamAuth.Password) StreamAuth.password(SaslMechanism.SCRAM_SHA_512, "app", "fixed");
+        var fixedCache = (CacheAuth.Password) CacheAuth.password("fixed");
+
+        password.set("rotated");
+        assertThat(suppliedStream.password()).isEqualTo("rotated");
+        assertThat(suppliedCache.password()).isEqualTo("rotated");
+        assertThat(suppliedStream.supplied()).isTrue();
+        assertThat(suppliedCache.supplied()).isTrue();
+        assertThat(fixedStream.password()).isEqualTo("fixed");
+        assertThat(fixedCache.password()).isEqualTo("fixed");
+        assertThat(fixedStream.supplied()).isFalse();
+        assertThat(fixedCache.supplied()).isFalse();
+        assertThat(suppliedStream.toString() + suppliedCache + fixedStream + fixedCache)
+                .doesNotContain("rotated").doesNotContain("fixed");
+    }
+
+    @Test
+    void fixedPasswordsKeepConfigurationsEqual() {
+        assertThat(StreamAuth.password(SaslMechanism.PLAIN, "app", "pw"))
+                .isEqualTo(new StreamAuth.Password(SaslMechanism.PLAIN, "app", "pw"));
+        assertThat(CacheAuth.password("app", "pw")).isEqualTo(CacheAuth.password("app", "pw"))
+                .hasSameHashCodeAs(CacheAuth.password("app", "pw"));
+        assertThat(StreamAuth.password(SaslMechanism.PLAIN, "app", "pw"))
+                .isNotEqualTo(StreamAuth.password(SaslMechanism.PLAIN, "app", "other"));
     }
 
     @Test

@@ -17,12 +17,14 @@ package dev.halyx.spring.autoconfigure;
 
 import dev.halyx.Halyx;
 import dev.halyx.error.UnsupportedFeatureException;
+import dev.halyx.parameters.ParameterStore;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 
 import java.util.Map;
+import java.util.function.Function;
 
 /**
  * Adds a Halyx stream cluster's connection and login to every {@link DefaultKafkaProducerFactory} and
@@ -34,12 +36,16 @@ final class HalyxSpringKafkaLogin implements BeanPostProcessor {
     private final ObjectProvider<Halyx> halyx;
     private final ObjectProvider<HalyxProperties> properties;
     private final String cluster;
+    private final Function<String, ParameterStore> secretStores;
     private Map<String, Object> login;
 
-    HalyxSpringKafkaLogin(ObjectProvider<Halyx> halyx, ObjectProvider<HalyxProperties> properties, String cluster) {
+    /** @param secretStores finds the parameter store the cluster's {@code auth.secret} names, by bean name */
+    HalyxSpringKafkaLogin(ObjectProvider<Halyx> halyx, ObjectProvider<HalyxProperties> properties, String cluster,
+                          Function<String, ParameterStore> secretStores) {
         this.halyx = halyx;
         this.properties = properties;
         this.cluster = cluster;
+        this.secretStores = secretStores;
     }
 
     @Override
@@ -60,7 +66,7 @@ final class HalyxSpringKafkaLogin implements BeanPostProcessor {
             HalyxProperties.StreamClusterProperties clusterProperties = config.streamClusters().get(name);
             try {
                 login = HalyxBlobStores.context(halyx.getObject(), "halyx.stream-clusters." + name, clusterProperties.provider())
-                        .kafkaClientProperties(clusterProperties.toStreamConfig(name));
+                        .kafkaClientProperties(clusterProperties.toStreamConfig(name, secretStores));
             } catch (UnsupportedFeatureException e) {
                 throw new IllegalStateException("halyx.spring-kafka.cluster=" + name + ": " + e.getMessage()
                         + ". Spring for Apache Kafka needs a Kafka cluster, and the memory provider's streams run in "

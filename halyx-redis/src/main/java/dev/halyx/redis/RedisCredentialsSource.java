@@ -23,4 +23,12 @@ package dev.halyx.redis;
 public interface RedisCredentialsSource {
 
     RedisLogin login();
+
+    /**
+     * Whether a login without an expiry is reused for later connections. False for a password asked for on every
+     * login, so a rotated one reaches new connections and reconnects.
+     */
+    default boolean reusesLogins() {
+        return true;
+    }
 }
