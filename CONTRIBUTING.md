@@ -64,7 +64,9 @@ Reviews check the rest:
   SDK's; provider differences are capabilities; anything provider-specific goes through `unwrap`.
 - **Configuration is immutable.** A method that changes a setting returns a new instance, as `ProviderConfig` does;
   types with several options have a builder.
-- **No nulls in the API.** A value that may be missing is an `Optional`. Records are preferred for plain data.
+- **No nulls returned from the API.** A value that may be missing is an `Optional`. Arguments don't take null either,
+  except where the type has no better way to say "none": exception constructors take null for an absent cause,
+  provider or code, as `CloudException` and `FunctionError` do. Records are preferred for plain data.
 - **Versions live in one place.** Each dependency and plugin version is a property in the parent `pom.xml`, such as
   `${kafka4.version}`; a module refers to the property rather than writing a number. A `dev.halyx` module is either
   managed by the parent or uses `${project.version}`. The project's own version is `revision` in
