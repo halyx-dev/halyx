@@ -110,7 +110,7 @@ emulators for manual experiments.
 Every source file carries the Apache-2.0 license header, and the build checks it. Run
 `mvn -N com.mycila:license-maven-plugin:format` to add any missing ones.
 
-`mvn verify` also compares each published module with the last release, `japicmp.baseline` (1.0.0), from Maven
+`mvn verify` also compares each published module with the last release, `japicmp.baseline` (1.1.0), from Maven
 Central, using [japicmp](https://siom79.github.io/japicmp/). A change that would break code compiled against that
 release, or its source, fails the build: a removed or changed public method, constructor or field, a method added to an
 interface without a default, a narrower visibility. Its report is in each module's `target/japicmp/`. Test modules,
