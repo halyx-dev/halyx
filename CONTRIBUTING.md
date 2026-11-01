@@ -72,6 +72,9 @@ Reviews check the rest:
 - **Every code snippet compiles.** Docs, READMEs and samples use only the public API; check each snippet against the
   code before adding it.
 - **Comments say why**, not what the code already says, and are as dense as the code around them.
+- **Released API stays compatible.** `mvn verify` compares each published module with the last release and fails on a
+  change that breaks code using it ([japicmp](https://halyx.dev/docs/design.html#build)). Add next to what's there:
+  an overload, a delegating constructor, a default method.
 
 ## Branches
 
@@ -96,6 +99,7 @@ newer branch, so the next merge forward doesn't bring it again.
 - Say what you changed, why, and how you tested it.
 - Start from an up-to-date copy of the [branch](#branches) your change belongs on, open the pull request against it,
   and rebase if it moves on.
-- CI must pass: the build, the license headers, the code conventions, and the unit and emulator tests.
+- CI must pass: the build, the license headers, the code conventions, API compatibility, and the unit and emulator
+  tests.
 
 By contributing, you agree that your contribution is licensed under the [Apache License 2.0](LICENSE).

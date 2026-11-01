@@ -64,7 +64,7 @@ The first release on Maven Central, on 23 October 2026.
 | A public repository, and the documentation at halyx.dev | Done |
 | The release: version 1.0.0, a `v1.0.0` tag, the upload to Maven Central, and a GitHub release | Done |
 | `module-info.java` descriptors | Later: most of the cloud SDKs ship without them |
-| API compatibility checks with japicmp | From the release after 1.0.0 |
+| API compatibility checks with japicmp: each published module against the last release, in `mvn verify` | Done |
 
 ## Coming next
 
