@@ -58,7 +58,14 @@ application would.
   storage account of its own, which the azurerm provider requires, reached with the account key: the principal may
   not give the app's managed identity storage roles. Nothing under test uses that account
 
-Shared keys and local auth are **off everywhere**, so only Entra ID works, except on the function host's own storage account (see below). The principal gets Storage Blob
+The kits log in with Entra ID only: shared keys and local auth are off, except on the function host's own storage
+account (see below), and on the Cosmos DB account and the Event Grid namespace, whose keys only the key rotation
+tests use. Those tests (`RealAzureIT$KeyRotation`, and `aFunctionKeyFromKeyVaultFollowsARotation` in
+`RealSpringFunctionIT`) keep a key in the run's Key Vault and change it there while the client stays open: a function
+key read on every call, and the Cosmos DB and Event Grid keys switched from the primary to a wrong key and then to the
+secondary. The script passes the keys through the environment. Cache and Kafka password rotation runs on the
+emulators only (Valkey, and Kafka 3.9 and 4.2 brokers): the clouds' caches and Kafka endpoints here use Entra ID or
+IAM. The principal gets Storage Blob
 Data Contributor, Service Bus Data Owner, Key Vault Secrets Officer, App Configuration Data Owner, EventGrid Data
 Sender and Receiver, and Cosmos DB's built-in Data Contributor. The script waits until the blob role reaches
 the data plane (one attempt this run) and gives the rest 30 seconds more.

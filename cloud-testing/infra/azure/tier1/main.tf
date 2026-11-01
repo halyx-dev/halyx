@@ -15,9 +15,11 @@
 #
 
 # Tier 1 real-cloud test resources on Azure: Blob Storage, Service Bus, Cosmos DB, Key Vault, App
-# Configuration, an Event Grid namespace and a function app in a resource group of the run's own. Entra ID only: shared keys and local auth are off,
-# and the test service principal gets data-plane roles on each resource; the one exception is the function host's own
-# storage account. The function is invoked with its function key.
+# Configuration, an Event Grid namespace and a function app in a resource group of the run's own. The conformance
+# kits log in with Entra ID: the test service principal gets data-plane roles on each resource, and shared keys and
+# local auth are off, except for the function host's own storage account. The function is invoked with its function
+# key, and the Cosmos DB account and the Event Grid namespace also take their keys, which only the key rotation tests
+# use.
 
 terraform {
   required_version = ">= 1.5"
@@ -142,7 +144,7 @@ resource "azurerm_cosmosdb_account" "docs" {
   location                     = var.location
   offer_type                   = "Standard"
   kind                         = "GlobalDocumentDB"
-  local_authentication_enabled = false
+  local_authentication_enabled = true # for the key rotation tests; the kits use Entra ID
   capabilities {
     name = "EnableServerless"
   }
@@ -270,6 +272,15 @@ data "azapi_resource" "events_namespace" {
   response_export_values = { hostname = "properties.topicsConfiguration.hostname" }
 }
 
+# The namespace's two access keys, for the key rotation tests.
+data "azapi_resource_action" "events_keys" {
+  type                   = "Microsoft.EventGrid/namespaces@2025-02-15"
+  resource_id            = azurerm_eventgrid_namespace.events.id
+  action                 = "listKeys"
+  method                 = "POST"
+  response_export_values = ["key1", "key2"]
+}
+
 resource "azurerm_role_assignment" "events" {
   for_each             = toset(["EventGrid Data Sender", "EventGrid Data Receiver"])
   scope                = azurerm_eventgrid_namespace.events.id
@@ -364,6 +375,16 @@ output "cosmos_endpoint" {
   value = azurerm_cosmosdb_account.docs.endpoint
 }
 
+output "cosmos_key" {
+  value     = azurerm_cosmosdb_account.docs.primary_key
+  sensitive = true
+}
+
+output "cosmos_secondary_key" {
+  value     = azurerm_cosmosdb_account.docs.secondary_key
+  sensitive = true
+}
+
 output "key_vault_url" {
   value = azurerm_key_vault.secrets.vault_uri
 }
@@ -374,6 +395,16 @@ output "appconfig_endpoint" {
 
 output "eventgrid_endpoint" {
   value = "https://${data.azapi_resource.events_namespace.output.hostname}"
+}
+
+output "eventgrid_key" {
+  value     = data.azapi_resource_action.events_keys.output.key1
+  sensitive = true
+}
+
+output "eventgrid_secondary_key" {
+  value     = data.azapi_resource_action.events_keys.output.key2
+  sensitive = true
 }
 
 output "eventgrid_topic" {

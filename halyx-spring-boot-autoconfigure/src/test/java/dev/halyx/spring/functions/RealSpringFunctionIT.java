@@ -15,10 +15,15 @@
  */
 package dev.halyx.spring.functions;
 
+import dev.halyx.Halyx;
+import dev.halyx.config.ProviderConfig;
+import dev.halyx.error.AccessDeniedException;
 import dev.halyx.error.UnavailableException;
 import dev.halyx.functions.FunctionInvoker;
 import dev.halyx.functions.FunctionRequest;
 import dev.halyx.json.Json;
+import dev.halyx.parameters.ParameterStore;
+import dev.halyx.parameters.ParameterStoreConfig;
 import dev.halyx.reactor.ReactiveFunctionInvoker;
 import dev.halyx.spring.autoconfigure.HalyxAutoConfiguration;
 import dev.halyx.spring.autoconfigure.reactor.HalyxReactorAutoConfiguration;
@@ -32,6 +37,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -84,6 +90,42 @@ class RealSpringFunctionIT {
             assertThatThrownBy(() -> tck.invoke(FunctionRequest.of("{\"action\":\"fail\",\"message\":\"spring\"}")))
                     .isInstanceOf(UnavailableException.class);
         });
+    }
+
+    /**
+     * The function key read from Key Vault through {@code secrets} instead of a property, and rotated there while the
+     * bean is in use. Azure only: the script names the run's Key Vault ({@code halyx.real.spring.function-key-store})
+     * and puts the key in {@code HALYX_FUNCTION_KEY}.
+     */
+    @Test
+    @EnabledIfSystemProperty(named = "halyx.real.spring.function-key-store", matches = ".+")
+    void aFunctionKeyFromKeyVaultFollowsARotation() {
+        String location = System.getProperty("halyx.real.spring.function-key-store");
+        String secret = "spring-function-key-" + UUID.randomUUID();
+        try (Halyx admin = Halyx.builder().register("azure", ProviderConfig.of("azure")).build()) {
+            ParameterStore vault = admin.provider("azure").parameterStore(ParameterStoreConfig.secrets().location(location).build());
+            vault.put(secret, "retired-key");
+            try {
+                runner().withPropertyValues(
+                                "halyx.parameter-stores.vault.kind=secrets",
+                                "halyx.parameter-stores.vault.location=" + location,
+                                "halyx.functions.tck.properties.azure.functions.key=",   // the plain key gives way
+                                "halyx.functions.tck.secrets[0].property=azure.functions.key",
+                                "halyx.functions.tck.secrets[0].store=vault",
+                                "halyx.functions.tck.secrets[0].name=" + secret)
+                        .run(context -> {
+                            assertThat(context).hasNotFailed();
+                            FunctionInvoker tck = context.getBean("tck", FunctionInvoker.class);
+                            FunctionRequest echo = FunctionRequest.of("{\"action\":\"echo\"}");
+
+                            assertThatThrownBy(() -> tck.invoke(echo)).isInstanceOf(AccessDeniedException.class);
+                            vault.put(secret, System.getenv("HALYX_FUNCTION_KEY"));
+                            assertThat(tck.invoke(echo).payloadAsString()).contains("echo");
+                        });
+            } finally {
+                vault.delete(secret);
+            }
+        }
     }
 
     @Test

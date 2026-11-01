@@ -423,6 +423,18 @@ class HalyxAutoConfigurationTest {
     }
 
     @Test
+    void aBlankFunctionPropertyGivesWayToASecret() {
+        runner.withPropertyValues(FUNCTION_WITH_SECRET)
+                .withPropertyValues("halyx.functions.resize.properties.azure.functions.key=")
+                .withBean(LazyInitializationBeanFactoryPostProcessor.class)
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    context.getBean("secrets", ParameterStore.class).put("resize-key", "key");
+                    assertThat(context.getBean("resize", FunctionInvoker.class).function()).isEqualTo("resize");
+                });
+    }
+
+    @Test
     void aFunctionSecretNeedsAKnownStore() {
         runner.withPropertyValues(FUNCTION_WITH_SECRET)
                 .withPropertyValues("halyx.functions.resize.secrets[0].store=vault")
