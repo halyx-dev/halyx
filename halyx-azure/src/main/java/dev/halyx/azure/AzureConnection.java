@@ -35,10 +35,7 @@ import com.azure.storage.common.StorageSharedKeyCredential;
 import com.azure.core.credential.AccessToken;
 import com.azure.core.credential.TokenCredential;
 import com.azure.core.http.HttpClient;
-import com.azure.core.http.HttpHeaderName;
-import com.azure.core.http.HttpHeaders;
 import com.azure.core.http.HttpPipelineBuilder;
-import com.azure.core.http.policy.AddHeadersPolicy;
 import com.azure.core.http.policy.BearerTokenAuthenticationPolicy;
 import com.azure.core.http.policy.ExponentialBackoffOptions;
 import com.azure.core.http.policy.HttpPipelinePolicy;
@@ -356,8 +353,6 @@ final class AzureConnection implements ProviderConnection {
      * Function invocations that may run the function twice are retried only after a 429 or a failure to connect,
      * when the Functions host hasn't run it.
      */
-    private static final HttpHeaderName FUNCTIONS_KEY_HEADER = HttpHeaderName.fromString("x-functions-key");
-
     private static final RetryOptions BEFORE_SEND_RETRIES = new RetryOptions(new ExponentialBackoffOptions())
             .setShouldRetryCondition(attempt -> attempt.getResponse() != null && attempt.getResponse().getStatusCode() == 429
                     || attempt.getThrowable() != null && ConnectFailures.isConnectFailure(attempt.getThrowable()));
@@ -390,16 +385,19 @@ final class AzureConnection implements ProviderConnection {
         return idempotent ? new RetryPolicy() : new RetryPolicy(BEFORE_SEND_RETRIES);
     }
 
-    /** An Entra ID token for the audience, or the function key; neither for an anonymous provider, such as an emulator. */
+    /**
+     * An Entra ID token for the audience; nothing for a function key, which the driver asks for on every call, or for an
+     * anonymous provider, such as an emulator.
+     */
     private Optional<HttpPipelinePolicy> functionLogin(FunctionConfig function) {
         Optional<String> audience = function.property(AzureProperties.FUNCTIONS_AUDIENCE);
-        Optional<String> key = function.property(AzureProperties.FUNCTIONS_KEY);
-        if (audience.isPresent() && key.isPresent()) {
+        boolean key = function.propertySupplier(AzureProperties.FUNCTIONS_KEY).isPresent();
+        if (audience.isPresent() && key) {
             throw new IllegalArgumentException("Azure function " + function.name() + " has both "
                     + AzureProperties.FUNCTIONS_AUDIENCE + " and " + AzureProperties.FUNCTIONS_KEY + ": set one");
         }
-        if (key.isPresent()) {
-            return Optional.of(new AddHeadersPolicy(new HttpHeaders().set(FUNCTIONS_KEY_HEADER, key.get())));
+        if (key) {
+            return Optional.empty();
         }
         if (audience.isPresent()) {
             if (!entraId()) {

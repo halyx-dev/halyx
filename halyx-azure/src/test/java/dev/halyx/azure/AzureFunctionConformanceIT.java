@@ -34,7 +34,9 @@ import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.utility.MountableFile;
 
 import java.time.Duration;
+import java.util.concurrent.atomic.AtomicReference;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
@@ -106,5 +108,19 @@ class AzureFunctionConformanceIT extends FunctionConformanceTest {
 
         assertThatThrownBy(() -> invoker.invoke(FunctionRequest.of("{\"action\":\"echo\"}")))
                 .isInstanceOf(AccessDeniedException.class);
+    }
+
+    @Test
+    void aRotatedFunctionKeyTakesEffectOnTheNextCall() {
+        AtomicReference<String> key = new AtomicReference<>("retired-key");
+        FunctionInvoker invoker = invoker(FunctionConfig.builder("tck").property("azure.functions.endpoint", endpoint())
+                .property("azure.functions.key", key::get).build());
+
+        assertThatThrownBy(() -> invoker.invoke(FunctionRequest.of("{\"action\":\"echo\"}")))
+                .isInstanceOf(AccessDeniedException.class);
+        key.set(KEY);
+        assertThat(invoker.invoke(FunctionRequest.of("{\"action\":\"echo\"}")).payloadAsString()).contains("echo");
+        assertThat(invoker.async().invoke(FunctionRequest.of("{\"action\":\"echo\"}")).join().payloadAsString())
+                .contains("echo");
     }
 }

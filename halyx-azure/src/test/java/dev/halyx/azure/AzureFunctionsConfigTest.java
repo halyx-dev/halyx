@@ -89,6 +89,23 @@ class AzureFunctionsConfigTest {
     }
 
     @Test
+    void aSuppliedKeyIsALogin() {
+        FunctionConfig key = FunctionConfig.builder("resize-image")
+                .property("azure.functions.endpoint", "https://orders.azurewebsites.net")
+                .property("azure.functions.key", () -> "secret").build();
+        FunctionConfig both = FunctionConfig.builder("resize-image")
+                .property("azure.functions.endpoint", "https://orders.azurewebsites.net")
+                .property("azure.functions.audience", "api://orders-functions")
+                .property("azure.functions.key", () -> "secret").build();
+
+        withProvider(Credentials.defaultChain(), azure -> {
+            assertThat(azure.functionInvoker(key).function()).isEqualTo("resize-image");
+            assertThatThrownBy(() -> azure.functionInvoker(both)).isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("set one");
+        });
+    }
+
+    @Test
     void nonIdempotentFunctionsAreRetriedOnlyWhenTheyDidNotRun() {
         assertThat(attempts(false, () -> response(500))).isEqualTo(1);
         assertThat(attempts(false, () -> response(429))).isEqualTo(4);
