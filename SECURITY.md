@@ -34,13 +34,13 @@ drivers, so most vulnerabilities that affect it are in those dependencies.
   Boot 3.5 lines. A Boot 3.5 application can override them in its own `dependencyManagement`, as the
   [Boot 3.5 sample](halyx-samples/portable-orders-boot3/pom.xml) shows.
 
-The repository is scanned with Snyk. Findings that Halyx can't fix itself are listed in [`.snyk`](.snyk), each with
-its reason and an expiry date, so they are reviewed again. At 1.0.0 they are:
+Every push and pull request, and a weekly run, scans the dependencies with
+[OSV-Scanner](https://google.github.io/osv-scanner/): an SBOM of every published module, test scope included, and of
+each sample as it runs. Findings that Halyx can't fix itself are listed in [`osv-scanner.toml`](osv-scanner.toml),
+each with its reason and an expiry date, so they are reviewed again. At 1.1.0 they are:
 
 | Finding | Why it stays open |
 |---|---|
-| Spring Framework 6.2 and Spring for Apache Kafka 3.3 | The Boot 3.5 lines. Fixed only in Spring Framework 7 and Spring for Apache Kafka 4 (Boot 4); the application's Boot BOM decides |
-| Jackson, Reactor and Micrometer as Boot 3.5 manages them | Used only by the auto-configuration's tests against Boot 3.5; the Halyx modules bring patched versions |
-| Logback 1.5 | Comes through `spring-boot-starter`, so Boot decides; the samples bring 1.6.5 |
-| Reactor Netty 1.2 | Through the Azure SDK's HTTP client and R2DBC's PostgreSQL driver. The fixes need Netty 4.2, which the AWS and Azure SDKs and Lettuce 6 don't support yet. None applies to how Halyx uses it: no Reactor Netty server, no WebSockets, and the default DNS resolver |
-| log4j-api | No fixed version yet |
+| Spring Framework 6.2 | The Boot 3.5 line. Fixed only in Spring Framework 7 (Boot 4); the application's Boot BOM decides |
+| Jackson, Netty, the OpenTelemetry API, commons-lang3, HttpClient and HttpCore as Boot 3.5 manages them | Used only by the auto-configuration's tests against Boot 3.5; the Halyx modules bring patched versions where they use them |
+| Log4j API 2.24 | Comes through `spring-boot-starter`, so Boot decides; the Boot 3.5 sample brings 2.25.5 |

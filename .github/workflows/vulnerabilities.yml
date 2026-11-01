@@ -1,0 +1,81 @@
+#
+# Copyright 2026 Kamran Zafar
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+
+# Scans the dependencies Halyx resolves for known vulnerabilities with OSV-Scanner: an SBOM of every published module,
+# test scope included, and of each sample at runtime. Findings Halyx can't fix itself are listed in osv-scanner.toml
+# with their reasons. It also runs weekly, so advisories published between changes are found too.
+name: Vulnerabilities
+
+on:
+  push:
+    # main and the maintenance branches, such as 1.0.x
+    branches: [main, '[0-9]+.[0-9]+.x']
+  pull_request:
+  schedule:
+    - cron: '0 20 * * 0'
+  workflow_dispatch:
+
+concurrency:
+  group: vulnerabilities-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  MAVEN_ARGS: -B -ntp -Dstyle.color=always
+  OSV_SCANNER_VERSION: 2.7.0
+  OSV_SCANNER_SHA256: 160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b
+  CYCLONEDX: org.cyclonedx:cyclonedx-maven-plugin:2.9.1:makeBom
+
+jobs:
+  osv-scanner:
+    name: OSV-Scanner
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+      # The samples resolve the Halyx modules from the local repository.
+      - name: Install the modules
+        run: mvn install -DskipTests -Dlicense.skip=true -Dcheckstyle.skip=true -Djapicmp.skip=true
+      # Published modules with their test scope, which includes the versions Boot 3.5 manages; the samples as they
+      # run. The unpublished test modules are left out, as their dependencies are the published modules'.
+      - name: SBOMs
+        run: |
+          mvn $CYCLONEDX -DincludeTestScope=true -DoutputFormat=json -DoutputName=sbom
+          mvn $CYCLONEDX -Dcyclonedx.skipNotDeployed=false -DoutputFormat=json -DoutputName=sbom-runtime \
+            -pl halyx-samples/portable-orders,halyx-samples/portable-orders-boot3,halyx-samples/plain-java-quickstart
+          mkdir -p target/sboms
+          for f in */target/sbom.json; do cp "$f" "target/sboms/${f%%/*}.cdx.json"; done
+          for f in halyx-samples/*/target/sbom-runtime.json; do
+            m=${f#halyx-samples/}; cp "$f" "target/sboms/sample-${m%%/*}.cdx.json"
+          done
+          ls target/sboms
+      - name: Install OSV-Scanner
+        run: |
+          curl -fsSL -o osv-scanner \
+            "https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64"
+          echo "${OSV_SCANNER_SHA256}  osv-scanner" | sha256sum -c -
+          chmod +x osv-scanner
+      # target/ is git-ignored, which OSV-Scanner skips unless told otherwise.
+      - name: Scan
+        run: ./osv-scanner scan source --config osv-scanner.toml --no-ignore -r target/sboms
