@@ -101,6 +101,20 @@ if (lock.isPresent()) {
 IAM tokens are minted again before they expire, and open connections re-authenticate with them, so
 long-lived connections survive token rotation.
 
+A password can be a value or a supplier. A supplier is asked each time a connection logs in, so a rotated AUTH token
+or access key reaches new connections and reconnects without a restart; open connections stay logged in. From a
+[parameter store](parameters.md) with a `cacheTtl`:
+
+```java
+CacheConfig.builder(endpoint)
+        .auth(CacheAuth.password("sessions-app", () -> secrets.require("cache/auth-token")))
+        .build();
+```
+
+ElastiCache and Memorystore keep two AUTH tokens or strings during a rotation, and Azure Cache for Redis two access
+keys, so a rotation that adds the new one, updates the secret, and removes the old one after the store's cache TTL
+fails no logins.
+
 ## TLS
 
 `rediss://` endpoints use TLS with full certificate and hostname checks.

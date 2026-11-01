@@ -45,6 +45,8 @@ class CredentialRotationIT {
             .withCommand("valkey-server",
                     "--user", "admin", "on", ">admin", "~*", "+@all",
                     "--user", "app", "on", ">token-1", "~*", "+@all",
+                    "--user", "rotating", "on", ">password-1", "~*", "+@all",
+                    "--user", "fixed", "on", ">fixed-password", "~*", "+@all",
                     "--user", "default", "off");
 
     @Test
@@ -77,6 +79,46 @@ class CredentialRotationIT {
             admin("ACL", "DELUSER", "app");
             admin("CLIENT", "KILL", "USER", "app2");
             assertThat(cache.get("k")).hasValue("before");
+        }
+    }
+
+    @Test
+    void reconnectsLogInWithAFixedPassword() throws Exception {
+        try (Halyx halyx = Halyx.builder()
+                .plugin(new RedisTestProvider(RedisCaches.iamUnsupported("redis-test")))
+                .register("redis", ProviderConfig.of("redis-test"))
+                .build()) {
+            URI endpoint = URI.create("redis://" + VALKEY.getHost() + ":" + VALKEY.getMappedPort(6379));
+            Cache<String> cache = halyx.provider("redis").cache(CacheConfig.builder(endpoint)
+                    .auth(CacheAuth.password("fixed", "fixed-password")).namespace("fixed-password").build());
+            cache.put("k", "before");
+
+            admin("CLIENT", "KILL", "USER", "fixed");
+
+            assertThat(cache.get("k")).hasValue("before");
+            assertThat(connectedUsers()).contains("user=fixed ");
+        }
+    }
+
+    @Test
+    void reconnectsLogInWithARotatedSuppliedPassword() throws Exception {
+        AtomicReference<String> password = new AtomicReference<>("password-1");
+        try (Halyx halyx = Halyx.builder()
+                .plugin(new RedisTestProvider(RedisCaches.iamUnsupported("redis-test")))
+                .register("redis", ProviderConfig.of("redis-test"))
+                .build()) {
+            URI endpoint = URI.create("redis://" + VALKEY.getHost() + ":" + VALKEY.getMappedPort(6379));
+            Cache<String> cache = halyx.provider("redis").cache(CacheConfig.builder(endpoint)
+                    .auth(CacheAuth.password("rotating", password::get)).namespace("password-rotation").build());
+            cache.put("k", "before");
+
+            // Rotate: the user takes the new password and drops the old one, then every connection is dropped.
+            admin("ACL", "SETUSER", "rotating", ">password-2", "<password-1");
+            password.set("password-2");
+            admin("CLIENT", "KILL", "USER", "rotating");
+
+            assertThat(cache.get("k")).hasValue("before");
+            assertThat(connectedUsers()).contains("user=rotating ");
         }
     }
 

@@ -124,6 +124,12 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
         streamConsumers = ordered(streamConsumers);
     }
 
+    /** For configurations built without the parameter store beans, where a {@code secret} can't be read. */
+    private static final Function<String, ParameterStore> NO_STORES = store -> {
+        throw new IllegalStateException("A secret is read through the halyx.parameter-stores beans, which aren't "
+                + "available here");
+    };
+
     private static <V> Map<String, V> ordered(Map<String, V> map) {
         return map == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(map));
     }
@@ -299,6 +305,11 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
         }
 
         CacheConfig toCacheConfig(String name) {
+            return toCacheConfig(name, NO_STORES);
+        }
+
+        /** @param stores finds the parameter store an {@code auth.secret} names, by bean name */
+        CacheConfig toCacheConfig(String name, Function<String, ParameterStore> stores) {
             if (endpoint == null) {
                 throw new IllegalStateException("halyx.caches." + name + ".endpoint is required (redis:// or rediss://)");
             }
@@ -306,7 +317,7 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
                     .namespace(namespace == null ? name : namespace)
                     .cluster(cluster)
                     .failOpen(failOpen)
-                    .auth(auth.toCacheAuth("halyx.caches." + name + ".auth"));
+                    .auth(auth.toCacheAuth("halyx.caches." + name + ".auth", stores));
             if (defaultTtl != null) {
                 config.defaultTtl(defaultTtl);
             }
@@ -319,20 +330,41 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
      * @param type     {@code none}, {@code password} (AUTH token / access key, optionally with an ACL
      *                 username) or {@code iam} (cloud identity tokens: ElastiCache IAM, Entra ID, Memorystore IAM)
      * @param username ACL username; for {@code iam}, the ElastiCache user id or the Entra object id
-     * @param password the password, for {@code password}
+     * @param password the password, for {@code password} without a {@code secret}
+     * @param secret   read the password from a Halyx parameter store each time a connection logs in, so a rotated
+     *                 secret takes effect on new connections and reconnects without a restart
      */
-    public record CacheAuthProperties(@DefaultValue("none") Type type, String username, String password) {
+    public record CacheAuthProperties(@DefaultValue("none") Type type, String username, String password,
+                                      SecretReference secret) {
 
         public enum Type { NONE, PASSWORD, IAM }
 
+        @ConstructorBinding
+        public CacheAuthProperties {
+        }
+
+        public CacheAuthProperties(Type type, String username, String password) {
+            this(type, username, password, null);
+        }
+
         /** The login; {@code property} is where it is configured, for error messages. */
         CacheAuth toCacheAuth(String property) {
+            return toCacheAuth(property, NO_STORES);
+        }
+
+        /** @param stores finds the parameter store the {@code secret} names, by bean name */
+        CacheAuth toCacheAuth(String property, Function<String, ParameterStore> stores) {
             return switch (type) {
                 case NONE -> CacheAuth.none();
                 case IAM -> username == null ? CacheAuth.iam() : CacheAuth.iam(username);
                 case PASSWORD -> {
+                    if (secret != null) {
+                        Supplier<String> password = secret.supplier(property + ".secret", stores);
+                        yield username == null ? CacheAuth.password(password) : CacheAuth.password(username, password);
+                    }
                     if (password == null) {
-                        throw new IllegalStateException(property + ".password is required for password auth");
+                        throw new IllegalStateException(property + ".password is required for password auth (or "
+                                + property + ".secret)");
                     }
                     yield username == null ? CacheAuth.password(password) : CacheAuth.password(username, password);
                 }
@@ -619,11 +651,17 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
         }
 
         StreamConfig toStreamConfig(String key) {
+            return toStreamConfig(key, NO_STORES);
+        }
+
+        /** @param stores finds the parameter store an {@code auth.secret} names, by bean name */
+        StreamConfig toStreamConfig(String key, Function<String, ParameterStore> stores) {
             String prefix = "halyx.stream-clusters." + key;
             if (bootstrapServers == null || bootstrapServers.isBlank()) {
                 throw new IllegalStateException(prefix + ".bootstrap-servers is required");
             }
-            StreamConfig.Builder config = StreamConfig.builder(bootstrapServers).auth(auth.toStreamAuth(prefix + ".auth"));
+            StreamConfig.Builder config = StreamConfig.builder(bootstrapServers)
+                    .auth(auth.toStreamAuth(prefix + ".auth", stores));
             properties.forEach(config::property);
             return config.build();
         }
@@ -633,23 +671,40 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
      * @param type      {@code none}, {@code password} or {@code iam} (MSK IAM, Entra ID, Google IAM tokens)
      * @param mechanism for {@code password}: {@code plain}, {@code scram-sha-256} or {@code scram-sha-512}
      * @param username  for {@code password}; {@code $ConnectionString} for an Event Hubs connection string
-     * @param password  for {@code password}
+     * @param password  for {@code password} without a {@code secret}
+     * @param secret    read the password from a Halyx parameter store each time a connection logs in, so a rotated
+     *                  secret takes effect without a restart
      */
     public record StreamAuthProperties(@DefaultValue("none") Type type, SaslMechanism mechanism, String username,
-                                       String password) {
+                                       String password, SecretReference secret) {
 
         public enum Type { NONE, PASSWORD, IAM }
 
+        @ConstructorBinding
+        public StreamAuthProperties {
+        }
+
+        public StreamAuthProperties(Type type, SaslMechanism mechanism, String username, String password) {
+            this(type, mechanism, username, password, null);
+        }
+
         StreamAuth toStreamAuth(String prefix) {
+            return toStreamAuth(prefix, NO_STORES);
+        }
+
+        /** @param stores finds the parameter store the {@code secret} names, by bean name */
+        StreamAuth toStreamAuth(String prefix, Function<String, ParameterStore> stores) {
             return switch (type) {
                 case NONE -> StreamAuth.none();
                 case IAM -> StreamAuth.iam();
                 case PASSWORD -> {
-                    if (mechanism == null || username == null || password == null) {
-                        throw new IllegalStateException(prefix + ".mechanism, .username and .password are required "
-                                + "for password auth");
+                    if (mechanism == null || username == null || (password == null && secret == null)) {
+                        throw new IllegalStateException(prefix + ".mechanism, .username and .password (or .secret) "
+                                + "are required for password auth");
                     }
-                    yield StreamAuth.password(mechanism, username, password);
+                    yield secret != null
+                            ? StreamAuth.password(mechanism, username, secret.supplier(prefix + ".secret", stores))
+                            : StreamAuth.password(mechanism, username, password);
                 }
             };
         }
@@ -821,6 +876,25 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
      * @param field the JSON field holding the password, for JSON secrets such as RDS-managed ones
      */
     public record SecretReference(String store, String name, String field) {
+
+        /**
+         * Reads the secret from its store, found by bean name when it's read; a missing one fails naming
+         * {@code configured}, where the reference is configured.
+         */
+        Supplier<String> supplier(String configured, Function<String, ParameterStore> stores) {
+            if (store == null || store.isBlank() || name == null || name.isBlank()) {
+                throw new IllegalStateException(configured + ".store and " + configured + ".name are required");
+            }
+            return () -> {
+                try {
+                    ParameterStore secrets = stores.apply(store);
+                    return field == null ? secrets.require(name) : secrets.require(name, field);
+                } catch (NotFoundException e) {
+                    throw new IllegalStateException(configured + " reads from parameter store " + store + ": "
+                            + e.getMessage(), e);
+                }
+            };
+        }
     }
 
     /** See {@code PoolSettings}; unset values keep its defaults. */
@@ -873,11 +947,16 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
         }
 
         public CacheConfig toCacheConfig(String cacheName) {
+            return toCacheConfig(cacheName, NO_STORES);
+        }
+
+        /** @param stores finds the parameter store an {@code auth.secret} names, by bean name */
+        public CacheConfig toCacheConfig(String cacheName, Function<String, ParameterStore> stores) {
             CacheConfig.Builder config = CacheConfig.builder(endpoint)
                     .namespace(namespacePrefix + cacheName)
                     .cluster(cluster)
                     .failOpen(failOpen)
-                    .auth(auth.toCacheAuth("halyx.cache-manager.auth"));
+                    .auth(auth.toCacheAuth("halyx.cache-manager.auth", stores));
             Duration expiry = ttl.getOrDefault(cacheName, defaultTtl);
             if (expiry != null) {
                 config.defaultTtl(expiry);

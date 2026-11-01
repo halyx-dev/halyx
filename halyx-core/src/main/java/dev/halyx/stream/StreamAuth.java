@@ -16,6 +16,7 @@
 package dev.halyx.stream;
 
 import java.util.Objects;
+import java.util.function.Supplier;
 
 /**
  * How to log in to the stream cluster. Separate from the provider's cloud credentials, which are used to
@@ -34,6 +35,16 @@ public sealed interface StreamAuth {
     }
 
     /**
+     * A password asked for each time a connection logs in, so a rotated secret takes effect without a restart:
+     * new connections, and open ones when the broker has them log in again ({@code connections.max.reauth.ms}).
+     * For example, from a cached parameter store:
+     * <pre>{@code StreamAuth.password(SaslMechanism.SCRAM_SHA_512, "app", () -> secrets.require("msk/app", "password"))}</pre>
+     */
+    static StreamAuth password(SaslMechanism mechanism, String username, Supplier<String> password) {
+        return new Password(mechanism, username, password);
+    }
+
+    /**
      * Short-lived tokens from the provider's cloud identity over TLS (SASL {@code OAUTHBEARER}): MSK IAM access
      * control, Microsoft Entra ID for Event Hubs, and Google IAM for Managed Service for Apache Kafka. Clients
      * fetch a new token before the current one expires.
@@ -46,11 +57,26 @@ public sealed interface StreamAuth {
         static final None INSTANCE = new None();
     }
 
-    record Password(SaslMechanism mechanism, String username, String password) implements StreamAuth {
+    /** @param passwordSupplier asked for the password; equal for equal fixed passwords */
+    record Password(SaslMechanism mechanism, String username, Supplier<String> passwordSupplier) implements StreamAuth {
         public Password {
             Objects.requireNonNull(mechanism, "mechanism");
             Objects.requireNonNull(username, "username");
-            Objects.requireNonNull(password, "password");
+            Objects.requireNonNull(passwordSupplier, "passwordSupplier");
+        }
+
+        public Password(SaslMechanism mechanism, String username, String password) {
+            this(mechanism, username, new FixedPassword(Objects.requireNonNull(password, "password")));
+        }
+
+        /** The password; a supplied one is asked now. */
+        public String password() {
+            return passwordSupplier.get();
+        }
+
+        /** Whether the password was given as a supplier, so it may change while clients are open. */
+        public boolean supplied() {
+            return !(passwordSupplier instanceof FixedPassword);
         }
 
         @Override

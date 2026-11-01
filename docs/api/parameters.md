@@ -125,8 +125,9 @@ it. See [Spring Boot](../spring-boot.md#configuration-import).
 ## Keys for other services
 
 A store can hold the keys and passwords that other services log in with, read as they're used so a rotation takes
-effect without a restart: a SQL password (`SqlAuth.password(user, supplier)`), an Azure function key, a Cosmos DB
-account key or an Event Grid access key (see [Provider configuration](../providers.md#azure)). Give the store a
+effect without a restart: a SQL password (`SqlAuth.password(user, supplier)`), a cache password
+(`CacheAuth.password(supplier)`), a Kafka password (`StreamAuth.password(mechanism, user, supplier)`), an Azure function
+key, a Cosmos DB account key or an Event Grid access key (see [Provider configuration](../providers.md#azure)). Give the store a
 `cacheTtl`, which also bounds how long a rotation takes to land. In Spring Boot, these are `auth.secret` and
 `secrets` entries; see [Spring Boot](../spring-boot.md#secrets-in-settings).
 

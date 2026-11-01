@@ -18,6 +18,7 @@ package dev.halyx.spring.autoconfigure;
 import dev.halyx.CloudContext;
 import dev.halyx.Halyx;
 import dev.halyx.cache.Cache;
+import dev.halyx.cache.CacheAuth;
 import dev.halyx.cache.CacheConfig;
 import dev.halyx.cache.Codec;
 import dev.halyx.error.UnsupportedFeatureException;
@@ -35,6 +36,7 @@ import dev.halyx.spring.autoconfigure.cache.CacheCodecs;
 import dev.halyx.sql.Database;
 import dev.halyx.sql.SqlAuth;
 import dev.halyx.storage.BlobStore;
+import dev.halyx.stream.StreamAuth;
 import dev.halyx.stream.StreamConfig;
 import dev.halyx.stream.StreamConsumer;
 import dev.halyx.stream.StreamProducer;
@@ -97,22 +99,22 @@ public final class HalyxBlobStores {
     }
 
     public Cache<String> cache(String property, String provider, CacheConfig config) {
-        return context(property, provider).cache(config);
+        return context(property, provider).cache(readSecret(config));
     }
 
     public Cache<byte[]> bytesCache(String property, String provider, CacheConfig config) {
-        return context(property, provider).cache(config, Codec.bytes());
+        return context(property, provider).cache(readSecret(config), Codec.bytes());
     }
 
     /** A cache of objects in {@code jdk} serialization or {@code json}, reading back only trusted types. */
     public Cache<Object> objectCache(String property, String provider, CacheConfig config, String codec,
                                      List<String> trustedPackages) {
-        return context(property, provider).cache(config, CacheCodecs.of(codec, trustedPackages, beans, property));
+        return context(property, provider).cache(readSecret(config), CacheCodecs.of(codec, trustedPackages, beans, property));
     }
 
     /** A cache whose values the application's own {@code Codec} bean encodes. */
     public <V> Cache<V> cacheWithCodec(String property, String provider, CacheConfig config, Codec<V> codec) {
-        return context(property, provider).cache(config, codec);
+        return context(property, provider).cache(readSecret(config), codec);
     }
 
     public ParameterStore parameterStore(String property, String provider, ParameterStoreConfig config) {
@@ -164,26 +166,26 @@ public final class HalyxBlobStores {
 
     public StreamProducer streamProducer(String property, String provider, String name,
                                          HalyxProperties.StreamProducerProperties producer, StreamConfig cluster) {
-        return context(property, provider).streamProducer(producer.toProducerConfig(name, cluster, null));
+        return context(property, provider).streamProducer(producer.toProducerConfig(name, readSecret(cluster), null));
     }
 
     public StreamProducer streamProducerWithClaimCheck(String property, String provider, String name,
                                                        HalyxProperties.StreamProducerProperties producer,
                                                        StreamConfig cluster, BlobStore claims) {
         return context(property, provider).streamProducer(
-                producer.toProducerConfig(name, cluster, producer.claimCheck().toClaimCheck(claims)));
+                producer.toProducerConfig(name, readSecret(cluster), producer.claimCheck().toClaimCheck(claims)));
     }
 
     public StreamConsumer streamConsumer(String property, String provider, String name,
                                          HalyxProperties.StreamConsumerProperties consumer, StreamConfig cluster) {
-        return context(property, provider).streamConsumer(consumer.toConsumerConfig(name, cluster, null));
+        return context(property, provider).streamConsumer(consumer.toConsumerConfig(name, readSecret(cluster), null));
     }
 
     public StreamConsumer streamConsumerWithClaimCheck(String property, String provider, String name,
                                                        HalyxProperties.StreamConsumerProperties consumer,
                                                        StreamConfig cluster, BlobStore claims) {
         return context(property, provider).streamConsumer(
-                consumer.toConsumerConfig(name, cluster, consumer.claimCheck().toClaimCheck(claims)));
+                consumer.toConsumerConfig(name, readSecret(cluster), consumer.claimCheck().toClaimCheck(claims)));
     }
 
     /** A pooled database with a fixed password or cloud IAM login. The pool closes with Halyx. */
@@ -196,6 +198,22 @@ public final class HalyxBlobStores {
     /** A {@code halyx.parameter-stores} bean that secrets read from; the registrar made the reading bean depend on it. */
     ParameterStore secretStore(String name) {
         return beans.getBean(name, ParameterStore.class);
+    }
+
+    /** Reads a cache's password secret once now, so a missing one fails at startup, naming where it's configured. */
+    private static CacheConfig readSecret(CacheConfig config) {
+        if (config.auth() instanceof CacheAuth.Password password && password.supplied()) {
+            password.password();
+        }
+        return config;
+    }
+
+    /** Reads a stream cluster's password secret once now, so a missing one fails at startup. */
+    private static StreamConfig readSecret(StreamConfig cluster) {
+        if (cluster.auth() instanceof StreamAuth.Password password && password.supplied()) {
+            password.password();
+        }
+        return cluster;
     }
 
     /** Reads each secret once now, so a missing one fails at startup, naming its property. */

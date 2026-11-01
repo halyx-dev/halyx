@@ -16,6 +16,8 @@
 package dev.halyx.spring.autoconfigure;
 
 import dev.halyx.Halyx;
+import dev.halyx.parameters.ParameterStore;
+import org.springframework.beans.factory.BeanFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -40,8 +42,9 @@ public class HalyxSpringKafkaAutoConfiguration {
     @Bean
     static HalyxSpringKafkaLogin halyxSpringKafkaLogin(ObjectProvider<Halyx> halyx,
                                                        ObjectProvider<HalyxProperties> properties,
-                                                       Environment environment) {
+                                                       Environment environment, BeanFactory beans) {
         // Read from the Environment: placeholders in @Value aren't resolved this early for a post-processor.
-        return new HalyxSpringKafkaLogin(halyx, properties, environment.getProperty("halyx.spring-kafka.cluster", ""));
+        return new HalyxSpringKafkaLogin(halyx, properties, environment.getProperty("halyx.spring-kafka.cluster", ""),
+                store -> beans.getBean(store, ParameterStore.class));
     }
 }

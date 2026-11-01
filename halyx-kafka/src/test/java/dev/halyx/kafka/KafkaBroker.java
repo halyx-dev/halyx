@@ -56,6 +56,33 @@ final class KafkaBroker {
                 .withEnv("KAFKA_CONNECTIONS_MAX_REAUTH_MS", "10000");
     }
 
+    /**
+     * Clients log in with SASL {@code SCRAM-SHA-256} on the external listener, as users {@link #scramPassword} sets;
+     * connections log in again every few seconds, so a password change reaches open connections.
+     */
+    static KafkaContainer scram() {
+        return plaintext()
+                .withEnv("KAFKA_LISTENER_SECURITY_PROTOCOL_MAP", "BROKER:PLAINTEXT,PLAINTEXT:SASL_PLAINTEXT,CONTROLLER:PLAINTEXT")
+                .withEnv("KAFKA_LISTENER_NAME_PLAINTEXT_SASL_ENABLED_MECHANISMS", "SCRAM-SHA-256")
+                .withEnv("KAFKA_LISTENER_NAME_PLAINTEXT_SCRAM___SHA___256_SASL_JAAS_CONFIG",
+                        "org.apache.kafka.common.security.scram.ScramLoginModule required;")
+                .withEnv("KAFKA_CONNECTIONS_MAX_REAUTH_MS", "3000");
+    }
+
+    /** Creates or replaces a {@link #scram()} user's password, over the broker's internal plaintext listener. */
+    static void scramPassword(KafkaContainer broker, String user, String password) {
+        try {
+            var result = broker.execInContainer("/opt/kafka/bin/kafka-configs.sh", "--bootstrap-server", "localhost:9093",
+                    "--alter", "--entity-type", "users", "--entity-name", user,
+                    "--add-config", "SCRAM-SHA-256=[iterations=4096,password=" + password + "]");
+            if (result.getExitCode() != 0) {
+                throw new IllegalStateException("Could not set the SCRAM password of " + user + ": " + result.getStderr());
+            }
+        } catch (java.io.IOException | InterruptedException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     /** Admin settings for the {@link #oauthBearer()} broker: Halyx' own login with an unsigned token. */
     static Map<String, Object> unsignedLogin() {
         StreamConfig cluster = StreamConfig.builder("unused:9092").auth(StreamAuth.iam())

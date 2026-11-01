@@ -313,7 +313,8 @@ halyx:
     events:
       provider: orders               # optional when only one provider is configured
       bootstrap-servers: boot-abc123.c2.kafka-serverless.eu-west-2.amazonaws.com:9098
-      auth: { type: iam }            # none, password (mechanism, username, password) or iam
+      auth: { type: iam }            # none, password (mechanism, username, password or secret) or iam
+      # auth: { type: password, mechanism: scram-sha-512, username: orders-app, secret: { store: app-secrets, name: msk/orders-app, field: password } }
       properties: { kafka.linger.ms: 5 }
   stream-producers:
     order-events:                    # StreamProducer bean name
@@ -422,6 +423,7 @@ halyx:
       endpoint: rediss://master.sessions.abc123.euw2.cache.amazonaws.com:6379
       default-ttl: 30m
       auth: { type: iam, username: sessions-app }      # none | password | iam
+      # auth: { type: password, username: sessions-app, secret: { store: app-secrets, name: cache/auth-token } }
       properties: { aws.elasticache.cache-name: sessions }
     quotes:
       endpoint: rediss://master.sessions.abc123.euw2.cache.amazonaws.com:6379
@@ -486,8 +488,9 @@ halyx:
 ### Secrets in settings
 
 Providers, event buses, subscriptions and functions take `secrets`: settings whose value is a secret in one of the
-`halyx.parameter-stores`, read as they're used, so a rotated key takes effect without a restart. A database's
-`auth.secret` does the same for its password.
+`halyx.parameter-stores`, read as they're used, so a rotated key takes effect without a restart. The `auth.secret`
+of a database, cache, the cache manager or a stream cluster does the same for its password, read each time a
+connection logs in.
 
 ```yaml
 halyx:
@@ -704,7 +707,7 @@ Startup fails with a message naming the property for:
 - a `halyx.*` value whose `${...}` placeholder didn't resolve, which Spring would leave as written: a missing secret
   would be sent as the key
 - a `secrets` entry naming no setting, no secret or an unknown store, a setting also in its `properties`, or a
-  secret that isn't there
+  secret that isn't there; likewise an `auth.secret` naming an unknown store or a secret that isn't there
 
 Spring Boot settings that a Halyx bean makes ineffective are logged as warnings at startup: `spring.datasource.*`
 next to `halyx.databases`, `spring.r2dbc.*` next to `halyx.r2dbc-databases`, and `spring.cache.*` while

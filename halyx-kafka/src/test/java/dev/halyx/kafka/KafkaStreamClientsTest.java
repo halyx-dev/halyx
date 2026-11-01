@@ -51,6 +51,29 @@ class KafkaStreamClientsTest {
     }
 
     @Test
+    void aSuppliedPasswordStaysOutOfTheJaasConfigAndGoesToTheHandler() {
+        StreamAuth auth = StreamAuth.password(SaslMechanism.SCRAM_SHA_512, "app", () -> "rotating");
+        Map<String, Object> properties = KafkaStreamClients.clientProperties(StreamConfig.builder("a:9096")
+                .auth(auth).build(), null, Map.of());
+
+        assertThat(properties).containsEntry("security.protocol", "SASL_SSL")
+                .containsEntry("sasl.mechanism", "SCRAM-SHA-512")
+                .containsEntry("sasl.client.callback.handler.class", PasswordCallbackHandler.class.getName())
+                .containsEntry(KafkaStreamClients.PASSWORD, auth)
+                .containsEntry("sasl.jaas.config", "org.apache.kafka.common.security.scram.ScramLoginModule required "
+                        + "username=\"app\";");
+        assertThat(properties.values()).noneMatch(value -> String.valueOf(value).contains("rotating"));
+    }
+
+    @Test
+    void aFixedPasswordNeedsNoHandler() {
+        Map<String, Object> properties = KafkaStreamClients.clientProperties(StreamConfig.builder("a:9096")
+                .auth(StreamAuth.password(SaslMechanism.PLAIN, "app", "fixed")).build(), null, Map.of());
+
+        assertThat(properties).doesNotContainKeys("sasl.client.callback.handler.class", KafkaStreamClients.PASSWORD);
+    }
+
+    @Test
     void iamLoginCarriesTheCredentialsToTheHandler() {
         Map<String, Object> properties = KafkaStreamClients.clientProperties(StreamConfig.builder("a:9098")
                 .auth(StreamAuth.iam()).build(), TOKENS, Map.of());

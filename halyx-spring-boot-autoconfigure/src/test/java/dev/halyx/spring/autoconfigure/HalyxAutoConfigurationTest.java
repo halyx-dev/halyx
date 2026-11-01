@@ -20,6 +20,7 @@ import io.micrometer.observation.tck.TestObservationRegistryAssert;
 import org.junit.jupiter.api.Test;
 import dev.halyx.Halyx;
 import dev.halyx.cache.Cache;
+import dev.halyx.cache.CacheAuth;
 import dev.halyx.cache.Codec;
 import dev.halyx.parameters.ParameterKind;
 import dev.halyx.parameters.ParameterStore;
@@ -39,6 +40,9 @@ import dev.halyx.spring.autoconfigure.observation.HalyxObservationAutoConfigurat
 import dev.halyx.storage.BlobContent;
 import dev.halyx.storage.BlobKey;
 import dev.halyx.storage.BlobStore;
+import dev.halyx.stream.SaslMechanism;
+import dev.halyx.stream.StreamAuth;
+import dev.halyx.stream.StreamProducer;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.boot.LazyInitializationBeanFactoryPostProcessor;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -269,6 +273,145 @@ class HalyxAutoConfigurationTest {
         runner.withPropertyValues(EVENT_BUS_WITH_SECRET).run(context -> assertThat(context).hasFailed().getFailure()
                 .hasStackTraceContaining("azure.eventgrid.access-key reads from parameter store secrets")
                 .hasStackTraceContaining("events-key"));
+    }
+
+    @Test
+    void plainKeyValuesStayFixedNextToSecrets() {
+        Map<String, String> keys = Map.of("azure.cosmos.key", "plain-cosmos-key",
+                "azure.eventgrid.access-key", "plain-events-key", "azure.functions.key", "plain-function-key");
+        var defaultChain = new HalyxProperties.CredentialsProperties(HalyxProperties.CredentialsProperties.Type.DEFAULT,
+                null, null, null, null, null, null, null, null, null, null);
+        var provider = new HalyxProperties.Provider("memory", null, null, defaultChain, keys);
+        var bus = new HalyxProperties.EventBusProperties(null, null, keys);
+        var subscription = new HalyxProperties.SubscriptionProperties(null, null, "orders", null, null, keys);
+        var function = new HalyxProperties.FunctionProperties(null, null, null, null, null, keys, List.of());
+        java.util.function.Function<String, ParameterStore> noStores = store -> {
+            throw new AssertionError("plain values read no store");
+        };
+
+        ProviderConfig providerConfig = provider.toProviderConfig("local", noStores);
+        assertThat(providerConfig.property("azure.cosmos.key")).hasValue("plain-cosmos-key");
+        assertThat(providerConfig.suppliedProperties()).isEmpty();
+        assertThat(bus.toEventBusConfig("orders", noStores).property("azure.eventgrid.access-key"))
+                .hasValue("plain-events-key");
+        assertThat(subscription.toSubscriptionConfig("inbox", null, noStores).suppliedProperties()).isEmpty();
+        FunctionConfig functionConfig = function.toFunctionConfig("resize", noStores);
+        assertThat(functionConfig.property("azure.functions.key")).hasValue("plain-function-key");
+        assertThat(functionConfig.suppliedProperties()).isEmpty();
+    }
+
+    @Test
+    void plainFunctionKeysStartWithoutAStore() {
+        runner.withPropertyValues("halyx.providers.local.type=memory",
+                        "halyx.functions.resize.properties.azure.functions.key=plain-function-key",
+                        "halyx.event-buses.orders.properties.azure.eventgrid.access-key=plain-events-key",
+                        "halyx.providers.local.properties.azure.cosmos.key=plain-cosmos-key")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context.getBean(Halyx.class).provider("local").config().property("azure.cosmos.key"))
+                            .hasValue("plain-cosmos-key");
+                    assertThat(context.getBean("resize", FunctionInvoker.class).function()).isEqualTo("resize");
+                });
+    }
+
+    @Test
+    void cacheAndStreamPasswordsComeFromPlainValuesOrSecrets() {
+        try (Halyx halyx = Halyx.builder().register("local", ProviderConfig.of("memory")).build()) {
+            ParameterStore secrets = halyx.provider("local").parameterStore(ParameterStoreConfig.secrets().build());
+            java.util.function.Function<String, ParameterStore> stores = Map.of("secrets", secrets)::get;
+            var secret = new HalyxProperties.SecretReference("secrets", "login", null);
+            var jsonSecret = new HalyxProperties.SecretReference("secrets", "login-json", "password");
+
+            var plainCache = (CacheAuth.Password) new HalyxProperties.CacheAuthProperties(
+                    HalyxProperties.CacheAuthProperties.Type.PASSWORD, "app", "plain-password").toCacheAuth("c", stores);
+            var secretCache = (CacheAuth.Password) new HalyxProperties.CacheAuthProperties(
+                    HalyxProperties.CacheAuthProperties.Type.PASSWORD, "app", null, secret).toCacheAuth("c", stores);
+            var plainStream = (StreamAuth.Password) new HalyxProperties.StreamAuthProperties(
+                    HalyxProperties.StreamAuthProperties.Type.PASSWORD, SaslMechanism.SCRAM_SHA_512, "app", "plain-password")
+                    .toStreamAuth("s", stores);
+            var secretStream = (StreamAuth.Password) new HalyxProperties.StreamAuthProperties(
+                    HalyxProperties.StreamAuthProperties.Type.PASSWORD, SaslMechanism.SCRAM_SHA_512, "app", null, jsonSecret)
+                    .toStreamAuth("s", stores);
+
+            assertThat(plainCache.supplied()).isFalse();
+            assertThat(plainCache.password()).isEqualTo("plain-password");
+            assertThat(plainStream.supplied()).isFalse();
+            assertThat(plainStream.password()).isEqualTo("plain-password");
+
+            secrets.put("login", "first");
+            secrets.put("login-json", "{\"password\":\"first\"}");
+            assertThat(secretCache.password()).isEqualTo("first");
+            assertThat(secretStream.password()).isEqualTo("first");
+            secrets.put("login", "rotated");
+            secrets.put("login-json", "{\"password\":\"rotated\"}");
+            assertThat(secretCache.password()).isEqualTo("rotated");
+            assertThat(secretStream.password()).isEqualTo("rotated");
+            assertThat(secretCache.supplied()).isTrue();
+            assertThat(secretStream.supplied()).isTrue();
+        }
+    }
+
+    private static final String[] CACHE_AND_STREAM_WITH_SECRETS = {
+            "halyx.providers.local.type=memory",
+            "halyx.parameter-stores.secrets.kind=secrets",
+            "halyx.caches.sessions.endpoint=redis://localhost:6379",
+            "halyx.caches.sessions.auth.type=password",
+            "halyx.caches.sessions.auth.secret.store=secrets",
+            "halyx.caches.sessions.auth.secret.name=cache-password",
+            "halyx.stream-clusters.events.bootstrap-servers=localhost:9092",
+            "halyx.stream-clusters.events.auth.type=password",
+            "halyx.stream-clusters.events.auth.mechanism=scram-sha-512",
+            "halyx.stream-clusters.events.auth.username=app",
+            "halyx.stream-clusters.events.auth.secret.store=secrets",
+            "halyx.stream-clusters.events.auth.secret.name=stream-password",
+            "halyx.stream-producers.orders.topic=orders"
+    };
+
+    @Test
+    void cacheAndStreamSecretsAreReadFromTheirStore() {
+        runner.withPropertyValues(CACHE_AND_STREAM_WITH_SECRETS).withBean(LazyInitializationBeanFactoryPostProcessor.class)
+                .run(context -> {
+                    ParameterStore secrets = context.getBean("secrets", ParameterStore.class);
+                    secrets.put("cache-password", "cache-pw");
+                    secrets.put("stream-password", "stream-pw");
+
+                    assertThat(context.getBean("sessions", Cache.class)).isNotNull();
+                    assertThat(context.getBean("orders", StreamProducer.class)).isNotNull();
+                });
+    }
+
+    @Test
+    void cacheAndStreamPlainPasswordsStartWithoutAStore() {
+        runner.withPropertyValues("halyx.providers.local.type=memory",
+                        "halyx.caches.sessions.endpoint=redis://localhost:6379",
+                        "halyx.caches.sessions.auth.type=password",
+                        "halyx.caches.sessions.auth.password=plain-cache-password",
+                        "halyx.stream-clusters.events.bootstrap-servers=localhost:9092",
+                        "halyx.stream-clusters.events.auth.type=password",
+                        "halyx.stream-clusters.events.auth.mechanism=scram-sha-512",
+                        "halyx.stream-clusters.events.auth.username=app",
+                        "halyx.stream-clusters.events.auth.password=plain-stream-password",
+                        "halyx.stream-producers.orders.topic=orders")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context.getBean("sessions", Cache.class)).isNotNull();
+                    assertThat(context.getBean("orders", StreamProducer.class)).isNotNull();
+                });
+    }
+
+    @Test
+    void aMissingCacheOrStreamSecretFailsAtStartup() {
+        runner.withPropertyValues(CACHE_AND_STREAM_WITH_SECRETS).run(context -> assertThat(context).hasFailed()
+                .getFailure().hasStackTraceContaining(".auth.secret reads from parameter store secrets"));
+    }
+
+    @Test
+    void cacheAndStreamSecretsNeedAKnownStore() {
+        runner.withPropertyValues(CACHE_AND_STREAM_WITH_SECRETS)
+                .withPropertyValues("halyx.stream-clusters.events.auth.secret.store=vault")
+                .run(context -> assertThat(context).hasFailed().getFailure()
+                        .hasMessageContaining("halyx.stream-clusters.events.auth.secret.store must name one of "
+                                + "halyx.parameter-stores"));
     }
 
     @Test

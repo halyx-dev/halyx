@@ -32,7 +32,7 @@ import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Adapts a {@link RedisCredentialsSource} to Lettuce. Logins are reused until shortly before they
- * expire. For expiring tokens, a fresh token is minted ahead of expiry and published on
+ * expire, unless the source asks for a login on every connection. For expiring tokens, a fresh token is minted ahead of expiry and published on
  * {@link #credentials()}, so Lettuce re-authenticates open connections (with
  * {@code ReauthenticateBehavior.ON_NEW_CREDENTIALS}) instead of letting them be dropped.
  */
@@ -78,7 +78,7 @@ final class RefreshingCredentialsProvider implements RedisCredentialsProvider, A
     RedisLogin currentLogin() {
         lock.lock();
         try {
-            if (current == null || expiringSoon(current)) {
+            if (current == null || expiringSoon(current) || !source.reusesLogins()) {
                 current = source.login();
                 schedule(current);
             }

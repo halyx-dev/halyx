@@ -45,6 +45,11 @@
     `secrets` on providers, event buses and subscriptions.
   - Service Bus and App Configuration connection strings stay read once: their SDKs copy the key when the client is
     built. The docs recommend Entra ID login for keys that rotate.
+  - Cache and Kafka passwords given as suppliers (`CacheAuth.password(Supplier)`,
+    `StreamAuth.password(mechanism, username, Supplier)`) are asked for each time a connection logs in: Redis on
+    new connections and reconnects, Kafka also when the broker has open connections log in again. Spring Boot:
+    `auth.secret` on caches, the cache manager and stream clusters, as on databases, including for Spring for
+    Apache Kafka.
   - Docs: keeping keys for other services in a parameter store, including a store on another cloud.
 
 ## 1.0.2 (2026-10-25)

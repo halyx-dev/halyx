@@ -16,6 +16,7 @@
 package dev.halyx.spring.autoconfigure.cache;
 
 import dev.halyx.Halyx;
+import dev.halyx.parameters.ParameterStore;
 import dev.halyx.cache.Codec;
 import dev.halyx.spring.autoconfigure.HalyxProperties;
 import org.springframework.cache.Cache;
@@ -28,6 +29,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executor;
 import java.util.function.BiConsumer;
+import java.util.function.Function;
 
 /**
  * Spring {@link CacheManager} over Halyx caches on one Redis-compatible server. Caches are created
@@ -40,6 +42,7 @@ public class HalyxCacheManager implements CacheManager {
     private final HalyxProperties.CacheManagerProperties properties;
     private final Codec<Object> codec;
     private final Executor executor;
+    private final Function<String, ParameterStore> secretStores;
     private final Map<String, HalyxSpringCache> caches = new ConcurrentHashMap<>();
     private final List<BiConsumer<String, dev.halyx.cache.Cache<?>>> listeners = new CopyOnWriteArrayList<>();
     /** Opened by the first {@link #ping()}, so health is checked before any cache exists. */
@@ -56,11 +59,20 @@ public class HalyxCacheManager implements CacheManager {
      */
     public HalyxCacheManager(Halyx halyx, String provider, HalyxProperties.CacheManagerProperties properties,
                                Codec<Object> codec, Executor executor) {
+        this(halyx, provider, properties, codec, executor, store -> {
+            throw new IllegalStateException("halyx.cache-manager.auth.secret needs the halyx.parameter-stores beans");
+        });
+    }
+
+    /** @param secretStores finds the parameter store {@code auth.secret} names, by bean name */
+    public HalyxCacheManager(Halyx halyx, String provider, HalyxProperties.CacheManagerProperties properties,
+                               Codec<Object> codec, Executor executor, Function<String, ParameterStore> secretStores) {
         this.halyx = halyx;
         this.provider = provider;
         this.properties = properties;
         this.codec = codec;
         this.executor = executor;
+        this.secretStores = secretStores;
         properties.cacheNames().forEach(this::getCache);
     }
 
@@ -77,7 +89,7 @@ public class HalyxCacheManager implements CacheManager {
     }
 
     private HalyxSpringCache create(String name) {
-        var cache = halyx.provider(provider).cache(properties.toCacheConfig(name), codec);
+        var cache = halyx.provider(provider).cache(properties.toCacheConfig(name, secretStores), codec);
         listeners.forEach(listener -> listener.accept(name, cache));
         return new HalyxSpringCache(name, cache, properties.allowNullValues(), executor);
     }
@@ -98,7 +110,7 @@ public class HalyxCacheManager implements CacheManager {
             synchronized (this) {
                 current = probe;
                 if (current == null) {
-                    current = halyx.provider(provider).cache(properties.toCacheConfig("halyx-health"), codec);
+                    current = halyx.provider(provider).cache(properties.toCacheConfig("halyx-health", secretStores), codec);
                     probe = current;
                 }
             }

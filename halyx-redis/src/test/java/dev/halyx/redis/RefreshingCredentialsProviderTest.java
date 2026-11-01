@@ -15,12 +15,14 @@
  */
 package dev.halyx.redis;
 
+import dev.halyx.cache.CacheAuth;
 import io.lettuce.core.RedisCredentials;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -39,6 +41,21 @@ class RefreshingCredentialsProviderTest {
             assertThat(first.hasUsername()).isFalse();
             assertThat(new String(first.getPassword())).isEqualTo("pw");
             assertThat(calls).hasValue(1);
+        }
+    }
+
+    @Test
+    void suppliedPasswordsAreAskedForOnEveryLogin() {
+        AtomicReference<String> password = new AtomicReference<>("first");
+        var auth = CacheAuth.password("app", password::get);
+        try (var provider = new RefreshingCredentialsProvider(RedisCaches.credentials(auth,
+                RedisCaches.iamUnsupported("test")))) {
+            assertThat(new String(provider.resolveCredentials().block().getPassword())).isEqualTo("first");
+            password.set("rotated");
+            RedisCredentials next = provider.resolveCredentials().block();
+
+            assertThat(next.getUsername()).isEqualTo("app");
+            assertThat(new String(next.getPassword())).isEqualTo("rotated");
         }
     }
 

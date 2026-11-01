@@ -171,8 +171,8 @@ Read every hit before recording it (see SKILL.md). "All clouds" means AWS, Azure
 - **Why:** keys in configuration tie a deployment to one account and are a secret to rotate. Each cloud's default
   chain covers IAM roles, workload identity, managed identities and gcloud.
 - **Severity:** risk (security); fine for emulator profiles.
-- **Fix:** remove them and grant the workload identity, or read the secret from a parameter store as it's used: a
-  database's `auth.secret`, or `secrets` on a function, provider, event bus or subscription
+- **Fix:** remove them and grant the workload identity, or read the secret from a parameter store as it's used: the
+  `auth.secret` of a database, cache or stream cluster, or `secrets` on a function, provider, event bus or subscription
   (`- { property: azure.functions.key, store: secrets, name: ... }`, likewise `azure.cosmos.key` and
   `azure.eventgrid.access-key`). A Service Bus connection string is read once: Entra ID login rotates on its own.
 
