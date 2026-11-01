@@ -26,27 +26,29 @@ and Azure services.
 
 | Cloud | Tier | Services | Latest result |
 |---|---|---|---|
-| [AWS](aws.md) | 1 | S3, DynamoDB, SSM Parameter Store, Secrets Manager, SNS, SQS, EventBridge; Spring Data repositories, Spring Boot and halyx-reactor | **227/228** passed, 1 skipped (expected); Spring **16/16** |
+| [AWS](aws.md) | 1 | S3, DynamoDB, SSM Parameter Store, Secrets Manager, SNS, SQS, EventBridge; Spring Data repositories, Spring Boot and halyx-reactor | **238/240** passed, 2 skipped (expected); Spring **20/22**, 2 skipped (expected) |
 | [AWS](aws.md) | 2 | RDS for PostgreSQL and MySQL with IAM auth; R2DBC and Spring Data R2DBC | **16/16**; Spring **2/2** |
 | [AWS](aws.md) | 3 | ElastiCache for Valkey with IAM auth; Spring Boot cache beans and `@Cacheable` | **56/56**; Spring **2/2** |
 | [AWS](aws.md) | 5 | Cloud logins: an assumed IAM role with an external ID; Spring Boot `credentials` | **3/3**; Spring **2/2** |
-| [GCP](gcp.md) | 1 | Cloud Storage, Firestore, Pub/Sub, Secret Manager, Parameter Manager, Eventarc Advanced; Spring Data repositories, Spring Boot and halyx-reactor | **230/234** passed, 4 skipped (expected); Spring **16/16** |
+| [GCP](gcp.md) | 1 | Cloud Storage, Firestore, Pub/Sub, Secret Manager, Parameter Manager, Eventarc Advanced; Spring Data repositories, Spring Boot and halyx-reactor | **240/246** passed, 6 skipped (expected); Spring **20/22**, 2 skipped (expected) |
 | [GCP](gcp.md) | 2 | Cloud SQL for PostgreSQL and MySQL with IAM auth, direct and through the Cloud SQL connector; R2DBC and Spring Data R2DBC | **22/22**; Spring **2/2** |
 | [GCP](gcp.md) | 3 | Memorystore for Valkey with IAM auth and TLS (private CA); Spring Boot cache beans and `@Cacheable` | **57/57**; Spring **2/2** |
 | [GCP](gcp.md) | 4 | Managed Service for Apache Kafka with Google IAM, plus Spring Boot 3 and 4 | **29/29**; Spring **2/2** |
 | [GCP](gcp.md) | 5 | Cloud logins: an impersonated service account; Spring Boot `credentials` | **3/3**; Spring **2/2** |
-| [Azure](azure.md) | 1 | Blob Storage, Cosmos DB, Service Bus, Key Vault, App Configuration, Event Grid namespaces (Entra ID only); Spring Data repositories, Spring Boot and halyx-reactor | **207/208** passed, 1 skipped (expected); Spring **16/16** |
+| [Azure](azure.md) | 1 | Blob Storage, Cosmos DB, Service Bus, Key Vault, App Configuration, Event Grid namespaces (Entra ID only); Spring Data repositories, Spring Boot and halyx-reactor | **220/223** passed, 3 skipped (expected); Spring **22/22** |
 | [Azure](azure.md) | 2 | Azure Database for PostgreSQL and Azure SQL with Entra ID login; R2DBC and Spring Data R2DBC | **13/13**; Spring **2/2** |
 | [Azure](azure.md) | 3 | Azure Managed Redis with Entra ID (access keys off); Spring Boot cache beans and `@Cacheable` | **55/55**; Spring **2/2** |
 | [Azure](azure.md) | 4 | Event Hubs through its Kafka endpoint, with Entra ID (shared access keys off), plus Spring Boot 3 and 4 | **27/29** passed, 2 skipped (expected); Spring **2/2** |
 | [Azure](azure.md) | 5 | Cloud logins: a service principal with a secret and with a federated Google ID token; Spring Boot `credentials` | **4/4**; Spring **4/4** |
 
-Function invocation (tier 1) was first run on its own on 2026-10-31: Lambda **11/12**, 1 skipped (expected);
-Cloud Run functions **10/12** and Azure Functions **10/12**, 2 skipped each (expected); Spring **4/4** on each cloud.
+These are the full regression before 1.1.0, run on 2026-11-01 at `40d4101`. Tier 1 now includes function
+invocation (Lambda, Cloud Run functions and Azure Functions), and on Azure the key rotation tests: a function key,
+a Cosmos DB key and an Event Grid key changed in Key Vault while the clients stay open.
 
 The skipped tests are features a service doesn't offer, such as per-message delays on SNS or Pub/Sub,
 and the driver declares them as missing [capabilities](../api/capabilities-and-unwrap.md). Azure tier 4's two
-skips are the claim-check tests instead: that run has no blob store for the claim check.
+skips are the claim-check tests instead: that run has no blob store for the claim check. The Spring skips on AWS
+and Google Cloud are the Key Vault rotation test, which runs on Azure only.
 
 ## What is tested
 
@@ -148,14 +150,17 @@ digests, and every pod ran them:
 
 | Image | Digest | EKS (ECR) | GKE (Artifact Registry) | AKS (ACR) |
 |---|---|---|---|---|
-| `portable-orders` (Spring Boot 4) | `sha256:b905c4c5…1a6a` | ran it | ran it | ran it |
-| `portable-orders-boot3` (Spring Boot 3.5) | `sha256:7b5b4e59…5a9b` | ran it | ran it | ran it |
+| `portable-orders` (Spring Boot 4) | `sha256:b653bf92…be39` | ran it | ran it | ran it |
+| `portable-orders-boot3` (Spring Boot 3.5) | `sha256:760e1060…d015` | ran it | ran it | ran it |
 
 | Run | Cluster | Boot 4 | Boot 3.5 | Teardown |
 |---|---|---|---|---|
 | `r26102013300aab` | EKS, `ap-southeast-2`, one `m7i-flex.large` node | 8/10, 2 skipped | 8/10, 2 skipped | nothing left |
 | `r26102013369237` | GKE, `australia-southeast1-a`, one `e2-standard-2` node | 9/10, 1 skipped | 9/10, 1 skipped | nothing left |
 | `r26102013275a4d` | AKS, `australiaeast`, one `Standard_B2s_v2` node | 9/10, 1 skipped | 9/10, 1 skipped | nothing left |
+| `r261101231181ff` | EKS, regression before 1.1.0 | 8/10, 2 skipped | 8/10, 2 skipped | nothing left |
+| `r2611012347a802` | GKE, regression before 1.1.0 | 9/10, 1 skipped | 9/10, 1 skipped | nothing left |
+| `r2611020028fb47` | AKS, regression before 1.1.0 | 9/10, 1 skipped | 9/10, 1 skipped | nothing left |
 
 Each run takes 25 to 45 minutes, most of it creating the managed services; GKE's Managed Kafka cluster alone takes
 about 15 minutes.
