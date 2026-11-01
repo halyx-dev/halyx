@@ -4,10 +4,10 @@
 
 | Version | Security fixes |
 |---|---|
-| 1.0.x | Yes |
+| 1.1.x | Yes |
+| 1.0.x | No: upgrade to 1.1, which is compatible with 1.0 |
 
-Fixes go into the latest release. Once there is more than one release line, this table lists which ones still get
-them.
+Fixes go into the latest release line. A critical fix may also go to an older line, case by case.
 
 ## Reporting a vulnerability
 
