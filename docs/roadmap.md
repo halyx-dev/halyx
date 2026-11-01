@@ -6,7 +6,7 @@ nav_order: 11
 # Roadmap
 {: .no_toc }
 
-Halyx 1.0.2 is on Maven Central. This page lists what has been delivered, what is left over, and what
+Halyx 1.1.0 is on Maven Central. This page lists what has been delivered, what is left over, and what
 comes next, in priority order. Work that is planned but waiting for demand, and ideas that were dropped, are at the
 end.
 
@@ -21,11 +21,26 @@ end.
 
 | Stage | Work |
 |---|---|
-| **Released** | [1.0.2](#release-102), a patch release, on 25 October 2026; [1.0.1](#release-101), a patch release, and [1.0.0](#release-100), the first release, both on 23 October 2026; all on Maven Central |
-| **Coming next** | [Planned additions](#coming-next): R2DBC through the Cloud SQL connector, and more real-cloud test runs, including key rotation on Azure |
+| **Released** | [1.1.0](#release-110), with Kotlin coroutines, function invocation and rotated keys, on 2 November 2026; [1.0.2](#release-102), a patch release, on 25 October 2026; [1.0.1](#release-101), a patch release, and [1.0.0](#release-100), the first release, both on 23 October 2026; all on Maven Central |
+| **Coming next** | [Planned additions](#coming-next): R2DBC through the Cloud SQL connector, and more real-cloud test runs |
 | **Delivered** | [19 milestones](#delivered): every service on AWS, Azure and Google Cloud, Spring Boot 3.5 and 4, reactive and asynchronous APIs, Kotlin coroutines, function invocation, rotated keys and passwords, a portable microservice on EKS, GKE and AKS, and cloud logins across clouds |
 
 ## Released
+
+### Release 1.1.0
+
+A minor release, on 2 November 2026, compatible with 1.0: japicmp checks every published module against 1.0.0. See
+the [release notes](https://github.com/halyx-dev/halyx/blob/main/CHANGELOG.md).
+
+| Addition | What it brings |
+|---|---|
+| [Kotlin coroutines](spring-boot.md#reactive-applications) | `suspend fun` listeners, coroutine repositories with `Flow` results, and coroutines over the reactive services |
+| [Function invocation](api/functions.md) | AWS Lambda functions, Azure Functions and Cloud Run functions invoked by name, with each cloud's login, the same exceptions everywhere, and what a failed function reported kept whole |
+| [Rotated keys and passwords](api/parameters.md#keys-for-other-services) | Keys and passwords read from a parameter store as they're used, so a rotation takes effect without a restart |
+| API compatibility checks | `mvn verify` fails on an incompatible change to the public API or the provider SPI |
+
+Before the release, every real-cloud tier on AWS, Google Cloud and Azure passed, with Spring Boot 3.5 and 4, and the
+portable orders service on EKS, GKE and AKS: see [Cloud testing](cloud-testing/index.md).
 
 ### Release 1.0.2
 
@@ -68,14 +83,13 @@ The first release on Maven Central, on 23 October 2026.
 
 ## Coming next
 
-Additions planned on top of 1.0.0.
+Additions planned on top of 1.1.0.
 
 | Item | Area | Today |
 |---|---|---|
 | R2DBC through the Cloud SQL connector | R2DBC | R2DBC connects to Cloud SQL directly, with IAM login; JDBC also works through the connector |
 | A real-cloud run on MSK Serverless with IAM, including transactions | Streams | Tested on Kafka 3.9 and 4.2.1 brokers, and on real Event Hubs and Managed Kafka. The run is ready ([AWS tier 4](cloud-testing/aws.md#tier-4-not-run)) and needs an AWS account plan that includes MSK |
 | A real-cloud run on Azure Database for MySQL with Entra ID | SQL databases | The run needs a directory-level grant in the test tenant |
-| A real-cloud run of key rotation on Azure | Rotated keys | Tested on emulators. The tier 1 tests are ready: a function key, a Cosmos DB key and an Event Grid key rotated in Key Vault. Cache and Kafka password rotation stays on the emulators, as the clouds' caches and Kafka endpoints in the tests use Entra ID or IAM |
 | Fully non-blocking I/O for Google Cloud Storage, Service Bus receives, and Cosmos DB and Firestore read-then-write calls | Asynchronous I/O | These calls work and run on virtual threads, so they hold no platform thread while they wait; they become non-blocking when the SDKs allow it |
 
 ## Delivered
@@ -98,9 +112,9 @@ Additions planned on top of 1.0.0.
 | 14 | Reactive and asynchronous APIs | `halyx-reactor`: `Mono` and `Flux` for every service with back-pressure and context propagation, reactive repositories, WebFlux and reactive `@Cacheable`, and interoperability with RxJava, Mutiny, `Flow` and `CompletableFuture`. `async()` views of every service, non-blocking where the SDK's async client does it well: S3, Azure Blob Storage, DynamoDB, Cosmos DB, Firestore, SNS, SQS, Service Bus and Pub/Sub publishing, EventBridge, Event Grid, Eventarc, SQS, Pub/Sub and Event Grid receives, Redis and Valkey, Kafka producers, and every parameter backend. The adapters add about 5 µs per call | [Reactive and async](api/reactive.md) |
 | 15 | Portable Spring Boot microservices | `halyx-samples/portable-orders`, an orders service on every Halyx API, built once as one image that runs unchanged on every cloud: the cloud is chosen by Spring profile, and optional features cover services a deployment can't offer. One Helm chart deploys the same image digests on EKS (Pod Identity), GKE (Workload Identity Federation) and AKS (Entra Workload ID), with no stored keys. One end-to-end suite runs in memory, on each cloud's emulators, against the image and on the three clusters, on Boot 4 and 3.5: EKS 8/10 (no MSK), GKE and AKS 9/10 | [Portable microservice](portable-service.md) |
 | 16 | Cloud logins | `Credentials.impersonate(target)`: an AWS IAM role through STS, with an external ID, a session name and a lifetime, or an impersonated Google service account, for every client and for SQL, cache and Kafka logins. `Credentials.servicePrincipal(...)`: an Entra ID application with a client secret, a certificate or a federated token file, for every Azure service. STS, SSO and SSO OIDC in `halyx-aws` for web identity (EKS) and SSO logins. Spring Boot `credentials.type: impersonate` and `service-principal`. Real clouds (tier 5): an assumed role with an external ID, an impersonated service account, and a service principal with a secret and with a federated Google ID token, on Boot 3.5 and 4. The certificate login is tested with unit tests only | [Provider configuration](providers.md#assumed-roles-and-impersonated-service-accounts) |
-| 17 | Kotlin coroutines | `suspend fun` `@HalyxListener` methods for subscriptions and stream consumers; coroutine repositories with `suspend` CRUD and queries and `Flow` results, on `@JvmRecord` entities; `awaitSingle` and `asFlow` over the reactive services, with back-pressure and context. Tested on Boot 3.5 (Kotlin 1.9) and Boot 4 (Kotlin 2.3), in memory and on Kafka, SQS and DynamoDB emulators. Not yet released | [Kotlin coroutines](spring-boot.md#reactive-applications) |
-| 18 | Function invocation | `FunctionInvoker`: AWS Lambda functions, Azure Functions and Cloud Run functions invoked by name with a payload and headers, with each cloud's login (IAM, Entra ID tokens or function keys, Google ID tokens) and the same exceptions on all three. Configured timeouts and headers, retries only for functions marked idempotent, fire-and-forget `trigger` on Lambda, `async()` and `ReactiveFunctionInvoker` views, trace context into the function, and Spring Boot `halyx.functions`. A failed invocation keeps what the function reported, whole, as a `FunctionError` cause. A function conformance kit on the memory provider, Floci's Lambda, the Azure Functions host and Google's Functions Framework. Real clouds (tier 1): Lambda 11/12, Cloud Run functions and Azure Functions 10/12 each, the skips expected; Spring 4/4 on each. Not yet released | [Functions](api/functions.md) |
-| 19 | Rotated keys and passwords | Keys and passwords read from a parameter store as they're used, so a rotation takes effect without a restart: Azure function keys on every call, Cosmos DB and Event Grid keys every `azure.key-refresh-interval`, and cache and Kafka passwords at each login, as SQL passwords already were. Spring Boot `secrets` on providers, event buses, subscriptions and functions, and `auth.secret` on caches and stream clusters; a missing secret, or a `halyx.*` placeholder that didn't resolve, fails the start. The store can be on another cloud. Service Bus and App Configuration connection strings stay read once, as their SDKs copy the key: Entra ID login rotates instead. Emulators: a rotated key on the Azure Functions host, rotated passwords on Valkey and on Kafka 3.9 and 4.2. Floci-az doesn't check Cosmos DB keys and Event Grid has no emulator, so real-cloud runs come with the next round. Not yet released | [Keys for other services](api/parameters.md#keys-for-other-services) |
+| 17 | Kotlin coroutines | `suspend fun` `@HalyxListener` methods for subscriptions and stream consumers; coroutine repositories with `suspend` CRUD and queries and `Flow` results, on `@JvmRecord` entities; `awaitSingle` and `asFlow` over the reactive services, with back-pressure and context. Tested on Boot 3.5 (Kotlin 1.9) and Boot 4 (Kotlin 2.3), in memory and on Kafka, SQS and DynamoDB emulators. In 1.1.0 | [Kotlin coroutines](spring-boot.md#reactive-applications) |
+| 18 | Function invocation | `FunctionInvoker`: AWS Lambda functions, Azure Functions and Cloud Run functions invoked by name with a payload and headers, with each cloud's login (IAM, Entra ID tokens or function keys, Google ID tokens) and the same exceptions on all three. Configured timeouts and headers, retries only for functions marked idempotent, fire-and-forget `trigger` on Lambda, `async()` and `ReactiveFunctionInvoker` views, trace context into the function, and Spring Boot `halyx.functions`. A failed invocation keeps what the function reported, whole, as a `FunctionError` cause. A function conformance kit on the memory provider, Floci's Lambda, the Azure Functions host and Google's Functions Framework. Real clouds (tier 1): Lambda 11/12, Cloud Run functions and Azure Functions 10/12 each, the skips expected; Spring 4/4 on each. In 1.1.0 | [Functions](api/functions.md) |
+| 19 | Rotated keys and passwords | Keys and passwords read from a parameter store as they're used, so a rotation takes effect without a restart: Azure function keys on every call, Cosmos DB and Event Grid keys every `azure.key-refresh-interval`, and cache and Kafka passwords at each login, as SQL passwords already were. Spring Boot `secrets` on providers, event buses, subscriptions and functions, and `auth.secret` on caches and stream clusters; a missing secret, or a `halyx.*` placeholder that didn't resolve, fails the start. The store can be on another cloud. Service Bus and App Configuration connection strings stay read once, as their SDKs copy the key: Entra ID login rotates instead. Emulators: a rotated key on the Azure Functions host, rotated passwords on Valkey and on Kafka 3.9 and 4.2. Real cloud (Azure tier 1): a function key, a Cosmos DB key and an Event Grid key rotated in Key Vault while the clients stay open, 3/3, and the function key through Spring Boot `secrets` on Boot 3.5 and 4. Cache and Kafka password rotation is tested on the emulators, as the clouds' caches and Kafka endpoints in the tests use Entra ID or IAM. In 1.1.0 | [Keys for other services](api/parameters.md#keys-for-other-services) |
 
 ## On demand
 
