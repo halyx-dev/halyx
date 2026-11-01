@@ -41,7 +41,7 @@
         <logback.version>1.6.5</logback.version>
         <slf4j.version>2.0.19</slf4j.version>
         <micrometer-bom.version>1.16.8</micrometer-bom.version>
-        <opentelemetry.version>1.67.0</opentelemetry.version>
+        <log4j2.version>2.25.5</log4j2.version>
         <httpclient5.version>5.6.5</httpclient5.version>
         <httpcore5.version>5.4.4</httpcore5.version>
     </properties>
@@ -137,6 +137,17 @@
                 <groupId>org.slf4j</groupId>
                 <artifactId>jul-to-slf4j</artifactId>
                 <version>${slf4j.version}</version>
+            </dependency>
+            <!-- Security fixes: the Log4j API that Boot's logging starter routes to SLF4J -->
+            <dependency>
+                <groupId>org.apache.logging.log4j</groupId>
+                <artifactId>log4j-api</artifactId>
+                <version>${log4j2.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.logging.log4j</groupId>
+                <artifactId>log4j-to-slf4j</artifactId>
+                <version>${log4j2.version}</version>
             </dependency>
             <!-- Security fixes: the Apache HttpClient the AWS SDK uses (Boot 3.5 would downgrade it) -->
             <dependency>

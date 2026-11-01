@@ -68,6 +68,15 @@
   published module with 1.0.0 from Maven Central using japicmp, and fails on a binary- or source-incompatible change
   to the public API, the provider SPI included. CI runs it on every push.
 
+### Dependencies
+
+- **OpenTelemetry API 1.67.0**, held above the 1.62.0 the Google Cloud libraries bring, for a security fix found
+  with OSV-Scanner. The portable orders samples take the same override, and the Boot 3.5 one also log4j 2.25.5.
+- Tested on Spring Boot 4.1.2 and Google Cloud libraries 26.91.0 (Parameter Manager 0.44.0).
+- Spring Boot 3.5 applications: Boot 3.5.16, the newest 3.5 release, manages Spring Framework 6.2.19, for which
+  OSV lists advisories fixed only in Spring Framework 7. Halyx doesn't bring Spring Framework; the version is the
+  application's Boot's.
+
 ## 1.0.2 (2026-10-25)
 
 ### Fixes

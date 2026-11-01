@@ -507,21 +507,27 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
      */
     public record SecretProperty(String property, String store, String name, String field) {
 
-        /**
-         * Reads the secret from its store, found by bean name when it's read; a missing one fails naming
-         * {@code configured}, the entry's property path.
-         */
+        /** Reads the secret when it's used; a missing one fails naming {@code configured}, the entry's path, and the setting. */
         Supplier<String> supplier(String configured, Function<String, ParameterStore> stores) {
-            return () -> {
-                try {
-                    ParameterStore secrets = stores.apply(store);
-                    return field == null ? secrets.require(name) : secrets.require(name, field);
-                } catch (NotFoundException e) {
-                    throw new IllegalStateException(configured + ": " + property + " reads from parameter store " + store
-                            + ": " + e.getMessage(), e);
-                }
-            };
+            return secret(configured + ": " + property, stores, store, name, field);
         }
+    }
+
+    /**
+     * Reads a secret from its store, found by bean name when it's read; a missing one fails naming {@code configured},
+     * where it's configured.
+     */
+    private static Supplier<String> secret(String configured, Function<String, ParameterStore> stores, String store,
+                                           String name, String field) {
+        return () -> {
+            try {
+                ParameterStore secrets = stores.apply(store);
+                return field == null ? secrets.require(name) : secrets.require(name, field);
+            } catch (NotFoundException e) {
+                throw new IllegalStateException(configured + " reads from parameter store " + store + ": "
+                        + e.getMessage(), e);
+            }
+        };
     }
 
     /** Gives {@code setter} each secret's property and supplier. */
@@ -885,15 +891,7 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
             if (store == null || store.isBlank() || name == null || name.isBlank()) {
                 throw new IllegalStateException(configured + ".store and " + configured + ".name are required");
             }
-            return () -> {
-                try {
-                    ParameterStore secrets = stores.apply(store);
-                    return field == null ? secrets.require(name) : secrets.require(name, field);
-                } catch (NotFoundException e) {
-                    throw new IllegalStateException(configured + " reads from parameter store " + store + ": "
-                            + e.getMessage(), e);
-                }
-            };
+            return secret(configured, stores, store, name, field);
         }
     }
 
