@@ -133,8 +133,9 @@ String out = resize.invoke(FunctionRequest.of(json)).payloadAsString();
   goes in `secrets`. A `halyx.*` placeholder that doesn't resolve fails the start.
 - `HttpClientErrorException` and `WebClientResponseException` handling becomes Halyx's exceptions: 404
   `NotFoundException`, 400 `InvalidArgumentException`, 429 and 503 `ThrottledException`, 500 `UnavailableException`.
-  The message is `Function <name> returned <status>: <the start of the body>`; the body itself isn't exposed, so a
-  service that passed it on to its clients changes what they see.
+  The message is `Function <name> returned <status>: <the start of the body>`. A service that passed the body on to
+  its clients reads it from the cause: `FunctionError.of(e)` gives the status and the whole body (`message()` as
+  text, `body()` as bytes), so what its clients see doesn't change.
 - Halyx sends only `POST`. A function called with `GET` and query parameters needs to accept `POST`.
 
 ## Streams: Event Hubs (Kafka endpoint)

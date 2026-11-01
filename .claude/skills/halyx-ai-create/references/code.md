@@ -201,6 +201,8 @@ class ImageService {
   `UnavailableException`: map it to 503. A missing function, a wrong Azure route and a function's own 404 are all
   `NotFoundException`, so don't use 404 to mean "no such item" in the function's contract either.
 - Halyx' messages name the function (`Function <name> failed: <message>`): don't pass them to clients as they are.
+  What the function reported is the exception's `FunctionError`: `FunctionError.of(e).map(FunctionError::message)`.
+  A function that throws on Azure or Google Cloud reports only the host's 500, so reasons travel in the payload.
 - A timeout raises `UnavailableException`, and the function may still be running. Leave `idempotent` false unless
   running it twice is harmless; only then does a retry run it again.
 - No `trigger`: it's Lambda's alone. Work that needs no answer goes through a topic.

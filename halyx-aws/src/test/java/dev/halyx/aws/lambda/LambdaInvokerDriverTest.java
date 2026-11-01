@@ -20,6 +20,7 @@ import dev.halyx.error.UnavailableException;
 import dev.halyx.error.UnsupportedFeatureException;
 import dev.halyx.functions.DefaultFunctionInvoker;
 import dev.halyx.functions.FunctionConfig;
+import dev.halyx.functions.FunctionError;
 import dev.halyx.functions.FunctionInvoker;
 import dev.halyx.functions.FunctionRequest;
 import dev.halyx.functions.FunctionResponse;
@@ -129,6 +130,25 @@ class LambdaInvokerDriverTest {
                 .isInstanceOfSatisfying(UnavailableException.class, e -> {
                     assertThat(e.getMessage()).contains("resize-image").contains("disk full");
                     assertThat(e.providerErrorCode()).contains("java.lang.IllegalStateException");
+                    assertThat(FunctionError.of(e)).hasValueSatisfying(reported -> {
+                        assertThat(reported.message()).isEqualTo("disk full");
+                        assertThat(reported.type()).contains("java.lang.IllegalStateException");
+                        assertThat(reported.status()).isEmpty();
+                        assertThat(new String(reported.body(), StandardCharsets.UTF_8)).contains("\"stackTrace\":[]");
+                    });
+                });
+    }
+
+    @Test
+    void aLongErrorMessageIsCutInTheExceptionButWholeInTheFunctionError() {
+        String reason = "x".repeat(2_000);
+        next = InvokeResponse.builder().statusCode(200).functionError("Unhandled").payload(SdkBytes.fromUtf8String(
+                "{\"errorMessage\":\"" + reason + "\",\"errorType\":\"Exception\"}")).build();
+
+        assertThatThrownBy(() -> invoker(FunctionConfig.of("resize-image")).invoke(FunctionRequest.of("{}")))
+                .isInstanceOfSatisfying(UnavailableException.class, e -> {
+                    assertThat(e.getMessage()).hasSizeLessThan(600).endsWith("...");
+                    assertThat(FunctionError.of(e)).hasValueSatisfying(r -> assertThat(r.message()).isEqualTo(reason));
                 });
     }
 
@@ -141,6 +161,10 @@ class LambdaInvokerDriverTest {
                 .isInstanceOfSatisfying(UnavailableException.class, e -> {
                     assertThat(e.getMessage()).contains("Runtime exited without providing a reason");
                     assertThat(e.providerErrorCode()).contains("Unhandled");
+                    assertThat(FunctionError.of(e)).hasValueSatisfying(reported -> {
+                        assertThat(reported.message()).isEqualTo("Runtime exited without providing a reason");
+                        assertThat(reported.type()).contains("Unhandled");
+                    });
                 });
     }
 

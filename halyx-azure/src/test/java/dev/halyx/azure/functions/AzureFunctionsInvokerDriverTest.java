@@ -22,6 +22,7 @@ import com.azure.core.http.HttpPipelineBuilder;
 import com.azure.core.http.HttpRequest;
 import com.azure.core.http.HttpResponse;
 import com.azure.core.util.Context;
+import dev.halyx.error.InvalidArgumentException;
 import dev.halyx.error.NotFoundException;
 import dev.halyx.error.ThrottledException;
 import dev.halyx.error.UnavailableException;
@@ -29,6 +30,7 @@ import dev.halyx.error.UnknownCloudException;
 import dev.halyx.error.UnsupportedFeatureException;
 import dev.halyx.functions.DefaultFunctionInvoker;
 import dev.halyx.functions.FunctionConfig;
+import dev.halyx.functions.FunctionError;
 import dev.halyx.functions.FunctionInvoker;
 import dev.halyx.functions.FunctionRequest;
 import dev.halyx.functions.FunctionResponse;
@@ -148,6 +150,18 @@ class AzureFunctionsInvokerDriverTest {
         next = new Response(500, new HttpHeaders(), "Exception while executing function: disk full");
         assertThatThrownBy(() -> invoker.invoke(FunctionRequest.of("{}"))).isInstanceOf(UnavailableException.class)
                 .hasMessageContaining("resize-image").hasMessageContaining("disk full");
+
+        // The function's own rejection: the exception's message cuts a long body, the FunctionError keeps it whole.
+        String reason = "{\"error\":\"" + "x".repeat(2_000) + "\"}";
+        next = new Response(400, new HttpHeaders(), reason);
+        assertThatThrownBy(() -> invoker.invoke(FunctionRequest.of("{}"))).isInstanceOf(InvalidArgumentException.class)
+                .satisfies(e -> assertThat(e.getMessage()).hasSizeLessThan(600))
+                .satisfies(e -> assertThat(FunctionError.of(e)).hasValueSatisfying(reported -> {
+                    assertThat(reported.status()).hasValue(400);
+                    assertThat(reported.message()).isEqualTo(reason);
+                    assertThat(reported.body()).isEqualTo(reason.getBytes(StandardCharsets.UTF_8));
+                    assertThat(reported.type()).isEmpty();
+                }));
 
         next = new Response(429, new HttpHeaders().set(HttpHeaderName.RETRY_AFTER, "4"), "");
         assertThatThrownBy(() -> invoker.invoke(FunctionRequest.of("{}"))).isInstanceOfSatisfying(ThrottledException.class,
