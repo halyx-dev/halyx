@@ -29,6 +29,7 @@ import dev.halyx.capability.Capabilities;
 import dev.halyx.error.CloudException;
 import dev.halyx.error.UnavailableException;
 import dev.halyx.functions.FunctionConfig;
+import dev.halyx.functions.FunctionError;
 import dev.halyx.functions.FunctionRequest;
 import dev.halyx.functions.FunctionResponse;
 import dev.halyx.functions.spi.AbstractFunctionInvokerDriver;
@@ -118,7 +119,7 @@ public final class AzureFunctionsInvokerDriver extends AbstractFunctionInvokerDr
         int status = response.getStatusCode();
         if (status < 200 || status >= 300) {
             throw AzureErrors.fromStatus(status, "Function " + config.name() + " returned " + status + ": " + start(body),
-                    null, String.valueOf(status), AzureErrors.retryAfter(response));
+                    FunctionError.http(status, body), String.valueOf(status), AzureErrors.retryAfter(response));
         }
         FunctionResponse.Builder result = FunctionResponse.builder(body);
         String contentType = response.getHeaderValue(HttpHeaderName.CONTENT_TYPE);

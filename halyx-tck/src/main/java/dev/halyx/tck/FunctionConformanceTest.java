@@ -23,6 +23,7 @@ import dev.halyx.error.UnavailableException;
 import dev.halyx.error.UnsupportedFeatureException;
 import dev.halyx.functions.FunctionCapability;
 import dev.halyx.functions.FunctionConfig;
+import dev.halyx.functions.FunctionError;
 import dev.halyx.functions.FunctionInvoker;
 import dev.halyx.functions.FunctionRequest;
 import dev.halyx.functions.FunctionResponse;
@@ -84,6 +85,23 @@ public abstract class FunctionConformanceTest {
     /** Whether the function can answer with an HTTP status: not on Lambda, whose functions return only a payload. */
     protected boolean returnsHttpStatuses() {
         return true;
+    }
+
+    /**
+     * Whether a thrown exception's message reaches the caller as the {@link FunctionError}: on Lambda, as the error
+     * payload's {@code errorMessage}. HTTP hosts answer a function that throws with a 500 of their own, so a function
+     * that wants its reason seen answers with a status and body instead.
+     */
+    protected boolean reportsThrownMessages() {
+        return true;
+    }
+
+    /**
+     * Whether an HTTP status's body reaches the caller as the {@link FunctionError}: not on the memory provider, whose
+     * test function stands in for a status with the exception it maps to, which passes through unchanged.
+     */
+    protected boolean statusesCarryTheFunctionsBody() {
+        return returnsHttpStatuses();
     }
 
     /** How long a triggered function may take to run; real clouds need longer than emulators. */
@@ -180,7 +198,12 @@ public abstract class FunctionConformanceTest {
     void aFunctionThatThrowsIsUnavailable() {
         assertThatThrownBy(() -> invoker().invoke(action("fail", Map.of("message", "halyx-tck failure"))))
                 .isInstanceOf(UnavailableException.class)
-                .satisfies(e -> assertThat(((CloudException) e).providerErrorCode()).isPresent());
+                .satisfies(e -> assertThat(((CloudException) e).providerErrorCode()).isPresent())
+                .satisfies(e -> assertThat(FunctionError.of(e)).hasValueSatisfying(reported -> {
+                    if (reportsThrownMessages()) {
+                        assertThat(reported.message()).isEqualTo("halyx-tck failure");
+                    }
+                }));
     }
 
     @Test
@@ -189,9 +212,21 @@ public abstract class FunctionConformanceTest {
         FunctionInvoker invoker = invoker();
 
         assertThatThrownBy(() -> invoker.invoke(action("status", Map.of("status", 400))))
-                .isInstanceOf(InvalidArgumentException.class);
+                .isInstanceOf(InvalidArgumentException.class)
+                .satisfies(e -> functionReported(e, 400));
         assertThatThrownBy(() -> invoker.invoke(action("status", Map.of("status", 404))))
-                .isInstanceOf(NotFoundException.class);
+                .isInstanceOf(NotFoundException.class)
+                .satisfies(e -> functionReported(e, 404));
+    }
+
+    /** The function's own status and body reach the caller whole, as the exception's {@link FunctionError}. */
+    private void functionReported(Throwable error, int status) {
+        if (statusesCarryTheFunctionsBody()) {
+            assertThat(FunctionError.of(error)).hasValueSatisfying(reported -> {
+                assertThat(reported.status()).hasValue(status);
+                assertThat(reported.message()).isEqualTo("halyx-tck status " + status);
+            });
+        }
     }
 
     @Test
@@ -252,6 +287,9 @@ public abstract class FunctionConformanceTest {
         assertThat(json(response).get("body")).isEqualTo(Json.parse(request.payloadAsString()));
         assertThatThrownBy(() -> invoker(missingFunction().build()).async().invoke(action("echo", Map.of())).join())
                 .isInstanceOf(CompletionException.class).hasCauseInstanceOf(NotFoundException.class);
+        assertThatThrownBy(() -> invoker().async().invoke(action("fail", Map.of("message", "halyx-tck failure"))).join())
+                .isInstanceOf(CompletionException.class).hasCauseInstanceOf(UnavailableException.class)
+                .satisfies(e -> assertThat(FunctionError.of(e)).isPresent());
     }
 
     @Test

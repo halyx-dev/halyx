@@ -62,4 +62,9 @@ class InMemoryFunctionConformanceTest extends FunctionConformanceTest {
     protected long maxHeaderBytes() {
         return 3_583;
     }
+
+    @Override
+    protected boolean statusesCarryTheFunctionsBody() {
+        return false;
+    }
 }

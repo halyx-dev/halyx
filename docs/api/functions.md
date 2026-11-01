@@ -131,8 +131,31 @@ try {
 
 A Lambda function that throws comes back as a 200 response with `X-Amz-Function-Error`; it's raised as the
 `UnavailableException` that the Azure Functions host and the Functions Framework give with their 500. The message
-names the function and includes what it said: `Function <name> failed: <errorMessage>` on Lambda, and
+names the function and includes the start of what it said: `Function <name> failed: <errorMessage>` on Lambda, and
 `Function <name> returned <status>: <the start of the body>` for an HTTP function.
+
+What the function reported is the exception's cause, a `FunctionError`, whole:
+
+| `FunctionError` | Lambda | Azure Functions, Cloud Run functions | memory |
+|---|---|---|---|
+| `message()` | the `errorMessage` | the body as text | the handler's exception message |
+| `body()` | the error payload | the body | the message |
+| `status()` | empty | the status | empty |
+| `type()` | the `errorType` | empty | the exception's class; the exception is its cause |
+
+```java
+try {
+    quote.invoke(request);
+} catch (InvalidArgumentException e) {             // the function answered 400
+    String reason = FunctionError.of(e).map(FunctionError::message).orElse(e.getMessage());
+    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, reason);
+}
+```
+
+The Azure Functions host and the Functions Framework answer a function that throws with a 500 of their own: the body
+is empty or a generic error page, not the exception's message. A function whose reason should reach the caller on
+every cloud answers with it, in its payload or as a status and body. A memory handler that throws a `CloudException`
+raises that exception as it is, with no `FunctionError`.
 
 Whether a status comes from the function's code or the front end doesn't matter, so a wrong Azure route, a function
 that isn't deployed and a function's own 404 are the same `NotFoundException`. Lambda functions return no status at

@@ -52,6 +52,12 @@
     Apache Kafka.
   - Docs: keeping keys for other services in a parameter store, including a store on another cloud.
 
+- **Function error text** ([#31](https://github.com/halyx-dev/halyx/issues/31)): a failed invocation's exception
+  has a `FunctionError` cause with what the function reported, whole: Lambda's `errorMessage`, `errorType` and
+  payload, or an HTTP function's status and body. `FunctionError.of(e)` finds it. The exception messages are
+  unchanged and still cut long bodies. On the memory provider, a handler's exception is now the `FunctionError`'s
+  cause rather than the `UnavailableException`'s.
+
 ## 1.0.2 (2026-10-25)
 
 ### Fixes

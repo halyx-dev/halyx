@@ -96,6 +96,12 @@ class AzureFunctionConformanceIT extends FunctionConformanceTest {
         return halyx.provider("azure").functionInvoker(config);
     }
 
+    /** The host answers a function that throws with a 500 of its own, without the exception's message. */
+    @Override
+    protected boolean reportsThrownMessages() {
+        return false;
+    }
+
     @Override
     protected long maxPayloadBytes() {
         return 100L * 1024 * 1024;

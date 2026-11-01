@@ -28,6 +28,7 @@ import dev.halyx.capability.Capabilities;
 import dev.halyx.error.CloudException;
 import dev.halyx.error.ThrottledException;
 import dev.halyx.functions.FunctionConfig;
+import dev.halyx.functions.FunctionError;
 import dev.halyx.functions.FunctionRequest;
 import dev.halyx.functions.FunctionResponse;
 import dev.halyx.functions.spi.AbstractFunctionInvokerDriver;
@@ -129,7 +130,7 @@ public final class CloudRunFunctionsInvokerDriver extends AbstractFunctionInvoke
         int status = response.getStatusCode();
         if (status < 200 || status >= 300) {
             throw GcpErrors.fromStatus(status, "Function " + config.name() + " returned " + status + ": " + start(body),
-                    null, String.valueOf(status),
+                    FunctionError.http(status, body), String.valueOf(status),
                     ThrottledException.parseRetryAfter(response.getHeaders().getFirstHeaderStringValue("Retry-After")));
         }
         FunctionResponse.Builder result = FunctionResponse.builder(body);

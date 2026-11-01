@@ -21,10 +21,12 @@ import dev.halyx.error.NotFoundException;
 import dev.halyx.error.UnavailableException;
 import dev.halyx.functions.FunctionCapability;
 import dev.halyx.functions.FunctionConfig;
+import dev.halyx.functions.FunctionError;
 import dev.halyx.functions.FunctionRequest;
 import dev.halyx.functions.FunctionResponse;
 import dev.halyx.functions.spi.AbstractFunctionInvokerDriver;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
@@ -104,7 +106,9 @@ final class InMemoryFunctionInvokerDriver extends AbstractFunctionInvokerDriver 
         if (error instanceof Error fatal) {
             throw fatal;
         }
-        return new UnavailableException("Function " + config.name() + " failed: " + error.getMessage(), error,
+        String message = String.valueOf(error.getMessage());
+        return new UnavailableException("Function " + config.name() + " failed: " + message,
+                new FunctionError(message, message.getBytes(StandardCharsets.UTF_8), null, error.getClass().getName(), error),
                 provider, error.getClass().getName());
     }
 

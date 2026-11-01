@@ -23,6 +23,7 @@ import dev.halyx.error.CloudException;
 import dev.halyx.error.UnavailableException;
 import dev.halyx.functions.FunctionCapability;
 import dev.halyx.functions.FunctionConfig;
+import dev.halyx.functions.FunctionError;
 import dev.halyx.functions.FunctionRequest;
 import dev.halyx.functions.FunctionResponse;
 import dev.halyx.functions.spi.AbstractFunctionInvokerDriver;
@@ -127,13 +128,17 @@ public final class LambdaInvokerDriver extends AbstractFunctionInvokerDriver {
         return result.build();
     }
 
-    /** The error payload is {@code {"errorMessage": ..., "errorType": ...}}, unless the runtime itself failed. */
+    /**
+     * The error payload is {@code {"errorMessage": ..., "errorType": ...}}, unless the runtime itself failed. The
+     * whole message and payload go in a {@link FunctionError} cause.
+     */
     private UnavailableException functionError(String kind, byte[] payload) {
         String text = new String(payload, StandardCharsets.UTF_8);
         Map<String, Object> error = Json.parseObject(text).orElse(Map.of());
         String type = error.get("errorType") instanceof String t ? t : kind;
-        String message = error.get("errorMessage") instanceof String m ? m : start(text);
-        return new UnavailableException("Function " + config.name() + " failed: " + message, null, provider, type);
+        String message = error.get("errorMessage") instanceof String m ? m : text;
+        return new UnavailableException("Function " + config.name() + " failed: " + start(message),
+                new FunctionError(message, payload, null, type, null), provider, type);
     }
 
     private static String start(String text) {
