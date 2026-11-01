@@ -32,13 +32,20 @@
     `LambdaClient` and HTTP calls to Azure Functions and Cloud Run functions, and `halyx-ai-review` checks them
     (rule C11).
 
-- **Rotated function keys** ([#26](https://github.com/halyx-dev/halyx/issues/26)):
+- **Rotated keys** ([#26](https://github.com/halyx-dev/halyx/issues/26)):
   - `FunctionConfig.Builder.property(String, Supplier<String>)`: a property asked for each time it's used. The
     Azure function key is asked for on every call, so a rotated key takes effect without a restart.
   - Spring Boot: `halyx.functions.<key>.secrets` reads settings such as `azure.functions.key` from one of the
     `halyx.parameter-stores`, through its read cache. A missing secret fails the start.
   - Spring Boot: a `halyx.*` property whose `${...}` placeholder didn't resolve fails the start, naming the property.
     Spring leaves such a value as written, so a missing secret was sent as the key and failed every call.
+  - Cosmos DB account keys and Event Grid access keys given as suppliers (`ProviderConfig.property(String, Supplier)`,
+    and the same on `EventBusConfig` and `SubscriptionConfig`) are asked for every `azure.key-refresh-interval` (one
+    minute by default), and Cosmos DB and Event Grid use a rotated key from the next request. Spring Boot:
+    `secrets` on providers, event buses and subscriptions.
+  - Service Bus and App Configuration connection strings stay read once: their SDKs copy the key when the client is
+    built. The docs recommend Entra ID login for keys that rotate.
+  - Docs: keeping keys for other services in a parameter store, including a store on another cloud.
 
 ## 1.0.2 (2026-10-25)
 

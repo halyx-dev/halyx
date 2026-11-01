@@ -102,6 +102,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 /**
  * Owns the Azure SDK clients for one configuration. Clients are created lazily and shared by all containers,
@@ -110,6 +111,7 @@ import java.util.Optional;
 final class AzureConnection implements ProviderConnection {
 
     private final ProviderConfig config;
+    private KeyRefresher keys;
     private TokenCredential entraCredential;
     private HttpClient http;
     private JdbcDatabases databases;
@@ -323,9 +325,11 @@ final class AzureConnection implements ProviderConnection {
             String endpoint = config.property(AzureProperties.COSMOS_ENDPOINT)
                     .orElseThrow(() -> new IllegalArgumentException("Cosmos DB needs '" + AzureProperties.COSMOS_ENDPOINT + "'"));
             var builder = new CosmosClientBuilder().endpoint(endpoint).gatewayMode().endpointDiscoveryEnabled(false);
-            var key = config.property(AzureProperties.COSMOS_KEY);
-            if (key.isPresent()) {
-                builder.key(key.get());
+            if (config.suppliedProperties().containsKey(AzureProperties.COSMOS_KEY)) {
+                builder.credential(keys().credential("Cosmos DB account key",
+                        config.suppliedProperties().get(AzureProperties.COSMOS_KEY)));
+            } else if (config.property(AzureProperties.COSMOS_KEY).isPresent()) {
+                builder.key(config.property(AzureProperties.COSMOS_KEY).get());
             } else {
                 builder.credential(entraCredential());
             }
@@ -344,8 +348,8 @@ final class AzureConnection implements ProviderConnection {
         String endpoint = bus.property(AzureProperties.EVENT_GRID_ENDPOINT).orElseThrow(() -> new IllegalArgumentException(
                 "An Event Grid event bus needs its namespace endpoint: property " + AzureProperties.EVENT_GRID_ENDPOINT));
         var sender = new EventGridSenderClientBuilder().endpoint(endpoint).topicName(bus.name());
-        bus.property(AzureProperties.EVENT_GRID_ACCESS_KEY).ifPresentOrElse(
-                key -> sender.credential(new AzureKeyCredential(key)), () -> sender.credential(tokenCredential(false)));
+        eventGridKey("access key of Event Grid topic " + bus.name(), bus.suppliedProperties(), bus.properties())
+                .ifPresentOrElse(sender::credential, () -> sender.credential(tokenCredential(false)));
         return new EventGridPublisherDriver(sender.buildClient(), sender.buildAsyncClient(), bus.name());
     }
 
@@ -415,6 +419,23 @@ final class AzureConnection implements ProviderConnection {
                 + AzureProperties.FUNCTIONS_AUDIENCE + " (Entra ID) or " + AzureProperties.FUNCTIONS_KEY + " (a function key)");
     }
 
+    /** The access key's credential: refreshed when the key is supplied, fixed when it's a value; empty for Entra ID. */
+    private Optional<AzureKeyCredential> eventGridKey(String name, Map<String, Supplier<String>> supplied,
+                                                      Map<String, String> fixed) {
+        if (supplied.containsKey(AzureProperties.EVENT_GRID_ACCESS_KEY)) {
+            return Optional.of(keys().credential(name, supplied.get(AzureProperties.EVENT_GRID_ACCESS_KEY)));
+        }
+        return Optional.ofNullable(fixed.get(AzureProperties.EVENT_GRID_ACCESS_KEY)).map(AzureKeyCredential::new);
+    }
+
+    private synchronized KeyRefresher keys() {
+        if (keys == null) {
+            keys = new KeyRefresher(config.property(AzureProperties.KEY_REFRESH_INTERVAL).map(Duration::parse)
+                    .orElse(Duration.ofMinutes(1)));
+        }
+        return keys;
+    }
+
     /** A Service Bus topic, or with {@code azure.servicebus.entity=queue} a queue. */
     @Override
     public synchronized PublisherDriver publisher(TopicConfig topic) {
@@ -442,8 +463,9 @@ final class AzureConnection implements ProviderConnection {
             var receiver = new EventGridReceiverClientBuilder()
                     .endpoint(subscription.property(AzureProperties.EVENT_GRID_ENDPOINT).orElseThrow())
                     .topicName(topic).subscriptionName(subscription.name());
-            subscription.property(AzureProperties.EVENT_GRID_ACCESS_KEY).ifPresentOrElse(
-                    key -> receiver.credential(new AzureKeyCredential(key)), () -> receiver.credential(tokenCredential(false)));
+            eventGridKey("access key of Event Grid subscription " + subscription.name(),
+                    subscription.suppliedProperties(), subscription.properties())
+                    .ifPresentOrElse(receiver::credential, () -> receiver.credential(tokenCredential(false)));
             Duration lock = subscription.property(AzureProperties.EVENT_GRID_LOCK_DURATION).map(Duration::parse)
                     .orElse(Duration.ofSeconds(60));
             return new EventGridSubscriptionDriver(receiver.buildClient(), receiver.buildAsyncClient(), subscription.name(), lock);
@@ -528,6 +550,10 @@ final class AzureConnection implements ProviderConnection {
 
     @Override
     public synchronized void close() {
+        if (keys != null) {
+            keys.close();
+            keys = null;
+        }
         if (streams != null) {
             streams.close();
             streams = null;

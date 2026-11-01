@@ -19,6 +19,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 /**
  * A subscription (or queue) to consume from. The name is the provider's: an SQS queue name or URL (the
@@ -32,12 +33,14 @@ public final class SubscriptionConfig {
     private final String topic;
     private final ClaimCheck claimCheck;
     private final Map<String, String> properties;
+    private final Map<String, Supplier<String>> suppliedProperties;
 
     private SubscriptionConfig(Builder b) {
         this.name = b.name;
         this.topic = b.topic;
         this.claimCheck = b.claimCheck;
         this.properties = Map.copyOf(b.properties);
+        this.suppliedProperties = Map.copyOf(b.suppliedProperties);
     }
 
     public static SubscriptionConfig of(String name) {
@@ -61,12 +64,29 @@ public final class SubscriptionConfig {
         return Optional.ofNullable(claimCheck);
     }
 
+    /** The property's value; a supplied property is asked now. */
     public Optional<String> property(String key) {
-        return Optional.ofNullable(properties.get(key));
+        String value = properties.get(key);
+        return value != null ? Optional.of(value) : Optional.ofNullable(suppliedProperties.get(key)).map(Supplier::get);
     }
 
+    /**
+     * The property as a supplier to ask each time the value is used: the one given to
+     * {@link Builder#property(String, Supplier)}, or one returning the fixed value.
+     */
+    public Optional<Supplier<String>> propertySupplier(String key) {
+        String value = properties.get(key);
+        return value != null ? Optional.of(() -> value) : Optional.ofNullable(suppliedProperties.get(key));
+    }
+
+    /** The properties with fixed values. */
     public Map<String, String> properties() {
         return properties;
+    }
+
+    /** The properties given as suppliers. */
+    public Map<String, Supplier<String>> suppliedProperties() {
+        return suppliedProperties;
     }
 
     /** Configurations with the same settings are equal, so contexts can share one client per configuration. */
@@ -75,12 +95,13 @@ public final class SubscriptionConfig {
         return o instanceof SubscriptionConfig other && Objects.equals(name, other.name)
                 && Objects.equals(topic, other.topic)
                 && Objects.equals(claimCheck, other.claimCheck)
-                && Objects.equals(properties, other.properties);
+                && Objects.equals(properties, other.properties)
+                && Objects.equals(suppliedProperties, other.suppliedProperties);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(name, topic, claimCheck, properties);
+        return Objects.hash(name, topic, claimCheck, properties, suppliedProperties);
     }
 
     @Override
@@ -93,6 +114,7 @@ public final class SubscriptionConfig {
         private String topic;
         private ClaimCheck claimCheck;
         private final Map<String, String> properties = new LinkedHashMap<>();
+        private final Map<String, Supplier<String>> suppliedProperties = new LinkedHashMap<>();
 
         private Builder(String name) {
             Objects.requireNonNull(name, "name");
@@ -115,11 +137,26 @@ public final class SubscriptionConfig {
 
         public Builder property(String key, String value) {
             Objects.requireNonNull(key, "key");
+            suppliedProperties.remove(key);
             if (Objects.requireNonNull(value, "value").isBlank()) {
                 properties.remove(key); // blank is unset, as an empty ${VAR:} in Spring configuration gives
             } else {
                 properties.put(key, value);
             }
+            return this;
+        }
+
+        /**
+         * A property whose value is asked for each time it's used, such as an access key from a parameter store, so a
+         * rotated key takes effect without a restart:
+         * <pre>{@code property(AzureProperties.EVENT_GRID_ACCESS_KEY, () -> secrets.require("orders-events-key"))}</pre>
+         * A cached store keeps this cheap. How often a driver asks depends on the setting; the provider modules say.
+         */
+        public Builder property(String key, Supplier<String> value) {
+            Objects.requireNonNull(key, "key");
+            Objects.requireNonNull(value, "value");
+            properties.remove(key);
+            suppliedProperties.put(key, value);
             return this;
         }
 

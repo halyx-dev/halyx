@@ -45,7 +45,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Nested;
+
+import static org.assertj.core.api.Assertions.assertThat;
 import dev.halyx.tck.DocumentRepositoryConformanceTest;
 import dev.halyx.tck.ReactiveDocumentRepositoryConformanceTest;
 
@@ -71,6 +74,7 @@ class CosmosDocumentStoreConformanceIT extends DocumentStoreConformanceTest {
             .waitingFor(Wait.forLogMessage(".*Listening on.*https.*", 1));
 
     private static Halyx halyx;
+    private static String endpoint;
 
     private static Path selfSignedKeystore() {
         try {
@@ -96,7 +100,7 @@ class CosmosDocumentStoreConformanceIT extends DocumentStoreConformanceTest {
     static void start() {
         // Only for the local emulator's throwaway certificate: the SDK's documented switch for emulators.
         System.setProperty("COSMOS.EMULATOR_SERVER_CERTIFICATE_VALIDATION_DISABLED", "true");
-        String endpoint = "https://localhost:" + FLOCI.getMappedPort(TLS_PORT) + "/";
+        endpoint = "https://localhost:" + FLOCI.getMappedPort(TLS_PORT) + "/";
         try (CosmosClient admin = new CosmosClientBuilder().endpoint(endpoint).key(KEY).gatewayMode()
                 .endpointDiscoveryEnabled(false).buildClient()) {
             admin.createDatabaseIfNotExists("halyx");
@@ -171,5 +175,45 @@ class CosmosDocumentStoreConformanceIT extends DocumentStoreConformanceTest {
         threads.track(() -> async.delete(key)).get(30, TimeUnit.SECONDS);
 
         threads.assertNonBlocking(4, Thread.currentThread());
+    }
+
+    /**
+     * Floci-az doesn't check account keys, so this shows a supplied key in use and asked for again while the store is in
+     * use; that Cosmos DB signs with the updated key is shown on a real account.
+     */
+    @Test
+    void aSuppliedAccountKeyIsAskedForAgainWhileInUse() throws Exception {
+        AtomicInteger asked = new AtomicInteger();
+        try (Halyx rotating = Halyx.builder().register("azure", ProviderConfig.of("azure")
+                .property(AzureProperties.COSMOS_ENDPOINT, endpoint)
+                .property(AzureProperties.COSMOS_KEY, () -> {
+                    asked.incrementAndGet();
+                    return KEY;
+                })
+                .property(AzureProperties.COSMOS_DATABASE, "halyx")
+                .property(AzureProperties.KEY_REFRESH_INTERVAL, "PT0.2S")).build()) {
+            DocumentStore items = rotating.provider("azure").documentStore(TableConfig.builder("items").build());
+            Key item = Key.of("rotation-" + UUID.randomUUID());
+
+            items.put(item, Document.builder().put("n", 1).build());
+            eventually(() -> assertThat(asked).hasValueGreaterThan(2));
+            assertThat(items.get(item)).isPresent();
+        }
+    }
+
+    /** Runs {@code check} until it passes, for up to 30 seconds. */
+    private static void eventually(Runnable check) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+        while (true) {
+            try {
+                check.run();
+                return;
+            } catch (AssertionError e) {
+                if (System.nanoTime() > deadline) {
+                    throw e;
+                }
+                Thread.sleep(200);
+            }
+        }
     }
 }

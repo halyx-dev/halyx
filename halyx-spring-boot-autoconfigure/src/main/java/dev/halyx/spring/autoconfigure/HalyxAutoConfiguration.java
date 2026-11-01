@@ -18,7 +18,9 @@ package dev.halyx.spring.autoconfigure;
 import dev.halyx.Halyx;
 import dev.halyx.interceptor.Interceptor;
 import dev.halyx.interceptor.RetryInterceptor;
+import dev.halyx.parameters.ParameterStore;
 import org.springframework.beans.factory.BeanFactory;
+import org.springframework.beans.factory.BeanFactoryAware;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -48,14 +50,23 @@ import org.springframework.context.annotation.Import;
 @ConditionalOnClass(Halyx.class)
 @EnableConfigurationProperties(HalyxProperties.class)
 @Import(BlobStoreBeanRegistrar.class)
-public class HalyxAutoConfiguration {
+public class HalyxAutoConfiguration implements BeanFactoryAware {
 
+    private BeanFactory beanFactory;
+
+    @Override
+    public void setBeanFactory(BeanFactory beanFactory) {
+        this.beanFactory = beanFactory;
+    }
+
+    /** Provider secrets read from {@code halyx.parameter-stores} beans, found when the secret is first read. */
     @Bean
     @ConditionalOnMissingBean
     public Halyx halyx(HalyxProperties properties, ObjectProvider<Interceptor> interceptors,
                            ObjectProvider<HalyxBuilderCustomizer> customizers) {
         Halyx.Builder builder = Halyx.builder().classLoader(Halyx.class.getClassLoader());
-        properties.providers().forEach((name, provider) -> builder.register(name, provider.toProviderConfig(name)));
+        properties.providers().forEach((name, provider) -> builder.register(name,
+                provider.toProviderConfig(name, store -> beanFactory.getBean(store, ParameterStore.class))));
         interceptors.orderedStream().forEach(builder::interceptor);
         if (properties.retry().enabled()) {
             builder.interceptor(new RetryInterceptor(properties.retry().toPolicy()));

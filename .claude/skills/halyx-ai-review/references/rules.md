@@ -172,7 +172,9 @@ Read every hit before recording it (see SKILL.md). "All clouds" means AWS, Azure
   chain covers IAM roles, workload identity, managed identities and gcloud.
 - **Severity:** risk (security); fine for emulator profiles.
 - **Fix:** remove them and grant the workload identity, or read the secret from a parameter store as it's used: a
-  database's `auth.secret`, a function's `secrets` (`- { property: azure.functions.key, store: secrets, name: ... }`).
+  database's `auth.secret`, or `secrets` on a function, provider, event bus or subscription
+  (`- { property: azure.functions.key, store: secrets, name: ... }`, likewise `azure.cosmos.key` and
+  `azure.eventgrid.access-key`). A Service Bus connection string is read once: Entra ID login rotates on its own.
 
 ### G6. A profile without a cloud
 - **Find:** a `local` (or test) profile on `type: memory`, and `halyx.databases` or `halyx.spring-kafka.cluster`

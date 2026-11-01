@@ -483,6 +483,38 @@ halyx:
       # startup-attempts: 3        # (default) retries while the backend is briefly unavailable
 ```
 
+### Secrets in settings
+
+Providers, event buses, subscriptions and functions take `secrets`: settings whose value is a secret in one of the
+`halyx.parameter-stores`, read as they're used, so a rotated key takes effect without a restart. A database's
+`auth.secret` does the same for its password.
+
+```yaml
+halyx:
+  providers:
+    azure:
+      type: azure
+      properties:
+        azure.cosmos.endpoint: https://acme.documents.azure.com:443/
+      secrets:
+        - property: azure.cosmos.key
+          store: app-secrets       # one of halyx.parameter-stores, on any provider
+          name: orders-cosmos-key
+          # field: key             # for a JSON secret
+  event-buses:
+    order-events:
+      name: orders
+      properties: { azure.eventgrid.endpoint: "https://acme.australiaeast-1.eventgrid.azure.net" }
+      secrets:
+        - { property: azure.eventgrid.access-key, store: app-secrets, name: orders-events-key }
+```
+
+How soon a rotation lands depends on the setting ([Provider configuration](providers.md#azure)) plus the store's
+`cache-ttl`. A resource's secrets are read when its bean is created, so a missing one fails the start, naming the
+entry; a provider's are read when a client that uses them is built. A setting in both `properties` and `secrets`
+fails too. A value in `properties`, from `${...}` or `spring.config.import`, is read once and keeps its startup
+value. The store can be on another cloud: see [A store on another cloud](api/parameters.md#a-store-on-another-cloud).
+
 ### Configuration import
 
 Load a store into the Spring `Environment` at startup:
@@ -506,8 +538,8 @@ spring:
   `EnvironmentChangeEvent` when Spring Cloud Context is present. `@ConfigurationProperties` and
   `@RefreshScope` beans then follow. Without Spring Cloud, `Environment` reads and event listeners see
   changes, and `@Value` fields keep their startup values. Halyx' own beans keep the values they were built with:
-  a password or key that rotates belongs in a database's `auth.secret` or a function's `secrets`, which are read
-  from the store as they're used.
+  a password or key that rotates belongs in a database's `auth.secret` or in [`secrets`](#secrets-in-settings),
+  which are read from the store as they're used.
 - `halyx.config-import.enabled=false` makes every `halyx:` import load nothing, optional or not, without
   connecting. Imports run while Spring prepares the environment, with the machine's own credentials, so a test that
   resolves a cloud profile as written, or a tool that starts the application with no cloud, sets it on the command
@@ -671,8 +703,8 @@ Startup fails with a message naming the property for:
 - a `halyx.*` key that is already a bean name: another entry's, in any group, or one of your beans
 - a `halyx.*` value whose `${...}` placeholder didn't resolve, which Spring would leave as written: a missing secret
   would be sent as the key
-- a function's `secrets` entry naming no setting, no secret or an unknown store, a setting also in its `properties`,
-  or a secret that isn't there
+- a `secrets` entry naming no setting, no secret or an unknown store, a setting also in its `properties`, or a
+  secret that isn't there
 
 Spring Boot settings that a Halyx bean makes ineffective are logged as warnings at startup: `spring.datasource.*`
 next to `halyx.databases`, `spring.r2dbc.*` next to `halyx.r2dbc-databases`, and `spring.cache.*` while

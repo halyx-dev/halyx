@@ -31,7 +31,6 @@ import org.springframework.beans.factory.support.AbstractBeanDefinition;
 import org.springframework.beans.factory.config.ConstructorArgumentValues;
 import org.springframework.beans.factory.config.RuntimeBeanReference;
 import org.springframework.beans.factory.support.BeanDefinitionRegistry;
-import org.springframework.beans.factory.support.ManagedMap;
 import org.springframework.beans.factory.support.RootBeanDefinition;
 import org.springframework.boot.context.properties.bind.Bindable;
 import org.springframework.boot.context.properties.bind.Binder;
@@ -171,6 +170,8 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
                             "halyx.event-buses." + name, bus.provider());
                     definition.getConstructorArgumentValues().addIndexedArgumentValue(2, name);
                     definition.getConstructorArgumentValues().addIndexedArgumentValue(3, bus);
+                    definition.setDependsOn(secretStores("halyx.event-buses." + name, bus.properties().keySet(),
+                            bus.secrets(), parameterStores));
                     definition.setDescription("Halyx event bus " + name);
                     names.register(name, "halyx.event-buses." + name, "name", definition);
                 });
@@ -182,19 +183,26 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
                             function.provider());
                     definition.getConstructorArgumentValues().addIndexedArgumentValue(2, name);
                     definition.getConstructorArgumentValues().addIndexedArgumentValue(3, function);
-                    if (!function.secrets().isEmpty()) {
-                        definition.setFactoryMethodName("functionInvokerWithSecrets");
-                        definition.getConstructorArgumentValues().addIndexedArgumentValue(4,
-                                secretStores(property, function.properties().keySet(), function.secrets(), parameterStores));
-                    }
+                    definition.setDependsOn(secretStores(property, function.properties().keySet(), function.secrets(),
+                            parameterStores));
                     definition.setDescription("Halyx function " + name);
                     names.register(name, property, "name", definition);
                 });
         binder.bind("halyx.subscriptions", Bindable.mapOf(String.class, HalyxProperties.SubscriptionProperties.class))
                 .orElse(Map.of())
-                .forEach((name, subscription) -> names.register(name, "halyx.subscriptions." + name, "name",
-                        messagingBean(Subscription.class, "halyx.subscriptions." + name, name, subscription.provider(),
-                                subscription, subscription.claimCheck(), "subscription", stores.keySet())));
+                .forEach((name, subscription) -> {
+                    String property = "halyx.subscriptions." + name;
+                    RootBeanDefinition definition = messagingBean(Subscription.class, property, name,
+                            subscription.provider(), subscription, subscription.claimCheck(), "subscription",
+                            stores.keySet());
+                    definition.setDependsOn(secretStores(property, subscription.properties().keySet(),
+                            subscription.secrets(), parameterStores));
+                    names.register(name, property, "name", definition);
+                });
+        // Provider secrets are read through the Halyx bean, which the stores themselves need, so they're only checked.
+        binder.bind("halyx.providers", Bindable.mapOf(String.class, HalyxProperties.Provider.class)).orElse(Map.of())
+                .forEach((name, provider) -> secretStores("halyx.providers." + name, provider.properties().keySet(),
+                        provider.secrets(), parameterStores));
         Map<String, HalyxProperties.StreamClusterProperties> clusters = binder
                 .bind("halyx.stream-clusters", Bindable.mapOf(String.class, HalyxProperties.StreamClusterProperties.class))
                 .orElse(Map.of());
@@ -224,13 +232,12 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
     }
 
     /**
-     * The parameter stores that {@code secrets} read from, by bean name, after checking that each names a setting not
-     * also in {@code properties}, a secret and one of the {@code halyx.parameter-stores}.
+     * The bean names of the parameter stores that {@code secrets} read from, after checking that each names a setting
+     * not also in {@code properties}, a secret and one of the {@code halyx.parameter-stores}.
      */
-    private static ManagedMap<String, RuntimeBeanReference> secretStores(String property, Set<String> properties,
-                                                                         List<HalyxProperties.SecretProperty> secrets,
-                                                                         Set<String> parameterStores) {
-        ManagedMap<String, RuntimeBeanReference> stores = new ManagedMap<>();
+    private static String[] secretStores(String property, Set<String> properties,
+                                         List<HalyxProperties.SecretProperty> secrets, Set<String> parameterStores) {
+        Set<String> stores = new TreeSet<>();
         Set<String> seen = new HashSet<>();
         for (int i = 0; i < secrets.size(); i++) {
             var secret = secrets.get(i);
@@ -249,9 +256,9 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
                 throw new IllegalStateException(prefix + ".store must name one of halyx.parameter-stores "
                         + parameterStores);
             }
-            stores.put(secret.store(), new RuntimeBeanReference(secret.store()));
+            stores.add(secret.store());
         }
-        return stores;
+        return stores.toArray(String[]::new);
     }
 
     /**

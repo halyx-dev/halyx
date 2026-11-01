@@ -33,13 +33,26 @@ public final class AzureProperties {
     /** Cosmos DB account endpoint, {@code https://<account>.documents.azure.com:443/}. */
     public static final String COSMOS_ENDPOINT = "azure.cosmos.endpoint";
 
-    /** Cosmos DB account key; without it, Entra ID with the default credential chain. */
+    /**
+     * Cosmos DB account key; without it, Entra ID with the default credential chain. Given as a supplier
+     * ({@code ProviderConfig.property(String, Supplier)}), it's asked for every {@link #KEY_REFRESH_INTERVAL}.
+     */
     public static final String COSMOS_KEY = "azure.cosmos.key";
+
+    /**
+     * How often keys given as suppliers ({@link #COSMOS_KEY}, {@link #EVENT_GRID_ACCESS_KEY}) are asked for again,
+     * ISO-8601 (default PT1M). A rotated key takes effect within this interval, plus any cache of the store it's read
+     * from.
+     */
+    public static final String KEY_REFRESH_INTERVAL = "azure.key-refresh-interval";
 
     /** Cosmos DB database holding the containers (required for document stores). */
     public static final String COSMOS_DATABASE = "azure.cosmos.database";
 
-    /** Service Bus connection string (shared access key, or the local emulator's). */
+    /**
+     * Service Bus connection string (shared access key, or the local emulator's). It's read once, when the client is
+     * built: for keys that rotate, log in with Entra ID through {@link #SERVICE_BUS_NAMESPACE}.
+     */
     public static final String SERVICE_BUS_CONNECTION_STRING = "azure.servicebus.connection-string";
 
     /**
@@ -70,7 +83,10 @@ public final class AzureProperties {
      */
     public static final String EVENT_GRID_ENDPOINT = "azure.eventgrid.endpoint";
 
-    /** Event bus and subscription property: an access key, instead of Entra ID login. */
+    /**
+     * Event bus and subscription property: an access key, instead of Entra ID login. Given as a supplier, it's asked
+     * for every {@link #KEY_REFRESH_INTERVAL}.
+     */
     public static final String EVENT_GRID_ACCESS_KEY = "azure.eventgrid.access-key";
 
     /** Subscription property: the pull subscription's lock duration, ISO-8601 (default PT60S, Event Grid's). */
