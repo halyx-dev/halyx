@@ -195,8 +195,12 @@ class ImageService {
 
 - The payload carries keys, not content, as messages do: the function reads the image from the blob store, and the
   request stays under Lambda's 6 MB.
-- A function that throws, or answers 5xx, raises `UnavailableException`; 404 or a missing function
-  `NotFoundException`; 400 `InvalidArgumentException`. Map them at the API's edge, as the other errors are.
+- **Rejections in the payload, not as a status.** Lambda functions return no HTTP status, so a function that runs on
+  every cloud answers a request it won't serve with a body such as `{"error": "unknown zone"}`, which the service
+  turns into its own exception where it parses the answer. A function that throws, or answers 5xx, raises
+  `UnavailableException`: map it to 503. A missing function, a wrong Azure route and a function's own 404 are all
+  `NotFoundException`, so don't use 404 to mean "no such item" in the function's contract either.
+- Halyx' messages name the function (`Function <name> failed: <message>`): don't pass them to clients as they are.
 - A timeout raises `UnavailableException`, and the function may still be running. Leave `idempotent` false unless
   running it twice is harmless; only then does a retry run it again.
 - No `trigger`: it's Lambda's alone. Work that needs no answer goes through a topic.
@@ -231,9 +235,9 @@ base document.
 
 ## Messages (`OrderMessages`)
 
-One final class writes and parses each body with `dev.halyx.json.Json` (`Json.write(map)`,
-`Json.parseObject(json)`). Bodies carry keys and the few fields consumers need, not whole records: they stay under
-every cloud's size limit, and consumers read the current record.
+One final class writes and parses each body with `dev.halyx.json.Json` (`Json.write(map)`, `Json.parseObject(json)`,
+an `Optional`: `.orElseThrow()`). Bodies carry keys and the few fields consumers need, not whole records: they stay
+under every cloud's size limit, and consumers read the current record.
 
 ## Local development (`LocalDevelopment`)
 

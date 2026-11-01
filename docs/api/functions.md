@@ -74,7 +74,7 @@ FunctionInvoker report = halyx.provider("aws").functionInvoker(FunctionConfig.bu
 | Provider | Function name | Properties |
 |---|---|---|
 | AWS | the function name or ARN | `aws.lambda.qualifier`: a version or alias; the unpublished version (`$LATEST`) if unset |
-| Azure | the function's name | `azure.functions.endpoint`: the function app's URL, such as `https://orders.azurewebsites.net`; `azure.functions.audience` (an Entra ID app, such as `api://orders-functions`) or `azure.functions.key` (a function key); optional `azure.functions.route`: the function's path on the app, if it isn't `api/<name>` |
+| Azure | the function's name | `azure.functions.endpoint`: the function app's URL, such as `https://orders.azurewebsites.net`; `azure.functions.audience` (an Entra ID app, such as `api://orders-functions`) or `azure.functions.key` (a function key); optional `azure.functions.route`: the function's whole path on the app, if it isn't `api/<name>`: `api/products/enrich` for `"route": "products/enrich"` |
 | Google Cloud | the function's name | `gcp.functions.region`, for the default URL `https://<region>-<project>.cloudfunctions.net/<name>`; or `gcp.functions.url`, such as a `run.app` URL; optional `gcp.functions.audience`: the ID token's audience, if it isn't the URL |
 | memory | a handler registered with `InMemoryFunctions` | |
 
@@ -130,9 +130,14 @@ try {
 ```
 
 A Lambda function that throws comes back as a 200 response with `X-Amz-Function-Error`; it's raised as the
-`UnavailableException` that the Azure Functions host and the Functions Framework give with their 500, with the error
-payload's `errorMessage` as the message. The message of an HTTP function's error includes the start of the response
-body. Whether a status comes from the function's code or the front end doesn't matter.
+`UnavailableException` that the Azure Functions host and the Functions Framework give with their 500. The message
+names the function and includes what it said: `Function <name> failed: <errorMessage>` on Lambda, and
+`Function <name> returned <status>: <the start of the body>` for an HTTP function.
+
+Whether a status comes from the function's code or the front end doesn't matter, so a wrong Azure route, a function
+that isn't deployed and a function's own 404 are the same `NotFoundException`. Lambda functions return no status at
+all: a function that should run on every cloud reports a rejected request in its payload, such as
+`{"error": "unknown zone"}`, and keeps statuses for failures.
 
 Requests over the provider's limits throw `InvalidArgumentException` before anything is sent: the payload (see the
 table above), and on Lambda the headers, which may be 3,583 bytes once encoded in the `ClientContext`.

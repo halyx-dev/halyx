@@ -195,11 +195,27 @@ Per cloud, the settings that differ:
 | Cache `auth` | `type: iam`, `username` the ElastiCache user id, `properties.aws.elasticache.cache-name` | `type: iam`, `username` the identity's object id | `type: iam`; a `rediss://` endpoint, and `properties.redis.ca-certificate` with the instance's CA file, in the deployment's configuration |
 | Database | `host`, `auth: { type: iam, username }` | `host`, `auth: { type: iam, username }` (the Entra ID name) | `host`, or through the Cloud SQL connector `properties.gcp.sql.instance: ${<SERVICE>_SQL_INSTANCE:}` (`<project>:<region>:<instance>`) with `host: ${<SERVICE>_DB_HOST:}`; `auth: { type: iam, username }` |
 | Stream cluster | `bootstrap-servers` (port 9098) | `<namespace>.servicebus.windows.net:9093` | the cluster's bootstrap address |
-| Function `properties` | none; optional `aws.lambda.qualifier` (a version or alias) | `azure.functions.endpoint` (the function app's URL, no default), and `azure.functions.audience` (App Service Authentication's Entra ID app) or `azure.functions.key: ${<function>-key}` from a secrets store's config import | `gcp.functions.region` for the default URL, or `gcp.functions.url` (a `run.app` URL) |
+| Function `properties` | none; optional `aws.lambda.qualifier` (a version or alias) | `azure.functions.endpoint` (the function app's URL, no default), and `azure.functions.audience` (App Service Authentication's Entra ID app) or the key in the function's `secrets` (below) | `gcp.functions.region` for the default URL, or `gcp.functions.url` (a `run.app` URL) |
 
 A function's `name` and `timeout` go in the base document (`name: ${<SERVICE>_RESIZE_FUNCTION:<service>-resize}`),
 its login and location in each cloud's document. On `local`, the function is a handler registered at startup
-([code.md](code.md#functions)).
+([code.md](code.md#functions)). On Azure, a function key comes from the secrets store through the function's
+`secrets`, read on every call through the store's cache, so a rotated key takes effect without a restart:
+
+```yaml
+halyx:
+  functions:
+    resize:
+      properties:
+        azure.functions.endpoint: ${<SERVICE>_FUNCTIONS_ENDPOINT}
+      secrets:
+        - { property: azure.functions.key, store: secrets, name: resize-key }   # a halyx.parameter-stores key
+```
+
+The store needs a `cache-ttl` (minutes): it sets how soon a rotation lands, and without it every call reads Key
+Vault. A missing secret fails the start, as does any `halyx.*` value whose `${...}` didn't resolve. A key from
+`${...}`, through `spring.config.import` or the environment, works but is read once: it doesn't follow a rotation.
+`azure.functions.route` is the whole path on the app: `api/products/enrich` for `"route": "products/enrich"`.
 
 The `local` profile: the memory provider has every service but SQL, and its streams run in process. Keep
 `halyx.databases` and `halyx.spring-kafka` out of what `local` sees. When SQL is optional, a feature document holds

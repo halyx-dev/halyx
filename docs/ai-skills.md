@@ -88,6 +88,15 @@ that loads a cloud profile's config import reaches the real cloud with the machi
 Spring Boot 4.1 service resolves Lettuce 7.5 and Netty 4.2, and that Halyx's caches and streams work on them. None of
 the three has run on a real cloud yet.
 
+A fourth trial, **shipping** on Spring Boot 4, quotes each shipment through a serverless function. It passed its
+suite in memory, with the function as a registered handler, and on each cloud's emulators with a stand-in function:
+Floci's Lambda, the Azure Functions host (its function key read from Key Vault) and Google's Functions Framework.
+Its profile and packaged-jar tests passed, and it caught a wrong Lambda name, a misnamed key and code that ignored
+the function's rejection. The trial added to the skill that Lambda functions return no status, so a portable
+function reports rejections in its payload. It also found that a function key missing from Key Vault showed only at
+the first call, which led to [#26](https://github.com/halyx-dev/halyx/issues/26): keys now come from the function's
+`secrets`, read on every call, and a missing secret or an unresolved placeholder fails the start.
+
 ## halyx-ai-migrate
 
 Moves an existing Spring Boot service onto Halyx. It covers:
@@ -125,6 +134,15 @@ then ran on a throwaway EKS, GKE and AKS cluster with workload identity. Every t
 the skill, including one Halyx bug, since fixed. The results are in
 [Migrating to Halyx](migration.md#trials).
 
+Two more services, migrated on emulators, call functions: **loyalty** (Spring Boot 3.5) invoked a Lambda alias with
+`LambdaClient`, the tenant in its `ClientContext`, and an `EVENT` invocation for audit; **catalog** (Spring Boot 4)
+called an Azure function with `RestClient` and a key in the query string. Both passed their original tests on
+Floci's Lambda and the Functions host. Each changed one assertion, on purpose: Halyx' error messages name the
+function, so a function's reason passed on to clients reads differently. The trials also found that
+`azure.functions.route` is the whole path on the app, `api/` included. With the bare route, the "unknown product"
+test kept passing, since the host's 404 is the same `NotFoundException` as the function's own, and only the
+known-product test failed. All three points are now in the skill and in the docs.
+
 ## halyx-ai-review
 
 Answers one question: would this service run, and behave correctly, on each cloud by changing only its profile? It's
@@ -154,8 +172,13 @@ same call in a controller isn't.
 rule groups. It found all twelve, and classified them by reading the code. For example, a message delay is a blocker
 on SNS and Pub/Sub but fine on Service Bus. On the sample itself, its first finding was a false positive, which
 exposed a wrong rule and a stale row in Halyx's own capability table. Both are fixed, and the sample now reports no
-blockers or risks. As with any review, a clean report means no leaks were found in the code and configuration, not
-that the service has run on each cloud.
+blockers or risks. For functions, it ran on the shipping trial service and on a copy with eight function problems
+planted: an unguarded `trigger`, a Lambda ARN in the shared configuration, a function with no Google Cloud location,
+`unwrap(LambdaClient.class)` in a controller, a literal function key, `idempotent` on a function that charges, a
+payload holding a PDF, and response headers read on Lambda. It found all eight (planted and reviewed in the same
+session, so not blind), and didn't flag the local profile's `unwrap(InMemoryFunctions.class)`. The rule's search
+didn't match the response headers, which reading the class found; the search now does. As with any review, a clean
+report means no leaks were found in the code and configuration, not that the service has run on each cloud.
 
 ## Naming
 

@@ -122,7 +122,9 @@ string is set, so set the endpoint too.
 Functions on emulators: Floci runs Lambda functions (it needs the Docker socket), and Azure and Google Cloud
 functions run in the Functions host image and under the Functions Framework, called on an anonymous provider by
 URL. Halyx's `AwsFunctionConformanceIT`, `AzureFunctionConformanceIT` and `GcpFunctionConformanceIT` are working
-setups. A service that doesn't own the function's code runs a stand-in with the same contract.
+setups. A service that doesn't own the function's code runs a stand-in with the same contract. The Python
+Functions host fails chunked request bodies with a 500: an old `RestClient` that streams its body needs buffering
+to pass its own baseline there (Halyx sends a length).
 
 Azure emulators take connection strings or keys as provider and store properties (`azure.cosmos.key`,
 `azure.servicebus.connection-string`, `azure.appconfig.connection-string`, and `azure.emulator.insecure-http` for

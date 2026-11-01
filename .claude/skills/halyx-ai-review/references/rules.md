@@ -11,6 +11,8 @@ Read every hit before recording it (see SKILL.md). "All clouds" means AWS, Azure
   using it runs on one cloud only. SDK imports elsewhere mean a cloud's API is used directly.
 - **Fine when:** the use sits in one class named for the feature, which checks the provider or a capability first
   and is documented as cloud-specific (for example, a `S3SelectReports` class only wired in the `aws` profile).
+  `unwrap(InMemoryFunctions.class)` in a `@Profile("local")` class is the memory provider's stand-in for a
+  function, not a cloud client.
 - **Severity:** blocker for the other clouds when it runs unconditionally; hygiene when isolated and guarded.
 - **Fix:** move it behind an interface with one implementation per cloud, each `@Profile`'d, or replace it with the
   Halyx API.
@@ -97,7 +99,7 @@ Read every hit before recording it (see SKILL.md). "All clouds" means AWS, Azure
 - **Fix:** rename the key, such as `bookings-db` for `bookings`.
 
 ### C11. Function invocations a cloud handles differently
-- **Find:** `grep -rnE "FunctionInvoker|\.trigger\(|executedVersion\(|idempotent" src/main` and
+- **Find:** `grep -rnE "FunctionInvoker|\.trigger\(|executedVersion\(|\.headers\(\)|idempotent" src/main` and
   `halyx.functions.*` in the configuration.
 - **Why:** from `docs/api/functions.md`:
   - `trigger` holds only on Lambda (`FunctionCapability.TRIGGER`), and there without headers, configured or per
@@ -163,12 +165,14 @@ Read every hit before recording it (see SKILL.md). "All clouds" means AWS, Azure
 
 ### G5. Credentials in configuration
 - **Find:** `credentials: { type: static ... }`, `access-key`, `secret`, `password:`, connection strings, or
-  `azure.*.key` (`azure.functions.key` included) set to a literal in profiles that real deployments use.
+  `azure.*.key` (`azure.functions.key` included) set to a literal in profiles that real deployments use. A function
+  key from `${...}` (a `halyx:` import or the environment) is read once at startup and doesn't follow a rotation:
+  hygiene, fixed with the function's `secrets`.
 - **Why:** keys in configuration tie a deployment to one account and are a secret to rotate. Each cloud's default
   chain covers IAM roles, workload identity, managed identities and gcloud.
 - **Severity:** risk (security); fine for emulator profiles.
-- **Fix:** remove them and grant the workload identity, or read the password from a parameter store
-  (`auth.secret`).
+- **Fix:** remove them and grant the workload identity, or read the secret from a parameter store as it's used: a
+  database's `auth.secret`, a function's `secrets` (`- { property: azure.functions.key, store: secrets, name: ... }`).
 
 ### G6. A profile without a cloud
 - **Find:** a `local` (or test) profile on `type: memory`, and `halyx.databases` or `halyx.spring-kafka.cluster`

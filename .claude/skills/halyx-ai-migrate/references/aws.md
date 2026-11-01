@@ -122,8 +122,10 @@ String out = resize.invoke(FunctionRequest.of(json)).payloadAsString();   // a f
 audit.trigger(FunctionRequest.of(json));                                 // InvocationType.EVENT: Lambda only
 ```
 
-- `FunctionError` checks go: a function that throws raises `UnavailableException`, with the error payload's
-  `errorMessage` as the message and its `errorType` as `providerErrorCode()`. `ResourceNotFoundException` becomes
+- `FunctionError` checks go: a function that throws raises `UnavailableException`, with the message
+  `Function <name> failed: <errorMessage>` and the `errorType` as `providerErrorCode()`. A service that passed the
+  bare `errorMessage` to its clients now sends the prefixed one: say so in the plan, or strip the prefix in one
+  place. (A trial's original test caught this.) `ResourceNotFoundException` becomes
   `NotFoundException`, throttling `ThrottledException`.
 - A `ClientContext` with a `custom` map becomes headers (`FunctionRequest.builder(json).header(k, v)`, or `headers`
   on the function), which arrive in `context.getClientContext().getCustom()` as before; other `ClientContext` fields
