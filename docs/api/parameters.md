@@ -122,6 +122,40 @@ detected changes and watch failures.
 In Spring Boot, `spring.config.import=halyx:<store>` loads a store into the `Environment` and can reload
 it. See [Spring Boot](../spring-boot.md#configuration-import).
 
+## Keys for other services
+
+A store can hold the keys and passwords that other services log in with, read as they're used so a rotation takes
+effect without a restart: a SQL password (`SqlAuth.password(user, supplier)`), an Azure function key, a Cosmos DB
+account key or an Event Grid access key (see [Provider configuration](../providers.md#azure)). Give the store a
+`cacheTtl`, which also bounds how long a rotation takes to land. In Spring Boot, these are `auth.secret` and
+`secrets` entries; see [Spring Boot](../spring-boot.md#secrets-in-settings).
+
+### A store on another cloud
+
+A parameter store names its own provider, so a service on one cloud can read its keys from a store on another, or
+from Vault: a function on Azure whose key is in AWS Secrets Manager, for example.
+
+```java
+ParameterStore shared = halyx.provider("aws").parameterStore(
+        ParameterStoreConfig.secrets().cacheTtl(Duration.ofMinutes(5)).build());
+
+FunctionInvoker quote = halyx.provider("azure").functionInvoker(FunctionConfig.builder("rate-quote")
+        .property(AzureProperties.FUNCTIONS_ENDPOINT, "https://pricing.azurewebsites.net")
+        .property(AzureProperties.FUNCTIONS_KEY, () -> shared.require("rate-quote-key"))
+        .build());
+```
+
+What to plan for:
+- **Login to the store's cloud.** The service needs an identity there as well as on its own cloud. Workload identity
+  federation avoids a stored key: the store's provider uses the default chain, which logs in with a token the
+  cluster issues (on AWS, a role trusting the cluster's issuer, through `AWS_ROLE_ARN` and
+  `AWS_WEB_IDENTITY_TOKEN_FILE`; on Google Cloud, a workload identity pool's credential configuration). A static key
+  for the store's cloud would itself need rotating.
+- **Availability.** The service depends on a second cloud. Keys are read when clients are built, so a start fails
+  while the store is unreachable; the read cache rides out shorter outages once running.
+- **Latency and egress.** A read after the cache expires crosses clouds. A `cacheTtl` of minutes makes reads rare.
+- **Bootstrap credentials** stay each cloud's workload identity, since they can't come from the store.
+
 ## Native names
 
 `ParameterStoreConfig.nativeNames(true)` uses the backend's own names as they are, with no validation and

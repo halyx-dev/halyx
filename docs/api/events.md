@@ -69,7 +69,7 @@ service name `events`, so retries and metrics apply as they do to other services
 | Provider | Bus name | Properties |
 |---|---|---|
 | AWS | the event bus name or ARN | |
-| Azure | the namespace topic | `azure.eventgrid.endpoint` (the namespace's `https://` endpoint), optional `azure.eventgrid.access-key` (Entra ID otherwise) |
+| Azure | the namespace topic | `azure.eventgrid.endpoint` (the namespace's `https://` endpoint), optional `azure.eventgrid.access-key` (Entra ID otherwise), which can be a supplier that's [asked for again](../providers.md#azure) as it rotates |
 | Google Cloud | `projects/<p>/locations/<l>/messageBuses/<id>`, or the id with `gcp.eventarc.location` | |
 | memory | an in-memory topic of the same name | |
 

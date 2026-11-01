@@ -25,7 +25,9 @@ import dev.halyx.parameters.ParameterKind;
 import dev.halyx.parameters.ParameterStore;
 import dev.halyx.config.ProviderConfig;
 import dev.halyx.error.ThrottledException;
+import dev.halyx.events.EventPublisher;
 import dev.halyx.functions.FunctionConfig;
+import dev.halyx.messaging.Subscription;
 import dev.halyx.functions.FunctionInvoker;
 import dev.halyx.parameters.ParameterStoreConfig;
 import dev.halyx.interceptor.Interceptor;
@@ -193,7 +195,7 @@ class HalyxAutoConfigurationTest {
                     Map.of("azure.functions.endpoint", "https://orders.azurewebsites.net"),
                     List.of(new HalyxProperties.SecretProperty("azure.functions.key", "secrets", "resize-key", null),
                             new HalyxProperties.SecretProperty("x.json", "secrets", "json", "value")));
-            FunctionConfig config = function.toFunctionConfig("resize", Map.of("secrets", secrets));
+            FunctionConfig config = function.toFunctionConfig("resize", Map.of("secrets", secrets)::get);
 
             secrets.put("resize-key", "first");
             secrets.put("json", "{\"value\":\"field\"}");
@@ -203,6 +205,70 @@ class HalyxAutoConfigurationTest {
             assertThat(config.property("azure.functions.key")).hasValue("rotated");
             assertThat(config.property("azure.functions.endpoint")).hasValue("https://orders.azurewebsites.net");
         }
+    }
+
+    @Test
+    void providerSecretsAreReadFromTheirStoreWhenUsed() {
+        runner.withPropertyValues("halyx.providers.local.type=memory",
+                        "halyx.parameter-stores.secrets.kind=secrets",
+                        "halyx.providers.local.secrets[0].property=azure.cosmos.key",
+                        "halyx.providers.local.secrets[0].store=secrets",
+                        "halyx.providers.local.secrets[0].name=cosmos-key")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    ParameterStore secrets = context.getBean("secrets", ParameterStore.class);
+                    ProviderConfig config = context.getBean(Halyx.class).provider("local").config();
+
+                    secrets.put("cosmos-key", "first");
+                    assertThat(config.property("azure.cosmos.key")).hasValue("first");
+                    secrets.put("cosmos-key", "rotated");
+                    assertThat(config.property("azure.cosmos.key")).hasValue("rotated");
+                    secrets.delete("cosmos-key");
+                    assertThatThrownBy(() -> config.property("azure.cosmos.key"))
+                            .hasMessageContaining("halyx.providers.local.secrets[0]: azure.cosmos.key reads from "
+                                    + "parameter store secrets");
+                });
+    }
+
+    @Test
+    void aProviderSecretNeedsAKnownStore() {
+        runner.withPropertyValues("halyx.providers.local.type=memory",
+                        "halyx.providers.local.secrets[0].property=azure.cosmos.key",
+                        "halyx.providers.local.secrets[0].store=vault",
+                        "halyx.providers.local.secrets[0].name=cosmos-key")
+                .run(context -> assertThat(context).hasFailed().getFailure()
+                        .hasMessageContaining("halyx.providers.local.secrets[0].store must name one of "
+                                + "halyx.parameter-stores"));
+    }
+
+    private static final String[] EVENT_BUS_WITH_SECRET = {
+            "halyx.providers.local.type=memory",
+            "halyx.parameter-stores.secrets.kind=secrets",
+            "halyx.event-buses.orders.secrets[0].property=azure.eventgrid.access-key",
+            "halyx.event-buses.orders.secrets[0].store=secrets",
+            "halyx.event-buses.orders.secrets[0].name=events-key",
+            "halyx.subscriptions.inbox.topic=orders",
+            "halyx.subscriptions.inbox.secrets[0].property=azure.eventgrid.access-key",
+            "halyx.subscriptions.inbox.secrets[0].store=secrets",
+            "halyx.subscriptions.inbox.secrets[0].name=events-key"
+    };
+
+    @Test
+    void eventBusAndSubscriptionSecretsAreReadFromTheirStore() {
+        runner.withPropertyValues(EVENT_BUS_WITH_SECRET).withBean(LazyInitializationBeanFactoryPostProcessor.class)
+                .run(context -> {
+                    context.getBean("secrets", ParameterStore.class).put("events-key", "key");
+
+                    assertThat(context.getBean("orders", EventPublisher.class)).isNotNull();
+                    assertThat(context.getBean("inbox", Subscription.class)).isNotNull();
+                });
+    }
+
+    @Test
+    void aMissingEventBusSecretFailsAtStartup() {
+        runner.withPropertyValues(EVENT_BUS_WITH_SECRET).run(context -> assertThat(context).hasFailed().getFailure()
+                .hasStackTraceContaining("azure.eventgrid.access-key reads from parameter store secrets")
+                .hasStackTraceContaining("events-key"));
     }
 
     @Test

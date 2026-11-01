@@ -19,6 +19,7 @@ import dev.halyx.cache.CacheAuth;
 import dev.halyx.cache.CacheConfig;
 import dev.halyx.config.Credentials;
 import dev.halyx.config.ProviderConfig;
+import dev.halyx.error.NotFoundException;
 import dev.halyx.interceptor.RetryPolicy;
 import dev.halyx.messaging.ClaimCheck;
 import dev.halyx.messaging.ConsumerOptions;
@@ -44,6 +45,7 @@ import dev.halyx.stream.StreamConsumerConfig;
 import dev.halyx.stream.StreamProducer;
 import dev.halyx.stream.StreamProducerConfig;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
 import java.net.URI;
@@ -53,6 +55,8 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BiConsumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -134,12 +138,35 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
      * @param credentials how to authenticate; the platform default chain when omitted
      * @param properties  provider-specific settings, such as {@code aws.s3.path-style} or
      *                    {@code gcp.project-id}
+     * @param secrets     provider-specific settings read from a parameter store while they're in use, such as
+     *                    {@code azure.cosmos.key}, so a rotated secret takes effect without a restart
      */
     public record Provider(String type, String region, URI endpoint, @DefaultValue CredentialsProperties credentials,
-                           Map<String, String> properties) {
+                           Map<String, String> properties, List<SecretProperty> secrets) {
 
+        @ConstructorBinding
         public Provider {
             properties = ordered(properties);
+            secrets = secrets == null ? List.of() : List.copyOf(secrets);
+        }
+
+        public Provider(String type, String region, URI endpoint, CredentialsProperties credentials,
+                        Map<String, String> properties) {
+            this(type, region, endpoint, credentials, properties, List.of());
+        }
+
+        /**
+         * With the secrets, read from the parameter stores that {@code stores} finds by bean name when they're used, so
+         * the stores can be beans on this provider.
+         */
+        ProviderConfig toProviderConfig(String name, Function<String, ParameterStore> stores) {
+            ProviderConfig config = toProviderConfig(name);
+            for (int i = 0; i < secrets.size(); i++) {
+                SecretProperty secret = secrets.get(i);
+                config = config.property(secret.property(),
+                        secret.supplier("halyx.providers." + name + ".secrets[" + i + "]", stores));
+            }
+            return config;
         }
 
         public ProviderConfig toProviderConfig(String name) {
@@ -370,16 +397,27 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
      *                   Eventarc Advanced message bus; defaults to the key
      * @param properties provider-specific settings, such as {@code azure.eventgrid.endpoint} or
      *                   {@code gcp.eventarc.location}
+     * @param secrets    provider-specific settings read from a parameter store while they're in use, such as
+     *                   {@code azure.eventgrid.access-key}
      */
-    public record EventBusProperties(String provider, String name, Map<String, String> properties) {
+    public record EventBusProperties(String provider, String name, Map<String, String> properties,
+                                     List<SecretProperty> secrets) {
 
+        @ConstructorBinding
         public EventBusProperties {
             properties = ordered(properties);
+            secrets = secrets == null ? List.of() : List.copyOf(secrets);
         }
 
-        EventBusConfig toEventBusConfig(String key) {
+        public EventBusProperties(String provider, String name, Map<String, String> properties) {
+            this(provider, name, properties, List.of());
+        }
+
+        /** @param stores finds the parameter stores the secrets name, by bean name */
+        EventBusConfig toEventBusConfig(String key, Function<String, ParameterStore> stores) {
             EventBusConfig.Builder config = EventBusConfig.builder(name == null || name.isBlank() ? key : name);
             properties.forEach(config::property);
+            forEachSecret("halyx.event-buses." + key, secrets, stores, config::property);
             return config.build();
         }
     }
@@ -409,12 +447,8 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
             secrets = secrets == null ? List.of() : List.copyOf(secrets);
         }
 
-        FunctionConfig toFunctionConfig(String key) {
-            return toFunctionConfig(key, Map.of());
-        }
-
-        /** @param stores the parameter stores the secrets name, by bean name */
-        FunctionConfig toFunctionConfig(String key, Map<String, ParameterStore> stores) {
+        /** @param stores finds the parameter stores the secrets name, by bean name */
+        FunctionConfig toFunctionConfig(String key, Function<String, ParameterStore> stores) {
             FunctionConfig.Builder config = FunctionConfig.builder(name == null || name.isBlank() ? key : name)
                     .headers(headers);
             if (timeout != null) {
@@ -424,14 +458,15 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
                 config.idempotent(idempotent);
             }
             properties.forEach(config::property);
-            secrets.forEach(secret -> config.property(secret.property(), secret.supplier(stores.get(secret.store()))));
+            forEachSecret("halyx.functions." + key, secrets, stores, config::property);
             return config.build();
         }
     }
 
     /**
-     * A provider-specific setting whose value is a secret in one of the {@code halyx.parameter-stores}, read each time
-     * it's used. The store's {@code cache-ttl} sets how soon a rotated secret takes effect.
+     * A provider-specific setting whose value is a secret in one of the {@code halyx.parameter-stores}, read while it's
+     * in use: on every call for a function key, and every {@code azure.key-refresh-interval} for an Azure account or
+     * access key. The store's {@code cache-ttl} adds to how soon a rotated secret takes effect.
      *
      * @param property the setting, such as {@code azure.functions.key}
      * @param store    bean name of the parameter store
@@ -440,8 +475,29 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
      */
     public record SecretProperty(String property, String store, String name, String field) {
 
-        Supplier<String> supplier(ParameterStore secrets) {
-            return () -> field == null ? secrets.require(name) : secrets.require(name, field);
+        /**
+         * Reads the secret from its store, found by bean name when it's read; a missing one fails naming
+         * {@code configured}, the entry's property path.
+         */
+        Supplier<String> supplier(String configured, Function<String, ParameterStore> stores) {
+            return () -> {
+                try {
+                    ParameterStore secrets = stores.apply(store);
+                    return field == null ? secrets.require(name) : secrets.require(name, field);
+                } catch (NotFoundException e) {
+                    throw new IllegalStateException(configured + ": " + property + " reads from parameter store " + store
+                            + ": " + e.getMessage(), e);
+                }
+            };
+        }
+    }
+
+    /** Gives {@code setter} each secret's property and supplier. */
+    private static void forEachSecret(String property, List<SecretProperty> secrets, Function<String, ParameterStore> stores,
+                                      BiConsumer<String, Supplier<String>> setter) {
+        for (int i = 0; i < secrets.size(); i++) {
+            SecretProperty secret = secrets.get(i);
+            setter.accept(secret.property(), secret.supplier(property + ".secrets[" + i + "]", stores));
         }
     }
 
@@ -481,15 +537,27 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
      * @param claimCheck resolve bodies sent through a blob store; must match the publisher's
      * @param listener   how {@code @HalyxListener} methods on this subscription are run
      * @param properties provider-specific settings
+     * @param secrets    provider-specific settings read from a parameter store while they're in use, such as
+     *                   {@code azure.eventgrid.access-key}
      */
     public record SubscriptionProperties(String provider, String name, String topic, ClaimCheckProperties claimCheck,
-                                         @DefaultValue ListenerProperties listener, Map<String, String> properties) {
+                                         @DefaultValue ListenerProperties listener, Map<String, String> properties,
+                                         List<SecretProperty> secrets) {
 
+        @ConstructorBinding
         public SubscriptionProperties {
             properties = ordered(properties);
+            secrets = secrets == null ? List.of() : List.copyOf(secrets);
         }
 
-        SubscriptionConfig toSubscriptionConfig(String key, ClaimCheck resolvedClaimCheck) {
+        public SubscriptionProperties(String provider, String name, String topic, ClaimCheckProperties claimCheck,
+                                      ListenerProperties listener, Map<String, String> properties) {
+            this(provider, name, topic, claimCheck, listener, properties, List.of());
+        }
+
+        /** @param stores finds the parameter stores the secrets name, by bean name */
+        SubscriptionConfig toSubscriptionConfig(String key, ClaimCheck resolvedClaimCheck,
+                                                Function<String, ParameterStore> stores) {
             SubscriptionConfig.Builder config = SubscriptionConfig.builder(name == null || name.isBlank() ? key : name);
             if (topic != null) {
                 config.topic(topic);
@@ -498,6 +566,7 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
                 config.claimCheck(resolvedClaimCheck);
             }
             properties.forEach(config::property);
+            forEachSecret("halyx.subscriptions." + key, secrets, stores, config::property);
             return config.build();
         }
     }

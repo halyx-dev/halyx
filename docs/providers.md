@@ -149,9 +149,10 @@ ProviderConfig.of("azure")
 |---|---|
 | `azure.storage.account` | the storage account; the endpoint is `https://<account>.blob.core.windows.net` |
 | `azure.cosmos.endpoint`, `azure.cosmos.database` | the Cosmos DB account endpoint and database |
-| `azure.cosmos.key` | an account key; without it, Entra ID is used |
+| `azure.cosmos.key` | an account key; without it, Entra ID is used. Given as a supplier, it's asked for every `azure.key-refresh-interval` |
+| `azure.key-refresh-interval` | how often keys given as suppliers (`azure.cosmos.key`, `azure.eventgrid.access-key`) are asked for again, ISO-8601 (`PT1M`) |
 | `azure.servicebus.namespace` | `<name>.servicebus.windows.net`, for Entra ID login |
-| `azure.servicebus.connection-string` | a shared-access-key connection string, instead of Entra ID |
+| `azure.servicebus.connection-string` | a shared-access-key connection string, instead of Entra ID; read once, when the client is built |
 | `azure.servicebus.entity` | on a `TopicConfig`: `queue` to send to a queue rather than a topic |
 | `azure.servicebus.sessions` | on topics and subscriptions: `true` for session-enabled entities |
 | `azure.servicebus.max-sessions` | on a subscription: sessions held at once (8) |
@@ -166,6 +167,26 @@ ProviderConfig.of("azure")
 
 Key Vault and App Configuration take their URL as the store's `location`; see
 [Parameters and secrets](api/parameters.md).
+
+Keys that rotate can be given as suppliers, such as a read from a parameter store, and Halyx follows the rotation
+without a restart:
+
+| Key | Asked for |
+|---|---|
+| `azure.functions.key` | on every call |
+| `azure.cosmos.key`, `azure.eventgrid.access-key` | when the client is built, then every `azure.key-refresh-interval`; Cosmos DB and Event Grid use the new key from the next request |
+| `azure.servicebus.connection-string`, `azure.appconfig.connection-string` | once, when the client is built: the SDKs keep a copy, so for keys that rotate, log in with Entra ID |
+
+```java
+ParameterStore secrets = ...;   // with a cacheTtl, so the refreshes are cheap
+ProviderConfig.of("azure")
+        .property(AzureProperties.COSMOS_ENDPOINT, "https://acme.documents.azure.com:443/")
+        .property(AzureProperties.COSMOS_KEY, () -> secrets.require("orders-cosmos-key"))
+```
+
+A failed refresh keeps the current key and is tried again at the next interval. Each of these services keeps two
+keys, so a rotation that switches to the other key, updates the secret, and regenerates the old key after the
+refresh interval plus the store's cache TTL fails no requests.
 
 ## Google Cloud
 

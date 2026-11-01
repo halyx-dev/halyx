@@ -20,14 +20,15 @@ import dev.halyx.Halyx;
 import dev.halyx.cache.Cache;
 import dev.halyx.cache.CacheConfig;
 import dev.halyx.cache.Codec;
-import dev.halyx.error.NotFoundException;
 import dev.halyx.error.UnsupportedFeatureException;
+import dev.halyx.events.EventBusConfig;
 import dev.halyx.events.EventPublisher;
 import dev.halyx.functions.FunctionConfig;
 import dev.halyx.functions.FunctionInvoker;
 import dev.halyx.messaging.Publisher;
 import dev.halyx.nosql.DocumentStore;
 import dev.halyx.messaging.Subscription;
+import dev.halyx.messaging.SubscriptionConfig;
 import dev.halyx.parameters.ParameterStore;
 import dev.halyx.parameters.ParameterStoreConfig;
 import dev.halyx.spring.autoconfigure.cache.CacheCodecs;
@@ -41,7 +42,8 @@ import org.springframework.beans.factory.BeanFactory;
 
 import javax.sql.DataSource;
 import java.util.List;
-import java.util.Map;
+import java.util.Optional;
+import java.util.function.Function;
 import java.util.Set;
 
 /**
@@ -124,28 +126,15 @@ public final class HalyxBlobStores {
 
     public EventPublisher eventPublisher(String property, String provider, String name,
                                          HalyxProperties.EventBusProperties bus) {
-        return context(property, provider).eventPublisher(bus.toEventBusConfig(name));
+        EventBusConfig config = bus.toEventBusConfig(name, this::secretStore);
+        readSecrets(bus.secrets(), config::property);
+        return context(property, provider).eventPublisher(config);
     }
 
     public FunctionInvoker functionInvoker(String property, String provider, String name,
                                            HalyxProperties.FunctionProperties function) {
-        return context(property, provider).functionInvoker(function.toFunctionConfig(name));
-    }
-
-    /** A function with secret settings, each read once now, so a missing secret fails at startup. */
-    public FunctionInvoker functionInvokerWithSecrets(String property, String provider, String name,
-                                                      HalyxProperties.FunctionProperties function,
-                                                      Map<String, ParameterStore> stores) {
-        FunctionConfig config = function.toFunctionConfig(name, stores);
-        for (int i = 0; i < function.secrets().size(); i++) {
-            var secret = function.secrets().get(i);
-            try {
-                config.property(secret.property());
-            } catch (NotFoundException e) {
-                throw new IllegalStateException(property + ".secrets[" + i + "]: " + secret.property() + " reads from "
-                        + "parameter store " + secret.store() + ": " + e.getMessage(), e);
-            }
-        }
+        FunctionConfig config = function.toFunctionConfig(name, this::secretStore);
+        readSecrets(function.secrets(), config::property);
         return context(property, provider).functionInvoker(config);
     }
 
@@ -160,13 +149,17 @@ public final class HalyxBlobStores {
 
     public Subscription subscription(String property, String provider, String name,
                                      HalyxProperties.SubscriptionProperties subscription) {
-        return context(property, provider).subscription(subscription.toSubscriptionConfig(name, null));
+        SubscriptionConfig config = subscription.toSubscriptionConfig(name, null, this::secretStore);
+        readSecrets(subscription.secrets(), config::property);
+        return context(property, provider).subscription(config);
     }
 
     public Subscription subscriptionWithClaimCheck(String property, String provider, String name,
                                                    HalyxProperties.SubscriptionProperties subscription, BlobStore claims) {
-        return context(property, provider).subscription(
-                subscription.toSubscriptionConfig(name, subscription.claimCheck().toClaimCheck(claims)));
+        SubscriptionConfig config = subscription.toSubscriptionConfig(name, subscription.claimCheck().toClaimCheck(claims),
+                this::secretStore);
+        readSecrets(subscription.secrets(), config::property);
+        return context(property, provider).subscription(config);
     }
 
     public StreamProducer streamProducer(String property, String provider, String name,
@@ -200,6 +193,16 @@ public final class HalyxBlobStores {
     }
 
     /** A pooled database whose password is read from {@code secrets} for every new connection. */
+    /** A {@code halyx.parameter-stores} bean that secrets read from; the registrar made the reading bean depend on it. */
+    ParameterStore secretStore(String name) {
+        return beans.getBean(name, ParameterStore.class);
+    }
+
+    /** Reads each secret once now, so a missing one fails at startup, naming its property. */
+    private static void readSecrets(List<HalyxProperties.SecretProperty> secrets, Function<String, Optional<String>> values) {
+        secrets.forEach(secret -> values.apply(secret.property()));
+    }
+
     public DataSource dataSourceWithSecret(String property, String provider, String name,
                                            HalyxProperties.DatabaseProperties database, ParameterStore secrets) {
         return database(property, provider, name, database, secrets).dataSource();
