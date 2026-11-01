@@ -25,6 +25,9 @@ import dev.halyx.parameters.ParameterKind;
 import dev.halyx.parameters.ParameterStore;
 import dev.halyx.config.ProviderConfig;
 import dev.halyx.error.ThrottledException;
+import dev.halyx.functions.FunctionConfig;
+import dev.halyx.functions.FunctionInvoker;
+import dev.halyx.parameters.ParameterStoreConfig;
 import dev.halyx.interceptor.Interceptor;
 import dev.halyx.interceptor.Invocation;
 import dev.halyx.config.Credentials;
@@ -35,6 +38,7 @@ import dev.halyx.storage.BlobContent;
 import dev.halyx.storage.BlobKey;
 import dev.halyx.storage.BlobStore;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
+import org.springframework.boot.LazyInitializationBeanFactoryPostProcessor;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.FilteredClassLoader;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -154,6 +158,78 @@ class HalyxAutoConfigurationTest {
             secrets.async().put("db/user", "app").get(15, TimeUnit.SECONDS);
             assertThat(secrets.async().getAll("db").get(15, TimeUnit.SECONDS)).containsOnlyKeys("db/password", "db/user");
         });
+    }
+
+    private static final String[] FUNCTION_WITH_SECRET = {
+            "halyx.providers.local.type=memory",
+            "halyx.parameter-stores.secrets.kind=secrets",
+            "halyx.functions.resize.secrets[0].property=azure.functions.key",
+            "halyx.functions.resize.secrets[0].store=secrets",
+            "halyx.functions.resize.secrets[0].name=resize-key"
+    };
+
+    @Test
+    void functionSecretsAreReadFromTheirStore() {
+        runner.withPropertyValues(FUNCTION_WITH_SECRET).withBean(LazyInitializationBeanFactoryPostProcessor.class)
+                .run(context -> {
+                    context.getBean("secrets", ParameterStore.class).put("resize-key", "key");
+
+                    assertThat(context.getBean("resize", FunctionInvoker.class).function()).isEqualTo("resize");
+                });
+    }
+
+    @Test
+    void aMissingFunctionSecretFailsAtStartup() {
+        runner.withPropertyValues(FUNCTION_WITH_SECRET).run(context -> assertThat(context).hasFailed().getFailure()
+                .hasStackTraceContaining("halyx.functions.resize.secrets[0]: azure.functions.key reads from parameter "
+                        + "store secrets").hasStackTraceContaining("resize-key"));
+    }
+
+    @Test
+    void functionSecretsFollowRotations() {
+        try (Halyx halyx = Halyx.builder().register("local", ProviderConfig.of("memory")).build()) {
+            ParameterStore secrets = halyx.provider("local").parameterStore(ParameterStoreConfig.secrets().build());
+            var function = new HalyxProperties.FunctionProperties(null, null, null, null, null,
+                    Map.of("azure.functions.endpoint", "https://orders.azurewebsites.net"),
+                    List.of(new HalyxProperties.SecretProperty("azure.functions.key", "secrets", "resize-key", null),
+                            new HalyxProperties.SecretProperty("x.json", "secrets", "json", "value")));
+            FunctionConfig config = function.toFunctionConfig("resize", Map.of("secrets", secrets));
+
+            secrets.put("resize-key", "first");
+            secrets.put("json", "{\"value\":\"field\"}");
+            assertThat(config.property("azure.functions.key")).hasValue("first");
+            assertThat(config.property("x.json")).hasValue("field");
+            secrets.put("resize-key", "rotated");
+            assertThat(config.property("azure.functions.key")).hasValue("rotated");
+            assertThat(config.property("azure.functions.endpoint")).hasValue("https://orders.azurewebsites.net");
+        }
+    }
+
+    @Test
+    void aFunctionSettingInPropertiesAndSecretsFailsAtStartup() {
+        runner.withPropertyValues(FUNCTION_WITH_SECRET)
+                .withPropertyValues("halyx.functions.resize.properties.azure.functions.key=literal")
+                .run(context -> assertThat(context).hasFailed().getFailure()
+                        .hasMessageContaining("halyx.functions.resize.secrets[0]").hasMessageContaining("set one"));
+    }
+
+    @Test
+    void aFunctionSecretNeedsAKnownStore() {
+        runner.withPropertyValues(FUNCTION_WITH_SECRET)
+                .withPropertyValues("halyx.functions.resize.secrets[0].store=vault")
+                .run(context -> assertThat(context).hasFailed().getFailure()
+                        .hasMessageContaining("halyx.functions.resize.secrets[0].store must name one of "
+                                + "halyx.parameter-stores [secrets]"));
+    }
+
+    @Test
+    void anUnresolvedPlaceholderFailsAtStartup() {
+        runner.withPropertyValues("halyx.providers.local.type=memory",
+                        "halyx.functions.resize.properties.azure.functions.key=${resize-key}",
+                        "halyx.functions.resize.properties.azure.functions.endpoint=${ENDPOINT:https://example.net}")
+                .run(context -> assertThat(context).hasFailed().getFailure()
+                        .hasMessageContaining("Unresolved placeholders in halyx.functions.resize.properties.azure"
+                                + ".functions.key:").hasMessageNotContaining("endpoint"));
     }
 
     @Test

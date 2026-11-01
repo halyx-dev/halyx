@@ -23,6 +23,7 @@ import com.azure.core.http.HttpRequest;
 import com.azure.core.http.HttpResponse;
 import com.azure.core.util.Context;
 import dev.halyx.azure.AzureErrors;
+import dev.halyx.azure.AzureProperties;
 import dev.halyx.azure.AzureProvider;
 import dev.halyx.capability.Capabilities;
 import dev.halyx.error.CloudException;
@@ -39,11 +40,13 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 
 /**
  * Invokes an HTTP-triggered Azure function with a POST to its URL, through a pipeline that logs in with an Entra ID
- * token or a function key. A non-2xx status, whether from the function's code or the Functions host, is mapped by
- * {@link AzureErrors#fromStatus}; the host answers a function that throws with 500.
+ * token, or with the function key {@code azure.functions.key}, asked for on every call so a rotated key takes effect. A
+ * non-2xx status, whether from the function's code or the Functions host, is mapped by {@link AzureErrors#fromStatus};
+ * the host answers a function that throws with 500.
  */
 public final class AzureFunctionsInvokerDriver extends AbstractFunctionInvokerDriver {
 
@@ -53,9 +56,12 @@ public final class AzureFunctionsInvokerDriver extends AbstractFunctionInvokerDr
     /** The Netty client's per-request override of its response timeout. */
     private static final String RESPONSE_TIMEOUT = "azure-response-timeout";
 
+    private static final HttpHeaderName FUNCTIONS_KEY_HEADER = HttpHeaderName.fromString("x-functions-key");
+
     private final HttpPipeline pipeline;
     private final URL url;
     private final FunctionConfig config;
+    private final Optional<Supplier<String>> key;
 
     /** @param pipeline sends with the connection's HTTP client, the function's login and its retry policy */
     public AzureFunctionsInvokerDriver(HttpPipeline pipeline, URL url, FunctionConfig config) {
@@ -63,6 +69,7 @@ public final class AzureFunctionsInvokerDriver extends AbstractFunctionInvokerDr
         this.pipeline = pipeline;
         this.url = url;
         this.config = config;
+        this.key = config.propertySupplier(AzureProperties.FUNCTIONS_KEY);
     }
 
     @Override
@@ -77,9 +84,17 @@ public final class AzureFunctionsInvokerDriver extends AbstractFunctionInvokerDr
         }
     }
 
+    /** A supplied key may be read from a parameter store, so it's asked for on the blocking executor. */
     @Override
     public CompletableFuture<FunctionResponse> invokeAsync(FunctionRequest request, Executor blocking) {
-        return pipeline.send(request(request), context())
+        if (key.isPresent()) {
+            return CompletableFuture.supplyAsync(() -> request(request), blocking).thenCompose(this::send);
+        }
+        return send(request(request));
+    }
+
+    private CompletableFuture<FunctionResponse> send(HttpRequest http) {
+        return pipeline.send(http, context())
                 .flatMap(response -> response.getBodyAsByteArray().defaultIfEmpty(new byte[0])
                         .map(body -> response(response, body))
                         .doFinally(signal -> response.close()))
@@ -91,6 +106,7 @@ public final class AzureFunctionsInvokerDriver extends AbstractFunctionInvokerDr
                 .setHeader(HttpHeaderName.CONTENT_TYPE, request.contentType())
                 .setBody(request.payloadUnsafe());
         request.headers().forEach((name, value) -> http.setHeader(HttpHeaderName.fromString(name), value));
+        key.ifPresent(k -> http.setHeader(FUNCTIONS_KEY_HEADER, k.get()));
         return http;
     }
 

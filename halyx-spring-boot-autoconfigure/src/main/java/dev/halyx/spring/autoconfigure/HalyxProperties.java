@@ -28,6 +28,7 @@ import dev.halyx.functions.FunctionConfig;
 import dev.halyx.messaging.TopicConfig;
 import dev.halyx.nosql.TableConfig;
 import dev.halyx.parameters.ParameterKind;
+import dev.halyx.parameters.ParameterStore;
 import dev.halyx.parameters.ParameterStoreConfig;
 import dev.halyx.sql.PoolSettings;
 import dev.halyx.sql.SqlAuth;
@@ -52,6 +53,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 
 /**
  * Halyx configuration:
@@ -394,16 +396,25 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
      * @param headers    headers sent on every invocation; a request's own headers replace those with the same name
      * @param properties provider-specific settings, such as {@code aws.lambda.qualifier},
      *                   {@code azure.functions.endpoint} or {@code gcp.functions.url}
+     * @param secrets    provider-specific settings read from a parameter store each time they're used, such as
+     *                   {@code azure.functions.key}, so a rotated secret takes effect without a restart
      */
     public record FunctionProperties(String provider, String name, Duration timeout, Boolean idempotent,
-                                     Map<String, String> headers, Map<String, String> properties) {
+                                     Map<String, String> headers, Map<String, String> properties,
+                                     List<SecretProperty> secrets) {
 
         public FunctionProperties {
             headers = ordered(headers);
             properties = ordered(properties);
+            secrets = secrets == null ? List.of() : List.copyOf(secrets);
         }
 
         FunctionConfig toFunctionConfig(String key) {
+            return toFunctionConfig(key, Map.of());
+        }
+
+        /** @param stores the parameter stores the secrets name, by bean name */
+        FunctionConfig toFunctionConfig(String key, Map<String, ParameterStore> stores) {
             FunctionConfig.Builder config = FunctionConfig.builder(name == null || name.isBlank() ? key : name)
                     .headers(headers);
             if (timeout != null) {
@@ -413,7 +424,24 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
                 config.idempotent(idempotent);
             }
             properties.forEach(config::property);
+            secrets.forEach(secret -> config.property(secret.property(), secret.supplier(stores.get(secret.store()))));
             return config.build();
+        }
+    }
+
+    /**
+     * A provider-specific setting whose value is a secret in one of the {@code halyx.parameter-stores}, read each time
+     * it's used. The store's {@code cache-ttl} sets how soon a rotated secret takes effect.
+     *
+     * @param property the setting, such as {@code azure.functions.key}
+     * @param store    bean name of the parameter store
+     * @param name     the secret's name
+     * @param field    the JSON field holding the value, for JSON secrets
+     */
+    public record SecretProperty(String property, String store, String name, String field) {
+
+        Supplier<String> supplier(ParameterStore secrets) {
+            return () -> field == null ? secrets.require(name) : secrets.require(name, field);
         }
     }
 

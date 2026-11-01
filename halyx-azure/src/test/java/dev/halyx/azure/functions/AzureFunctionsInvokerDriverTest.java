@@ -45,6 +45,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -98,6 +99,32 @@ class AzureFunctionsInvokerDriverTest {
         assertThat(response.contentType()).isEqualTo("application/json");
         assertThat(response.headers()).containsEntry("X-Resized", "true");
         assertThat(response.executedVersion()).isEmpty();
+    }
+
+    @Test
+    void aSuppliedKeyIsAskedForOnEveryCall() throws Exception {
+        AtomicInteger rotations = new AtomicInteger();
+        FunctionInvoker invoker = invoker(FunctionConfig.builder("resize-image")
+                .property("azure.functions.key", () -> "key-" + rotations.get()).build());
+        HttpHeaderName key = HttpHeaderName.fromString("x-functions-key");
+
+        invoker.invoke(FunctionRequest.of("{}"));
+        rotations.incrementAndGet();
+        invoker.invoke(FunctionRequest.of("{}"));
+        rotations.incrementAndGet();
+        invoker.async().invoke(FunctionRequest.of("{}")).join();
+
+        assertThat(requests).extracting(r -> r.getHeaders().getValue(key)).containsExactly("key-0", "key-1", "key-2");
+    }
+
+    @Test
+    void theKeyReplacesAHeaderOfTheSameName() throws Exception {
+        FunctionInvoker invoker = invoker(FunctionConfig.builder("resize-image").property("azure.functions.key", "key")
+                .header("x-functions-key", "other").build());
+
+        invoker.invoke(FunctionRequest.of("{}"));
+
+        assertThat(requests.getFirst().getHeaders().getValue(HttpHeaderName.fromString("x-functions-key"))).isEqualTo("key");
     }
 
     @Test

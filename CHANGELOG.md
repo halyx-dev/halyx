@@ -32,6 +32,14 @@
     `LambdaClient` and HTTP calls to Azure Functions and Cloud Run functions, and `halyx-ai-review` checks them
     (rule C11).
 
+- **Rotated function keys** ([#26](https://github.com/halyx-dev/halyx/issues/26)):
+  - `FunctionConfig.Builder.property(String, Supplier<String>)`: a property asked for each time it's used. The
+    Azure function key is asked for on every call, so a rotated key takes effect without a restart.
+  - Spring Boot: `halyx.functions.<key>.secrets` reads settings such as `azure.functions.key` from one of the
+    `halyx.parameter-stores`, through its read cache. A missing secret fails the start.
+  - Spring Boot: a `halyx.*` property whose `${...}` placeholder didn't resolve fails the start, naming the property.
+    Spring leaves such a value as written, so a missing secret was sent as the key and failed every call.
+
 ## 1.0.2 (2026-10-25)
 
 ### Fixes

@@ -20,12 +20,14 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 /**
  * A function to invoke: a Lambda function (name or ARN, with an optional {@code aws.lambda.qualifier}), an Azure
  * function (with {@code azure.functions.endpoint}, and {@code azure.functions.audience} or
  * {@code azure.functions.key}), or a Cloud Run function (its name, or {@code gcp.functions.url}). Provider settings go
- * in {@link Builder#property}.
+ * in {@link Builder#property}. A secret, such as the function key, can be given as a supplier, which is asked each time
+ * the value is used, so a rotated secret takes effect without a restart.
  */
 public final class FunctionConfig {
 
@@ -36,6 +38,7 @@ public final class FunctionConfig {
     private final Map<String, String> headers;
     private final boolean idempotent;
     private final Map<String, String> properties;
+    private final Map<String, Supplier<String>> suppliedProperties;
 
     private FunctionConfig(Builder b) {
         this.name = b.name;
@@ -43,6 +46,7 @@ public final class FunctionConfig {
         this.headers = Map.copyOf(b.headers);
         this.idempotent = b.idempotent;
         this.properties = Map.copyOf(b.properties);
+        this.suppliedProperties = Map.copyOf(b.suppliedProperties);
     }
 
     public static FunctionConfig of(String name) {
@@ -75,12 +79,28 @@ public final class FunctionConfig {
         return idempotent;
     }
 
+    /** The property's value; a supplied property is asked now. */
     public Optional<String> property(String key) {
-        return Optional.ofNullable(properties.get(key));
+        return propertySupplier(key).map(Supplier::get);
     }
 
+    /**
+     * The property as a supplier to ask each time the value is used: the one given to
+     * {@link Builder#property(String, Supplier)}, or one returning the fixed value.
+     */
+    public Optional<Supplier<String>> propertySupplier(String key) {
+        String value = properties.get(key);
+        return value != null ? Optional.of(() -> value) : Optional.ofNullable(suppliedProperties.get(key));
+    }
+
+    /** The properties with fixed values. */
     public Map<String, String> properties() {
         return properties;
+    }
+
+    /** The properties given as suppliers. */
+    public Map<String, Supplier<String>> suppliedProperties() {
+        return suppliedProperties;
     }
 
     /** Configurations with the same settings are equal, so contexts can share one client per configuration. */
@@ -88,12 +108,13 @@ public final class FunctionConfig {
     public boolean equals(Object o) {
         return o instanceof FunctionConfig other && Objects.equals(name, other.name)
                 && Objects.equals(timeout, other.timeout) && Objects.equals(headers, other.headers)
-                && idempotent == other.idempotent && Objects.equals(properties, other.properties);
+                && idempotent == other.idempotent && Objects.equals(properties, other.properties)
+                && Objects.equals(suppliedProperties, other.suppliedProperties);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(name, timeout, headers, idempotent, properties);
+        return Objects.hash(name, timeout, headers, idempotent, properties, suppliedProperties);
     }
 
     @Override
@@ -107,6 +128,7 @@ public final class FunctionConfig {
         private final Map<String, String> headers = new LinkedHashMap<>();
         private boolean idempotent;
         private final Map<String, String> properties = new LinkedHashMap<>();
+        private final Map<String, Supplier<String>> suppliedProperties = new LinkedHashMap<>();
 
         private Builder(String name) {
             Objects.requireNonNull(name, "name");
@@ -150,11 +172,27 @@ public final class FunctionConfig {
 
         public Builder property(String key, String value) {
             Objects.requireNonNull(key, "key");
+            suppliedProperties.remove(key);
             if (Objects.requireNonNull(value, "value").isBlank()) {
                 properties.remove(key); // blank is unset, as an empty ${VAR:} in Spring configuration gives
             } else {
                 properties.put(key, value);
             }
+            return this;
+        }
+
+        /**
+         * A property whose value is asked for each time it's used, such as a function key from a parameter store, so
+         * a rotated key takes effect without a restart:
+         * <pre>{@code property(AzureProperties.FUNCTIONS_KEY, () -> secrets.require("resize-image-key"))}</pre>
+         * A cached store keeps this cheap. Settings used to build the driver, such as the endpoint, are asked once; the
+         * Azure function key on every call.
+         */
+        public Builder property(String key, Supplier<String> value) {
+            Objects.requireNonNull(key, "key");
+            Objects.requireNonNull(value, "value");
+            properties.remove(key);
+            suppliedProperties.put(key, value);
             return this;
         }
 

@@ -31,9 +31,14 @@ import org.springframework.beans.factory.support.AbstractBeanDefinition;
 import org.springframework.beans.factory.config.ConstructorArgumentValues;
 import org.springframework.beans.factory.config.RuntimeBeanReference;
 import org.springframework.beans.factory.support.BeanDefinitionRegistry;
+import org.springframework.beans.factory.support.ManagedMap;
 import org.springframework.beans.factory.support.RootBeanDefinition;
 import org.springframework.boot.context.properties.bind.Bindable;
 import org.springframework.boot.context.properties.bind.Binder;
+import org.springframework.boot.context.properties.source.ConfigurationPropertyName;
+import org.springframework.boot.context.properties.source.ConfigurationPropertySource;
+import org.springframework.boot.context.properties.source.ConfigurationPropertySources;
+import org.springframework.boot.context.properties.source.IterableConfigurationPropertySource;
 import org.springframework.context.EnvironmentAware;
 import org.springframework.context.annotation.ImportBeanDefinitionRegistrar;
 import org.springframework.core.ResolvableType;
@@ -42,8 +47,12 @@ import org.springframework.core.type.AnnotationMetadata;
 import org.springframework.util.ClassUtils;
 
 import javax.sql.DataSource;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
+import java.util.regex.Pattern;
 
 /**
  * Registers one {@link BlobStore} bean per {@code halyx.blob-stores.<name>} entry, one {@code Cache} bean per
@@ -58,6 +67,8 @@ import java.util.Set;
 class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, EnvironmentAware, BeanClassLoaderAware {
 
     static final String FACTORY_BEAN = HalyxBlobStores.BEAN_NAME;
+
+    private static final Pattern PLACEHOLDER = Pattern.compile("\\$\\{[^}]*}");
 
     private Environment environment;
     private ClassLoader classLoader = BlobStoreBeanRegistrar.class.getClassLoader();
@@ -74,6 +85,7 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
 
     @Override
     public void registerBeanDefinitions(AnnotationMetadata metadata, BeanDefinitionRegistry registry) {
+        checkPlaceholders(environment);
         Binder binder = Binder.get(environment);
         HalyxBeanNames names = new HalyxBeanNames(registry);
         Map<String, HalyxProperties.BlobStoreProperties> stores = binder
@@ -165,12 +177,18 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
         binder.bind("halyx.functions", Bindable.mapOf(String.class, HalyxProperties.FunctionProperties.class))
                 .orElse(Map.of())
                 .forEach((name, function) -> {
-                    RootBeanDefinition definition = serviceBean(FunctionInvoker.class, "functionInvoker",
-                            "halyx.functions." + name, function.provider());
+                    String property = "halyx.functions." + name;
+                    RootBeanDefinition definition = serviceBean(FunctionInvoker.class, "functionInvoker", property,
+                            function.provider());
                     definition.getConstructorArgumentValues().addIndexedArgumentValue(2, name);
                     definition.getConstructorArgumentValues().addIndexedArgumentValue(3, function);
+                    if (!function.secrets().isEmpty()) {
+                        definition.setFactoryMethodName("functionInvokerWithSecrets");
+                        definition.getConstructorArgumentValues().addIndexedArgumentValue(4,
+                                secretStores(property, function.properties().keySet(), function.secrets(), parameterStores));
+                    }
                     definition.setDescription("Halyx function " + name);
-                    names.register(name, "halyx.functions." + name, "name", definition);
+                    names.register(name, property, "name", definition);
                 });
         binder.bind("halyx.subscriptions", Bindable.mapOf(String.class, HalyxProperties.SubscriptionProperties.class))
                 .orElse(Map.of())
@@ -203,6 +221,58 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
             definition.setDescription("Halyx blob store " + bucket);
             names.register(name, "halyx.blob-stores." + name, "bucket", definition);
         });
+    }
+
+    /**
+     * The parameter stores that {@code secrets} read from, by bean name, after checking that each names a setting not
+     * also in {@code properties}, a secret and one of the {@code halyx.parameter-stores}.
+     */
+    private static ManagedMap<String, RuntimeBeanReference> secretStores(String property, Set<String> properties,
+                                                                         List<HalyxProperties.SecretProperty> secrets,
+                                                                         Set<String> parameterStores) {
+        ManagedMap<String, RuntimeBeanReference> stores = new ManagedMap<>();
+        Set<String> seen = new HashSet<>();
+        for (int i = 0; i < secrets.size(); i++) {
+            var secret = secrets.get(i);
+            String prefix = property + ".secrets[" + i + "]";
+            if (secret.property() == null || secret.property().isBlank()) {
+                throw new IllegalStateException(prefix + ".property is required");
+            }
+            if (properties.contains(secret.property()) || !seen.add(secret.property())) {
+                throw new IllegalStateException(prefix + ": " + secret.property() + " is set more than once in "
+                        + property + ".properties and .secrets: set one");
+            }
+            if (secret.name() == null || secret.name().isBlank()) {
+                throw new IllegalStateException(prefix + ".name is required");
+            }
+            if (secret.store() == null || !parameterStores.contains(secret.store())) {
+                throw new IllegalStateException(prefix + ".store must name one of halyx.parameter-stores "
+                        + parameterStores);
+            }
+            stores.put(secret.store(), new RuntimeBeanReference(secret.store()));
+        }
+        return stores;
+    }
+
+    /**
+     * Fails on any {@code halyx.*} value whose placeholder didn't resolve. Spring leaves such a value as written, so a
+     * missing secret would otherwise be sent as the key, and fail every call instead of the start.
+     */
+    static void checkPlaceholders(Environment environment) {
+        Binder binder = Binder.get(environment);
+        ConfigurationPropertyName halyx = ConfigurationPropertyName.of("halyx");
+        Set<String> unresolved = new TreeSet<>();
+        for (ConfigurationPropertySource source : ConfigurationPropertySources.get(environment)) {
+            if (source instanceof IterableConfigurationPropertySource iterable) {
+                iterable.stream().filter(halyx::isAncestorOf)
+                        .filter(name -> PLACEHOLDER.matcher(binder.bind(name, Bindable.of(String.class)).orElse("")).find())
+                        .forEach(name -> unresolved.add(name.toString())); // not the value: it may hold a secret
+            }
+        }
+        if (!unresolved.isEmpty()) {
+            throw new IllegalStateException("Unresolved placeholders in " + String.join(", ", unresolved)
+                    + ": set the property, environment variable or secret they name");
+        }
     }
 
     /**

@@ -80,8 +80,24 @@ FunctionInvoker report = halyx.provider("aws").functionInvoker(FunctionConfig.bu
 
 On Azure, an audience is for a function app protected by App Service Authentication with that Entra ID app: the
 provider's Entra ID credential (the default chain or a service principal) gets tokens for `<audience>/.default`. A
-function key is sent as `x-functions-key`; it can come from a [parameter store](parameters.md) in Spring Boot, as
-`${...}` in the property. An anonymous provider, such as one for a local Functions host, may set neither.
+function key is sent as `x-functions-key`. An anonymous provider, such as one for a local Functions host, may set
+neither.
+
+A function key given as a supplier is asked for on every call, so a rotated key takes effect without a restart. From
+a [parameter store](parameters.md) with a read cache, the cache sets how soon:
+
+```java
+ParameterStore secrets = halyx.provider("azure").parameterStore(ParameterStoreConfig.secrets()
+        .location("https://orders-vault.vault.azure.net").cacheTtl(Duration.ofMinutes(5)).build());
+
+FunctionInvoker resize = halyx.provider("azure").functionInvoker(FunctionConfig.builder("resize-image")
+        .property(AzureProperties.FUNCTIONS_ENDPOINT, "https://orders.azurewebsites.net")
+        .property(AzureProperties.FUNCTIONS_KEY, () -> secrets.require("resize-image-key"))
+        .build());
+```
+
+A key given as a string is fixed for the life of the invoker. Azure Functions keeps several keys per function, so a
+rotation that adds the new key, updates the secret, and revokes the old key after the cache's TTL fails no calls.
 
 On Google Cloud, the ID tokens come from the provider's Google identity: Application Default Credentials, or a
 service account they impersonate.

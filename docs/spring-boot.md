@@ -278,16 +278,30 @@ halyx:
 
 Each entry is a `FunctionInvoker` bean named after its key, and with halyx-reactor a `ReactiveFunctionInvoker` named
 `<key>Reactive`. With Micrometer Tracing, invocations carry the trace context. There's no health indicator: nothing
-can be checked without invoking the function. On Azure, a function key can come from a parameter store:
+can be checked without invoking the function. On Azure, a function key can come from a parameter store, read on
+every call, so a rotated key takes effect without a restart:
 
 ```yaml
 halyx:
+  parameter-stores:
+    secrets:
+      kind: secrets
+      location: https://orders-vault.vault.azure.net
+      cache-ttl: 5m                # how soon a rotated key takes effect
   functions:
     resize:
       properties:
         azure.functions.endpoint: https://orders.azurewebsites.net
-        azure.functions.key: ${resize-function-key}    # from spring.config.import
+      secrets:
+        - property: azure.functions.key
+          store: secrets           # one of halyx.parameter-stores
+          name: resize-function-key
+          # field: key             # for a JSON secret
 ```
+
+Each secret is read once at startup, so a missing one fails the start with its property named. A setting in both
+`properties` and `secrets` fails too. A key in `properties`, from `${...}` or `spring.config.import`, is read once
+and keeps its startup value.
 
 See [Functions](api/functions.md).
 
@@ -491,7 +505,9 @@ spring:
   publishes a `HalyxParametersChangedEvent` with the store name and changed keys, and Spring Cloud's
   `EnvironmentChangeEvent` when Spring Cloud Context is present. `@ConfigurationProperties` and
   `@RefreshScope` beans then follow. Without Spring Cloud, `Environment` reads and event listeners see
-  changes, and `@Value` fields keep their startup values.
+  changes, and `@Value` fields keep their startup values. Halyx' own beans keep the values they were built with:
+  a password or key that rotates belongs in a database's `auth.secret` or a function's `secrets`, which are read
+  from the store as they're used.
 - `halyx.config-import.enabled=false` makes every `halyx:` import load nothing, optional or not, without
   connecting. Imports run while Spring prepares the environment, with the machine's own credentials, so a test that
   resolves a cloud profile as written, or a tool that starts the application with no cloud, sets it on the command
@@ -653,6 +669,10 @@ Startup fails with a message naming the property for:
   `concurrency` on a stream consumer's listener
 - a bean named `messaging`, `streams` or `cache-manager`, which would hide a health entry of the same name
 - a `halyx.*` key that is already a bean name: another entry's, in any group, or one of your beans
+- a `halyx.*` value whose `${...}` placeholder didn't resolve, which Spring would leave as written: a missing secret
+  would be sent as the key
+- a function's `secrets` entry naming no setting, no secret or an unknown store, a setting also in its `properties`,
+  or a secret that isn't there
 
 Spring Boot settings that a Halyx bean makes ineffective are logged as warnings at startup: `spring.datasource.*`
 next to `halyx.databases`, `spring.r2dbc.*` next to `halyx.r2dbc-databases`, and `spring.cache.*` while

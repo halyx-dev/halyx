@@ -85,7 +85,10 @@ public final class AzureProperties {
      */
     public static final String FUNCTIONS_AUDIENCE = "azure.functions.audience";
 
-    /** Function property: a function key, sent as {@code x-functions-key}, instead of an Entra ID token. */
+    /**
+     * Function property: a function key, sent as {@code x-functions-key}, instead of an Entra ID token. Given as a
+     * supplier ({@code FunctionConfig.Builder.property(String, Supplier)}), it's asked for on every call.
+     */
     public static final String FUNCTIONS_KEY = "azure.functions.key";
 
     /** Function property: the function's path on the app, when it isn't {@code api/<name>}, such as {@code images/resize}. */

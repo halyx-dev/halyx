@@ -20,8 +20,10 @@ import dev.halyx.Halyx;
 import dev.halyx.cache.Cache;
 import dev.halyx.cache.CacheConfig;
 import dev.halyx.cache.Codec;
+import dev.halyx.error.NotFoundException;
 import dev.halyx.error.UnsupportedFeatureException;
 import dev.halyx.events.EventPublisher;
+import dev.halyx.functions.FunctionConfig;
 import dev.halyx.functions.FunctionInvoker;
 import dev.halyx.messaging.Publisher;
 import dev.halyx.nosql.DocumentStore;
@@ -39,6 +41,7 @@ import org.springframework.beans.factory.BeanFactory;
 
 import javax.sql.DataSource;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -127,6 +130,23 @@ public final class HalyxBlobStores {
     public FunctionInvoker functionInvoker(String property, String provider, String name,
                                            HalyxProperties.FunctionProperties function) {
         return context(property, provider).functionInvoker(function.toFunctionConfig(name));
+    }
+
+    /** A function with secret settings, each read once now, so a missing secret fails at startup. */
+    public FunctionInvoker functionInvokerWithSecrets(String property, String provider, String name,
+                                                      HalyxProperties.FunctionProperties function,
+                                                      Map<String, ParameterStore> stores) {
+        FunctionConfig config = function.toFunctionConfig(name, stores);
+        for (int i = 0; i < function.secrets().size(); i++) {
+            var secret = function.secrets().get(i);
+            try {
+                config.property(secret.property());
+            } catch (NotFoundException e) {
+                throw new IllegalStateException(property + ".secrets[" + i + "]: " + secret.property() + " reads from "
+                        + "parameter store " + secret.store() + ": " + e.getMessage(), e);
+            }
+        }
+        return context(property, provider).functionInvoker(config);
     }
 
     public Publisher publisher(String property, String provider, String name, HalyxProperties.TopicProperties topic) {
