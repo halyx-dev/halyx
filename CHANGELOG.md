@@ -51,6 +51,10 @@
     `auth.secret` on caches, the cache manager and stream clusters, as on databases, including for Spring for
     Apache Kafka.
   - Docs: keeping keys for other services in a parameter store, including a store on another cloud.
+  - Spring Boot: a blank `properties` value no longer counts as set next to a `secrets` entry for the same setting,
+    as a blank value is unset everywhere else.
+  - Real-cloud tests on Azure (tier 1): a function key, a Cosmos DB key and an Event Grid key rotated in Key Vault
+    while the clients stay open, and the function key through Spring Boot `secrets`.
 
 - **Function error text** ([#31](https://github.com/halyx-dev/halyx/issues/31)): a failed invocation's exception
   has a `FunctionError` cause with what the function reported, whole: Lambda's `errorMessage`, `errorType` and

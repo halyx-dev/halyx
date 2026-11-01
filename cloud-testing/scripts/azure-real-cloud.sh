@@ -31,10 +31,12 @@
 # The az CLI (your own login) is used only to check that nothing is left.
 #
 # 1. Terraform creates a resource group of the run's own with a storage account, a Service Bus namespace, a
-#    serverless Cosmos DB account, a Key Vault and an App Configuration store, all Entra ID only, and gives the
-#    principal data-plane roles on them (tagged halyx-test=<run id>).
+#    serverless Cosmos DB account, a Key Vault and an App Configuration store, and gives the principal data-plane
+#    roles on them (tagged halyx-test=<run id>). The kits use Entra ID; the Cosmos DB account and the Event Grid
+#    namespace also take keys, for the key rotation tests.
 # 2. RealAzureIT runs the blob, document store, messaging and parameter kits; it creates Service Bus topics,
-#    subscriptions and queues named after the run.
+#    subscriptions and queues named after the run. Its key rotation tests keep keys in the run's Key Vault and
+#    change them there while clients are open.
 # 3. Always, even if tests fail or the script is interrupted: terraform destroy (the resource group with
 #    everything in it; the Key Vault and App Configuration store are purged, not left soft-deleted), and list
 #    what remains (expected: nothing).
@@ -287,6 +289,10 @@ EVENT_GRID_SUBSCRIPTION=$(terraform -chdir="$TF_DIR" output -raw eventgrid_subsc
 FUNCTION_ENDPOINT=$(terraform -chdir="$TF_DIR" output -raw function_endpoint)
 # Read by the tests from the environment, so the key stays off the command line
 export HALYX_FUNCTION_KEY="$(terraform -chdir="$TF_DIR" output -raw function_key)"
+export HALYX_COSMOS_KEY="$(terraform -chdir="$TF_DIR" output -raw cosmos_key)"
+export HALYX_COSMOS_SECONDARY_KEY="$(terraform -chdir="$TF_DIR" output -raw cosmos_secondary_key)"
+export HALYX_EVENTGRID_KEY="$(terraform -chdir="$TF_DIR" output -raw eventgrid_key)"
+export HALYX_EVENTGRID_SECONDARY_KEY="$(terraform -chdir="$TF_DIR" output -raw eventgrid_secondary_key)"
 
 wait_for_blob_access
 sleep 30 # the other services' assignments were made at the same time; give them a little longer
@@ -317,6 +323,7 @@ for module in halyx-spring-boot-autoconfigure halyx-spring-boot4-tests; do
       -Dhalyx.real.spring.messaging=true -Dhalyx.real.spring.parameters=true -Dhalyx.real.spring.functions=true \
       -Dhalyx.real.spring.function=tck \
       -Dhalyx.real.spring.function-properties="azure.functions.endpoint=$FUNCTION_ENDPOINT,azure.functions.key=\${HALYX_FUNCTION_KEY}" \
+      -Dhalyx.real.spring.function-key-store="$(terraform -chdir="$TF_DIR" output -raw key_vault_url)" \
       -Dhalyx.real.spring.provider=azure -Dhalyx.real.spring.bucket="$CONTAINER" \
       -Dhalyx.real.spring.table="items-sorted" \
       -Dhalyx.real.spring.provider-properties="azure.cosmos.endpoint=$(terraform -chdir="$TF_DIR" output -raw cosmos_endpoint),azure.cosmos.database=halyx,azure.storage.account=$STORAGE,azure.servicebus.namespace=$(terraform -chdir="$TF_DIR" output -raw servicebus_namespace)" \

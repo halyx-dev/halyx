@@ -192,7 +192,7 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
                             "halyx.event-buses." + name, bus.provider());
                     definition.getConstructorArgumentValues().addIndexedArgumentValue(2, name);
                     definition.getConstructorArgumentValues().addIndexedArgumentValue(3, bus);
-                    definition.setDependsOn(secretStores("halyx.event-buses." + name, bus.properties().keySet(),
+                    definition.setDependsOn(secretStores("halyx.event-buses." + name, bus.properties(),
                             bus.secrets(), parameterStores));
                     definition.setDescription("Halyx event bus " + name);
                     names.register(name, "halyx.event-buses." + name, "name", definition);
@@ -205,7 +205,7 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
                             function.provider());
                     definition.getConstructorArgumentValues().addIndexedArgumentValue(2, name);
                     definition.getConstructorArgumentValues().addIndexedArgumentValue(3, function);
-                    definition.setDependsOn(secretStores(property, function.properties().keySet(), function.secrets(),
+                    definition.setDependsOn(secretStores(property, function.properties(), function.secrets(),
                             parameterStores));
                     definition.setDescription("Halyx function " + name);
                     names.register(name, property, "name", definition);
@@ -217,13 +217,13 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
                     RootBeanDefinition definition = messagingBean(Subscription.class, property, name,
                             subscription.provider(), subscription, subscription.claimCheck(), "subscription",
                             stores.keySet());
-                    definition.setDependsOn(secretStores(property, subscription.properties().keySet(),
+                    definition.setDependsOn(secretStores(property, subscription.properties(),
                             subscription.secrets(), parameterStores));
                     names.register(name, property, "name", definition);
                 });
         // Provider secrets are read through the Halyx bean, which the stores themselves need, so they're only checked.
         binder.bind("halyx.providers", Bindable.mapOf(String.class, HalyxProperties.Provider.class)).orElse(Map.of())
-                .forEach((name, provider) -> secretStores("halyx.providers." + name, provider.properties().keySet(),
+                .forEach((name, provider) -> secretStores("halyx.providers." + name, provider.properties(),
                         provider.secrets(), parameterStores));
         Map<String, HalyxProperties.StreamClusterProperties> clusters = binder
                 .bind("halyx.stream-clusters", Bindable.mapOf(String.class, HalyxProperties.StreamClusterProperties.class))
@@ -259,9 +259,9 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
 
     /**
      * The bean names of the parameter stores that {@code secrets} read from, after checking that each names a setting
-     * not also in {@code properties}, a secret and one of the {@code halyx.parameter-stores}.
+     * not also set in {@code properties}, a secret and one of the {@code halyx.parameter-stores}.
      */
-    private static String[] secretStores(String property, Set<String> properties,
+    private static String[] secretStores(String property, Map<String, String> properties,
                                          List<HalyxProperties.SecretProperty> secrets, Set<String> parameterStores) {
         Set<String> stores = new TreeSet<>();
         Set<String> seen = new HashSet<>();
@@ -271,7 +271,8 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
             if (secret.property() == null || secret.property().isBlank()) {
                 throw new IllegalStateException(prefix + ".property is required");
             }
-            if (properties.contains(secret.property()) || !seen.add(secret.property())) {
+            String fixed = properties.get(secret.property());
+            if (fixed != null && !fixed.isBlank() || !seen.add(secret.property())) { // a blank value is unset
                 throw new IllegalStateException(prefix + ": " + secret.property() + " is set more than once in "
                         + property + ".properties and .secrets: set one");
             }

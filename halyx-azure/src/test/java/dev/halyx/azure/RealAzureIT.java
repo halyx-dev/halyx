@@ -22,6 +22,7 @@ import com.azure.messaging.servicebus.administration.models.CreateQueueOptions;
 import com.azure.messaging.servicebus.administration.models.CreateSubscriptionOptions;
 import com.azure.messaging.servicebus.administration.models.CreateTopicOptions;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -29,18 +30,24 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import dev.halyx.Halyx;
 import dev.halyx.CloudContext;
 import dev.halyx.config.ProviderConfig;
+import dev.halyx.events.CloudEvent;
+import dev.halyx.error.AccessDeniedException;
 import dev.halyx.events.EventBusConfig;
 import dev.halyx.events.EventPublisher;
 import dev.halyx.functions.FunctionConfig;
 import dev.halyx.functions.FunctionInvoker;
+import dev.halyx.functions.FunctionRequest;
 import dev.halyx.messaging.ClaimCheck;
 import dev.halyx.messaging.OutgoingMessage;
 import dev.halyx.messaging.ReceivedMessage;
 import dev.halyx.messaging.Subscription;
 import dev.halyx.messaging.SubscriptionConfig;
 import dev.halyx.messaging.TopicConfig;
+import dev.halyx.nosql.Document;
 import dev.halyx.nosql.DocumentStore;
+import dev.halyx.nosql.Key;
 import dev.halyx.nosql.TableConfig;
+import dev.halyx.parameters.ParameterStore;
 import dev.halyx.parameters.ParameterStoreConfig;
 import dev.halyx.storage.BlobStore;
 import dev.halyx.tck.BlobStoreConformanceTest;
@@ -53,16 +60,22 @@ import dev.halyx.tck.MessagingConformanceTest;
 import dev.halyx.tck.ParameterStoreConformanceTest;
 
 import java.time.Duration;
+import java.util.Base64;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import dev.halyx.tck.DocumentRepositoryConformanceTest;
 
 /**
  * The conformance kits against real Azure (tier 1: Blob Storage, Cosmos DB, Service Bus, Key Vault, App
- * Configuration), with Entra ID only: shared keys and local auth are off on every resource. Runs only with
+ * Configuration), with Entra ID; and keys rotated in the run's Key Vault while clients use them ({@link KeyRotation}). Runs only with
  * {@code -Dhalyx.real.azure=true}, normally through {@code cloud-testing/scripts/azure-real-cloud.sh}, which creates the
  * resources with Terraform and passes their names in. Credentials are {@code DefaultAzureCredential}, normally
  * the test service principal from the environment. Service Bus topics, subscriptions and queues are created
@@ -303,6 +316,118 @@ class RealAzureIT {
         @Override
         protected Duration timeout() {
             return Duration.ofMinutes(2);
+        }
+    }
+
+    /**
+     * Keys kept in the run's Key Vault and changed there while clients use them, as a rotation does: a function key
+     * read on every call, and Cosmos DB and Event Grid keys read every {@code azure.key-refresh-interval}. Each client
+     * is built once and must follow the change. The keys come from the environment ({@code HALYX_FUNCTION_KEY},
+     * {@code HALYX_COSMOS_KEY} and {@code HALYX_EVENTGRID_KEY}, with their {@code _SECONDARY_} counterparts).
+     */
+    @Nested
+    class KeyRotation {
+        /** A well-formed key that no account has. */
+        private static final String WRONG_KEY = Base64.getEncoder().encodeToString(new byte[64]);
+
+        private final ParameterStore vault = azure().parameterStore(ParameterStoreConfig.secrets().location(KEY_VAULT).build());
+        private final String prefix = "rotation-" + RUN.replaceAll("[^A-Za-z0-9-]", "-") + "-";
+        private final Set<String> written = new LinkedHashSet<>();
+
+        @AfterEach
+        void deleteSecrets() {
+            for (String name : written) {
+                try {
+                    vault.delete(name);
+                } catch (RuntimeException e) {
+                    System.err.println("Could not delete secret " + name + ": " + e.getMessage());
+                }
+            }
+        }
+
+        /** Writes {@code value} to the run's secret {@code name}, and returns its full name. */
+        private String rotate(String name, String value) {
+            vault.put(prefix + name, value);
+            written.add(prefix + name);
+            return prefix + name;
+        }
+
+        private static String env(String name) {
+            String value = System.getenv(name);
+            assertThat(value).as(name + " in the environment").isNotBlank();
+            return value;
+        }
+
+        @Test
+        void aFunctionKeyRotatedInKeyVaultTakesEffectOnTheNextCall() {
+            String secret = rotate("function", "retired-key");
+            FunctionInvoker invoker = azure().functionInvoker(FunctionConfig.builder("tck")
+                    .property(AzureProperties.FUNCTIONS_ENDPOINT, FUNCTION_ENDPOINT)
+                    .property(AzureProperties.FUNCTIONS_KEY, () -> vault.require(secret)).build());
+            FunctionRequest echo = FunctionRequest.of("{\"action\":\"echo\"}");
+
+            assertThatThrownBy(() -> invoker.invoke(echo)).isInstanceOf(AccessDeniedException.class);
+            rotate("function", env("HALYX_FUNCTION_KEY"));
+            assertThat(invoker.invoke(echo).payloadAsString()).contains("echo");
+        }
+
+        @Test
+        void aCosmosKeyRotatedInKeyVaultIsUsedWithoutARestart() throws Exception {
+            String secret = rotate("cosmos", env("HALYX_COSMOS_KEY"));
+            try (Halyx keyed = Halyx.builder().register("azure", ProviderConfig.of("azure")
+                    .property(AzureProperties.COSMOS_ENDPOINT, COSMOS)
+                    .property(AzureProperties.COSMOS_DATABASE, "halyx")
+                    .property(AzureProperties.COSMOS_KEY, () -> vault.require(secret))
+                    .property(AzureProperties.KEY_REFRESH_INTERVAL, "PT2S")).build()) {
+                DocumentStore items = keyed.provider("azure").documentStore(TableConfig.builder("items").build());
+                Key item = Key.of(prefix + UUID.randomUUID());
+                items.put(item, Document.builder().put("n", 1).build());
+
+                rotate("cosmos", WRONG_KEY);
+                eventually(() -> assertThatThrownBy(() -> items.get(item)).isInstanceOf(AccessDeniedException.class));
+                rotate("cosmos", env("HALYX_COSMOS_SECONDARY_KEY"));
+                eventually(() -> assertThat(items.get(item)).isPresent());
+                items.delete(item);
+            }
+        }
+
+        @Test
+        void anEventGridKeyRotatedInKeyVaultIsUsedWithoutARestart() throws Exception {
+            String secret = rotate("events", env("HALYX_EVENTGRID_KEY"));
+            try (Halyx keyed = Halyx.builder().register("azure", ProviderConfig.of("azure")
+                    .property(AzureProperties.KEY_REFRESH_INTERVAL, "PT2S")).build()) {
+                EventPublisher publisher = keyed.provider("azure").eventPublisher(EventBusConfig.builder(EVENT_GRID_TOPIC)
+                        .property(AzureProperties.EVENT_GRID_ENDPOINT, EVENT_GRID)
+                        .property(AzureProperties.EVENT_GRID_ACCESS_KEY, () -> vault.require(secret)).build());
+                publisher.publish(rotationEvent());
+
+                rotate("events", WRONG_KEY);
+                eventually(() -> assertThatThrownBy(() -> publisher.publish(rotationEvent()))
+                        .isInstanceOf(AccessDeniedException.class));
+                rotate("events", env("HALYX_EVENTGRID_SECONDARY_KEY"));
+                eventually(() -> publisher.publish(rotationEvent()));
+            }
+        }
+
+        /** An event of a source of its own, which the event kit's receiver acknowledges and ignores. */
+        private CloudEvent rotationEvent() {
+            return CloudEvent.builder("dev.halyx.rotation", "/halyx/rotation/" + RUN).json("{}").build();
+        }
+
+        /** Runs {@code check} until it passes, for up to a minute: a key change lands within the refresh interval. */
+        private static void eventually(Runnable check) throws InterruptedException {
+            long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(1);
+            while (true) {
+                try {
+                    check.run();
+                    return;
+                } catch (AssertionError | RuntimeException e) {
+                    if (System.nanoTime() > deadline) {
+                        throw e;
+                    }
+                    Thread.sleep(500);
+                }
+            }
         }
     }
 
