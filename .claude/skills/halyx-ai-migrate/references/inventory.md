@@ -26,7 +26,8 @@ grep -rnE "com\.google\.cloud\.(storage|firestore|pubsub|secretmanager|parameter
 # Caches, Kafka and SQL with a cloud login
 grep -rnE "RedisTemplate|StringRedisTemplate|LettuceConnectionFactory|LettuceClientConfigurationBuilderCustomizer|RedisCredentialsProvider|RedisCacheManagerBuilderCustomizer|RedisCacheConfiguration|@Cacheable|@CacheEvict|@EnableCaching|opsForValue\(\)\.increment|KafkaTemplate|@KafkaListener|groupId|IAMLoginModule|IAMClientCallbackHandler|GcpLoginCallbackHandler|aws-wrapper|azure.passwordless|cloudSqlInstance" src
 # Function invocations: Lambda's client, and HTTP calls to Azure Functions and Cloud Run functions
-grep -rnE "LambdaClient|LambdaAsyncClient|InvokeRequest|InvocationType|AWSLambda|x-functions-key|azurewebsites\.net/api|cloudfunctions\.net|\.run\.app|IdTokenCredentials|IdTokenProvider" src
+grep -rnE "LambdaClient|LambdaAsyncClient|InvokeRequest|InvocationType|AWSLambda|x-functions-key|[?&]code=|azurewebsites\.net/api|cloudfunctions\.net|\.run\.app|IdTokenCredentials|IdTokenProvider" src
+# An HTTP function's URL often comes only from the deployment: read the RestClient, WebClient and RestTemplate calls
 # Events SDKs, and the clients built by hand around them
 grep -rnE "EventBridgeClient|putEvents|EventGridSenderClient|EventGridReceiverClient|eventarc\.publishing|PublisherClient|PublishRequest" src
 # Tests that wire containers into Boot's own beans (they won't reach Halyx's)

@@ -162,7 +162,7 @@ ProviderConfig.of("azure")
 | `azure.functions.endpoint` | on a `FunctionConfig`: the function app's URL, such as `https://orders.azurewebsites.net` |
 | `azure.functions.audience` | on a `FunctionConfig`: the Entra ID app that App Service Authentication checks; tokens are for `<audience>/.default` |
 | `azure.functions.key` | on a `FunctionConfig`: a function key, sent as `x-functions-key`, instead of an Entra ID token; given as a supplier, it's asked for on every call |
-| `azure.functions.route` | on a `FunctionConfig`: the function's path on the app, if it isn't `api/<name>` |
+| `azure.functions.route` | on a `FunctionConfig`: the function's whole path on the app, if it isn't `api/<name>`, such as `api/products/enrich` |
 
 Key Vault and App Configuration take their URL as the store's `location`; see
 [Parameters and secrets](api/parameters.md).

@@ -95,7 +95,9 @@ After the last area, add the two tests no existing test covers ([testing.md](ref
   test can fail
 - **the production profile:** what the cloud profile resolves to, without connecting anywhere
 
-Then start the packaged jar or image once: the test classpath can hold dependencies the package doesn't.
+Then start the packaged jar or image once, on emulators or the `local` profile, never with the production settings
+(with the machine's credentials, it reaches the real cloud): the test classpath can hold dependencies the package
+doesn't.
 
 ## Phase 4: make the cloud a profile
 

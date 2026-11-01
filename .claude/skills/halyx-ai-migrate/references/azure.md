@@ -114,18 +114,27 @@ sending a function key (`x-functions-key` or `?code=`) or an Entra ID token they
 String out = restClient.post().uri("https://orders-fn.azurewebsites.net/api/resize")
         .header("x-functions-key", functionKey).body(json).retrieve().body(String.class);
 
-// After: halyx.functions.resize: { name: resize, properties: {
-//          azure.functions.endpoint: https://orders-fn.azurewebsites.net, azure.functions.key: "${resize-function-key}" } }
+// After: halyx.functions.resize: { name: resize,
+//          properties: { azure.functions.endpoint: https://orders-fn.azurewebsites.net },
+//          secrets: [ { property: azure.functions.key, store: secrets, name: resize-function-key } ] }
 String out = resize.invoke(FunctionRequest.of(json)).payloadAsString();
 ```
 
-- The key comes from Key Vault through `spring.config.import: halyx:secrets`, as other secrets do; with App
+- The key comes from Key Vault through the function's `secrets`, read on every call through the store's
+  `cache-ttl`, so a rotated key takes effect without a restart; a missing secret fails the start. With App
   Service Authentication, `azure.functions.audience: api://<app>` replaces the key, and the provider's Entra ID
   credential gets the tokens. A hand-built `TokenCredential` call for the token goes.
 - A route other than `api/<name>` (`"route": "..."` in `function.json`, or `@HttpTrigger(route = ...)`):
-  `azure.functions.route`.
+  `azure.functions.route` with the whole path on the app, `api/` included: `api/products/enrich` for
+  `"route": "products/enrich"`. The bare route reaches nothing, and the host's 404 is the same `NotFoundException` as
+  the function's own: in a trial, the "unknown product" test kept passing, and only the known-product test failed.
+- A key sent as `?code=` moves to `azure.functions.key`, sent as `x-functions-key`. A key that came from an
+  environment variable can stay one (`${CATALOG_ENRICH_KEY}`), read once at startup; a key from a secrets store
+  goes in `secrets`. A `halyx.*` placeholder that doesn't resolve fails the start.
 - `HttpClientErrorException` and `WebClientResponseException` handling becomes Halyx's exceptions: 404
   `NotFoundException`, 400 `InvalidArgumentException`, 429 and 503 `ThrottledException`, 500 `UnavailableException`.
+  The message is `Function <name> returned <status>: <the start of the body>`; the body itself isn't exposed, so a
+  service that passed it on to its clients changes what they see.
 - Halyx sends only `POST`. A function called with `GET` and query parameters needs to accept `POST`.
 
 ## Streams: Event Hubs (Kafka endpoint)

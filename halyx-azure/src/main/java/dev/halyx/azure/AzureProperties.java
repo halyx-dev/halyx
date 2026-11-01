@@ -91,7 +91,10 @@ public final class AzureProperties {
      */
     public static final String FUNCTIONS_KEY = "azure.functions.key";
 
-    /** Function property: the function's path on the app, when it isn't {@code api/<name>}, such as {@code images/resize}. */
+    /**
+     * Function property: the function's whole path on the app, when it isn't {@code api/<name>}, such as
+     * {@code api/images/resize} for a function whose route is {@code images/resize}.
+     */
     public static final String FUNCTIONS_ROUTE = "azure.functions.route";
 
     private AzureProperties() {

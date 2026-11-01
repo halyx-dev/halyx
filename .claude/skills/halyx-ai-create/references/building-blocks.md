@@ -85,6 +85,7 @@ Each of these goes in the plan when the service uses it, with how the service st
 | Function payloads | `invoke`: 6 MB on Lambda, 100 MB on Azure Functions, 32 MiB on Cloud Run functions; Lambda headers fit in 3,583 bytes once encoded | send keys, not content; the function reads the content from a blob store |
 | Function `trigger` | Lambda only (`FunctionCapability.TRIGGER`), and without headers | publish a message instead, or check the capability and fall back to `invoke` |
 | Function retries | a non-idempotent function (the default) is retried only when it can't have run (throttling, a failed connect); a timeout throws `UnavailableException` while the function may still be running | mark a function `idempotent: true` only when running it twice is harmless; make it idempotent, or key its writes by a request id |
+| Function errors | Lambda functions return no HTTP status; a wrong Azure route, a missing function and a function's 404 are all `NotFoundException` | the function's contract reports rejections in its payload, and keeps statuses for failures |
 | Function login | IAM on AWS; on Azure, an Entra ID audience (App Service Authentication) or a function key; a Google ID token on Google Cloud | set them in the cloud's document: a function key from a secrets store, never inline |
 | No emulator | Event Grid namespaces, Eventarc Advanced, Parameter Manager | test them on the memory provider; the emulator runs read settings from Secret Manager on Google Cloud (`kind: secrets`) and leave events off on Azure and Google Cloud |
 

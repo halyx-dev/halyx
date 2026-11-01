@@ -123,6 +123,8 @@ repository holds it, otherwise a stand-in that keeps its contract (the same payl
   container. On the anonymous provider, Halyx sends no login: give the function `authLevel: anonymous`, or set
   `azure.functions.key` with a key from `/azure-functions-host/Secrets/host.json` and
   `AzureWebJobsSecretStorageType=files`.
+- Keep a test that reaches a known item through the function. A wrong name or route is `NotFoundException`, like a
+  missing item, so a "not found" test alone passes against a function that was never reached.
 - **Google Cloud:** the function under Google's Functions Framework (`functions-framework` on a `python:3.12-slim`
   image, or the function's language), and `properties.gcp.functions.url` at the container. On the anonymous
   provider, Halyx sends no ID token.
