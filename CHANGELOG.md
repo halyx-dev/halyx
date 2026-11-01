@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.1.0 (unreleased)
+## 1.1.0 (2026-11-02)
 
 ### Features
 
@@ -67,6 +67,9 @@
 - **API compatibility checks** ([#4](https://github.com/halyx-dev/halyx/issues/4)): `mvn verify` compares each
   published module with 1.0.0 from Maven Central using japicmp, and fails on a binary- or source-incompatible change
   to the public API, the provider SPI included. CI runs it on every push.
+- **Dependency scanning**: a workflow scans SBOMs of every published module and the samples with OSV-Scanner on
+  every push and pull request, and weekly. `osv-scanner.toml` lists the findings Halyx can't fix itself, with their
+  reasons, in place of the Snyk policy file.
 
 ### Dependencies
 
