@@ -51,7 +51,7 @@ that.
 | Chain of Responsibility | `Interceptor` and `InterceptorChain` (`RetryInterceptor` included) |
 | Value Object | `BlobKey`, `ETag`, `Key`, `Version`, `ProviderConfig`: immutable |
 | Service Stub | the `memory` provider, for tests, with `InMemoryFunctions` serving registered handlers |
-| Exception Translation | the sealed `CloudException` hierarchy with `isRetryable()`; HTTP statuses through `AzureErrors.fromStatus` and `GcpErrors.fromStatus`, shared by the SDK translations and the HTTP function drivers |
+| Exception Translation | the sealed `CloudException` hierarchy with `isRetryable()`; HTTP statuses through `AzureErrors.fromStatus` and `GcpErrors.fromStatus`, shared by the SDK translations and the HTTP function drivers; what a failed function reported kept whole as a `FunctionError` cause |
 
 ### Principles
 
