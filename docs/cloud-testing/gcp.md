@@ -13,7 +13,7 @@ the `halyx-test` service account, impersonated through Application Default Crede
 
 | Tier | Services | Latest result |
 |---|---|---|
-| [1](#tier-1-latest-result) | Cloud Storage, Firestore, Pub/Sub, Secret Manager, Parameter Manager, Eventarc Advanced; Spring Data repositories (blocking and reactive) on Firestore, and Spring Boot on Firestore, Eventarc and, with halyx-reactor, WebFlux | **230/234** passed, 4 skipped (expected); Spring **16/16** |
+| [1](#tier-1-latest-result) | Cloud Storage, Firestore, Pub/Sub, Secret Manager, Parameter Manager, Eventarc Advanced; Spring Data repositories (blocking and reactive) on Firestore, and Spring Boot on Firestore, Eventarc and, with halyx-reactor, WebFlux | **240/246** passed, 6 skipped (expected); Spring **20/22**, 2 skipped (expected) |
 | [2](#tier-2-latest-result) | Cloud SQL for PostgreSQL and MySQL with IAM auth, direct and through the Cloud SQL connector; R2DBC and Spring Data R2DBC | **22/22**; Spring **2/2** |
 | [3](#tier-3-latest-result) | Memorystore for Valkey with IAM auth and TLS (private CA) | **57/57**; Spring **2/2** |
 | [4](#tier-4-latest-result) | Streams on Managed Service for Apache Kafka with Google IAM, from a runner inside the VPC, plus Spring Boot 3 and 4 | **29/29**; Spring **2/2** |
@@ -682,6 +682,11 @@ Then Spring Boot 3.5 and 4: a provider with `credentials.type: impersonate` and 
 | `r2610231129846c` | tier 5, plus Spring Boot 3 and 4 | **3/3**; Spring **2/2** | clean | Latest tier 5 result, above. |
 | `r26103118357945` | tier 1, functions only (`IT_TEST='RealGcpIT$CloudRunFunctions'`, `SPRING_IT_TEST=RealSpringFunctionIT`) | not run | clean | Stopped at `terraform apply`: the test service account had no `cloudfunctions.functions.create`. It was granted Cloud Functions Developer, Cloud Run Admin (to grant `run.invoker` on the function) and Cloud Build Service Account, and the function is now built as the test service account. The Cloud Functions, Cloud Build and Cloud Run APIs were enabled first. |
 | `r2610312021456e` | tier 1, functions only | **10 passed, 2 skipped** (expected: no `trigger` and no header limit on Cloud Run functions); Spring **4/4** | clean | First function run: the function kit at the function's `run.app` URL with Google ID tokens, one instance taking one request at a time; a missing function at its default URL answered 404. `RealSpringFunctionIT` 2/2 on Boot 3.5 and 4, at the default `cloudfunctions.net` URL. |
+| `r261101194024cd` | tier 1, plus Spring Boot 3 and 4 | **240 passed, 6 skipped**; Spring **20/22**, 2 skipped | clean | Full regression before 1.1.0, at `40d4101`. Tier 1 now includes the function kit on Cloud Run functions. The skips are expected: features the services don't offer, and on Spring the Key Vault rotation test, which runs on Azure only. |
+| `r261101214786d7` | tier 2, plus Spring Boot 3 and 4 | **22/22**; Spring **2/2** | clean | Full regression before 1.1.0, at `40d4101`. |
+| `r261101220895fe` | tier 3, plus Spring Boot 3 and 4 | **57/57**; Spring **2/2** | clean | Full regression before 1.1.0, at `40d4101`. |
+| `r26110122291cd3` | tier 4, plus Spring Boot 3 and 4 | **29/29**; Spring **2/2** | clean | Full regression before 1.1.0, at `40d4101`. |
+| `r26110123052fed` | tier 5, plus Spring Boot 3 and 4 | **3/3**; Spring **2/2** | clean | Full regression before 1.1.0, at `40d4101`. |
 
 ## What real GCP found
 

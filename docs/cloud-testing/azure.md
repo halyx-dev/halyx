@@ -13,7 +13,7 @@ the `halyx-test` service principal. Every run creates its own throwaway resource
 
 | Tier | Services | Latest result |
 |---|---|---|
-| [1](#tier-1-latest-result) | Blob Storage, Cosmos DB, Service Bus, Key Vault, App Configuration, Event Grid namespaces (Entra ID only); Spring Data repositories (blocking and reactive) on Cosmos DB, and Spring Boot on Cosmos DB, Event Grid and, with halyx-reactor, WebFlux | **207/208** passed, 1 skipped (expected); Spring **16/16** |
+| [1](#tier-1-latest-result) | Blob Storage, Cosmos DB, Service Bus, Key Vault, App Configuration, Event Grid namespaces (Entra ID only); Spring Data repositories (blocking and reactive) on Cosmos DB, and Spring Boot on Cosmos DB, Event Grid and, with halyx-reactor, WebFlux | **220/223** passed, 3 skipped (expected); Spring **22/22** |
 | [2](#tier-2-latest-result) | Azure Database for PostgreSQL and Azure SQL with Entra ID login; R2DBC and Spring Data R2DBC on PostgreSQL | **13/13**; Spring **2/2** |
 | [3](#tier-3-latest-result) | Azure Managed Redis with Entra ID (access keys off) | **55/55**; Spring **2/2** |
 | [4](#tier-4-latest-result) | Event Hubs through its Kafka endpoint, with Entra ID (shared access keys off), plus Spring Boot 3 and 4 | **27/29** passed, 2 skipped (expected); Spring **2/2** |
@@ -568,6 +568,13 @@ environment), and with `token-file`. **4/4; Spring 4/4**, run `r26102311158b75`,
 | `r26102311158b75` | tier 5, plus Spring Boot 3 and 4 | **4/4**; Spring **4/4** | clean | The first tier 5 run: a service principal with a secret, and with a federated Google ID token. |
 | `r26103118516ad7` | tier 1, functions only (`IT_TEST='RealAzureIT$AzureFunctions'`, `SPRING_IT_TEST=RealSpringFunctionIT`) | not run | clean | Stopped at `terraform apply`: the principal's role-assignment rights don't allow giving the function app's managed identity storage roles. The function host now has a storage account of its own with an account key, the one exception to Entra ID only. |
 | `r26103120092661` | tier 1, functions only | **10 passed, 2 skipped** (expected: no `trigger` and no header limit on Azure Functions); Spring **4/4** | clean | First function run: the function kit on a function app's single Basic instance, with its function key. `RealSpringFunctionIT` 2/2 on Boot 3.5 and 4. |
+| `r2611011856dabc` | tier 1, plus Spring Boot 3 and 4 | **220 passed, 3 skipped**; Spring **22/22** | clean | Full regression before 1.1.0, at `40d4101`. Tier 1 now includes the function kit on Azure Functions and the key rotation tests: `RealAzureIT$KeyRotation` **3/3**, and `aFunctionKeyFromKeyVaultFollowsARotation` on Boot 3.5 and 4. The first apply with the Event Grid keys read through azapi `listKeys`. |
+| `r26110121016f75` | tier 2, plus Spring Boot 3 and 4 | **13/13**; Spring **2/2** | clean | Full regression before 1.1.0, at `40d4101`. |
+| `r26110121148fa8` | tier 3, plus Spring Boot 3 and 4 | 54/55; Spring **2/2** | clean | Full regression before 1.1.0, at `40d4101`. `largeValue` timed out: reading a 1 MiB value back took longer than the 2-second default command timeout. The other 54 tests passed on the same connection. |
+| `r261102005486b4` | tier 3, plus Spring Boot 3 and 4 | **55/55**; Spring **2/2** | clean | Rerun of the regression's tier 3, at `40d4101`: every test passed, `largeValue` included. |
+| `r26110121289a1f` | tier 4, plus Spring Boot 3 and 4 | **27 passed, 2 skipped**; Spring **2/2** | clean | Full regression before 1.1.0, at `40d4101`. |
+| `r261101214198dc` | tier 5, plus Spring Boot 3 and 4 | 3 passed, 1 skipped; Spring **2/2** | clean | Full regression before 1.1.0, at `40d4101`. The federated login was skipped: the run had no `AZURE_FEDERATED_GOOGLE_SA`, so no Google ID token. |
+| `r26110201115756` | tier 5, plus Spring Boot 3 and 4 | **4/4**; Spring **4/4** | clean | Rerun of the regression's tier 5 with `AZURE_FEDERATED_GOOGLE_SA`, at `40d4101`: the federated login with a Google ID token passed too. |
 
 ## What real Azure found
 

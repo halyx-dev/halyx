@@ -13,7 +13,7 @@ the `halyx_test` IAM user. Every run creates its own throwaway resources and del
 
 | Tier | Services | Latest result |
 |---|---|---|
-| [1](#tier-1-latest-result) | S3, DynamoDB, SSM Parameter Store, Secrets Manager, SNS, SQS, EventBridge; Spring Data repositories (blocking and reactive) on DynamoDB, and Spring Boot on DynamoDB, EventBridge and, with halyx-reactor, WebFlux | **227/228**, 1 skipped (expected); Spring **16/16** |
+| [1](#tier-1-latest-result) | S3, DynamoDB, SSM Parameter Store, Secrets Manager, SNS, SQS, EventBridge; Spring Data repositories (blocking and reactive) on DynamoDB, and Spring Boot on DynamoDB, EventBridge and, with halyx-reactor, WebFlux | **238/240**, 2 skipped (expected); Spring **20/22**, 2 skipped (expected) |
 | [2](#tier-2-latest-result) | RDS for PostgreSQL and MySQL with IAM auth; R2DBC and Spring Data R2DBC | **16/16**; Spring **2/2** |
 | [3](#tier-3-latest-result) | ElastiCache for Valkey with IAM auth | **56/56**; Spring **2/2** |
 | [4](#tier-4-not-run) | Streams on MSK Serverless with IAM | not run: the test account's Free plan doesn't allow MSK |
@@ -633,6 +633,10 @@ Then Spring Boot 3.5 and 4: a provider with `credentials.type: impersonate`, `ta
 | `r26103118264f82` | tier 1, functions only (`IT_TEST='RealAwsIT$Lambda'`, `SPRING_IT_TEST=RealSpringFunctionIT`) | not run | clean | Stopped at `terraform apply`: the test user may not attach a managed policy to a role (`iam:AttachRolePolicy`). The function's role now has an inline policy only, as tier 5's does. |
 | `r26103118314607` | tier 1, functions only | not run | clean | Stopped at `terraform apply`: no `iam:PassRole` to give the role to Lambda. The test user was granted `iam:PassRole` on `halyx-*` roles for Lambda, and the Lambda actions on `halyx-*` functions. |
 | `r2610311838d2b2` | tier 1, functions only | **11 passed, 1 skipped** (expected: Lambda functions return no HTTP status); Spring **4/4** | clean | First function run: the function kit on a real Lambda function, with IAM, the `ClientContext` headers, the function error, the 2-second timeout not retried, and `trigger`. `RealSpringFunctionIT` 2/2 on Boot 3.5 and 4. |
+| `r2611011925fd7e` | tier 1, plus Spring Boot 3 and 4 | **238 passed, 2 skipped**; Spring **20/22**, 2 skipped | clean | Full regression before 1.1.0, at `40d4101`. Tier 1 now includes the function kit on Lambda. The skips are expected: features the services don't offer, and on Spring the Key Vault rotation test, which runs on Azure only. |
+| `r26110120300038` | tier 2, plus Spring Boot 3 and 4 | **16/16**; Spring **2/2** | clean | Full regression before 1.1.0, at `40d4101`. |
+| `r26110120427cff` | tier 3, plus Spring Boot 3 and 4 | **56/56**; Spring **2/2** | clean | Full regression before 1.1.0, at `40d4101`. |
+| `r2611012059e552` | tier 5, plus Spring Boot 3 and 4 | **3/3**; Spring **2/2** | clean | Full regression before 1.1.0, at `40d4101`. |
 
 ## What real AWS found
 
