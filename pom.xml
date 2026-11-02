@@ -212,7 +212,7 @@
         <central-publishing-maven-plugin.version>0.12.0</central-publishing-maven-plugin.version>
         <!-- API compatibility: each published module is compared with this release from Maven Central -->
         <japicmp-maven-plugin.version>0.26.5</japicmp-maven-plugin.version>
-        <japicmp.baseline>1.0.0</japicmp.baseline>
+        <japicmp.baseline>1.1.0</japicmp.baseline>
     </properties>
 
     <dependencyManagement>
