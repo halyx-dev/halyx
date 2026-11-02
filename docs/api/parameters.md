@@ -122,6 +122,51 @@ detected changes and watch failures.
 In Spring Boot, `spring.config.import=halyx:<store>` loads a store into the `Environment` and can reload
 it. See [Spring Boot](../spring-boot.md#configuration-import).
 
+## Feature flags
+
+A parameter store makes a portable home for feature flags: the same flags, managed the same way, on SSM Parameter
+Store, App Configuration, Parameter Manager or Vault. Halyx stores them; a flag library evaluates them. Any library with
+a pluggable source works, such as flipjack's `PollingFeatureToggles`, a Togglz `StateRepository`, an FF4J
+`FeatureStore` or an OpenFeature provider. This example uses [flipjack](https://github.com/kamranzafar/flipjack), which
+routes calls between an implementation and its fallback so business code has no flag checks:
+
+```java
+@Bean
+OverridableFeatureToggles featureToggles(@Qualifier("settings") ParameterStore settings) {
+    return PollingFeatureToggles.builder(() -> {
+                Map<String, String> flags = new LinkedHashMap<>();
+                settings.getAll("features").forEach((name, p) ->           // features/bulk-discount -> bulk-discount
+                        flags.put(name.substring(name.lastIndexOf('/') + 1), p.value()));
+                return flags;
+            })
+            .interval(Duration.ofSeconds(30))
+            .requireInitialLoad()
+            .build()
+            .withOverrides();
+}
+
+@Component
+@Toggleable(value = "bulk-discount", fallback = StandardPricing.class)
+class BulkDiscountPricing implements OrderPricing { ... }
+```
+
+- `getAll` returns names relative to the store's prefix, the same on every backend, so `features/bulk-discount` under
+  the prefix `orders-svc` is the flag `bulk-discount`.
+- Flipjack polls, so a change takes effect within the poll interval plus the store's `cacheTtl`. Give a flags store
+  no cache, or a short one.
+- A flag that is missing from the store is off. Features start off until the store turns them on, and deleting a flag
+  turns it off at the next poll.
+- `requireInitialLoad()` stops the start when the store can't be read, rather than starting with every flag off.
+- `withOverrides()` adds kill switches: `toggles.override("bulk-discount", false)` turns a feature off at once, even
+  while the store is unreachable, and `clearOverride` hands it back to the store.
+
+A parameter store holds on/off flags per deployment. Per-user targeting and percentage rollouts need a flag platform
+such as flagd, Unleash or LaunchDarkly; flipjack's `flipjack-openfeature` module takes any OpenFeature provider as its
+source in place of `PollingFeatureToggles`, and the routing stays the same.
+
+Without Spring, build the same `PollingFeatureToggles` and wrap beans with `ToggledFeature.of(...)`. The
+[portable orders sample](../portable-service.md#feature-flags) runs this on every cloud.
+
 ## Keys for other services
 
 A store can hold the keys and passwords that other services log in with, read as they're used so a rotation takes

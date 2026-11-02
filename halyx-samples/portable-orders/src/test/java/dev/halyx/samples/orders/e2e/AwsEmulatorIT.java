@@ -86,7 +86,7 @@ class AwsEmulatorIT extends PortableOrdersSuite {
     @Override
     protected Expectations expected() {
         return new Expectations("aws", Set.of("events", "streams", "cache", "sql"),
-                Integer.parseInt(AwsResources.MAX_LINES), AwsResources.CURRENCY, SIGNING_KEY,
+                Integer.parseInt(AwsResources.MAX_LINES), AwsResources.CURRENCY, SIGNING_KEY, Set.of("bulk-discount"),
                 Duration.ofSeconds(60));
     }
 }

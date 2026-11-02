@@ -95,7 +95,7 @@ print("\n".join(sorted({c["imageID"].split("@")[-1] for p in pods for c in p["st
 }
 
 # Runs DeployedServiceIT from the given module through a port-forward to the service. ORDERS_E2E_FEATURES,
-# ORDERS_E2E_MAX_LINES, ORDERS_E2E_CURRENCY and ORDERS_E2E_SIGNING_KEY describe what the deployment should be.
+# ORDERS_E2E_MAX_LINES, ORDERS_E2E_CURRENCY, ORDERS_E2E_FLAGS and ORDERS_E2E_SIGNING_KEY describe what the deployment should be.
 run_suite() {
   local module=$1 cloud=$2 label=$3
   log "Running the end-to-end suite ($label) through a port-forward"
@@ -108,7 +108,7 @@ run_suite() {
   mvn -q verify -pl "halyx-samples/$module" -Dit.test=DeployedServiceIT -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
       -Dlicense.skip=true -Dorders.e2e.url="http://localhost:$LOCAL_PORT" -Dorders.e2e.cloud="$cloud" \
       -Dorders.e2e.features="$ORDERS_E2E_FEATURES" -Dorders.e2e.max-lines="$ORDERS_E2E_MAX_LINES" \
-      -Dorders.e2e.currency="$ORDERS_E2E_CURRENCY" -Dorders.e2e.signing-key="$ORDERS_E2E_SIGNING_KEY"
+      -Dorders.e2e.currency="$ORDERS_E2E_CURRENCY" -Dorders.e2e.flags="${ORDERS_E2E_FLAGS:-}" -Dorders.e2e.signing-key="$ORDERS_E2E_SIGNING_KEY"
   local status=$?
   kill "$forward" 2>/dev/null
   mkdir -p "$REPORTS"

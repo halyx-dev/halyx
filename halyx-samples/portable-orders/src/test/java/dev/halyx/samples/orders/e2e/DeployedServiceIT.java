@@ -27,7 +27,8 @@ import java.util.stream.Collectors;
  * The suite against a running deployment, such as the image on a real cloud. Runs only with
  * {@code -Dorders.e2e.url=http://...}; the deployment's expected cloud, features, settings and signing key come from
  * {@code orders.e2e.cloud}, {@code .features} (comma separated), {@code .max-lines}, {@code .currency},
- * {@code .signing-key} and {@code .patience} (an ISO-8601 duration, 2 minutes by default).
+ * {@code .signing-key}, {@code .flags} (the feature flags turned on, comma separated) and {@code .patience} (an
+ * ISO-8601 duration, 2 minutes by default).
  */
 @EnabledIfSystemProperty(named = "orders.e2e.url", matches = ".+")
 class DeployedServiceIT extends PortableOrdersSuite {
@@ -41,12 +42,17 @@ class DeployedServiceIT extends PortableOrdersSuite {
 
     @Override
     protected Expectations expected() {
-        Set<String> features = Arrays.stream(System.getProperty("orders.e2e.features", "").split(","))
-                .map(String::trim).filter(feature -> !feature.isEmpty()).collect(Collectors.toSet());
+        Set<String> features = csv(System.getProperty("orders.e2e.features", ""));
         return new Expectations(System.getProperty("orders.e2e.cloud"), features,
                 Integer.parseInt(System.getProperty("orders.e2e.max-lines", "20")),
                 System.getProperty("orders.e2e.currency", "GBP"),
                 System.getProperty("orders.e2e.signing-key"),
+                csv(System.getProperty("orders.e2e.flags", "")),
                 Duration.parse(System.getProperty("orders.e2e.patience", "PT2M")));
+    }
+
+    private static Set<String> csv(String value) {
+        return Arrays.stream(value.split(",")).map(String::trim).filter(item -> !item.isEmpty())
+                .collect(Collectors.toSet());
     }
 }

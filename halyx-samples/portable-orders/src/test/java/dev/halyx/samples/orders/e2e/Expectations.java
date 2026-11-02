@@ -26,12 +26,17 @@ import java.util.Set;
  * @param maxLines   {@code orders.max-lines}, as the settings store or the defaults give it
  * @param currency   {@code orders.currency}, likewise
  * @param signingKey the receipt signing key in the secrets store
+ * @param flags      the feature flags the settings store turns on, such as {@code bulk-discount}; any other is off
  * @param patience   how long asynchronous steps (listeners, routers, streams) may take
  */
 public record Expectations(String cloud, Set<String> features, int maxLines, String currency, String signingKey,
-                           Duration patience) {
+                           Set<String> flags, Duration patience) {
 
     public boolean has(String feature) {
         return features.contains(feature);
+    }
+
+    public boolean flagOn(String flag) {
+        return flags.contains(flag);
     }
 }

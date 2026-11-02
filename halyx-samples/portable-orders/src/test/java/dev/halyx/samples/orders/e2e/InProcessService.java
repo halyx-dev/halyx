@@ -43,6 +43,11 @@ final class InProcessService implements AutoCloseable {
         return client;
     }
 
+    /** A bean of the running service, such as a parameter store a test changes while the service runs. */
+    <T> T bean(String name, Class<T> type) {
+        return context.getBean(name, type);
+    }
+
     @Override
     public void close() {
         context.close();
