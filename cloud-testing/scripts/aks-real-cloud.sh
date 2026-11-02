@@ -183,7 +183,7 @@ values = {
 }
 print(json.dumps(values, indent=2))' > "$WORK/values.yaml" || exit 1   # JSON is YAML
 
-export ORDERS_E2E_FEATURES="events,streams,cache,sql" ORDERS_E2E_MAX_LINES=4 ORDERS_E2E_CURRENCY=NZD
+export ORDERS_E2E_FEATURES="events,streams,cache,sql" ORDERS_E2E_MAX_LINES=4 ORDERS_E2E_CURRENCY=NZD ORDERS_E2E_FLAGS=
 ORDERS_E2E_SIGNING_KEY="$(tf signing_key)"
 export ORDERS_E2E_SIGNING_KEY
 deploy_and_test "$REGISTRY/portable-orders" azure

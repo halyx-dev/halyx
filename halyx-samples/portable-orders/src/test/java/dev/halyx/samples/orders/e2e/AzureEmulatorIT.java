@@ -161,7 +161,7 @@ class AzureEmulatorIT extends PortableOrdersSuite {
 
     @Override
     protected Expectations expected() {
-        return new Expectations("azure", Set.of("streams", "cache", "sql"), 6, "USD", SIGNING_KEY,
+        return new Expectations("azure", Set.of("streams", "cache", "sql"), 6, "USD", SIGNING_KEY, Set.of("bulk-discount"),
                 Duration.ofSeconds(60));
     }
 
@@ -184,6 +184,7 @@ class AzureEmulatorIT extends PortableOrdersSuite {
                     .build());
             settings.put("orders/max-lines", "6");
             settings.put("orders/currency", "USD");
+            settings.put("features/bulk-discount", "true");
             halyx.provider("azure").parameterStore(ParameterStoreConfig.secrets().prefix("portable-orders")
                             .location(vaultUrl).property("azure.emulator.insecure-http", "true").build())
                     .put("receipt-signing-key", SIGNING_KEY);

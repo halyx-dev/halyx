@@ -29,6 +29,7 @@ POST /customers/{id}/orders ──► orders (DocumentStore, via a Spring Data r
                             ├─► order-audit (StreamProducer)  ──► auditor (@HalyxListener, stream consumer)    streams
                             └─► idempotency (Cache): an Idempotency-Key header makes retries safe            cache
 spring.config.import: halyx:settings  ──► orders.max-lines, orders.currency (ParameterStore, reloaded every minute)
+settings features/* ──► flipjack (polled) ──► bulk-discount: BulkDiscountPricing, or StandardPricing when off
 ```
 
 | Endpoint | Returns |
@@ -80,9 +81,19 @@ names:
 | `ORDERS_STORAGE_ACCOUNT`, `ORDERS_COSMOS_ENDPOINT`, `ORDERS_SERVICEBUS_NAMESPACE`, `ORDERS_KEYVAULT_URL`, `ORDERS_APPCONFIG_ENDPOINT`, `ORDERS_EVENTGRID_ENDPOINT` | the Azure accounts and endpoints | |
 | `GOOGLE_CLOUD_PROJECT`, `ORDERS_PARAMETER_LOCATION` | the Google Cloud project, and the Parameter Manager location | location `global` |
 
-The settings (`orders/max-lines` and `orders/currency`) and the `receipt-signing-key` secret live under the
-`portable-orders` prefix: in SSM Parameter Store and Secrets Manager, App Configuration and Key Vault, or Parameter
-Manager and Secret Manager.
+The settings (`orders/max-lines` and `orders/currency`), the feature flags (`features/bulk-discount`) and the
+`receipt-signing-key` secret live under the `portable-orders` prefix: in SSM Parameter Store and Secrets Manager, App
+Configuration and Key Vault, or Parameter Manager and Secret Manager.
+
+### Feature flags
+
+Profiles decide which services a deployment has; feature flags switch behaviour at runtime. The sample's one flag,
+`bulk-discount`, takes 10% off each order line of ten or more. [flipjack](https://github.com/kamranzafar/flipjack)
+evaluates it from the `settings` store (`FeatureFlags`): `OrderService` calls `OrderPricing`, and flipjack routes the
+call to `BulkDiscountPricing` while the flag is `true`, and to `StandardPricing` while it's `false` or missing.
+Flipjack polls the store every `orders.feature-flags.poll-interval` (30 seconds), so a change takes effect without a
+restart. An override on the `featureToggles` bean wins over the store, as a kill switch that doesn't wait for a poll.
+See [Feature flags](api/parameters.md#feature-flags).
 
 ## What portability takes
 
@@ -149,11 +160,15 @@ skipped, so the report shows what each deployment ran.
 | Deployment | Test | Services |
 |---|---|---|
 | `local` profile, in process | `LocalDeploymentTest` | the memory provider; every feature but SQL |
+| `local` profile, in process | `FeatureFlagsTest` | the memory provider: `bulk-discount` turned on, off and deleted while the service runs |
 | AWS emulators, in process | `AwsEmulatorIT` | Floci (S3, DynamoDB, SNS, SQS, EventBridge, SSM, Secrets Manager), PostgreSQL, Valkey, Kafka; every feature |
 | Azure emulators, in process | `AzureEmulatorIT` | Floci-az (Blob Storage, Cosmos DB, Key Vault, App Configuration), the Service Bus emulator, PostgreSQL, Valkey, Kafka; all but `events` |
 | Google Cloud emulators, in process | `GcpEmulatorIT` | Floci-gcp (Cloud Storage, Firestore, Pub/Sub, Secret Manager), PostgreSQL, Valkey, Kafka; all but `events` |
 | the image, on the AWS emulators | `ImageIT`, with `-Pimage` | as `AwsEmulatorIT`, with the image configured only through its environment |
 | a running deployment | `DeployedServiceIT`, with `-Dorders.e2e.url=...` | whatever it runs on: the image on EKS, GKE and AKS, through the scripts above |
+
+The suite's `bulk-discount` test follows each deployment's flags: on for the AWS and Azure emulators, the image, EKS
+and GKE; missing in memory and on the Google Cloud emulators; `false` on AKS.
 
 `portable-orders-boot3` builds the same sources and runs the same tests on Spring Boot 3.5. The sample itself
 targets Boot 4.

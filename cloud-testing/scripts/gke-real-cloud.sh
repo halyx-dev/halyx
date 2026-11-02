@@ -184,7 +184,7 @@ values = {
 }
 print(json.dumps(values, indent=2))' > "$WORK/values.yaml" || exit 1
 
-export ORDERS_E2E_FEATURES="events,streams,cache,sql" ORDERS_E2E_MAX_LINES=3 ORDERS_E2E_CURRENCY=JPY
+export ORDERS_E2E_FEATURES="events,streams,cache,sql" ORDERS_E2E_MAX_LINES=3 ORDERS_E2E_CURRENCY=JPY ORDERS_E2E_FLAGS=bulk-discount
 ORDERS_E2E_SIGNING_KEY="$(tf signing_key)"
 export ORDERS_E2E_SIGNING_KEY
 deploy_and_test "$(tf repository)/portable-orders" gcp

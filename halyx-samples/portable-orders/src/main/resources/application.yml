@@ -44,6 +44,9 @@ orders:
   # Defaults, overridden by the settings parameter store (portable-orders/orders/max-lines and so on)
   max-lines: 20
   currency: GBP
+  # Feature flags are values in the same store, under portable-orders/features (see FeatureFlags); a missing flag is off
+  feature-flags:
+    poll-interval: 30s
 
 halyx:
   blob-stores:
