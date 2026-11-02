@@ -308,6 +308,14 @@ resource "azurerm_app_configuration_key" "currency" {
   depends_on             = [time_sleep.data_roles]
 }
 
+# Off, and declared, so flipjack's consistency check sees it; AWS and Google Cloud turn it on
+resource "azurerm_app_configuration_key" "bulk_discount" {
+  configuration_store_id = azurerm_app_configuration.settings.id
+  key                    = "${local.prefix}/features/bulk-discount"
+  value                  = "false"
+  depends_on             = [time_sleep.data_roles]
+}
+
 resource "random_password" "signing_key" {
   length  = 32
   special = false

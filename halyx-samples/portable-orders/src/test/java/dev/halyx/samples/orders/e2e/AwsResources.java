@@ -85,6 +85,7 @@ final class AwsResources {
                     ParameterStoreConfig.parameters().prefix("portable-orders").build());
             settings.put("orders/max-lines", MAX_LINES);
             settings.put("orders/currency", CURRENCY);
+            settings.put("features/bulk-discount", "true");
             halyx.provider("aws").parameterStore(ParameterStoreConfig.secrets().prefix("portable-orders").build())
                     .put("receipt-signing-key", signingKey);
         }

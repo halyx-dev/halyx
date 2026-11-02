@@ -238,9 +238,13 @@ resource "google_eventarc_enrollment" "events" {
 # --- settings and secrets: Parameter Manager and Secret Manager ---------------------------------------------------
 # Portable names: <prefix>/orders/max-lines is stored as <prefix>__orders__max-lines.
 
+locals {
+  settings = { "orders__max-lines" = "3", "orders__currency" = "JPY", "features__bulk-discount" = "true" }
+}
+
 resource "google_parameter_manager_parameter" "settings" {
-  for_each     = { "max-lines" = "3", "currency" = "JPY" }
-  parameter_id = "${local.prefix}__orders__${each.key}"
+  for_each     = local.settings
+  parameter_id = "${local.prefix}__${each.key}"
   format       = "UNFORMATTED"
 }
 
@@ -248,7 +252,7 @@ resource "google_parameter_manager_parameter_version" "settings" {
   for_each             = google_parameter_manager_parameter.settings
   parameter            = each.value.id
   parameter_version_id = "v1"
-  parameter_data       = each.key == "max-lines" ? "3" : "JPY"
+  parameter_data       = local.settings[each.key]
 }
 
 resource "random_password" "signing_key" {
