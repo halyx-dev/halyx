@@ -22,7 +22,7 @@ end.
 | Stage | Work |
 |---|---|
 | **Released** | [1.1.0](#release-110), with Kotlin coroutines, function invocation and rotated keys, on 2 November 2026; [1.0.2](#release-102), a patch release, on 25 October 2026; [1.0.1](#release-101), a patch release, and [1.0.0](#release-100), the first release, both on 23 October 2026; all on Maven Central |
-| **Coming next** | [Planned additions](#coming-next): R2DBC through the Cloud SQL connector, and more real-cloud test runs |
+| **Coming next** | [Planned additions](#coming-next): key management, R2DBC through the Cloud SQL connector, and more real-cloud test runs |
 | **Delivered** | [19 milestones](#delivered): every service on AWS, Azure and Google Cloud, Spring Boot 3.5 and 4, reactive and asynchronous APIs, Kotlin coroutines, function invocation, rotated keys and passwords, a portable microservice on EKS, GKE and AKS, and cloud logins across clouds |
 
 ## Released
@@ -87,10 +87,11 @@ Additions planned on top of 1.1.0.
 
 | Item | Area | Today |
 |---|---|---|
-| R2DBC through the Cloud SQL connector | R2DBC | R2DBC connects to Cloud SQL directly, with IAM login; JDBC also works through the connector |
-| A real-cloud run on MSK Serverless with IAM, including transactions | Streams | Tested on Kafka 3.9 and 4.2.1 brokers, and on real Event Hubs and Managed Kafka. The run is ready ([AWS tier 4](cloud-testing/aws.md#tier-4-not-run)) and needs an AWS account plan that includes MSK |
-| A real-cloud run on Azure Database for MySQL with Entra ID | SQL databases | The run needs a directory-level grant in the test tenant |
-| Fully non-blocking I/O for Google Cloud Storage, Service Bus receives, and Cosmos DB and Firestore read-then-write calls | Asynchronous I/O | These calls work and run on virtual threads, so they hold no platform thread while they wait; they become non-blocking when the SDKs allow it |
+| Key management: envelope encryption and signing with AWS KMS, Azure Key Vault keys, Google Cloud KMS and Vault Transit, in one format on every cloud ([#47](https://github.com/halyx-dev/halyx/issues/47)) | Keys | Halyx stores secrets but doesn't encrypt or sign with cloud-held keys: applications call each cloud's KMS SDK themselves |
+| R2DBC through the Cloud SQL connector ([#43](https://github.com/halyx-dev/halyx/issues/43)) | R2DBC | R2DBC connects to Cloud SQL directly, with IAM login; JDBC also works through the connector |
+| A real-cloud run on MSK Serverless with IAM, including transactions ([#44](https://github.com/halyx-dev/halyx/issues/44)) | Streams | Tested on Kafka 3.9 and 4.2.1 brokers, and on real Event Hubs and Managed Kafka. The run is ready ([AWS tier 4](cloud-testing/aws.md#tier-4-not-run)) and needs an AWS account plan that includes MSK |
+| A real-cloud run on Azure Database for MySQL with Entra ID ([#45](https://github.com/halyx-dev/halyx/issues/45)) | SQL databases | The run needs a directory-level grant in the test tenant |
+| Fully non-blocking I/O for Google Cloud Storage, Service Bus receives, and Cosmos DB and Firestore read-then-write calls ([#46](https://github.com/halyx-dev/halyx/issues/46)) | Asynchronous I/O | These calls work and run on virtual threads, so they hold no platform thread while they wait; they become non-blocking when the SDKs allow it |
 
 ## Delivered
 
