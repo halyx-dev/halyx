@@ -36,7 +36,19 @@
         <maven.install.skip>true</maven.install.skip>
         <maven.deploy.skip>true</maven.deploy.skip>
         <japicmp.skip>true</japicmp.skip>
+        <flipjack.version>1.1.0</flipjack.version>
     </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- Feature flags in portable-orders, evaluated by flipjack over a Halyx parameter store -->
+            <dependency>
+                <groupId>org.kamranzafar.flipjack</groupId>
+                <artifactId>flipjack-spring-boot-starter</artifactId>
+                <version>${flipjack.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <modules>
         <module>portable-orders</module>

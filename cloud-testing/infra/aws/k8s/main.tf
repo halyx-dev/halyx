@@ -355,8 +355,8 @@ resource "aws_sqs_queue_policy" "notifications" {
 # Portable names: <prefix>/orders/max-lines is the parameter /<prefix>/orders/max-lines.
 
 resource "aws_ssm_parameter" "settings" {
-  for_each = { "max-lines" = "8", "currency" = "CAD" }
-  name     = "/${local.prefix}/orders/${each.key}"
+  for_each = { "orders/max-lines" = "8", "orders/currency" = "CAD", "features/bulk-discount" = "true" }
+  name     = "/${local.prefix}/${each.key}"
   type     = "String"
   value    = each.value
 }

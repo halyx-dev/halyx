@@ -24,7 +24,6 @@ import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.List;
@@ -47,14 +46,16 @@ public class OrderService {
     private final Environment environment;
     private final ObjectProvider<IdempotencyKeys> idempotencyKeys;
     private final List<OrderPlacedHook> hooks;
+    private final OrderPricing pricing;
 
     OrderService(OrderRepository orders, @Qualifier("order-placed") Publisher placed, Environment environment,
-                 ObjectProvider<IdempotencyKeys> idempotencyKeys, List<OrderPlacedHook> hooks) {
+                 ObjectProvider<IdempotencyKeys> idempotencyKeys, List<OrderPlacedHook> hooks, OrderPricing pricing) {
         this.orders = orders;
         this.placed = placed;
         this.environment = environment;
         this.idempotencyKeys = idempotencyKeys;
         this.hooks = hooks;
+        this.pricing = pricing;
     }
 
     /** A placed order, and whether it was placed by an earlier request with the same idempotency key. */
@@ -73,10 +74,7 @@ public class OrderService {
                 return new Placement(order, true);
             }
         }
-        BigDecimal total = lines.stream()
-                .map(line -> line.unitPrice().multiply(BigDecimal.valueOf(line.quantity())))
-                .reduce(BigDecimal.ZERO, BigDecimal::add)
-                .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal total = pricing.total(lines);
         Order order;
         try {
             order = orders.save(new Order(customerId, orderId, OrderStatus.PLACED, Instant.now(), List.copyOf(lines),

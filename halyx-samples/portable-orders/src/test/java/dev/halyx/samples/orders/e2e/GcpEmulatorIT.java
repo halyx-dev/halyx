@@ -104,7 +104,7 @@ class GcpEmulatorIT extends PortableOrdersSuite {
 
     @Override
     protected Expectations expected() {
-        return new Expectations("gcp", Set.of("streams", "cache", "sql"), 5, "AUD", SIGNING_KEY,
+        return new Expectations("gcp", Set.of("streams", "cache", "sql"), 5, "AUD", SIGNING_KEY, Set.of(),
                 Duration.ofSeconds(60));
     }
 

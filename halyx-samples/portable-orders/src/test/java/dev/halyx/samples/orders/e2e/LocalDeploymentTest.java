@@ -48,7 +48,7 @@ class LocalDeploymentTest extends PortableOrdersSuite {
 
     @Override
     protected Expectations expected() {
-        return new Expectations("local", Set.of("events", "streams", "cache"), 20, "GBP", "local-test-key",
+        return new Expectations("local", Set.of("events", "streams", "cache"), 20, "GBP", "local-test-key", Set.of(),
                 Duration.ofSeconds(20));
     }
 }

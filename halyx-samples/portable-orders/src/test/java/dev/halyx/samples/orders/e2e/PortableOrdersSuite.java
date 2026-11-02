@@ -131,6 +131,17 @@ public abstract class PortableOrdersSuite {
     }
 
     @Test
+    void bulkDiscountFollowsItsFeatureFlag() {
+        String customer = customer("barbara");
+        OrdersClient.Response placed = place(customer, null, line("tea", 10, "1.00"), line("cake", 1, "4.00"));
+
+        assertThat(placed.status()).as(placed.body()).isEqualTo(201);
+        assertThat(new BigDecimal(placed.json().get("total").toString()))
+                .as("bulk-discount %s in the settings store", expected().flagOn("bulk-discount") ? "on" : "off or missing")
+                .isEqualByComparingTo(expected().flagOn("bulk-discount") ? "13.00" : "14.00");
+    }
+
+    @Test
     void eventsNotifyThroughTheEventBus() {
         assumeTrue(expected().has("events"), "events are off in this deployment");
         String customer = customer("barbara");

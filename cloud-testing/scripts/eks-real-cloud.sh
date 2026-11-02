@@ -146,7 +146,7 @@ import json, sys
 print(json.dumps({"profiles": ["aws", "events", "cache", "sql"], "env": json.load(sys.stdin)}, indent=2))' \
   > "$WORK/values.yaml" || exit 1
 
-export ORDERS_E2E_FEATURES="events,cache,sql" ORDERS_E2E_MAX_LINES=8 ORDERS_E2E_CURRENCY=CAD
+export ORDERS_E2E_FEATURES="events,cache,sql" ORDERS_E2E_MAX_LINES=8 ORDERS_E2E_CURRENCY=CAD ORDERS_E2E_FLAGS=bulk-discount
 ORDERS_E2E_SIGNING_KEY="$(tf signing_key)"
 export ORDERS_E2E_SIGNING_KEY
 deploy_and_test "$REPOSITORY" aws
