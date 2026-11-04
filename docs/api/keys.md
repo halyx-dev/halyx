@@ -26,7 +26,7 @@ to encrypt your data:
 
 - **Envelope encryption.** Each `encrypt` generates a fresh 256-bit data key, encrypts your data locally with
   AES-256-GCM, and asks the key service only to wrap the data key: one call, whatever the size of the data. The result
-  is `SealedData` in Halyx's HLXS format, the same on every cloud.
+  is `SealedData` in the [HLXS format](keys-format.md), the same on every cloud.
 - **Local verification.** `sign` hashes locally and has the key service sign the digest. `verify` checks the signature
   locally with the public key, which Halyx caches, so verifying makes no call.
 

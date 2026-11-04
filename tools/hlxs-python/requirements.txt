@@ -1,0 +1,2 @@
+# The only dependency: AES-GCM, which Python's standard library doesn't have. Pinned, like every Halyx dependency.
+cryptography==46.0.7

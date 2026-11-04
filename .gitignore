@@ -66,3 +66,7 @@ cloud-testing/reports/
 # Claude Code local state (the skills under .claude/skills are shared)
 .claude/scheduled_tasks.lock
 .claude/settings.local.json
+
+# --- Python (tools/hlxs-python) ---
+__pycache__/
+*.pyc
