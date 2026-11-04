@@ -1,0 +1,60 @@
+#
+# Copyright 2026 Kamran Zafar
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# Runs the published HLXS v1 test vectors through the independent Python decoder, so the format's specification stays
+# complete without Halyx's Java code. The Java side runs the same vectors in HlxsVectorsTest.
+name: HLXS format
+
+on:
+  push:
+    branches: [main, '[0-9]+.[0-9]+.x']
+    paths:
+      - 'docs/api/keys-format.md'
+      - 'halyx-core/src/main/java/dev/halyx/keys/**'
+      - 'halyx-core/src/test/resources/hlxs/**'
+      - 'tools/hlxs-python/**'
+      - '.github/workflows/hlxs.yml'
+  pull_request:
+    paths:
+      - 'docs/api/keys-format.md'
+      - 'halyx-core/src/main/java/dev/halyx/keys/**'
+      - 'halyx-core/src/test/resources/hlxs/**'
+      - 'tools/hlxs-python/**'
+      - '.github/workflows/hlxs.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: hlxs-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  python-decoder:
+    name: Independent decoder (Python)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install the decoder's dependency
+        run: pip install -r tools/hlxs-python/requirements.txt
+      - name: Run the test vectors
+        working-directory: tools/hlxs-python
+        run: python -m unittest -v test_vectors

@@ -47,6 +47,10 @@ The integration tests are skipped when Docker isn't available. See
 - **Add the license header.** Every `.java`, `pom.xml`, `.yml`, `.sh` and `.tf` file carries the Apache-2.0
   header, and the build fails without it. `mvn -N com.mycila:license-maven-plugin:format` adds any missing ones.
 - **Match the surrounding code** in naming, structure and comments.
+- **Changes to the HLXS format specification** (`docs/api/keys-format.md`) **or its test vectors**
+  (`halyx-core/src/test/resources/hlxs/`) are made under the
+  [OWF Contributor License Agreement 1.0 - Copyright and Patent](https://www.openwebfoundation.org/the-agreements/the-owf-1-0-agreements-granted-claims/owf-contributor-license-agreement-1-0-copyright-and-patent),
+  since the specification is offered under OWFa 1.0. Say so in the pull request. Code stays under Apache-2.0.
 
 ## Code conventions
 
