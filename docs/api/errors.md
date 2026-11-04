@@ -30,7 +30,7 @@ add types, so a `switch` over it is exhaustive and stays correct as providers ar
 | `AccessDeniedException` | missing permissions, bad credentials, or an untrusted TLS certificate | no |
 | `InvalidArgumentException` | the request was rejected as invalid, such as a name the backend can't store | no |
 | `UnsupportedFeatureException` | a feature this provider doesn't support (see [capabilities](capabilities-and-unwrap.md)) | no |
-| `DataIntegrityException` | a checksum mismatch on upload or download | no |
+| `DataIntegrityException` | a checksum mismatch on upload or download, or sealed data failing authentication (wrong AAD, changed or truncated data) | no |
 | `ThrottledException` | the provider is rate limiting you; `retryAfter()` says for how long, when the provider says | **yes** |
 | `UnavailableException` | a transient outage, timeout, or a resource that's briefly busy, such as a secret still being deleted | **yes** |
 | `UnknownCloudException` | anything not mapped above | no |

@@ -33,6 +33,9 @@ import dev.halyx.events.EventPublisher;
 import dev.halyx.functions.DefaultFunctionInvoker;
 import dev.halyx.functions.FunctionConfig;
 import dev.halyx.functions.FunctionInvoker;
+import dev.halyx.keys.DefaultKeyStore;
+import dev.halyx.keys.KeyStore;
+import dev.halyx.keys.KeyStoreConfig;
 import dev.halyx.messaging.DefaultPublisher;
 import dev.halyx.messaging.DefaultSubscription;
 import dev.halyx.messaging.Publisher;
@@ -88,12 +91,15 @@ public final class CloudContext implements AutoCloseable {
     private final Map<SubscriptionConfig, Subscription> subscriptions = new ConcurrentHashMap<>();
     private final Map<EventBusConfig, EventPublisher> eventPublishers = new ConcurrentHashMap<>();
     private final Map<FunctionConfig, FunctionInvoker> functionInvokers = new ConcurrentHashMap<>();
+    private final Map<KeyStoreConfig, DefaultKeyStore> keyStores = new ConcurrentHashMap<>();
     private final Map<StreamProducerConfig, StreamProducer> streamProducers = new ConcurrentHashMap<>();
     /** Stream consumers created here, closed with this context; one running a listener is held by its poller. */
     private final Set<StreamConsumer> streamConsumers =
             Collections.synchronizedSet(Collections.newSetFromMap(new WeakHashMap<>()));
     private volatile ProviderConnection connection;
     private volatile boolean closed;
+    /** Set while {@code connect} runs, so a login that needs this same connection fails instead of recursing. */
+    private boolean connecting;
 
     CloudContext(String name, ProviderConfig config, CloudProvider provider, InterceptorChain interceptors) {
         this.name = name;
@@ -207,6 +213,20 @@ public final class CloudContext implements AutoCloseable {
     }
 
     /**
+     * A key store: the keys at {@code config}'s location, such as an Azure Key Vault or a Google Cloud KMS key ring.
+     * The keys must already exist. Asking again with an equal configuration returns the same store, with its caches
+     * and statistics.
+     */
+    public KeyStore keyStore(KeyStoreConfig config) {
+        return keyStores.computeIfAbsent(config, c -> new DefaultKeyStore(c, connection().keyStore(c), interceptors));
+    }
+
+    /** The provider's default key store: AWS KMS in the provider's account and region, or Vault's {@code transit}. */
+    public KeyStore keyStore() {
+        return keyStore(KeyStoreConfig.defaults());
+    }
+
+    /**
      * A producer for an existing stream topic: Amazon MSK, Azure Event Hubs or Google Cloud Managed Service for
      * Apache Kafka. Thread-safe: asking again with an equal configuration returns the same producer.
      */
@@ -262,7 +282,18 @@ public final class CloudContext implements AutoCloseable {
                 }
                 c = connection;
                 if (c == null) {
-                    c = provider.connect(config);
+                    if (connecting) {
+                        throw new IllegalStateException("Provider '" + name + "' needs itself to log in: a setting it "
+                                + "reads while connecting comes through a parameter store or key that uses this same "
+                                + "provider. Take that setting from configuration, the environment, the platform "
+                                + "identity, or a store on another provider");
+                    }
+                    connecting = true;
+                    try {
+                        c = provider.connect(config);
+                    } finally {
+                        connecting = false;
+                    }
                     connection = c;
                 }
             }
@@ -292,6 +323,8 @@ public final class CloudContext implements AutoCloseable {
         subscriptions.clear();
         eventPublishers.clear();
         functionInvokers.clear();
+        keyStores.values().forEach(DefaultKeyStore::close);
+        keyStores.clear();
         streamProducers.clear();
         if (open != null) {
             open.close();
@@ -303,7 +336,7 @@ public final class CloudContext implements AutoCloseable {
      * finish and what they handled is committed or acked. They stop in parallel, each within its own shutdown
      * timeout.
      */
-    private void stopConsumers() {
+    void stopConsumers() {
         List<AutoCloseable> running = new ArrayList<>();
         synchronized (streamConsumers) {
             running.addAll(streamConsumers);

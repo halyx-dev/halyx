@@ -16,8 +16,10 @@
 package dev.halyx.error;
 
 /**
- * Data was corrupted: a checksum computed over the bytes sent or received does not match the
- * provider's. Retrying may succeed if the corruption happened in transit.
+ * Data failed an integrity check: a checksum over the bytes sent or received doesn't match the provider's, or sealed
+ * data failed authentication when opened (wrong AAD, changed or truncated data, or data sealed under another data
+ * key). Not retryable: a checksum mismatch in transit may pass on a fresh request, which the caller can make, but
+ * repeating the same decryption fails the same way.
  */
 public final class DataIntegrityException extends CloudException {
 

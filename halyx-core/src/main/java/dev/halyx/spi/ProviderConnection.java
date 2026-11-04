@@ -22,6 +22,8 @@ import dev.halyx.events.EventBusConfig;
 import dev.halyx.events.spi.EventPublisherDriver;
 import dev.halyx.functions.FunctionConfig;
 import dev.halyx.functions.spi.FunctionInvokerDriver;
+import dev.halyx.keys.KeyStoreConfig;
+import dev.halyx.keys.spi.KeyStoreDriver;
 import dev.halyx.messaging.SubscriptionConfig;
 import dev.halyx.messaging.TopicConfig;
 import dev.halyx.messaging.spi.PublisherDriver;
@@ -112,6 +114,11 @@ public interface ProviderConnection extends AutoCloseable {
     /** Kafka client properties for {@code cluster}, logging in as this provider's stream drivers do. */
     default Map<String, Object> kafkaClientProperties(StreamConfig cluster) {
         throw new UnsupportedFeatureException("Streams are not supported by this provider");
+    }
+
+    /** A driver for the key store described by {@code config}: the keys at its location. */
+    default KeyStoreDriver keyStore(KeyStoreConfig config) {
+        throw new UnsupportedFeatureException("Key management is not supported by this provider");
     }
 
     /** A driver for the document table {@code config.name()}. */

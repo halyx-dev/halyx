@@ -23,6 +23,8 @@ import dev.halyx.events.EventBusConfig;
 import dev.halyx.events.spi.EventPublisherDriver;
 import dev.halyx.functions.FunctionConfig;
 import dev.halyx.functions.spi.FunctionInvokerDriver;
+import dev.halyx.keys.KeyStoreConfig;
+import dev.halyx.keys.spi.KeyStoreDriver;
 import dev.halyx.messaging.TopicConfig;
 import dev.halyx.messaging.spi.PublisherDriver;
 import dev.halyx.messaging.spi.SubscriptionDriver;
@@ -49,7 +51,7 @@ import java.util.concurrent.ConcurrentSkipListMap;
  * The {@code "memory"} provider: a Service Stub that keeps everything in the JVM heap. Use it for unit
  * tests and local development, with {@code ProviderConfig.of("memory")}. Buckets, caches and stream topics
  * are created on first use (any {@code redis://} endpoint works), and each connection has its own isolated data.
- * Functions are handlers registered with {@link InMemoryFunctions}.
+ * Functions are handlers registered with {@link InMemoryFunctions}, and keys are created with {@link InMemoryKeys}.
  */
 public final class InMemoryProvider implements CloudProvider {
 
@@ -76,6 +78,8 @@ public final class InMemoryProvider implements CloudProvider {
         private final InMemoryStreams streams = new InMemoryStreams();
         private final InMemoryFunctions functions = new InMemoryFunctions();
         private final Map<String, InMemoryDocumentStoreDriver.Table> tables = new ConcurrentHashMap<>();
+        /** Keys per store location, shared by every store on that location. */
+        private final Map<String, InMemoryKeys> keys = new ConcurrentHashMap<>();
 
         @Override
         public BlobStoreDriver blobStore(String bucket) {
@@ -132,7 +136,14 @@ public final class InMemoryProvider implements CloudProvider {
         }
 
         @Override
+        public KeyStoreDriver keyStore(KeyStoreConfig config) {
+            return new InMemoryKeyStoreDriver(keys.computeIfAbsent(config.location().orElse(""), InMemoryKeys::new));
+        }
+
+        @Override
         public void close() {
+            keys.values().forEach(InMemoryKeys::clear);
+            keys.clear();
             tables.clear();
             broker.clear();
             streams.clear();
