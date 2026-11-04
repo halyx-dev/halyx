@@ -33,7 +33,8 @@ Halyx                                   one per application
  │     ├── functionInvoker("resize-image")  → FunctionInvoker  (Lambda)
  │     ├── database(SqlConfig)              → Database         (RDS)
  │     ├── cache(CacheConfig)               → Cache<V>         (ElastiCache)
- │     └── parameterStore(ParameterStoreConfig) → ParameterStore (Secrets Manager, SSM)
+ │     ├── parameterStore(ParameterStoreConfig) → ParameterStore (Secrets Manager, SSM)
+ │     └── keyStore(KeyStoreConfig)         → KeyStore         (KMS)
  └── provider("analytics") → CloudContext  Google Cloud, acme-prod
        └── ...
 ```
@@ -69,6 +70,7 @@ halyx.names();   // [orders, analytics]
 | [SQL databases](sql.md) | `Database` | a pooled JDBC `DataSource` with IAM, Entra ID or password login |
 | [Caches](caches.md) | `Cache<V>` | Redis and Valkey operations, atomic updates, counters, locks, fail-open |
 | [Parameters and secrets](parameters.md) | `ParameterStore` | configuration values and secrets, versions, JSON fields, watching for changes |
+| [Keys and encryption](keys.md) | `KeyStore`, `CryptoKey` | envelope encryption, signing and MACs with AWS KMS, Azure Key Vault, Google Cloud KMS and Vault Transit keys, in one format on every cloud |
 | [Errors and retries](errors.md) | `CloudException` | the portable error model, retries, throttling and interceptors |
 | [Capabilities and native clients](capabilities-and-unwrap.md) | `Capabilities`, `unwrap` | optional features per provider, and the native SDK clients |
 | [Reactive and async code](reactive.md) | `ReactiveHalyx` and a reactive view of each | `halyx-reactor`: `Mono` and `Flux` for every service on a scheduler you choose, streams in and out, subscriptions as a `Flux`, interoperability, testing |

@@ -72,9 +72,21 @@ public final class Halyx implements AutoCloseable {
         return contexts.keySet();
     }
 
+    /**
+     * Stops every context's listeners and stream consumers first, letting running handlers finish, then closes the
+     * contexts. A handler on one context may use a client of another, such as a key on a Vault context or a claim
+     * check's blob store, so no client closes while any handler still runs.
+     */
     @Override
     public void close() {
         RuntimeException failure = null;
+        for (CloudContext context : contexts.values()) {
+            try {
+                context.stopConsumers();
+            } catch (RuntimeException e) {
+                failure = e;
+            }
+        }
         for (CloudContext context : contexts.values()) {
             try {
                 context.close();
