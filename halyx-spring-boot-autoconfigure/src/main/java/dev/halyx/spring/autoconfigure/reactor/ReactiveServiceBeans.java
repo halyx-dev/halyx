@@ -18,6 +18,8 @@ package dev.halyx.spring.autoconfigure.reactor;
 import dev.halyx.cache.Cache;
 import dev.halyx.events.EventPublisher;
 import dev.halyx.functions.FunctionInvoker;
+import dev.halyx.keys.CryptoKey;
+import dev.halyx.keys.KeyStore;
 import dev.halyx.messaging.Publisher;
 import dev.halyx.messaging.Subscription;
 import dev.halyx.nosql.DocumentStore;
@@ -26,7 +28,9 @@ import dev.halyx.reactor.ReactiveBlobStore;
 import dev.halyx.reactor.ReactiveCache;
 import dev.halyx.reactor.ReactiveDocumentStore;
 import dev.halyx.reactor.ReactiveEventPublisher;
+import dev.halyx.reactor.ReactiveCryptoKey;
 import dev.halyx.reactor.ReactiveFunctionInvoker;
+import dev.halyx.reactor.ReactiveKeyStore;
 import dev.halyx.reactor.ReactiveHalyx;
 import dev.halyx.reactor.ReactiveParameterStore;
 import dev.halyx.reactor.ReactivePublisher;
@@ -75,6 +79,8 @@ final class ReactiveServiceBeans implements BeanDefinitionRegistryPostProcessor 
         REACTIVE_TYPES.put(StreamProducer.class, ResolvableType.forClass(ReactiveStreamProducer.class));
         REACTIVE_TYPES.put(StreamConsumer.class, ResolvableType.forClass(ReactiveStreamConsumer.class));
         REACTIVE_TYPES.put(ParameterStore.class, ResolvableType.forClass(ReactiveParameterStore.class));
+        REACTIVE_TYPES.put(KeyStore.class, ResolvableType.forClass(ReactiveKeyStore.class));
+        REACTIVE_TYPES.put(CryptoKey.class, ResolvableType.forClass(ReactiveCryptoKey.class));
         REACTIVE_TYPES.put(Cache.class, ResolvableType.forClassWithGenerics(ReactiveCache.class, String.class));
     }
 

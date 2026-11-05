@@ -548,6 +548,47 @@ spring:
   resolves a cloud profile as written, or a tool that starts the application with no cloud, sets it on the command
   line or in the environment (`HALYX_CONFIGIMPORT_ENABLED=false`).
 
+## Keys and encryption
+
+```yaml
+halyx:
+  key-stores:
+    kms:                           # KeyStore bean name
+      provider: aws                # optional when only one provider is configured
+      prefix: orders-              # alias/orders-<name> on AWS
+      # location: https://acme.vault.azure.net      # Key Vault on Azure, key ring on Google Cloud, mount on Vault
+      # segment-size: 64KB         # (default)
+      # data-key-cache: { ttl: 5m, max-entries: 1000 }
+      # data-key-reuse: { max-age: 5m, max-messages: 10000 }
+  keys:
+    orders-data:                   # CryptoKey bean name
+      store: kms                   # optional when only one key store is configured
+      name: data                   # defaults to the key: here alias/orders-data
+    invoice-signing:
+      name: signing
+      signing-algorithm: ecdsa-p256-sha256
+      # purpose: signing           # for a key with several purposes, such as an Azure RSA key
+      # version: "3"               # pin a version instead of following the current one
+      # check-on-startup: true     # read the key's metadata at startup
+```
+
+Each `key-stores` entry is a `KeyStore` bean and each `keys` entry a `CryptoKey` bean, named after their keys, and with
+halyx-reactor a `ReactiveKeyStore` and a `ReactiveCryptoKey` named `<key>Reactive`. A key bean is created after its
+store and destroyed before it. See [Keys and encryption](api/keys.md) for what they do.
+
+Creating the beans makes no key service call, so a missing or disabled key, or one whose type doesn't fit its
+`purpose` or `signing-algorithm`, shows in health and at first use. With `check-on-startup: true`, the key's metadata
+is read when its bean is created, and such a key fails the start instead.
+
+Health has an entry per key store, which pings the key service, and per key, which is UP when the key exists, is
+enabled and fits its settings. A key's entry reads metadata the key keeps for a few minutes, so frequent probes don't
+use up the key service's request quota.
+
+Key stores take no `secrets`, and a key store's provider can't log in with a secret that comes through itself. Provider
+logins and key-store settings are fixed roots: they come from configuration, the environment, the platform identity,
+or a store on another provider. Everything that uses keys can then use them freely. Use a workload or managed identity
+for key service access.
+
 ## Reactive applications
 
 With `halyx-reactor` on the classpath, every service bean from `halyx.*` properties also has a reactive view
@@ -708,6 +749,9 @@ Startup fails with a message naming the property for:
   would be sent as the key
 - a `secrets` entry naming no setting, no secret or an unknown store, a setting also in its `properties`, or a
   secret that isn't there; likewise an `auth.secret` naming an unknown store or a secret that isn't there
+- a `halyx.keys` entry naming an unknown key store, or none when there are several; `secrets` on a key store; a
+  segment size outside 4KB to 16MB, or `data-key-reuse` or `data-key-cache` with a setting missing
+- with `check-on-startup`, a key that is missing, disabled, or doesn't fit its `purpose` or `signing-algorithm`
 
 Spring Boot settings that a Halyx bean makes ineffective are logged as warnings at startup: `spring.datasource.*`
 next to `halyx.databases`, `spring.r2dbc.*` next to `halyx.r2dbc-databases`, and `spring.cache.*` while

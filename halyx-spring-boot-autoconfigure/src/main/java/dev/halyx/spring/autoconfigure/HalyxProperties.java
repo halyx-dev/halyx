@@ -21,6 +21,10 @@ import dev.halyx.config.Credentials;
 import dev.halyx.config.ProviderConfig;
 import dev.halyx.error.NotFoundException;
 import dev.halyx.interceptor.RetryPolicy;
+import dev.halyx.keys.KeyOptions;
+import dev.halyx.keys.KeyPurpose;
+import dev.halyx.keys.KeyStoreConfig;
+import dev.halyx.keys.SigningAlgorithm;
 import dev.halyx.messaging.ClaimCheck;
 import dev.halyx.messaging.ConsumerOptions;
 import dev.halyx.messaging.SubscriptionConfig;
@@ -47,6 +51,7 @@ import dev.halyx.stream.StreamProducerConfig;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.ConstructorBinding;
 import org.springframework.boot.context.properties.bind.DefaultValue;
+import org.springframework.util.unit.DataSize;
 
 import java.net.URI;
 import java.nio.file.Path;
@@ -999,6 +1004,119 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
             properties.forEach(config::property);
             return config.build();
         }
+    }
+
+    /**
+     * A key store, from {@code halyx.key-stores.<key>}, registered as a {@code KeyStore} bean named after its key. It
+     * takes no {@code secrets}: its provider's login and these settings are fixed roots, from configuration, the
+     * environment, the platform identity, or a store on another provider.
+     *
+     * @param provider      the provider name; may be omitted when exactly one provider is configured
+     * @param location      Key Vault URL on Azure, key ring on Google Cloud, Transit mount on Vault; none on AWS
+     * @param prefix        added to every key name, such as {@code orders-} for {@code alias/orders-<name>} on AWS
+     * @param nativeNames   take key names as the backend's own IDs, ARNs or full names, as they are
+     * @param segmentSize   plaintext per sealed segment, 4KB to 16MB; 64KB by default
+     * @param dataKeyReuse  seal many messages with one data key; off by default
+     * @param dataKeyCache  keep unwrapped data keys in memory for decrypting; off by default
+     * @param properties    provider-specific settings
+     */
+    public record KeyStoreProperties(String provider, String location, @DefaultValue("") String prefix,
+                                     @DefaultValue("false") boolean nativeNames, DataSize segmentSize,
+                                     DataKeyReuseProperties dataKeyReuse, DataKeyCacheProperties dataKeyCache,
+                                     Map<String, String> properties) {
+
+        public KeyStoreProperties {
+            properties = ordered(properties);
+        }
+
+        KeyStoreConfig toKeyStoreConfig(String key) {
+            String property = "halyx.key-stores." + key;
+            KeyStoreConfig.Builder config = KeyStoreConfig.builder().prefix(prefix).nativeNames(nativeNames);
+            if (location != null && !location.isBlank()) {
+                config.location(location);
+            }
+            try {
+                if (segmentSize != null) {
+                    long bytes = segmentSize.toBytes();
+                    config.segmentSize(bytes > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) bytes);
+                }
+                if (dataKeyReuse != null) {
+                    config.dataKeyReuse(required(property + ".data-key-reuse.max-age", dataKeyReuse.maxAge()),
+                            required(property + ".data-key-reuse.max-messages", dataKeyReuse.maxMessages()));
+                }
+                if (dataKeyCache != null) {
+                    config.dataKeyCache(required(property + ".data-key-cache.ttl", dataKeyCache.ttl()),
+                            required(property + ".data-key-cache.max-entries", dataKeyCache.maxEntries()));
+                }
+                properties.forEach(config::property);
+                return config.build();
+            } catch (IllegalArgumentException e) {
+                throw new IllegalStateException(property + ": " + e.getMessage(), e);
+            }
+        }
+    }
+
+    /**
+     * @param maxAge      the longest one data key seals for
+     * @param maxMessages the most messages one data key seals
+     */
+    public record DataKeyReuseProperties(Duration maxAge, Long maxMessages) {
+    }
+
+    /**
+     * @param ttl        how long an unwrapped data key is kept
+     * @param maxEntries the most data keys kept
+     */
+    public record DataKeyCacheProperties(Duration ttl, Integer maxEntries) {
+    }
+
+    /**
+     * A key, from {@code halyx.keys.<key>}, registered as a {@code CryptoKey} bean named after its key. Creating it
+     * makes no key service call unless {@code check-on-startup} is set; a missing or disabled key shows in health and
+     * at first use.
+     *
+     * @param store            bean name of its {@code halyx.key-stores} entry; may be omitted when there is one
+     * @param name             the key's name in the store; defaults to the key
+     * @param purpose          what the key is used for, when it has several (an Azure RSA key wraps and signs)
+     * @param signingAlgorithm the algorithm a signing key signs with, when its type allows several
+     * @param version          pin one version instead of following the current one
+     * @param checkOnStartup   read the key's metadata when the bean is created, so a missing or disabled key, or one
+     *                         whose type doesn't fit, fails the start; false by default
+     * @param properties       provider-specific settings
+     */
+    public record KeyProperties(String store, String name, KeyPurpose purpose, SigningAlgorithm signingAlgorithm,
+                                String version, @DefaultValue("false") boolean checkOnStartup,
+                                Map<String, String> properties) {
+
+        public KeyProperties {
+            properties = ordered(properties);
+        }
+
+        String keyName(String key) {
+            return name == null || name.isBlank() ? key : name;
+        }
+
+        KeyOptions toKeyOptions() {
+            KeyOptions.Builder options = KeyOptions.builder();
+            if (purpose != null) {
+                options.purpose(purpose);
+            }
+            if (signingAlgorithm != null) {
+                options.signingAlgorithm(signingAlgorithm);
+            }
+            if (version != null && !version.isBlank()) {
+                options.version(version);
+            }
+            properties.forEach(options::property);
+            return options.build();
+        }
+    }
+
+    private static <T> T required(String property, T value) {
+        if (value == null) {
+            throw new IllegalStateException(property + " is required");
+        }
+        return value;
     }
 
     /**

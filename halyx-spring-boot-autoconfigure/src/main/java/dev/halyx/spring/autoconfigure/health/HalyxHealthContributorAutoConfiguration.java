@@ -16,6 +16,8 @@
 package dev.halyx.spring.autoconfigure.health;
 
 import dev.halyx.cache.Cache;
+import dev.halyx.keys.CryptoKey;
+import dev.halyx.keys.KeyStore;
 import dev.halyx.messaging.Subscription;
 import dev.halyx.nosql.DocumentStore;
 import dev.halyx.parameters.ParameterStore;
@@ -27,6 +29,9 @@ import dev.halyx.spring.autoconfigure.cache.HalyxCacheManagerAutoConfiguration;
 import dev.halyx.storage.BlobStore;
 import dev.halyx.stream.StreamConsumer;
 import dev.halyx.stream.StreamProducer;
+import org.springframework.beans.factory.BeanFactory;
+import org.springframework.beans.factory.BeanFactoryAware;
+import org.springframework.beans.factory.ListableBeanFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -43,7 +48,7 @@ import java.util.TreeMap;
 
 /**
  * Spring Boot 4 ({@code org.springframework.boot.health}): a {@code halyx} health contributor with
- * one entry per blob store, cache, parameter store, document store and stream producer bean, plus the
+ * one entry per blob store, cache, parameter store, key store, key, document store and stream producer bean, plus the
  * {@code messaging} and {@code streams} listeners and the {@code cache-manager}. On Boot 3 these classes are absent and
  * {@code actuate.HalyxActuatorHealthContributorAutoConfiguration} applies instead. Disable with
  * {@code management.health.halyx.enabled=false}.
@@ -52,7 +57,15 @@ import java.util.TreeMap;
 @ConditionalOnClass({HealthIndicator.class, ConditionalOnEnabledHealthIndicator.class, BlobStore.class})
 @Conditional(HalyxResourcesCondition.class)
 @ConditionalOnEnabledHealthIndicator("halyx")
-public class HalyxHealthContributorAutoConfiguration {
+public class HalyxHealthContributorAutoConfiguration implements BeanFactoryAware {
+
+    private ListableBeanFactory beanFactory;
+
+    // Key stores and keys come from the bean factory, so the contributor's bean method keeps its 1.1 signature.
+    @Override
+    public void setBeanFactory(BeanFactory beanFactory) {
+        this.beanFactory = (ListableBeanFactory) beanFactory;
+    }
 
     @Bean
     @ConditionalOnMissingBean(name = "halyxHealthContributor")
@@ -68,6 +81,8 @@ public class HalyxHealthContributorAutoConfiguration {
         blobStores.forEach((name, store) -> contributors.put(name, new BlobStoreHealthIndicator(store)));
         caches.forEach((name, cache) -> contributors.put(name, new CacheHealthIndicator(cache)));
         parameterStores.forEach((name, store) -> contributors.put(name, new ParameterStoreHealthIndicator(store)));
+        beanFactory.getBeansOfType(KeyStore.class).forEach((name, store) -> contributors.put(name, new KeyStoreHealthIndicator(store)));
+        beanFactory.getBeansOfType(CryptoKey.class).forEach((name, key) -> contributors.put(name, new CryptoKeyHealthIndicator(key)));
         documentStores.forEach((name, store) -> contributors.put(name, new DocumentStoreHealthIndicator(store)));
         streamProducers.forEach((name, producer) -> contributors.put(name, new StreamProducerHealthIndicator(producer)));
         cacheManager.ifAvailable(manager -> putEntry(contributors, "cache-manager", new CacheManagerHealthIndicator(manager),

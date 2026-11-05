@@ -26,6 +26,11 @@ import dev.halyx.events.EventBusConfig;
 import dev.halyx.events.EventPublisher;
 import dev.halyx.functions.FunctionConfig;
 import dev.halyx.functions.FunctionInvoker;
+import dev.halyx.keys.CryptoKey;
+import dev.halyx.keys.KeyMetadata;
+import dev.halyx.keys.KeyOptions;
+import dev.halyx.keys.KeyStore;
+import dev.halyx.keys.KeyStoreConfig;
 import dev.halyx.messaging.Publisher;
 import dev.halyx.nosql.DocumentStore;
 import dev.halyx.messaging.Subscription;
@@ -50,8 +55,9 @@ import java.util.Set;
 
 /**
  * Factory behind the beans declared under {@code halyx.blob-stores}, {@code halyx.caches},
- * {@code halyx.parameter-stores}, {@code halyx.databases}, {@code halyx.document-stores}, {@code halyx.topics},
- * {@code halyx.subscriptions}, {@code halyx.stream-producers} and {@code halyx.stream-consumers}.
+ * {@code halyx.parameter-stores}, {@code halyx.key-stores}, {@code halyx.keys}, {@code halyx.databases},
+ * {@code halyx.document-stores}, {@code halyx.topics}, {@code halyx.subscriptions}, {@code halyx.stream-producers} and
+ * {@code halyx.stream-consumers}.
  *
  * <p>Each method takes the configuring {@code property} and its {@code provider} (null when omitted), resolved
  * against the {@link Halyx} bean's providers: those of {@code halyx.providers}, and any a
@@ -119,6 +125,33 @@ public final class HalyxBlobStores {
 
     public ParameterStore parameterStore(String property, String provider, ParameterStoreConfig config) {
         return context(property, provider).parameterStore(config);
+    }
+
+    public KeyStore keyStore(String property, String provider, KeyStoreConfig config) {
+        return context(property, provider).keyStore(config);
+    }
+
+    /**
+     * The key {@code name} of {@code store}. With {@code checkOnStartup}, reads its metadata now, so a missing or
+     * disabled key, or one whose type doesn't fit {@code options}, fails the start naming {@code property}; otherwise
+     * makes no key service call.
+     */
+    public CryptoKey cryptoKey(String property, KeyStore store, String name, KeyOptions options,
+                               boolean checkOnStartup) {
+        CryptoKey key = store.key(name, options);
+        if (checkOnStartup) {
+            KeyMetadata metadata;
+            try {
+                metadata = key.metadata();
+            } catch (RuntimeException e) {
+                throw new IllegalStateException(property + ".check-on-startup: key '" + name + "' can't be used: "
+                        + e.getMessage(), e);
+            }
+            if (!metadata.enabled()) {
+                throw new IllegalStateException(property + ".check-on-startup: key '" + name + "' is disabled");
+            }
+        }
+        return key;
     }
 
     public DocumentStore documentStore(String property, String provider, String name,
