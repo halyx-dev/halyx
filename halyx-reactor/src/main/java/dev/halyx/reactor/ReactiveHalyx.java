@@ -19,6 +19,8 @@ import dev.halyx.Halyx;
 import dev.halyx.cache.Cache;
 import dev.halyx.events.EventPublisher;
 import dev.halyx.functions.FunctionInvoker;
+import dev.halyx.keys.CryptoKey;
+import dev.halyx.keys.KeyStore;
 import dev.halyx.messaging.Publisher;
 import dev.halyx.messaging.Subscription;
 import dev.halyx.nosql.DocumentStore;
@@ -171,6 +173,15 @@ public final class ReactiveHalyx implements AutoCloseable {
 
     public ReactiveParameterStore wrap(ParameterStore store) {
         return new ReactiveParameterStore(store, calls);
+    }
+
+    public ReactiveKeyStore wrap(KeyStore store) {
+        return new ReactiveKeyStore(store, calls);
+    }
+
+    /** The key, whose {@link ReactiveCryptoKey#store()} is a new reactive view of its store. */
+    public ReactiveCryptoKey wrap(CryptoKey key) {
+        return wrap(key.store()).wrap(key);
     }
 
     /** Disposes of the scheduler if this created it; never closes the {@link Halyx}, which stays the caller's. */

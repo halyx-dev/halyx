@@ -42,6 +42,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.Random;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -362,6 +363,9 @@ class KeyStoreTest {
         assertThatThrownBy(() -> store.key("data").decrypt(sealed, AAD)).isInstanceOf(AccessDeniedException.class)
                 .satisfies(e -> assertThat(((AccessDeniedException) e).isRetryable()).isFalse());
         assertThatThrownBy(() -> store.key("data").encrypt(DATA, AAD)).isInstanceOf(AccessDeniedException.class);
+        // The async view fails with the same exception one level down, not wrapped twice
+        assertThatThrownBy(() -> store.key("data").async().encrypt(DATA, AAD).join())
+                .isInstanceOf(CompletionException.class).cause().isInstanceOf(AccessDeniedException.class);
         keys.enable("data");
         assertThat(store.key("data").decrypt(sealed, AAD)).isEqualTo(DATA);
     }

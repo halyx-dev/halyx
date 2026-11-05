@@ -102,6 +102,9 @@ Each segment is authenticated before its bytes are returned. Changed, reordered 
 `DataIntegrityException`, at the segment where it was changed or at the end for missing data, so a reader never sees
 a silently shortened plaintext.
 
+With `halyx-reactor`, `encryptBody` and `decryptBody` do the same for a `Publisher<ByteBuffer>`; see
+[Reactive and async code](reactive.md#keys).
+
 ### Several keys, rotation and moving data
 
 Sealed data can carry the data key wrapped by up to 16 keys, on any providers. Any one of them can open it:
