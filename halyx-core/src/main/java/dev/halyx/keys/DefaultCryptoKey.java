@@ -597,7 +597,10 @@ final class DefaultCryptoKey implements CryptoKey {
                 return wrapAsync(dek).handle((wrapped, error) -> {
                     try {
                         if (error != null) {
-                            throw new CompletionException(error);
+                            // Already a CompletionException from the wrap stage: wrapping it again would leave the
+                            // cause one level down, where callers and fromFuture adapters don't look.
+                            throw error instanceof CompletionException completion ? completion
+                                    : new CompletionException(error);
                         }
                         return seal(new Lease(dek, wrapped), plaintext, aad);
                     } finally {

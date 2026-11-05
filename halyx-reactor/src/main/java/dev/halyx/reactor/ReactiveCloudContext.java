@@ -20,6 +20,7 @@ import dev.halyx.cache.CacheConfig;
 import dev.halyx.cache.Codec;
 import dev.halyx.events.EventBusConfig;
 import dev.halyx.functions.FunctionConfig;
+import dev.halyx.keys.KeyStoreConfig;
 import dev.halyx.messaging.SubscriptionConfig;
 import dev.halyx.messaging.TopicConfig;
 import dev.halyx.nosql.TableConfig;
@@ -111,6 +112,16 @@ public final class ReactiveCloudContext {
 
     public ReactiveParameterStore parameterStore(ParameterStoreConfig config) {
         return reactive.wrap(context.parameterStore(config));
+    }
+
+    /** The key store {@code config} describes; see {@link CloudContext#keyStore(KeyStoreConfig)}. */
+    public ReactiveKeyStore keyStore(KeyStoreConfig config) {
+        return reactive.wrap(context.keyStore(config));
+    }
+
+    /** The provider's default key store. */
+    public ReactiveKeyStore keyStore() {
+        return reactive.wrap(context.keyStore());
     }
 
     /** Where and how to connect to a database, for R2DBC; see {@code R2dbcDatabases} in {@code halyx-r2dbc}. */

@@ -25,6 +25,17 @@ import dev.halyx.events.EventPublisher;
 import dev.halyx.functions.FunctionInvoker;
 import dev.halyx.functions.FunctionRequest;
 import dev.halyx.functions.FunctionResponse;
+import dev.halyx.keys.AsyncCryptoKey;
+import dev.halyx.keys.AsyncKeyStore;
+import dev.halyx.keys.CryptoKey;
+import dev.halyx.keys.DataKey;
+import dev.halyx.keys.KeyMetadata;
+import dev.halyx.keys.KeyOptions;
+import dev.halyx.keys.KeyStore;
+import dev.halyx.keys.KeyStoreStatistics;
+import dev.halyx.keys.SealedData;
+import dev.halyx.keys.Signature;
+import dev.halyx.keys.WrappedKey;
 import dev.halyx.messaging.ConsumerOptions;
 import dev.halyx.messaging.MessageConsumer;
 import dev.halyx.messaging.MessageListener;
@@ -79,17 +90,27 @@ import dev.halyx.stream.StreamConsumer;
 import dev.halyx.stream.StreamListener;
 import dev.halyx.stream.StreamProducer;
 import reactor.core.Disposable;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.UncheckedIOException;
+import java.nio.ByteBuffer;
 import java.nio.file.Path;
+import java.security.PublicKey;
 import java.time.Duration;
 import java.util.Collection;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
@@ -97,7 +118,9 @@ import java.util.stream.Stream;
  * The reactive services seen through their blocking interfaces, so the conformance kits run through every
  * adapter method: each call subscribes and waits. Not part of the API. The exceptions are a blob's open stream
  * ({@code get}, which the reactive API doesn't hand out) and listeners, which the kits read statistics from and
- * which run on the blocking consumer; the streaming adapters have tests of their own.
+ * which run on the blocking consumer; the streaming adapters have tests of their own. A key's
+ * {@code encryptingStream} is the blocking one too, since an {@code OutputStream} can't wait for the {@code Flux}
+ * that seals behind it; {@code encryptBody} has tests of its own.
  */
 final class BlockingViews {
 
@@ -309,5 +332,163 @@ final class BlockingViews {
             public Capabilities capabilities() { return rx.capabilities(); }
             public <T> T unwrap(Class<T> nativeType) { return rx.unwrap(nativeType); }
         };
+    }
+
+    /**
+     * Key store and key views, one per blocking store and key, so the kit's identity checks ({@code key.store()},
+     * equal options sharing a key) hold through them. Stores the kit makes itself, outside the views, are wrapped
+     * with {@code wrap} where a reactive call takes one.
+     */
+    static final class KeyViews {
+
+        private final Function<KeyStore, ReactiveKeyStore> wrap;
+        private final Map<KeyStore, ReactiveKeyStore> reactive = new ConcurrentHashMap<>();
+        private final Map<KeyStore, KeyStore> stores = new ConcurrentHashMap<>();
+        private final Map<CryptoKey, CryptoKey> keys = new ConcurrentHashMap<>();
+
+        KeyViews(Function<KeyStore, ReactiveKeyStore> wrap) {
+            this.wrap = wrap;
+        }
+
+        /** The reactive store behind a view, or a new reactive view of a store the kit made itself. */
+        private ReactiveKeyStore reactive(KeyStore store) {
+            ReactiveKeyStore known = reactive.get(store);
+            return known != null ? known : wrap.apply(store);
+        }
+
+        KeyStore of(ReactiveKeyStore rx) {
+            return stores.computeIfAbsent(rx.blocking(), blocking -> {
+                KeyStore view = new KeyStore() {
+                    public String provider() { return rx.provider(); }
+                    public Optional<String> location() { return rx.location(); }
+                    public CryptoKey key(String name) { return of(rx.key(name)); }
+                    public CryptoKey key(String name, KeyOptions options) { return of(rx.key(name, options)); }
+                    public List<KeyMetadata> keys(String prefix) { return await(rx.keys(prefix).collectList()); }
+                    public byte[] decrypt(SealedData sealed, byte[] aad) { return await(rx.decrypt(sealed, aad)); }
+                    public DataKey decryptDataKey(WrappedKey wrapped) { return await(rx.decryptDataKey(wrapped)); }
+                    public InputStream decryptingStream(InputStream sealed, byte[] aad) { return inputStream(rx.decryptBody(body(sealed), aad)); }
+                    public void ping() { await(rx.ping()); }
+                    public KeyStoreStatistics statistics() { return rx.statistics(); }
+                    public Capabilities capabilities() { return rx.capabilities(); }
+                    public AsyncKeyStore async(Executor blocking) {
+                        KeyStore self = this;
+                        return new AsyncKeyStore() {
+                            public String provider() { return rx.provider(); }
+                            public CompletableFuture<byte[]> decrypt(SealedData sealed, byte[] aad) { return rx.decrypt(sealed, aad).toFuture(); }
+                            public CompletableFuture<DataKey> decryptDataKey(WrappedKey wrapped) { return rx.decryptDataKey(wrapped).toFuture(); }
+                            public CompletableFuture<List<KeyMetadata>> keys(String prefix) { return rx.keys(prefix).collectList().toFuture(); }
+                            public CompletableFuture<Void> ping() { return rx.ping().toFuture(); }
+                            public KeyStore blocking() { return self; }
+                        };
+                    }
+                    public <T> T unwrap(Class<T> nativeType) { return rx.unwrap(nativeType); }
+                };
+                reactive.put(view, rx);
+                return view;
+            });
+        }
+
+        CryptoKey of(ReactiveCryptoKey rx) {
+            return keys.computeIfAbsent(rx.blocking(), blocking -> new CryptoKey() {
+                public KeyStore store() { return of(rx.store()); }
+                public String name() { return rx.name(); }
+                public String provider() { return rx.provider(); }
+                public KeyMetadata metadata() { return await(rx.metadata()); }
+                public SealedData encrypt(byte[] plaintext, byte[] aad) { return await(rx.encrypt(plaintext, aad)); }
+                public byte[] decrypt(SealedData sealed, byte[] aad) { return await(rx.decrypt(sealed, aad)); }
+                public OutputStream encryptingStream(OutputStream sink, byte[] aad) { return rx.blocking().encryptingStream(sink, aad); }
+                public DataKey generateDataKey() { return await(rx.generateDataKey()); }
+                public DataKey decryptDataKey(WrappedKey wrapped) { return await(rx.decryptDataKey(wrapped)); }
+                public WrappedKey wrap(DataKey dataKey) { return await(rx.wrap(dataKey)); }
+                public SealedData rewrap(SealedData sealed) { return await(rx.rewrap(sealed)); }
+                public SealedData rewrap(SealedData sealed, KeyStore from) { return await(rx.rewrap(sealed, reactive(from))); }
+                public SealedData addTo(SealedData sealed, KeyStore from) { return await(rx.addTo(sealed, reactive(from))); }
+                public Signature sign(byte[] data) { return await(rx.sign(data)); }
+                public Signature signDigest(byte[] digest) { return await(rx.signDigest(digest)); }
+                public boolean verify(byte[] data, Signature signature) { return await(rx.verify(data, signature)); }
+                public byte[] mac(byte[] data) { return await(rx.mac(data)); }
+                public boolean verifyMac(byte[] data, byte[] mac) { return await(rx.verifyMac(data, mac)); }
+                public PublicKey publicKey(String version) { return await(rx.publicKey(version)); }
+                public PublicKey currentPublicKey() { return await(rx.currentPublicKey()); }
+                public Map<String, PublicKey> publicKeys() { return await(rx.publicKeys()); }
+                public Capabilities capabilities() { return rx.capabilities(); }
+                public AsyncCryptoKey async(Executor executor) {
+                    CryptoKey self = this;
+                    return new AsyncCryptoKey() {
+                        public String provider() { return rx.provider(); }
+                        public String name() { return rx.name(); }
+                        public CompletableFuture<KeyMetadata> metadata() { return rx.metadata().toFuture(); }
+                        public CompletableFuture<SealedData> encrypt(byte[] plaintext, byte[] aad) { return rx.encrypt(plaintext, aad).toFuture(); }
+                        public CompletableFuture<byte[]> decrypt(SealedData sealed, byte[] aad) { return rx.decrypt(sealed, aad).toFuture(); }
+                        public CompletableFuture<DataKey> generateDataKey() { return rx.generateDataKey().toFuture(); }
+                        public CompletableFuture<Signature> sign(byte[] data) { return rx.sign(data).toFuture(); }
+                        public CompletableFuture<Signature> signDigest(byte[] digest) { return rx.signDigest(digest).toFuture(); }
+                        public CompletableFuture<Boolean> verify(byte[] data, Signature signature) { return rx.verify(data, signature).toFuture(); }
+                        public CompletableFuture<byte[]> mac(byte[] data) { return rx.mac(data).toFuture(); }
+                        public CompletableFuture<Boolean> verifyMac(byte[] data, byte[] mac) { return rx.verifyMac(data, mac).toFuture(); }
+                        public CryptoKey blocking() { return self; }
+                    };
+                }
+                public <T> T unwrap(Class<T> nativeType) { return rx.unwrap(nativeType); }
+            });
+        }
+
+        /** {@code in} as a body of 1000-byte chunks, so segments span chunks; closed however the body ends. */
+        private static Flux<ByteBuffer> body(InputStream in) {
+            return Flux.<ByteBuffer>generate(sink -> {
+                try {
+                    byte[] chunk = in.readNBytes(1000);
+                    if (chunk.length == 0) {
+                        sink.complete();
+                    } else {
+                        sink.next(ByteBuffer.wrap(chunk));
+                    }
+                } catch (IOException e) {
+                    sink.error(new UncheckedIOException(e));
+                }
+            }).doFinally(signal -> {
+                try {
+                    in.close();
+                } catch (IOException e) {
+                    // already done with it
+                }
+            });
+        }
+
+        /** A body read as a stream; a failed body throws its error from {@code read}. */
+        private static InputStream inputStream(Flux<ByteBuffer> body) {
+            Stream<ByteBuffer> chunks = body.toStream(4);
+            Iterator<ByteBuffer> iterator = chunks.iterator();
+            return new InputStream() {
+                private ByteBuffer current;
+
+                @Override
+                public int read() {
+                    byte[] one = new byte[1];
+                    return read(one, 0, 1) < 0 ? -1 : one[0] & 0xff;
+                }
+
+                @Override
+                public int read(byte[] b, int off, int len) {
+                    if (len == 0) {
+                        return 0;
+                    }
+                    while (current == null || !current.hasRemaining()) {
+                        if (!iterator.hasNext()) {
+                            return -1;
+                        }
+                        current = iterator.next();
+                    }
+                    int n = Math.min(len, current.remaining());
+                    current.get(b, off, n);
+                    return n;
+                }
+
+                @Override
+                public void close() {
+                    chunks.close();
+                }
+            };
+        }
     }
 }

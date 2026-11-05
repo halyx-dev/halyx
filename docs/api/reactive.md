@@ -102,6 +102,8 @@ Mono<byte[]> invoice = invoices.getBytes(BlobKey.of("2026/inv-1.pdf"))
 | `ReactiveDocumentStore` | `get`, `getAll`, `query`, `queryIndex` | `queryAll`, `queryIndexAll` page by page |
 | `ReactiveCache<V>` | every operation; `getOrLoad(key, Mono<V> loader)` | |
 | `ReactiveParameterStore` | `get`, `require`, `getAll` | `watch(prefix, interval)` as `Flux<ParameterChanges>` |
+| `ReactiveKeyStore` | `decrypt`, `decryptDataKey`, `ping` | `keys(prefix)` as `Flux<KeyMetadata>`; `decryptBody` as `Flux<ByteBuffer>` |
+| `ReactiveCryptoKey` | every operation: `encrypt`, `decrypt`, data keys, `rewrap`, `addTo`, signing, MACs, public keys | `encryptBody`, `decryptBody` as `Flux<ByteBuffer>` |
 
 Listings and queries read pages as the subscriber asks for items, at most one page ahead of its demand, and
 none after cancellation:
@@ -144,6 +146,30 @@ stored only if the body completes:
 ```java
 Mono<PutResult> uploaded = invoices.put(BlobKey.of("exports/orders.csv"), csvChunks, PutOptions.defaults());
 ```
+
+## Keys
+
+`provider(name).keyStore()` and `keyStore(config)` give a `ReactiveKeyStore`, and its `key(name)` a
+`ReactiveCryptoKey`, with the same operations as [`KeyStore` and `CryptoKey`](keys.md). `key(name)` makes no call,
+and equal options give the same key. `ReactiveCryptoKeys.encrypt` seals for several keys at once, as `CryptoKeys`
+does.
+
+Large data seals and opens as it arrives, one segment at a time. `encryptBody` turns a plaintext
+`Publisher<ByteBuffer>` into the sealed bytes, and `decryptBody` does the reverse, so a sealed blob streams to and
+from storage without being held in memory:
+
+```java
+ReactiveCryptoKey data = rx.provider("orders").keyStore().key("orders-data");
+
+Mono<PutResult> stored = invoices.put(key, data.encryptBody(csvChunks, aad), PutOptions.defaults());
+Flux<ByteBuffer> csv = data.decryptBody(invoices.getBody(key), aad);
+```
+
+Only a plaintext body that completes gives sealed data that opens. If it fails, or the subscription is cancelled, the
+bytes emitted so far fail to open as truncated. A changed or truncated sealed body fails `decryptBody` with
+`DataIntegrityException` at the changed segment or at the end, after the segments before it have been emitted, so
+don't act on the plaintext until the `Flux` completes. Data keys from `generateDataKey` and `decryptDataKey` are
+yours to close; one that arrives after the subscriber has cancelled is closed for you.
 
 ## Consuming messages, events and records
 

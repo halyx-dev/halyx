@@ -24,6 +24,11 @@ import dev.halyx.config.ProviderConfig;
 import dev.halyx.events.EventPublisher;
 import dev.halyx.functions.FunctionConfig;
 import dev.halyx.functions.FunctionInvoker;
+import dev.halyx.keys.KeyPurpose;
+import dev.halyx.keys.KeyStore;
+import dev.halyx.keys.KeyStoreConfig;
+import dev.halyx.keys.SigningAlgorithm;
+import dev.halyx.memory.InMemoryKeys;
 import dev.halyx.messaging.ClaimCheck;
 import dev.halyx.messaging.Subscription;
 import dev.halyx.messaging.SubscriptionConfig;
@@ -43,6 +48,7 @@ import dev.halyx.tck.CacheConformanceTest;
 import dev.halyx.tck.DocumentStoreConformanceTest;
 import dev.halyx.tck.EventBusConformanceTest;
 import dev.halyx.tck.FunctionConformanceTest;
+import dev.halyx.tck.KeyStoreConformanceTest;
 import dev.halyx.tck.MessagingConformanceTest;
 import dev.halyx.tck.ParameterStoreConformanceTest;
 import dev.halyx.tck.StreamConformanceTest;
@@ -52,6 +58,8 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Nested;
 
 import java.net.URI;
+import java.util.Map;
+import java.util.Optional;
 
 /**
  * The conformance kits through the reactive adapters, on the in-memory provider: every call goes through a
@@ -61,11 +69,20 @@ class ReactiveConformanceTest {
 
     private static Halyx halyx;
     private static ReactiveHalyx rx;
+    private static InMemoryKeys keys;
 
     @BeforeAll
     static void start() {
         halyx = Halyx.builder().register("test", ProviderConfig.of("memory")).build();
         rx = ReactiveHalyx.withVirtualThreads(halyx);
+        keys = halyx.provider("test").keyStore().unwrap(InMemoryKeys.class);
+        keys.create("tck-data", KeyPurpose.ENCRYPTION);
+        keys.create("tck-other", KeyPurpose.ENCRYPTION);
+        keys.create("tck-disposable", KeyPurpose.ENCRYPTION);
+        keys.create("tck-mac", KeyPurpose.MAC);
+        keys.create("tck-rsa", KeyPurpose.SIGNING, SigningAlgorithm.RSA_PSS_SHA256);
+        keys.create("tck-p256", KeyPurpose.SIGNING, SigningAlgorithm.ECDSA_P256_SHA256);
+        keys.create("tck-p384", KeyPurpose.SIGNING, SigningAlgorithm.ECDSA_P384_SHA384);
     }
 
     @AfterAll
@@ -95,6 +112,78 @@ class ReactiveConformanceTest {
                 table.sortKey("sk");
             }
             return BlockingViews.of(rx.provider("test").documentStore(indexes(table, sorted).build()));
+        }
+    }
+
+    @Nested
+    class Keys extends KeyStoreConformanceTest {
+        private final BlockingViews.KeyViews views = new BlockingViews.KeyViews(rx::wrap);
+
+        @Override
+        protected CloudContext context() {
+            return ReactiveConformanceTest.context();
+        }
+
+        @Override
+        protected KeyStoreConfig.Builder config() {
+            return KeyStoreConfig.builder();
+        }
+
+        @Override
+        protected KeyStore store() {
+            return views.of(rx.provider("test").keyStore(config().build()));
+        }
+
+        @Override
+        protected String encryptionKey() {
+            return "tck-data";
+        }
+
+        @Override
+        protected String otherEncryptionKey() {
+            return "tck-other";
+        }
+
+        @Override
+        protected String disposableKey() {
+            return "tck-disposable";
+        }
+
+        @Override
+        protected String signingKey(SigningAlgorithm algorithm) {
+            return switch (algorithm) {
+                case RSA_PSS_SHA256, RSA_PKCS1_SHA256 -> "tck-rsa";
+                case ECDSA_P256_SHA256 -> "tck-p256";
+                case ECDSA_P384_SHA384 -> "tck-p384";
+            };
+        }
+
+        @Override
+        protected Optional<String> macKey() {
+            return Optional.of("tck-mac");
+        }
+
+        @Override
+        protected void rotate(String name) {
+            keys.rotate(name);
+        }
+
+        @Override
+        protected void disable(String name) {
+            keys.disable(name);
+        }
+
+        @Override
+        protected void enable(String name) {
+            keys.enable(name);
+        }
+
+        @Override
+        protected Map<String, String> knownEnvironmentGaps() {
+            // Its last check compares the blocking context's store with the store under test, here a view of it.
+            // Equal options sharing a key, and keys naming their store, are checked in ReactiveKeyStoreTest, and through
+            // the views in metadataDescribesTheKey.
+            return Map.of("equalOptionsShareOneKey", "the store under test is a reactive view, not the context's");
         }
     }
 
