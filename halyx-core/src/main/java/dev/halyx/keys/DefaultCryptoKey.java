@@ -260,7 +260,7 @@ final class DefaultCryptoKey implements CryptoKey {
 
     private WrappedKey ownEntry(KeyMetadata current, List<WrappedKey> entries) {
         for (WrappedKey entry : entries) {
-            if (entry.keyId().equals(current.keyId())) {
+            if (entry.keyId().equals(current.keyId()) && store.opens(entry)) {
                 return entry;
             }
         }

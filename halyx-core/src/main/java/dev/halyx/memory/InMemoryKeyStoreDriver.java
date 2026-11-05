@@ -260,6 +260,11 @@ final class InMemoryKeyStoreDriver extends AbstractKeyStoreDriver {
     }
 
     @Override
+    public boolean unwraps(WrapAlgorithm algorithm) {
+        return algorithm == WrapAlgorithm.MEMORY;
+    }
+
+    @Override
     public void ping() {
         // Always answers: the keys are in this JVM.
     }
