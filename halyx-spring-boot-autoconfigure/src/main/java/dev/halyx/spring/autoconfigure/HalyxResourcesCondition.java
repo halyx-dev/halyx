@@ -16,6 +16,7 @@
 package dev.halyx.spring.autoconfigure;
 
 import dev.halyx.cache.Cache;
+import dev.halyx.keys.KeyStore;
 import dev.halyx.messaging.Subscription;
 import dev.halyx.nosql.DocumentStore;
 import dev.halyx.parameters.ParameterStore;
@@ -46,6 +47,10 @@ public class HalyxResourcesCondition extends AnyNestedCondition {
 
     @ConditionalOnBean(ParameterStore.class)
     static class HasParameterStore {
+    }
+
+    @ConditionalOnBean(KeyStore.class)
+    static class HasKeyStore {
     }
 
     @ConditionalOnBean(Subscription.class)

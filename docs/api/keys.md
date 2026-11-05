@@ -59,6 +59,9 @@ and asking a store again for a name with equal options returns the same key.
 Names are portable: 1 to 63 letters, digits and hyphens, prefix included, which every key service accepts. To use the
 provider's own names, such as a key ARN or a full Google Cloud crypto key name, set `nativeNames(true)`.
 
+In Spring Boot, key stores and keys are beans from `halyx.key-stores` and `halyx.keys`; see
+[Spring Boot](../spring-boot.md#keys-and-encryption).
+
 The first use of a key reads its metadata (`metadata()`, no cryptographic call) and checks it: a key whose type doesn't
 fit what you ask of it throws `InvalidArgumentException`. Metadata is refreshed every few minutes, so a rotation is
 seen without a restart.

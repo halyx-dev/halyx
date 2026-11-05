@@ -18,6 +18,9 @@ package dev.halyx.spring.autoconfigure;
 import dev.halyx.cache.Cache;
 import dev.halyx.events.EventPublisher;
 import dev.halyx.functions.FunctionInvoker;
+import dev.halyx.keys.CryptoKey;
+import dev.halyx.keys.KeyOptions;
+import dev.halyx.keys.KeyStore;
 import dev.halyx.messaging.Publisher;
 import dev.halyx.nosql.DocumentStore;
 import dev.halyx.messaging.Subscription;
@@ -58,8 +61,8 @@ import java.util.regex.Pattern;
 /**
  * Registers one {@link BlobStore} bean per {@code halyx.blob-stores.<name>} entry, one {@code Cache} bean per
  * {@code halyx.caches.<name>} entry and one {@code DataSource} bean per {@code halyx.databases.<name>} entry, each
- * named {@code <name>}, and likewise for document stores, topics, event buses, subscriptions and stream producers and
- * consumers, so they can be injected by type or with {@code @Qualifier("<name>")}. Configuration mistakes fail at
+ * named {@code <name>}, and likewise for key stores, keys, document stores, topics, event buses, subscriptions and
+ * stream producers and consumers, so they can be injected by type or with {@code @Qualifier("<name>")}. Configuration mistakes fail at
  * startup with the offending property named.
  *
  * <p>Providers are resolved when each bean is created, against the {@code Halyx} bean, so resources can use
@@ -123,6 +126,33 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
                     definition.getConstructorArgumentValues().addIndexedArgumentValue(2, store.toStoreConfig());
                     definition.setDescription("Halyx " + store.kind().name().toLowerCase() + " store " + name);
                     names.register(name, "halyx.parameter-stores." + name, null, definition);
+                });
+        // Bound on their own: an entry with only secrets binds as no key store at all.
+        binder.bind("halyx.key-stores", Bindable.mapOf(String.class, KeyStoreSecrets.class)).orElse(Map.of())
+                .forEach((name, entry) -> {
+                    if (entry.secrets() != null && !entry.secrets().isEmpty()) {
+                        throw new IllegalStateException("halyx.key-stores." + name + ".secrets: a key store takes no "
+                                + "secrets. Its settings and its provider's login are fixed roots: take them from "
+                                + "configuration, the environment, the platform identity, or a store on another "
+                                + "provider");
+                    }
+                });
+        Map<String, HalyxProperties.KeyStoreProperties> keyStores = binder
+                .bind("halyx.key-stores", Bindable.mapOf(String.class, HalyxProperties.KeyStoreProperties.class))
+                .orElse(Map.of());
+        keyStores.forEach((name, store) -> {
+            String property = "halyx.key-stores." + name;
+            RootBeanDefinition definition = serviceBean(KeyStore.class, "keyStore", property, store.provider());
+            definition.getConstructorArgumentValues().addIndexedArgumentValue(2, store.toKeyStoreConfig(name));
+            definition.setDescription("Halyx key store " + name);
+            names.register(name, property, null, definition);
+        });
+        binder.bind("halyx.keys", Bindable.mapOf(String.class, HalyxProperties.KeyProperties.class))
+                .orElse(Map.of())
+                .forEach((name, key) -> {
+                    String property = "halyx.keys." + name;
+                    names.register(name, property, "name", keyBean(property, key.keyName(name), key,
+                            keyStore(property + ".store", key.store(), keyStores.keySet())));
                 });
         Map<String, HalyxProperties.DatabaseProperties> databases = binder
                 .bind("halyx.databases", Bindable.mapOf(String.class, HalyxProperties.DatabaseProperties.class))
@@ -286,6 +316,51 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
             stores.add(secret.store());
         }
         return stores.toArray(String[]::new);
+    }
+
+    /** Only the {@code secrets} of a {@code halyx.key-stores} entry, which a key store refuses. */
+    record KeyStoreSecrets(List<HalyxProperties.SecretProperty> secrets) {
+    }
+
+    /**
+     * The key store bean that {@code property} names: {@code store}, which must be one of the
+     * {@code halyx.key-stores}, or when it is omitted, the only one.
+     */
+    static String keyStore(String property, String store, Set<String> keyStores) {
+        if (store == null || store.isBlank()) {
+            if (keyStores.size() == 1) {
+                return keyStores.iterator().next();
+            }
+            throw new IllegalStateException(property + " is required when " + keyStores.size()
+                    + " key stores are configured " + new TreeSet<>(keyStores));
+        }
+        if (!keyStores.contains(store)) {
+            throw new IllegalStateException(property + " must name one of halyx.key-stores " + new TreeSet<>(keyStores));
+        }
+        return store;
+    }
+
+    /** A {@code CryptoKey} from its store bean, which is created first and destroyed after it. */
+    private static RootBeanDefinition keyBean(String property, String name, HalyxProperties.KeyProperties key,
+                                              String store) {
+        KeyOptions options;
+        try {
+            options = key.toKeyOptions();
+        } catch (IllegalArgumentException e) {
+            throw new IllegalStateException(property + ": " + e.getMessage(), e);
+        }
+        RootBeanDefinition definition = new RootBeanDefinition(CryptoKey.class);
+        definition.setFactoryBeanName(FACTORY_BEAN);
+        definition.setFactoryMethodName("cryptoKey");
+        definition.setTargetType(CryptoKey.class);
+        ConstructorArgumentValues args = definition.getConstructorArgumentValues();
+        args.addIndexedArgumentValue(0, property);
+        args.addIndexedArgumentValue(1, new RuntimeBeanReference(store));
+        args.addIndexedArgumentValue(2, name);
+        args.addIndexedArgumentValue(3, options);
+        args.addIndexedArgumentValue(4, key.checkOnStartup());
+        definition.setDescription("Halyx key " + store + "/" + name);
+        return definition;
     }
 
     /** The store an {@code auth.secret} reads from, as a bean name to depend on, after checking it's one of the stores. */

@@ -16,6 +16,10 @@
 package dev.halyx.spring.autoconfigure.health;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.config.BeanPostProcessor;
+import dev.halyx.keys.KeyPurpose;
+import dev.halyx.keys.KeyStore;
+import dev.halyx.memory.InMemoryKeys;
 import dev.halyx.spring.autoconfigure.HalyxAutoConfiguration;
 import dev.halyx.spring.autoconfigure.HalyxBuilderCustomizer;
 import dev.halyx.spring.autoconfigure.TestProviders;
@@ -227,5 +231,48 @@ class HalyxHealthTest {
     void absentWithoutBlobStores() {
         runner.withPropertyValues("halyx.providers.local.type=memory")
                 .run(context -> assertThat(context).doesNotHaveBean("halyxHealthContributor"));
+    }
+
+    @Test
+    void keyStoresAndKeysHaveIndicators() {
+        runner.withPropertyValues("halyx.providers.local.type=memory", "halyx.key-stores.kms.location=main",
+                        "halyx.keys.data.name=orders", "halyx.keys.gone.name=missing", "halyx.keys.off.name=retired")
+                .withBean(BeanPostProcessor.class, () -> new BeanPostProcessor() {
+                    @Override
+                    public Object postProcessAfterInitialization(Object bean, String name) {
+                        if (bean instanceof KeyStore store) {
+                            InMemoryKeys memory = store.unwrap(InMemoryKeys.class);
+                            memory.create("orders", KeyPurpose.ENCRYPTION);
+                            memory.create("retired", KeyPurpose.ENCRYPTION);
+                            memory.disable("retired");
+                        }
+                        return bean;
+                    }
+                })
+                .run(context -> {
+                    var composite = context.getBean("halyxHealthContributor", CompositeHealthContributor.class);
+                    var kms = ((HealthIndicator) composite.getContributor("kms")).health();
+                    var data = ((HealthIndicator) composite.getContributor("data")).health();
+
+                    assertThat(kms.getStatus()).isEqualTo(Status.UP);
+                    assertThat(kms.getDetails()).containsEntry("provider", "memory").containsEntry("location", "main");
+                    assertThat(data.getStatus()).isEqualTo(Status.UP);
+                    assertThat(data.getDetails()).containsEntry("name", "orders").containsEntry("enabled", true)
+                            .containsKey("keyId");
+                    assertThat(((HealthIndicator) composite.getContributor("gone")).health().getStatus())
+                            .isEqualTo(Status.DOWN);
+                    assertThat(((HealthIndicator) composite.getContributor("off")).health().getStatus())
+                            .isEqualTo(Status.DOWN);
+                });
+    }
+
+    @Test
+    void noKeyEntriesWithoutKeySettings() {
+        runner.withPropertyValues("halyx.providers.local.type=memory", "halyx.blob-stores.invoices.bucket=b")
+                .run(context -> {
+                    var composite = context.getBean("halyxHealthContributor", CompositeHealthContributor.class);
+                    assertThat(composite.getContributor("invoices")).isNotNull();
+                    assertThat(context.getBeansOfType(KeyStore.class)).isEmpty();
+                });
     }
 }
