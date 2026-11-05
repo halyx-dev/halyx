@@ -20,6 +20,7 @@ import dev.halyx.error.CloudException;
 import dev.halyx.error.UnsupportedFeatureException;
 import dev.halyx.keys.KeyMetadata;
 import dev.halyx.keys.SigningAlgorithm;
+import dev.halyx.keys.WrapAlgorithm;
 import dev.halyx.keys.WrappedKey;
 
 import java.security.PublicKey;
@@ -88,6 +89,15 @@ public interface KeyStoreDriver extends AutoCloseable {
 
     /** Whether the provider-prefixed {@code keyId} names a key in this store's location. */
     boolean inLocation(String keyId);
+
+    /**
+     * Whether this driver unwraps data keys wrapped with {@code algorithm}. HLXS readers skip entries they can't open
+     * rather than fail on them, so an entry from a newer writer doesn't stop an older one using another entry. All of
+     * them by default; a driver that knows several algorithms for its scheme lists only those it implements.
+     */
+    default boolean unwraps(WrapAlgorithm algorithm) {
+        return true;
+    }
 
     /** An authenticated read that always reaches the key service, for health checks. */
     void ping();

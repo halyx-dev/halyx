@@ -40,6 +40,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.Random;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -148,6 +149,25 @@ class KeyStoreTest {
 
         assertThatThrownBy(() -> data.decrypt(tampered, AAD)).isInstanceOf(DataIntegrityException.class)
                 .hasMessageContaining("key commitment");
+    }
+
+    @Test
+    void entriesWithAnAlgorithmTheDriverDoesntImplementAreSkipped() {
+        CryptoKey data = store.key("data");
+        SealedData sealed = data.encrypt(DATA, AAD);
+        WrappedKey own = sealed.keys().get(0);
+        WrappedKey unknown = new WrappedKey(own.keyId(), "1", 239, own.bytes());
+        WrappedKey foreign = new WrappedKey(own.keyId(), Optional.of("1"), WrapAlgorithm.AWS_KMS, own.bytes());
+
+        for (WrappedKey entry : List.of(unknown, foreign)) {
+            SealedData only = sealed.withKeys(List.of(entry));
+            assertThatThrownBy(() -> store.decrypt(only, AAD)).isInstanceOf(InvalidArgumentException.class);
+            assertThatThrownBy(() -> data.decrypt(only, AAD)).isInstanceOf(InvalidArgumentException.class);
+            assertThatThrownBy(() -> store.decryptDataKey(entry)).isInstanceOf(InvalidArgumentException.class);
+        }
+        WrappedKey other = store.key("other-data").encrypt(DATA, AAD).keys().get(0);
+        SealedData skipping = sealed.withKeys(List.of(new WrappedKey(other.keyId(), "1", 239, other.bytes()), own));
+        assertThat(store.decrypt(skipping, AAD)).isEqualTo(DATA);
     }
 
     @Test

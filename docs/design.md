@@ -137,6 +137,7 @@ either portable or explicitly declared as a capability:
 | Streams | 28 | asynchronous sends and polls, keys, headers, partitions and offsets, order per key, committed positions, uncommitted records read again, groups sharing partitions, start positions, listener retries holding only their partition, dead letters, commits on close, claim checks, idempotence and transactions |
 | Cache | 52 | ping, the asynchronous view, basic and bulk operations, cache-aside, atomic operations, counters, locks, namespaces, expiry (fail-open has its own test against an unreachable server) |
 | Parameter store | 26 | CRUD, the asynchronous view, ping past the cache, versions, prefixes, caching, JSON fields, native names, watching |
+| Key store | 63 | round trips from empty to many segments, with and without AAD; every header field, key entry and segment changed, reordered, truncated or extended; wrong keys and keys outside the store; data sealed for several keys and for 16 at most, keys added and removed with the body unchanged, unknown entries skipped; the key commitment; data keys and streams; rewrap after rotation, across keys and across stores; signing per algorithm, checked by the JDK alone, and after rotation; purposes, missing and disabled keys; data key reuse and the decrypt cache; names, metadata, ping, MACs and the asynchronous view. Several-key cases seal next to a memory key store the kit starts itself |
 
 ### Emulators
 

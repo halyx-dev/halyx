@@ -118,7 +118,7 @@ public final class DefaultKeyStore implements KeyStore, AutoCloseable {
     @Override
     public DataKey decryptDataKey(WrappedKey wrapped) {
         Objects.requireNonNull(wrapped, "wrapped");
-        if (!driver.inLocation(wrapped.keyId())) {
+        if (!opens(wrapped)) {
             throw notInLocation(List.of(wrapped));
         }
         return new DataKey(unwrap(wrapped), wrapped);
@@ -225,10 +225,18 @@ public final class DefaultKeyStore implements KeyStore, AutoCloseable {
         return nativeName.startsWith(config.prefix()) ? nativeName.substring(config.prefix().length()) : nativeName;
     }
 
+    /**
+     * Whether this store can open {@code entry}: a key in its location, wrapped with an algorithm the driver implements.
+     * An algorithm this version of Halyx doesn't know is never one.
+     */
+    boolean opens(WrappedKey entry) {
+        return driver.inLocation(entry.keyId()) && entry.algorithm().filter(driver::unwraps).isPresent();
+    }
+
     /** The first entry this store can open. */
     WrappedKey entryInLocation(List<WrappedKey> entries) {
         for (WrappedKey entry : entries) {
-            if (driver.inLocation(entry.keyId())) {
+            if (opens(entry)) {
                 return entry;
             }
         }
@@ -382,7 +390,7 @@ public final class DefaultKeyStore implements KeyStore, AutoCloseable {
         public CompletableFuture<DataKey> decryptDataKey(WrappedKey wrapped) {
             try {
                 Objects.requireNonNull(wrapped, "wrapped");
-                if (!driver.inLocation(wrapped.keyId())) {
+                if (!opens(wrapped)) {
                     throw notInLocation(List.of(wrapped));
                 }
             } catch (RuntimeException e) {
