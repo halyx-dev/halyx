@@ -17,6 +17,8 @@ package dev.halyx.vault;
 
 import dev.halyx.config.Credentials;
 import dev.halyx.config.ProviderConfig;
+import dev.halyx.keys.KeyStoreConfig;
+import dev.halyx.keys.spi.KeyStoreDriver;
 import dev.halyx.parameters.ParameterStoreConfig;
 import dev.halyx.parameters.spi.ParameterDriver;
 import dev.halyx.spi.CloudProvider;
@@ -27,7 +29,8 @@ import java.nio.file.Path;
 
 /**
  * The {@code "vault"} provider: HashiCorp Vault (including HCP Vault). Both parameter kinds use the
- * KV v2 engine mounted at the store's location (default {@code secret}).
+ * KV v2 engine mounted at the store's location (default {@code secret}), and key stores the Transit engine mounted at
+ * theirs (default {@code transit}).
  */
 public final class VaultProvider implements CloudProvider {
 
@@ -48,6 +51,11 @@ public final class VaultProvider implements CloudProvider {
             @Override
             public ParameterDriver parameterStore(ParameterStoreConfig storeConfig) {
                 return new VaultKvDriver(client, storeConfig.location().orElse("secret"), storeConfig.nativeNames());
+            }
+
+            @Override
+            public KeyStoreDriver keyStore(KeyStoreConfig storeConfig) {
+                return new VaultTransitDriver(client, storeConfig.location().orElse("transit"));
             }
 
             @Override
