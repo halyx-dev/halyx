@@ -229,6 +229,34 @@ ProviderConfig.of("vault")
 
 The KV v2 mount is the parameter store's `location` (`secret` by default).
 
+### Keys on Transit
+
+A key store is the Transit mount at its `location` (`transit` by default), and a key's name is the Transit key's. Halyx
+never creates, rotates or deletes keys: create them yourself, `aes256-gcm96` (or another symmetric type) for
+encryption, `rsa-2048`, `rsa-3072`, `rsa-4096`, `ecdsa-p256` or `ecdsa-p384` for signing, and `hmac` for MACs.
+
+Give the application this policy, for the `transit` mount:
+
+```hcl
+path "transit/encrypt/*" { capabilities = ["update"] }
+path "transit/decrypt/*" { capabilities = ["update"] }
+path "transit/rewrap/*"  { capabilities = ["update"] }
+path "transit/sign/*"    { capabilities = ["update"] }
+path "transit/hmac/*"    { capabilities = ["update"] }
+path "transit/verify/*"  { capabilities = ["update"] }
+path "transit/keys/*"    { capabilities = ["read"] }
+path "transit/keys"      { capabilities = ["list"] }
+```
+
+It grants `update` and never `create` on `transit/encrypt/*`: with `create`, Transit makes a missing key on its first
+`encrypt` instead of failing.
+
+Transit has no disabled state, so a key's metadata always reports it enabled. To withdraw a key, deny its paths in
+another policy on the application's token. Name each path exactly: Vault applies the matching path of highest
+priority, and `transit/encrypt/*` outranks a pattern such as `transit/+/orders`. Calls then fail with
+`AccessDeniedException`. Wrapping, unwrapping, signing, MACs and metadata and public key reads have a non-blocking
+path on Transit.
+
 ## In-memory
 
 ```java
