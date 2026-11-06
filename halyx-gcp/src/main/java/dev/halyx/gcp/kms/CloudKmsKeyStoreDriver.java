@@ -65,12 +65,14 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.regex.Matcher;
@@ -400,6 +402,22 @@ public final class CloudKmsKeyStoreDriver extends AbstractKeyStoreDriver {
         return mac(request.getName(), kms.macSign(request));
     }
 
+    /** Signs with the version Halyx knows, looking the current one up only if that version has been disabled. */
+    @Override
+    public byte[] generateMac(String nativeName, Optional<String> knownVersion, byte[] data) {
+        if (knownVersion.isPresent()) {
+            MacSignRequest request = macSign(versionName(keyNameOf(nativeName), knownVersion.get()), data);
+            try {
+                return mac(request.getName(), kms.macSign(request));
+            } catch (ApiException e) {
+                if (!staleVersion(e)) {
+                    throw e;
+                }
+            }
+        }
+        return generateMac(nativeName, data);
+    }
+
     @Override
     public CompletableFuture<byte[]> generateMacAsync(String nativeName, byte[] data, Executor blocking) {
         String key = keyNameOf(nativeName);
@@ -408,6 +426,19 @@ public final class CloudKmsKeyStoreDriver extends AbstractKeyStoreDriver {
             return GcpFutures.of(kms.macSignCallable().futureCall(request))
                     .thenApply(response -> mac(request.getName(), response));
         });
+    }
+
+    @Override
+    public CompletableFuture<byte[]> generateMacAsync(String nativeName, Optional<String> knownVersion, byte[] data,
+                                                      Executor blocking) {
+        if (knownVersion.isEmpty()) {
+            return generateMacAsync(nativeName, data, blocking);
+        }
+        MacSignRequest request = macSign(versionName(keyNameOf(nativeName), knownVersion.get()), data);
+        return GcpFutures.of(kms.macSignCallable().futureCall(request))
+                .thenApply(response -> mac(request.getName(), response))
+                .exceptionallyCompose(error -> staleVersion(error) ? generateMacAsync(nativeName, data, blocking)
+                        : CompletableFuture.failedFuture(error));
     }
 
     private static MacSignRequest macSign(String version, byte[] data) {
@@ -429,13 +460,40 @@ public final class CloudKmsKeyStoreDriver extends AbstractKeyStoreDriver {
      */
     @Override
     public boolean verifyMac(String nativeName, byte[] data, byte[] mac) {
+        return verifyMac(nativeName, List.of(), data, mac);
+    }
+
+    /**
+     * Tries the versions Halyx knows first. Before answering false it lists the key's versions and tries those it
+     * hasn't, so a version made since Halyx last read the key still verifies; a mismatch costs that one list.
+     */
+    @Override
+    public boolean verifyMac(String nativeName, List<String> knownVersions, byte[] data, byte[] mac) {
         String key = keyNameOf(nativeName);
-        List<String> versions = new ArrayList<>(enabled(versions(key)));
-        Collections.reverse(versions);
+        Set<String> refused = new HashSet<>();
+        if (verifyEach(key, data, mac, newestFirst(knownVersions), refused, true)) {
+            return true;
+        }
+        return verifyEach(key, data, mac, newestFirst(enabled(versions(key))), refused, false);
+    }
+
+    /** Whether any of {@code versions} not already in {@code refused} verifies; adds each that doesn't. */
+    private boolean verifyEach(String key, byte[] data, byte[] mac, List<String> versions, Set<String> refused,
+                               boolean hinted) {
         for (String version : versions) {
+            if (refused.contains(version)) {
+                continue;
+            }
             MacVerifyRequest request = macVerify(versionName(key, version), data, mac);
-            if (verified(request.getName(), kms.macVerify(request))) {
-                return true;
+            try {
+                if (verified(request.getName(), kms.macVerify(request))) {
+                    return true;
+                }
+                refused.add(version);
+            } catch (ApiException e) {
+                if (!hinted || !staleVersion(e)) {
+                    throw e;
+                }
             }
         }
         return false;
@@ -443,22 +501,54 @@ public final class CloudKmsKeyStoreDriver extends AbstractKeyStoreDriver {
 
     @Override
     public CompletableFuture<Boolean> verifyMacAsync(String nativeName, byte[] data, byte[] mac, Executor blocking) {
-        String key = keyNameOf(nativeName);
-        return versionsAsync(key).thenCompose(all -> {
-            List<String> versions = new ArrayList<>(enabled(all));
-            Collections.reverse(versions);
-            return verifyFrom(key, data, mac, versions, 0);
-        });
+        return verifyMacAsync(nativeName, List.of(), data, mac, blocking);
     }
 
-    private CompletableFuture<Boolean> verifyFrom(String key, byte[] data, byte[] mac, List<String> versions, int i) {
+    @Override
+    public CompletableFuture<Boolean> verifyMacAsync(String nativeName, List<String> knownVersions, byte[] data,
+                                                     byte[] mac, Executor blocking) {
+        String key = keyNameOf(nativeName);
+        Set<String> refused = ConcurrentHashMap.newKeySet();
+        return verifyFrom(key, data, mac, newestFirst(knownVersions), 0, refused, true)
+                .thenCompose(valid -> valid ? CompletableFuture.completedFuture(true)
+                        : versionsAsync(key).thenCompose(all ->
+                                verifyFrom(key, data, mac, newestFirst(enabled(all)), 0, refused, false)));
+    }
+
+    private CompletableFuture<Boolean> verifyFrom(String key, byte[] data, byte[] mac, List<String> versions, int i,
+                                                  Set<String> refused, boolean hinted) {
         if (i == versions.size()) {
             return CompletableFuture.completedFuture(false);
         }
-        MacVerifyRequest request = macVerify(versionName(key, versions.get(i)), data, mac);
+        String version = versions.get(i);
+        if (refused.contains(version)) {
+            return verifyFrom(key, data, mac, versions, i + 1, refused, hinted);
+        }
+        MacVerifyRequest request = macVerify(versionName(key, version), data, mac);
         return GcpFutures.of(kms.macVerifyCallable().futureCall(request))
-                .thenCompose(response -> verified(request.getName(), response)
-                        ? CompletableFuture.completedFuture(true) : verifyFrom(key, data, mac, versions, i + 1));
+                .thenApply(response -> verified(request.getName(), response))
+                .exceptionallyCompose(error -> hinted && staleVersion(error) ? CompletableFuture.completedFuture(false)
+                        : CompletableFuture.failedFuture(error))
+                .thenCompose(valid -> {
+                    if (valid) {
+                        return CompletableFuture.completedFuture(true);
+                    }
+                    refused.add(version);
+                    return verifyFrom(key, data, mac, versions, i + 1, refused, hinted);
+                });
+    }
+
+    private static List<String> newestFirst(List<String> oldestFirst) {
+        List<String> versions = new ArrayList<>(oldestFirst);
+        Collections.reverse(versions);
+        return versions;
+    }
+
+    /** A disabled or destroyed version, or one that's gone: the hint was stale. */
+    private static boolean staleVersion(Throwable error) {
+        return unwrapFuture(error) instanceof ApiException e
+                && (e.getStatusCode().getCode() == StatusCode.Code.FAILED_PRECONDITION
+                || e.getStatusCode().getCode() == StatusCode.Code.NOT_FOUND);
     }
 
     private static MacVerifyRequest macVerify(String version, byte[] data, byte[] mac) {

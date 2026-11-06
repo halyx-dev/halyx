@@ -221,6 +221,24 @@ class VaultTransitConformanceIT extends KeyStoreConformanceTest {
         assertThatThrownBy(() -> store().decrypt(sealed, AAD)).isInstanceOf(dev.halyx.error.InvalidArgumentException.class);
     }
 
+    @Test
+    void aKeyReadBeforeARotationStillVerifiesNewerMacs() {
+        root("POST", "transit/keys/tck-mac-rotated", Map.of("type", "hmac", "key_size", 32));
+        CryptoKey stale = store().key("tck-mac-rotated");
+        assertThat(stale.metadata().versions()).containsExactly("1");
+
+        // Two rotations, and version 1 withdrawn: the versions the key keeps are now all wrong.
+        rotate("tck-mac-rotated");
+        rotate("tck-mac-rotated");
+        root("POST", "transit/keys/tck-mac-rotated/config", Map.of("min_decryption_version", 3));
+        byte[] mac = context().keyStore(config().build()).key("tck-mac-rotated").mac(DATA);
+
+        assertThat(stale.metadata().versions()).as("still the copy read before").containsExactly("1");
+        assertThat(stale.verifyMac(DATA, mac)).isTrue();
+        assertThat(stale.async().verifyMac(DATA, mac).join()).isTrue();
+        assertThat(stale.verifyMac("other".getBytes(StandardCharsets.UTF_8), mac)).isFalse();
+    }
+
     // Helpers
 
     /** Denies every use of {@code name} on top of the key policy ({@code none} names no key). */

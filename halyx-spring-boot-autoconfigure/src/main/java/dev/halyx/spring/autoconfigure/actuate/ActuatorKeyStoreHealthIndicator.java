@@ -16,24 +16,30 @@
 package dev.halyx.spring.autoconfigure.actuate;
 
 import dev.halyx.keys.KeyStore;
+import dev.halyx.spring.autoconfigure.KeyStorePing;
 import org.springframework.boot.actuate.health.AbstractHealthIndicator;
 import org.springframework.boot.actuate.health.Health;
 
-/** UP when the key service answers an authenticated read, past every cache. */
+/**
+ * UP when the key service answers an authenticated read, past every cache. The answer stands for
+ * {@link KeyStorePing#TTL}, so frequent probes don't spend the key service's request quota.
+ */
 public class ActuatorKeyStoreHealthIndicator extends AbstractHealthIndicator {
 
     private final KeyStore store;
+    private final KeyStorePing ping;
 
     public ActuatorKeyStoreHealthIndicator(KeyStore store) {
         super("Key store health check failed");
         this.store = store;
+        this.ping = new KeyStorePing(store);
     }
 
     @Override
     protected void doHealthCheck(Health.Builder builder) {
         builder.withDetail("provider", store.provider());
         store.location().ifPresent(location -> builder.withDetail("location", location));
-        store.ping();
+        ping.check();
         builder.up();
     }
 }

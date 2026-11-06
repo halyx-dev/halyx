@@ -232,6 +232,9 @@ paths on Azure, and give busy services their own vault; see [Keys on Key Vault](
   `interceptAsync`, as tracing does, see your context; one that only implements `intercept` runs on a virtual thread,
   as it does for any asynchronous call.
 - Decryptions that hit `dataKeyCache` don't wait on each other.
+- MACs use the key versions Halyx already knows: making one is a single call, and checking one tries those versions
+  without listing them first. Before a check answers false, the key's versions are read again, so a version made
+  since still verifies; a mismatch costs that one read.
 
 **Your responsibilities,** because each is a trade-off only you can make, or infrastructure Halyx doesn't run:
 
@@ -244,8 +247,9 @@ paths on Azure, and give busy services their own vault; see [Keys on Key Vault](
 - **Freshness.** `cacheTtl` on parameter stores decides how often secrets are read, and decrypted, again.
 - **Access patterns.** Fewer, larger reads cost fewer calls than many small ones: an encrypted blob's range read
   unwraps its data key each time unless `dataKeyCache` is on. Call `head` only where you need a blob's exact size.
-- **Health probes.** A key store's health check pings the key service: put it in readiness, not liveness, and probe
-  at an interval your quota allows.
+- **Health probes.** A key store's health check pings the key service, and the Spring health entry keeps each
+  answer, failures included, for 30 seconds. Put it in readiness, not liveness: a key service outage should take a pod
+  out of rotation, not restart it.
 - **Your executors.** When you pass your own executor to `async(executor)`, or use a reactive scheduler, propagating
   your context (traces, MDC) on it is yours, as anywhere in Halyx.
 - **IAM, key creation and rotation.** Halyx never creates, rotates or deletes keys.

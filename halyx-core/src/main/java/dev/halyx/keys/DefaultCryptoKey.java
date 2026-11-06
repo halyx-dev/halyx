@@ -582,8 +582,9 @@ final class DefaultCryptoKey implements CryptoKey {
     @Override
     public byte[] mac(byte[] data) {
         Objects.requireNonNull(data, "data");
-        requireMac();
-        byte[] mac = store.call("mac", nativeName, () -> store.driver().generateMac(nativeName, data));
+        KeyMetadata current = requireMac();
+        byte[] mac = store.call("mac", nativeName,
+                () -> store.driver().generateMac(nativeName, current.currentVersion(), data));
         store.stats().maced();
         return mac;
     }
@@ -592,15 +593,17 @@ final class DefaultCryptoKey implements CryptoKey {
     public boolean verifyMac(byte[] data, byte[] mac) {
         Objects.requireNonNull(data, "data");
         Objects.requireNonNull(mac, "mac");
-        requireMac();
-        boolean valid = store.call("verifyMac", nativeName, () -> store.driver().verifyMac(nativeName, data, mac));
+        KeyMetadata current = requireMac();
+        boolean valid = store.call("verifyMac", nativeName,
+                () -> store.driver().verifyMac(nativeName, current.versions(), data, mac));
         store.stats().maced();
         return valid;
     }
 
-    private void requireMac() {
+    /** The cached metadata, whose versions spare the driver a lookup. */
+    private KeyMetadata requireMac() {
         store.capabilities().require(KeyCapability.MAC, provider());
-        require(KeyPurpose.MAC);
+        return require(KeyPurpose.MAC);
     }
 
     // --- public keys ------------------------------------------------------------------------------------------
@@ -837,7 +840,7 @@ final class DefaultCryptoKey implements CryptoKey {
                 return CompletableFuture.failedFuture(e);
             }
             return requireAsync(KeyPurpose.MAC).thenCompose(current -> store.callAsync("mac", nativeName,
-                    () -> store.driver().generateMacAsync(nativeName, data, blocking), blocking))
+                    () -> store.driver().generateMacAsync(nativeName, current.currentVersion(), data, blocking), blocking))
                     .thenApply(mac -> {
                         store.stats().maced();
                         return mac;
@@ -854,7 +857,8 @@ final class DefaultCryptoKey implements CryptoKey {
                 return CompletableFuture.failedFuture(e);
             }
             return requireAsync(KeyPurpose.MAC).thenCompose(current -> store.callAsync("verifyMac", nativeName,
-                    () -> store.driver().verifyMacAsync(nativeName, data, mac, blocking), blocking))
+                    () -> store.driver().verifyMacAsync(nativeName, current.versions(), data, mac, blocking),
+                    blocking))
                     .thenApply(valid -> {
                         store.stats().maced();
                         return valid;
