@@ -135,6 +135,34 @@ rather than on the provider.
 | `aws.msk.region` | `StreamConfig` | the MSK cluster's region, for IAM tokens, if it differs from the provider's |
 | `aws.lambda.qualifier` | `FunctionConfig` | the Lambda version or alias to invoke; the unpublished version if unset |
 
+### Keys on AWS KMS
+
+A key store is the provider's account and region, so it takes no `location`; for another region, configure another
+provider. A key's portable name is its alias without `alias/`, so `orders-data` is `alias/orders-data`. With
+`nativeNames(true)`, a key ID, key ARN, alias or alias ARN is used as given. Halyx never creates, rotates or deletes
+keys: create them yourself, `SYMMETRIC_DEFAULT` for encryption, `RSA_2048` (or larger), `ECC_NIST_P256` or
+`ECC_NIST_P384` with `SIGN_VERIFY` for signing, and `HMAC_256` for MACs.
+
+Sealed data names the key ARN, which stays valid when an alias moves. Keys have no versions in Halyx: KMS rotates
+symmetric keys inside the key, so data sealed before a rotation keeps opening, and never rotates asymmetric ones.
+`keys(prefix)` lists the keys that have an alias, never the AWS-managed `alias/aws/*` ones. A `rewrap` within the
+store uses `ReEncrypt`, so the data key never leaves KMS. A MAC covers up to 4 KB of data, KMS's limit for
+`GenerateMac`.
+
+Give the application these actions on its keys:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": ["kms:Encrypt", "kms:Decrypt", "kms:ReEncryptFrom", "kms:ReEncryptTo", "kms:Sign", "kms:GetPublicKey",
+             "kms:DescribeKey", "kms:GenerateMac", "kms:VerifyMac"],
+  "Resource": "arn:aws:kms:eu-west-2:111122223333:key/*"
+}
+```
+
+plus `kms:ListAliases` on `*` for `keys(prefix)` and health checks. Wrapping, unwrapping, signing, MACs and metadata
+and public key reads have a non-blocking path on KMS.
+
 ## Azure
 
 ```java

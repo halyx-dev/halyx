@@ -17,6 +17,7 @@ package dev.halyx.aws;
 
 import dev.halyx.aws.dynamodb.DynamoDocumentStoreDriver;
 import dev.halyx.aws.elasticache.ElastiCacheIamTokens;
+import dev.halyx.aws.kms.KmsKeyStoreDriver;
 import dev.halyx.aws.messaging.SnsPublisherDriver;
 import dev.halyx.aws.events.EventBridgePublisherDriver;
 import dev.halyx.aws.lambda.LambdaClients;
@@ -38,6 +39,8 @@ import dev.halyx.config.HttpSettings;
 import dev.halyx.config.ProviderConfig;
 import dev.halyx.error.UnsupportedFeatureException;
 import dev.halyx.jdbc.JdbcDatabases;
+import dev.halyx.keys.KeyStoreConfig;
+import dev.halyx.keys.spi.KeyStoreDriver;
 import dev.halyx.events.EventBusConfig;
 import dev.halyx.events.spi.EventPublisherDriver;
 import dev.halyx.functions.FunctionConfig;
@@ -73,6 +76,8 @@ import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
 import software.amazon.awssdk.core.retry.RetryMode;
 import software.amazon.awssdk.services.eventbridge.EventBridgeAsyncClient;
+import software.amazon.awssdk.services.kms.KmsAsyncClient;
+import software.amazon.awssdk.services.kms.KmsClient;
 import software.amazon.awssdk.services.sns.SnsAsyncClient;
 import software.amazon.awssdk.services.sqs.SqsAsyncClient;
 import software.amazon.awssdk.utils.SdkAutoCloseable;
@@ -131,6 +136,8 @@ final class AwsConnection implements ProviderConnection {
     private SecretsManagerClient secretsManager;
     private SsmAsyncClient ssmAsync;
     private SecretsManagerAsyncClient secretsManagerAsync;
+    private KmsClient kms;
+    private KmsAsyncClient kmsAsync;
     private AwsCredentialsProvider credentials;
     private StsClient sts;
 
@@ -240,6 +247,17 @@ final class AwsConnection implements ProviderConnection {
         return secretsManagerAsync;
     }
 
+    /** The non-blocking KMS client, made on the first asynchronous call. */
+    private synchronized KmsAsyncClient kmsAsync() {
+        if (kmsAsync == null) {
+            var builder = KmsAsyncClient.builder().region(region()).credentialsProvider(credentials())
+                    .httpClient(nettyHttp()).overrideConfiguration(overrides());
+            config.endpoint().ifPresent(builder::endpointOverride);
+            kmsAsync = builder.build();
+        }
+        return kmsAsync;
+    }
+
     /** One Netty connection pool for every non-blocking client, tuned by {@link HttpSettings} as the blocking one is. */
     private synchronized SdkAsyncHttpClient nettyHttp() {
         if (nettyHttp == null) {
@@ -291,6 +309,25 @@ final class AwsConnection implements ProviderConnection {
                 yield new SecretsManagerDriver(secretsManager, storeConfig.nativeNames(), this::secretsManagerAsync);
             }
         };
+    }
+
+    /**
+     * The KMS keys of the connection's account and region. A store has no location on AWS: keys in another region
+     * are another provider's, configured with that region.
+     */
+    @Override
+    public synchronized KeyStoreDriver keyStore(KeyStoreConfig storeConfig) {
+        storeConfig.location().ifPresent(location -> {
+            throw new IllegalArgumentException("An AWS KMS key store has no location ('" + location + "'): its keys "
+                    + "are the provider's account and region's. For another region, configure a provider with it");
+        });
+        if (kms == null) {
+            var builder = KmsClient.builder().region(region()).credentialsProvider(credentials())
+                    .httpClient(http()).overrideConfiguration(overrides());
+            config.endpoint().ifPresent(builder::endpointOverride);
+            kms = builder.build();
+        }
+        return new KmsKeyStoreDriver(kms, region().id(), storeConfig.nativeNames(), this::kmsAsync);
     }
 
     private ElastiCacheIamTokens iamTokens(CacheConfig cacheConfig, CacheAuth.Iam iam) {
@@ -570,6 +607,10 @@ final class AwsConnection implements ProviderConnection {
             secretsManager.close();
             secretsManager = null;
         }
+        if (kms != null) {
+            kms.close();
+            kms = null;
+        }
         if (ssmAsync != null) {
             ssmAsync.close();
             ssmAsync = null;
@@ -577,6 +618,10 @@ final class AwsConnection implements ProviderConnection {
         if (secretsManagerAsync != null) {
             secretsManagerAsync.close();
             secretsManagerAsync = null;
+        }
+        if (kmsAsync != null) {
+            kmsAsync.close();
+            kmsAsync = null;
         }
         if (s3Async != null) {
             s3Async.close();

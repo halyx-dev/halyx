@@ -37,7 +37,7 @@ Service Bus and Pub/Sub; message receives and their acks, nacks and lease extens
 Grid; event publishes on EventBridge, Event Grid and Eventarc; function invocations on Lambda and Azure
 Functions; cache `get`, `getAll`, `put`, `delete`, `exists` and
 `getOrLoad` on Redis and Valkey; parameter and secret `get`, `require`, `getAll`, `put`, `delete` and `ping` on
-every parameter store; key wraps, unwraps, signatures, MACs and metadata reads on Azure Key Vault and Vault Transit; and stream sends on Kafka. Other calls, and Cloud Storage, whose library has no asynchronous API, take the blocking path on the scheduler, with the same results.
+every parameter store; key wraps, unwraps, signatures, MACs and metadata reads on AWS KMS, Azure Key Vault and Vault Transit; and stream sends on Kafka. Other calls, and Cloud Storage, whose library has no asynchronous API, take the blocking path on the scheduler, with the same results.
 
 ## Getting the reactive services
 
