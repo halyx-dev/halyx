@@ -20,6 +20,7 @@ import com.google.api.core.ApiFutures;
 import com.google.api.gax.grpc.GrpcCallContext;
 import com.google.api.gax.grpc.GrpcStatusCode;
 import com.google.api.gax.rpc.ApiCallContext;
+import com.google.api.gax.rpc.ApiException;
 import com.google.api.gax.rpc.ApiExceptionFactory;
 import com.google.api.gax.rpc.PageContext;
 import com.google.api.gax.rpc.PagedListDescriptor;
@@ -155,6 +156,61 @@ class CloudKmsKeyStoreDriverTest {
     }
 
     @Test
+    void knownVersionsSpareTheVersionList() {
+        FakeKms kms = new FakeKms().macKey(TAGS, version(TAGS, 1, true), version(TAGS, 2, true));
+        CloudKmsKeyStoreDriver driver = driver(kms, false);
+        byte[] data = "orders/o-1".getBytes();
+        byte[] old = FakeKms.mac(TAGS + "/cryptoKeyVersions/1", data);
+
+        byte[] mac = driver.generateMac("tags", Optional.of("2"), data);
+        assertThat(driver.verifyMac("tags", List.of("1", "2"), data, mac)).isTrue();
+        assertThat(driver.verifyMac("tags", List.of("1", "2"), data, old)).isTrue();
+        assertThat(driver.generateMacAsync("tags", Optional.of("2"), data, Runnable::run).join()).isEqualTo(mac);
+        assertThat(driver.verifyMacAsync("tags", List.of("1", "2"), data, old, Runnable::run).join()).isTrue();
+
+        assertThat(kms.macSignedWith).isEqualTo(TAGS + "/cryptoKeyVersions/2");
+        assertThat(kms.versionListsServed).as("every call used the versions it was given").isZero();
+    }
+
+    @Test
+    void staleKnownVersionsFallBackToTheVersionList() {
+        FakeKms kms = new FakeKms().macKey(TAGS, version(TAGS, 1, false), version(TAGS, 2, true),
+                version(TAGS, 3, true));
+        CloudKmsKeyStoreDriver driver = driver(kms, false);
+        byte[] data = "orders/o-1".getBytes();
+        byte[] newest = FakeKms.mac(TAGS + "/cryptoKeyVersions/3", data);
+
+        assertThat(driver.generateMac("tags", Optional.of("1"), data)).as("1 was disabled since")
+                .isEqualTo(newest);
+        assertThat(driver.generateMacAsync("tags", Optional.of("1"), data, Runnable::run).join()).isEqualTo(newest);
+        assertThat(driver.verifyMac("tags", List.of("1", "2"), data, newest)).as("3 was made since").isTrue();
+        assertThat(driver.verifyMacAsync("tags", List.of("1", "2"), data, newest, Runnable::run).join()).isTrue();
+        assertThat(kms.versionListsServed).isEqualTo(4);
+
+        kms.versionListsServed = 0;
+        kms.macsChecked.clear();
+        assertThat(driver.verifyMac("tags", List.of("2", "3"), "other".getBytes(), newest)).isFalse();
+        assertThat(kms.versionListsServed).as("a mismatch lists once").isEqualTo(1);
+        assertThat(kms.macsChecked).as("and checks no version twice").containsExactly(TAGS + "/cryptoKeyVersions/3",
+                TAGS + "/cryptoKeyVersions/2");
+    }
+
+    @Test
+    void anErrorThatIsntAStaleVersionStillFails() {
+        FakeKms kms = new FakeKms().macKey(TAGS, version(TAGS, 1, true));
+        kms.macError = error(Status.Code.PERMISSION_DENIED, "Permission denied");
+        CloudKmsKeyStoreDriver driver = driver(kms, false);
+        byte[] data = "orders/o-1".getBytes();
+
+        assertThatThrownBy(() -> driver.generateMac("tags", Optional.of("1"), data)).isInstanceOf(ApiException.class);
+        assertThatThrownBy(() -> driver.verifyMac("tags", List.of("1"), data, new byte[4]))
+                .isInstanceOf(ApiException.class);
+        assertThatThrownBy(() -> driver.verifyMacAsync("tags", List.of("1"), data, new byte[4], Runnable::run).join())
+                .hasCauseInstanceOf(ApiException.class);
+        assertThat(kms.versionListsServed).isZero();
+    }
+
+    @Test
     void aWrongResponseChecksumIsAnIntegrityError() {
         FakeKms kms = new FakeKms();
         kms.encrypt = request -> EncryptResponse.newBuilder().setName(request.getName() + "/cryptoKeyVersions/1")
@@ -261,6 +317,9 @@ class CloudKmsKeyStoreDriverTest {
         int keyPagesServed;
         String encryptedWith;
         String macSignedWith;
+        int versionListsServed;
+        final List<String> macsChecked = new ArrayList<>();
+        RuntimeException macError;
 
         FakeKms macKey(String name, CryptoKeyVersion... all) {
             keys.put(name, CryptoKey.newBuilder().setName(name).setPurpose(CryptoKeyPurpose.MAC)
@@ -299,9 +358,11 @@ class CloudKmsKeyStoreDriverTest {
         @Override
         public UnaryCallable<ListCryptoKeyVersionsRequest, ListCryptoKeyVersionsPagedResponse>
                 listCryptoKeyVersionsPagedCallable() {
-            UnaryCallable<ListCryptoKeyVersionsRequest, ListCryptoKeyVersionsResponse> raw = unary(request ->
-                    ListCryptoKeyVersionsResponse.newBuilder()
-                            .addAllCryptoKeyVersions(versions.getOrDefault(request.getParent(), List.of())).build());
+            UnaryCallable<ListCryptoKeyVersionsRequest, ListCryptoKeyVersionsResponse> raw = unary(request -> {
+                versionListsServed++;
+                return ListCryptoKeyVersionsResponse.newBuilder()
+                        .addAllCryptoKeyVersions(versions.getOrDefault(request.getParent(), List.of())).build();
+            });
             return new UnaryCallable<>() {
                 @Override
                 public ApiFuture<ListCryptoKeyVersionsPagedResponse> futureCall(ListCryptoKeyVersionsRequest request,
@@ -351,6 +412,7 @@ class CloudKmsKeyStoreDriverTest {
         @Override
         public UnaryCallable<MacSignRequest, MacSignResponse> macSignCallable() {
             return unary(request -> {
+                usable(request.getName());
                 macSignedWith = request.getName();
                 ByteString mac = ByteString.copyFrom(mac(request.getName(), request.getData().toByteArray()));
                 return MacSignResponse.newBuilder().setName(request.getName()).setMac(mac)
@@ -361,12 +423,27 @@ class CloudKmsKeyStoreDriverTest {
         @Override
         public UnaryCallable<MacVerifyRequest, MacVerifyResponse> macVerifyCallable() {
             return unary(request -> {
+                usable(request.getName());
+                macsChecked.add(request.getName());
                 boolean success = ByteString.copyFrom(mac(request.getName(), request.getData().toByteArray()))
                         .equals(request.getMac());
                 return MacVerifyResponse.newBuilder().setName(request.getName()).setSuccess(success)
                         .setVerifiedSuccessIntegrity(success).setVerifiedDataCrc32C(true).setVerifiedMacCrc32C(true)
                         .build();
             });
+        }
+
+        /** Cloud KMS refuses a disabled version with FAILED_PRECONDITION. */
+        private void usable(String version) {
+            if (macError != null) {
+                throw macError;
+            }
+            String key = version.substring(0, version.indexOf("/cryptoKeyVersions/"));
+            boolean enabled = versions.getOrDefault(key, List.of()).stream()
+                    .anyMatch(v -> v.getName().equals(version) && v.getState() == CryptoKeyVersionState.ENABLED);
+            if (!enabled) {
+                throw error(Status.Code.FAILED_PRECONDITION, version + " is not enabled");
+            }
         }
 
         private static <Q, R> UnaryCallable<Q, R> unary(Function<Q, R> call) {

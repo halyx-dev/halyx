@@ -87,6 +87,24 @@ public interface KeyStoreDriver extends AutoCloseable {
         throw new UnsupportedFeatureException("MACs are not supported by provider '" + provider() + "'");
     }
 
+    /**
+     * {@link #generateMac(String, byte[])}, given the key's current version as Halyx last read it, so a driver whose
+     * service needs a version can skip looking it up. The hint may be stale: a driver must still work, by looking the
+     * version up, when the service refuses it. By default the hint is ignored.
+     */
+    default byte[] generateMac(String nativeName, Optional<String> knownVersion, byte[] data) {
+        return generateMac(nativeName, data);
+    }
+
+    /**
+     * {@link #verifyMac(String, byte[], byte[])}, given the key's versions as Halyx last read them, oldest first, so a
+     * driver that tries each version can skip listing them. The hint may be stale: before answering false, a driver
+     * must look the versions up and try any it hasn't. By default the hint is ignored.
+     */
+    default boolean verifyMac(String nativeName, List<String> knownVersions, byte[] data, byte[] mac) {
+        return verifyMac(nativeName, data, mac);
+    }
+
     /** Whether the provider-prefixed {@code keyId} names a key in this store's location. */
     boolean inLocation(String keyId);
 
@@ -135,6 +153,18 @@ public interface KeyStoreDriver extends AutoCloseable {
 
     default CompletableFuture<Boolean> verifyMacAsync(String nativeName, byte[] data, byte[] mac, Executor blocking) {
         return CompletableFuture.supplyAsync(() -> verifyMac(nativeName, data, mac), blocking);
+    }
+
+    /** {@link #generateMac(String, Optional, byte[])} without blocking; by default the unhinted async call. */
+    default CompletableFuture<byte[]> generateMacAsync(String nativeName, Optional<String> knownVersion, byte[] data,
+                                                       Executor blocking) {
+        return generateMacAsync(nativeName, data, blocking);
+    }
+
+    /** {@link #verifyMac(String, List, byte[], byte[])} without blocking; by default the unhinted async call. */
+    default CompletableFuture<Boolean> verifyMacAsync(String nativeName, List<String> knownVersions, byte[] data,
+                                                      byte[] mac, Executor blocking) {
+        return verifyMacAsync(nativeName, data, mac, blocking);
     }
 
     /** Store-level features: {@code MAC}, {@code SERVER_SIDE_REWRAP}. */

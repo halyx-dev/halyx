@@ -23,6 +23,7 @@ import dev.halyx.error.InvalidArgumentException;
 import dev.halyx.error.NotFoundException;
 import dev.halyx.error.ThrottledException;
 import dev.halyx.error.UnavailableException;
+import dev.halyx.interceptor.AsyncInvocation;
 import dev.halyx.json.Json;
 import dev.halyx.keys.KeyCapability;
 import dev.halyx.keys.KeyMetadata;
@@ -43,6 +44,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -50,6 +52,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -325,12 +328,40 @@ final class VaultTransitDriver extends AbstractKeyStoreDriver {
      */
     @Override
     public boolean verifyMac(String nativeName, byte[] data, byte[] mac) {
-        KeyMetadata metadata = metadata(nativeName);
-        for (String version : newestFirst(metadata)) {
-            Object response = client.call("POST", mount + "/verify/" + nativeName + "/sha2-256",
-                    verifyBody(data, mac, version));
-            if (Boolean.TRUE.equals(Json.at(response, "data", "valid"))) {
-                return true;
+        return verifyMac(nativeName, List.of(), data, mac);
+    }
+
+    /**
+     * Tries the versions Halyx knows first. Before answering false it reads the key and tries the versions it hasn't,
+     * so a version made since Halyx last read the key still verifies; a mismatch costs that one read.
+     */
+    @Override
+    public boolean verifyMac(String nativeName, List<String> knownVersions, byte[] data, byte[] mac) {
+        Set<String> refused = new HashSet<>();
+        if (verifyEach(nativeName, data, mac, newestFirst(knownVersions), refused, true)) {
+            return true;
+        }
+        return verifyEach(nativeName, data, mac, newestFirst(metadata(nativeName).versions()), refused, false);
+    }
+
+    /** Whether any of {@code versions} not already in {@code refused} verifies; adds each that doesn't. */
+    private boolean verifyEach(String name, byte[] data, byte[] mac, List<String> versions, Set<String> refused,
+                               boolean hinted) {
+        for (String version : versions) {
+            if (refused.contains(version)) {
+                continue;
+            }
+            try {
+                Object response = client.call("POST", mount + "/verify/" + name + "/sha2-256",
+                        verifyBody(data, mac, version));
+                if (Boolean.TRUE.equals(Json.at(response, "data", "valid"))) {
+                    return true;
+                }
+                refused.add(version);
+            } catch (VaultHttpException e) {
+                if (!hinted || !staleVersion(e)) {
+                    throw e;
+                }
             }
         }
         return false;
@@ -338,26 +369,54 @@ final class VaultTransitDriver extends AbstractKeyStoreDriver {
 
     @Override
     public CompletableFuture<Boolean> verifyMacAsync(String nativeName, byte[] data, byte[] mac, Executor blocking) {
-        return metadataAsync(nativeName, blocking)
-                .thenCompose(metadata -> verifyFrom(nativeName, data, mac, newestFirst(metadata), 0, blocking));
+        return verifyMacAsync(nativeName, List.of(), data, mac, blocking);
+    }
+
+    @Override
+    public CompletableFuture<Boolean> verifyMacAsync(String nativeName, List<String> knownVersions, byte[] data,
+                                                     byte[] mac, Executor blocking) {
+        Set<String> refused = ConcurrentHashMap.newKeySet();
+        return verifyFrom(nativeName, data, mac, newestFirst(knownVersions), 0, refused, true, blocking)
+                .thenCompose(valid -> valid ? CompletableFuture.completedFuture(true)
+                        : metadataAsync(nativeName, blocking).thenCompose(metadata -> verifyFrom(nativeName, data, mac,
+                                newestFirst(metadata.versions()), 0, refused, false, blocking)));
     }
 
     private CompletableFuture<Boolean> verifyFrom(String name, byte[] data, byte[] mac, List<String> versions, int i,
-                                                  Executor blocking) {
+                                                  Set<String> refused, boolean hinted, Executor blocking) {
         if (i == versions.size()) {
             return CompletableFuture.completedFuture(false);
         }
-        return client.callAsync("POST", mount + "/verify/" + name + "/sha2-256", verifyBody(data, mac, versions.get(i)),
+        String version = versions.get(i);
+        if (refused.contains(version)) {
+            return verifyFrom(name, data, mac, versions, i + 1, refused, hinted, blocking);
+        }
+        return client.callAsync("POST", mount + "/verify/" + name + "/sha2-256", verifyBody(data, mac, version),
                         blocking)
-                .thenCompose(response -> Boolean.TRUE.equals(Json.at(response, "data", "valid"))
-                        ? CompletableFuture.completedFuture(true)
-                        : verifyFrom(name, data, mac, versions, i + 1, blocking));
+                .thenApply(response -> Boolean.TRUE.equals(Json.at(response, "data", "valid")))
+                .exceptionallyCompose(error -> hinted && staleVersion(error) ? CompletableFuture.completedFuture(false)
+                        : CompletableFuture.failedFuture(error))
+                .thenCompose(valid -> {
+                    if (valid) {
+                        return CompletableFuture.completedFuture(true);
+                    }
+                    refused.add(version);
+                    return verifyFrom(name, data, mac, versions, i + 1, refused, hinted, blocking);
+                });
     }
 
-    private static List<String> newestFirst(KeyMetadata metadata) {
-        List<String> versions = new ArrayList<>(metadata.versions());
+    private static List<String> newestFirst(List<String> oldestFirst) {
+        List<String> versions = new ArrayList<>(oldestFirst);
         Collections.reverse(versions);
         return versions;
+    }
+
+    /**
+     * Vault refuses a version below the key's minimum, or one it doesn't have, with 400: the known versions were
+     * stale. The read that follows lists the versions the key accepts now, and retries the rest.
+     */
+    private static boolean staleVersion(Throwable error) {
+        return AsyncInvocation.unwrap(error) instanceof VaultHttpException e && e.status() == 400;
     }
 
     private static Map<String, Object> verifyBody(byte[] data, byte[] mac, String version) {

@@ -588,8 +588,10 @@ Creating the beans makes no key service call, so a missing or disabled key, or o
 is read when its bean is created, and such a key fails the start instead.
 
 Health has an entry per key store, which pings the key service, and per key, which is UP when the key exists, is
-enabled and fits its settings. A key's entry reads metadata the key keeps for a few minutes, so frequent probes don't
-use up the key service's request quota.
+enabled and fits its settings. A key store's entry keeps each ping's answer, failures included, for 30 seconds, and a
+key's entry reads metadata the key keeps for a few minutes, so frequent probes don't use up the key service's request
+quota. Put these entries in a readiness group, not liveness: a key service outage should take a pod out of rotation,
+not restart it.
 
 Key stores take no `secrets`, and a key store's provider can't log in with a secret that comes through itself. Provider
 logins and key-store settings are fixed roots: they come from configuration, the environment, the platform identity,
