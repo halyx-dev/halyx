@@ -15,7 +15,7 @@
  */
 package dev.halyx.azure.parameters;
 
-/** Azure parameter store properties ({@code ParameterStoreConfig.property}). */
+/** Azure parameter store properties ({@code ParameterStoreConfig.property}), and the emulator switch key stores share. */
 public final class AzureParameterProperties {
 
     /** App Configuration connection string ({@code Endpoint=...;Id=...;Secret=...}) instead of Entra ID. */
@@ -24,7 +24,10 @@ public final class AzureParameterProperties {
     /** App Configuration label to read and write; the null label when unset. */
     public static final String APPCONFIG_LABEL = "azure.appconfig.label";
 
-    /** {@code true} for local emulators only: send requests over plain HTTP. */
+    /**
+     * {@code true} for local emulators only: send requests over plain HTTP. Also a key store property
+     * ({@code KeyStoreConfig.property}), for Key Vault keys on an emulator.
+     */
     public static final String INSECURE_HTTP = "azure.emulator.insecure-http";
 
     private AzureParameterProperties() {

@@ -22,6 +22,8 @@ import com.azure.core.credential.AzureKeyCredential;
 import com.azure.identity.DefaultAzureCredentialBuilder;
 import com.azure.messaging.eventgrid.namespaces.EventGridReceiverClientBuilder;
 import com.azure.messaging.eventgrid.namespaces.EventGridSenderClientBuilder;
+import dev.halyx.keys.KeyStoreConfig;
+import dev.halyx.keys.spi.KeyStoreDriver;
 import dev.halyx.azure.eventgrid.EventGridPublisherDriver;
 import dev.halyx.azure.eventgrid.EventGridSubscriptionDriver;
 import dev.halyx.events.EventBusConfig;
@@ -43,6 +45,8 @@ import com.azure.core.http.policy.RetryOptions;
 import com.azure.core.http.policy.RetryPolicy;
 import com.azure.core.util.HttpClientOptions;
 import com.azure.data.appconfiguration.ConfigurationClientBuilder;
+import com.azure.security.keyvault.keys.KeyClientBuilder;
+import com.azure.security.keyvault.keys.cryptography.CryptographyClientBuilder;
 import com.azure.security.keyvault.secrets.SecretClientBuilder;
 import dev.halyx.azure.blob.AzureBlobStoreDriver;
 import dev.halyx.azure.cosmos.CosmosDocumentStoreDriver;
@@ -50,6 +54,7 @@ import dev.halyx.azure.eventhubs.EventHubsEntraTokens;
 import dev.halyx.azure.functions.AzureFunctionsInvokerDriver;
 import dev.halyx.azure.parameters.AppConfigurationDriver;
 import dev.halyx.azure.parameters.AzureParameterProperties;
+import dev.halyx.azure.keyvault.KeyVaultKeyDriver;
 import dev.halyx.azure.parameters.ForceHttpPolicy;
 import dev.halyx.azure.parameters.KeyVaultSecretDriver;
 import dev.halyx.parameters.ParameterStoreConfig;
@@ -202,6 +207,32 @@ final class AzureConnection implements ProviderConnection {
                         storeConfig.property(AzureParameterProperties.APPCONFIG_LABEL).orElse(null), storeConfig.nativeNames());
             }
         };
+    }
+
+    /**
+     * The keys of the Key Vault at the store's location. Each key version gets its own cryptography client, built
+     * from the vault URL rather than a returned {@code kid}, with the connection's credential and HTTP client.
+     */
+    @Override
+    public KeyStoreDriver keyStore(KeyStoreConfig storeConfig) {
+        String vaultUrl = storeConfig.location().orElseThrow(() -> new IllegalArgumentException(
+                "Key Vault keys need the vault URL as the store location, such as https://my-vault.vault.azure.net"));
+        boolean insecureHttp = Boolean.parseBoolean(storeConfig.property(AzureParameterProperties.INSECURE_HTTP)
+                .orElse("false"));
+        TokenCredential credential = tokenCredential(insecureHttp);
+        var builder = new KeyClientBuilder().vaultUrl(vaultUrl).credential(credential).httpClient(http());
+        if (insecureHttp) {
+            builder.addPolicy(new ForceHttpPolicy()).disableChallengeResourceVerification();
+        }
+        return new KeyVaultKeyDriver(builder.buildClient(), builder.buildAsyncClient(), vaultUrl,
+                storeConfig.nativeNames(), keyId -> {
+                    var crypto = new CryptographyClientBuilder().keyIdentifier(keyId).credential(credential)
+                            .httpClient(http());
+                    if (insecureHttp) {
+                        crypto.addPolicy(new ForceHttpPolicy()).disableChallengeResourceVerification();
+                    }
+                    return crypto;
+                });
     }
 
     /**

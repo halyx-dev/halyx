@@ -29,7 +29,7 @@
 
     <artifactId>halyx-azure</artifactId>
     <name>Halyx :: Azure</name>
-    <description>Halyx, the multi-cloud Java library: the Azure provider (Blob Storage, Cosmos DB, Service Bus, Key Vault, App Configuration, and Entra ID login for caches and databases).</description>
+    <description>Halyx, the multi-cloud Java library: the Azure provider (Blob Storage, Cosmos DB, Service Bus, Key Vault secrets and keys, App Configuration, and Entra ID login for caches and databases).</description>
 
     <properties>
         <halyx.module.name>dev.halyx.azure</halyx.module.name>
@@ -70,6 +70,11 @@
         <dependency>
             <groupId>com.azure</groupId>
             <artifactId>azure-security-keyvault-secrets</artifactId>
+        </dependency>
+        <!-- Keys -->
+        <dependency>
+            <groupId>com.azure</groupId>
+            <artifactId>azure-security-keyvault-keys</artifactId>
         </dependency>
         <dependency>
             <groupId>com.azure</groupId>

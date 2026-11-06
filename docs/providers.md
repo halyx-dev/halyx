@@ -188,6 +188,34 @@ A failed refresh keeps the current key and is tried again at the next interval. 
 keys, so a rotation that switches to the other key, updates the secret, and regenerates the old key after the
 refresh interval plus the store's cache TTL fails no requests.
 
+### Keys on Key Vault
+
+A key store is one Key Vault, its URL the store's `location`, such as `https://acme.vault.azure.net`, and a key's
+name is the Key Vault key's. With `nativeNames(true)`, the versionless key URL in that vault is accepted too. Halyx
+never creates, rotates or deletes keys: create them yourself, RSA 2048-bit or larger with `wrapKey` and `unwrapKey`
+for encryption, and RSA, EC P-256 or EC P-384 with `sign` for signing. An RSA key allowing both can do either: give
+its handle a `purpose`. Give the application the **Key Vault Crypto User** role on the vault.
+
+Data keys are wrapped on the vault with `RSA-OAEP-256`, and sealed data names the key and the version that wrapped it,
+so data keeps opening after a rotation while that version is enabled. Key Vault enables and disables versions one by
+one: a key reports itself disabled when its current version is, and an older disabled version refuses only the data
+it wrapped. Every wrap, unwrap and signature runs on the vault, never locally, and has a non-blocking path. MACs and
+server-side rewrap need Managed HSM, which Halyx doesn't support yet.
+
+Every wrap and unwrap is an RSA operation on the vault, and Key Vault limits them per vault and region: 4,000 per 10
+seconds for software RSA 2048-bit keys, 2,000 for HSM ones, and fewer for larger keys (1,000 and 500 software for
+3,072 and 4,096 bits), with the subscription's total at five times one vault's. A busy service reaches this sooner
+than on AWS or Google Cloud, so on Azure:
+
+- turn on `dataKeyReuse` where the service writes a lot, and `dataKeyCache` where it reads a lot (see
+  [Performance and caches](api/keys.md#performance-and-caches))
+- give each service, or at least each busy one, its own vault
+- use 2048-bit keys unless policy needs larger ones
+
+Throttled calls fail with `ThrottledException`, which is retryable, so the SDK's retries and a `RetryInterceptor`
+apply. Microsoft's [Key Vault service limits](https://learn.microsoft.com/en-us/azure/key-vault/general/service-limits)
+has the current figures.
+
 ## Google Cloud
 
 ```java

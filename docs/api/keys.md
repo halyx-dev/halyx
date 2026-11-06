@@ -209,6 +209,10 @@ KeyStore keys = halyx.provider("cloud").keyStore(KeyStoreConfig.builder()
 Public keys are always cached, by version, since they aren't secret. `keys.statistics()` counts the calls that reached
 the key service and the ones the caches saved.
 
+On Azure Key Vault, every wrap and unwrap is an RSA operation on the vault, and a vault allows a few thousand of them
+per 10 seconds, so a busy service is throttled sooner there than on AWS or Google Cloud. Turn both caches on for busy
+paths on Azure, and give busy services their own vault; see [Keys on Key Vault](../providers.md#keys-on-key-vault).
+
 ## Testing with the memory provider
 
 The memory provider holds real JDK keys, so sealed data and signatures are real. Create keys through
