@@ -295,6 +295,47 @@ store.abortPresignedUpload(upload);
 - Abandoned uploads cost storage until cleaned up: add a lifecycle rule that aborts incomplete multipart
   uploads on S3 and GCS. Azure discards uncommitted blocks after a week.
 
+## Client-side encryption
+
+`encryptedWith(key)` gives a view of a store that seals every blob with a key before it leaves the application,
+and opens it on the way back. The key service only ever sees a data key: the blob is sealed locally, in segments,
+with AES-256-GCM (see [Keys and encryption](keys.md)).
+
+```java
+CryptoKey key = keys.key("receipts");
+BlobStore receipts = halyx.provider("cloud").blobStore("acme-orders").encryptedWith(key);
+
+receipts.put(BlobKey.of("o-1001/receipt.pdf"), BlobContent.ofFile(pdf));     // sealed: one wrap call
+try (Blob blob = receipts.get(BlobKey.of("o-1001/receipt.pdf"))) { ... }       // opened: one unwrap call
+```
+
+Each blob is HLXS sealed data, bound to its blob key: a sealed blob copied or renamed to another key outside the view
+fails to open, while replication to another bucket keeps it readable. Content type, the other headers and your
+metadata are kept; `Content-Encoding` is stored in the metadata instead, so nothing between you and the store
+decompresses or re-encodes the ciphertext, and comes back on reads. Metadata names starting with `halyx_` are
+reserved for the view's own entries, such as the `halyx_encryption` marker.
+
+| | |
+|---|---|
+| Reads | Whole reads, `download` and parallel reads stream through the view. A range read fetches the header with a small ranged read (4 KiB), then only the segments the range touches, pinned to the version it read first; a range of a small blob comes from that first read alone. Each read unwraps the blob's data key once, so for many small range reads of the same blobs, turn on the key store's `dataKeyCache` |
+| Sizes | `head` and `get` report the plaintext size. **`list` reports the stored size**, which is larger: a header of about 100 bytes to a few KB, depending on the key, plus 16 bytes per segment (64 KiB by default). A listing never sees a blob's header, and reading each one would cost a request per blob, so for a blob's exact size call `head`. Totals summed from a listing are overstated, the more so for small blobs |
+| `head` | Free when the size was known at write time (`put` of bytes, a file or a sized stream); after a streamed `write`, it reads the header once |
+| Plain data | Reading a blob that isn't sealed through the view fails with `InvalidArgumentException`. Reading a sealed blob without the key returns the ciphertext, starting with `HLXS`, never plaintext |
+| Presigned URLs | Dropped: a presigned upload would bypass the key, and a presigned download would hand out ciphertext. For presigned access to encrypted data, use the store's server-side encryption with a key (S3 SSE-KMS, GCS CMEK, Azure encryption scopes) |
+| `copy` | Through the application: the blob is opened and sealed again for its new key, so it costs a download and an upload. `SERVER_SIDE_COPY` is dropped |
+| Checksums | `CHECKSUM` is dropped: the stored checksums are the ciphertext's, which you can't compare with anything you hold. Each segment's tag authenticates every read instead, and `validateChecksum` still protects the upload of the stored bytes |
+| Asynchronous calls | `async()` seals and opens too, on a virtual thread, since sealing streams the content |
+
+**A bucket encrypted in part.** `encryptedWith(key, "private/")` seals only blob keys under the prefix; the rest pass
+through as plain blobs, keep presigned URLs, and copy on the server when both sides are outside the prefix. A copy
+into or out of the prefix is sealed or opened on the way.
+
+**A key per blob.** `encryptedWith(keys, blobKey -> "tenant-" + tenantOf(blobKey))` names a key of a key store for
+each blob, such as a key per tenant; any key of the store opens what any other sealed.
+
+Each write wraps a new data key and each read unwraps one, so the key service sees a call per blob. On busy paths,
+turn on the key store's `dataKeyReuse` and `dataKeyCache` (see [Performance and caches](keys.md#performance-and-caches)).
+
 ## Performance
 
 **Connection pooling.** Each provider connection shares one pooled HTTP client across its services. Tune

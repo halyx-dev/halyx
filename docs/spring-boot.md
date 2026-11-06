@@ -149,7 +149,14 @@ halyx:
     invoices:                      # BlobStore bean name
       bucket: acme-invoices        # defaults to the bean name
       # provider: orders           # optional when only one provider is configured
+      # encryption-key:            # seal every blob with a key before it leaves the application
+      #   store: kms               # a halyx.key-stores entry; optional when there's only one
+      #   name: invoices           # the key's name in that store
+      # encryption-prefix: private/  # with encryption-key: seal only blob keys under this prefix
 ```
+
+With `encryption-key`, the bean is the store's encrypted view, created after its key store: see
+[Client-side encryption](api/storage.md#client-side-encryption). Its listings report stored sizes, not plaintext ones.
 
 ## NoSQL documents
 

@@ -127,6 +127,17 @@ public final class HalyxBlobStores {
         return context(property, provider).parameterStore(config);
     }
 
+    /**
+     * The blob store {@code bucket}, seen through a view that seals blobs with the key {@code keyName} of {@code keys},
+     * all of them or only those under {@code prefix}.
+     */
+    public BlobStore encryptedBlobStore(String property, String provider, String bucket, KeyStore keys,
+                                        String keyName, String prefix) {
+        BlobStore store = blobStore(property, provider, bucket);
+        CryptoKey key = keys.key(keyName);
+        return prefix == null ? store.encryptedWith(key) : store.encryptedWith(key, prefix);
+    }
+
     public KeyStore keyStore(String property, String provider, KeyStoreConfig config) {
         return context(property, provider).keyStore(config);
     }

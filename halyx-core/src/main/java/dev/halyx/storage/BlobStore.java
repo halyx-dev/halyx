@@ -18,15 +18,19 @@ package dev.halyx.storage;
 import dev.halyx.interceptor.InterceptorChain;
 
 import dev.halyx.capability.Capabilities;
+import dev.halyx.keys.CryptoKey;
+import dev.halyx.keys.KeyStore;
 
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Collection;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Spliterator;
 import java.util.Spliterators;
 import java.util.concurrent.Executor;
+import java.util.function.Function;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
@@ -230,6 +234,50 @@ public interface BlobStore {
     }
 
     Capabilities capabilities();
+
+    /**
+     * A view of this store that seals every blob with {@code key} before it leaves the application, and opens it on the
+     * way back. Each blob is HLXS sealed data bound to its blob key; reading a blob that isn't sealed through the view
+     * is refused.
+     *
+     * <p>Sizes from {@code head} and {@code get} are the plaintext's. Sizes from {@code list} are the stored sizes,
+     * slightly larger: a header of about a hundred bytes to a few KB, depending on the key, and 16 bytes per segment
+     * (64 KiB by default); call {@code head} for a blob's exact size. The view drops server-side copy, since a sealed
+     * blob is bound to its key, and presigned URLs, which would bypass the key: for those, use server-side encryption
+     * with a key.
+     */
+    default BlobStore encryptedWith(CryptoKey key) {
+        Objects.requireNonNull(key, "key");
+        return new EncryptedBlobStore(this, blobKey -> key, key.store(), null);
+    }
+
+    /**
+     * As {@link #encryptedWith(CryptoKey)}, for blob keys starting with {@code prefix} only: the rest pass through as
+     * plain blobs, and keep presigned URLs. For a bucket encrypted only in part.
+     */
+    default BlobStore encryptedWith(CryptoKey key, String prefix) {
+        Objects.requireNonNull(key, "key");
+        Objects.requireNonNull(prefix, "prefix");
+        return new EncryptedBlobStore(this, blobKey -> key, key.store(), prefix);
+    }
+
+    /**
+     * As {@link #encryptedWith(CryptoKey)}, with the key for each blob named by {@code keyName}, such as a key per
+     * tenant; any key of {@code keys} opens what any other sealed.
+     */
+    default BlobStore encryptedWith(KeyStore keys, Function<BlobKey, String> keyName) {
+        Objects.requireNonNull(keys, "keys");
+        Objects.requireNonNull(keyName, "keyName");
+        return new EncryptedBlobStore(this, blobKey -> keys.key(keyName.apply(blobKey)), keys, null);
+    }
+
+    /** As {@link #encryptedWith(KeyStore, Function)}, for blob keys starting with {@code prefix} only. */
+    default BlobStore encryptedWith(KeyStore keys, Function<BlobKey, String> keyName, String prefix) {
+        Objects.requireNonNull(keys, "keys");
+        Objects.requireNonNull(keyName, "keyName");
+        Objects.requireNonNull(prefix, "prefix");
+        return new EncryptedBlobStore(this, blobKey -> keys.key(keyName.apply(blobKey)), keys, prefix);
+    }
 
     /**
      * Escape hatch to the native SDK client, for features outside the portable API.

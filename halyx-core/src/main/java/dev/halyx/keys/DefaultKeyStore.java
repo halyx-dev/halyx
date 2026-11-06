@@ -146,6 +146,48 @@ public final class DefaultKeyStore implements KeyStore, AutoCloseable {
     }
 
     @Override
+    public InputStream decryptingStream(SealedHeader header, InputStream segments, long sealedLength,
+                                        long plaintextOffset, long plaintextLength, byte[] aad) {
+        Objects.requireNonNull(header, "header");
+        Objects.requireNonNull(segments, "segments");
+        Objects.requireNonNull(aad, "aad");
+        long total = header.plaintextLength(sealedLength);
+        if (plaintextOffset < 0 || plaintextLength < 0 || plaintextOffset > total
+                || plaintextLength > total - plaintextOffset) {
+            throw new InvalidArgumentException("Plaintext range " + plaintextOffset + "+" + plaintextLength
+                    + " is outside the sealed data's " + total + " bytes");
+        }
+        Hlxs.Header parsed = header.header();
+        byte[] dek = unwrap(entryInLocation(parsed.keys()));
+        Hlxs.Segments opened;
+        try {
+            Hlxs.checkCommitment(dek, parsed);
+            opened = new Hlxs.Segments(dek, parsed.salt(), parsed.noncePrefix(), parsed.segmentSize(), aad);
+        } finally {
+            Arrays.fill(dek, (byte) 0);
+        }
+        int size = parsed.segmentSize();
+        long finalIndex = header.segments(sealedLength) - 1;
+        if (total == 0) {
+            // The only segment is empty: open it anyway, so an empty blob is still authenticated.
+            RangeOpeningInputStream empty = new RangeOpeningInputStream(segments, opened, 0, 0, 0, 0, 0);
+            try {
+                empty.nextSegment();
+            } catch (IOException e) {
+                throw new UncheckedIOException("Could not read the sealed data", e);
+            }
+            return empty;
+        }
+        if (plaintextLength == 0) {
+            return new RangeOpeningInputStream(segments, opened, 0, -1, finalIndex, 0, 0);
+        }
+        long first = plaintextOffset / size;
+        long lastNeeded = (plaintextOffset + plaintextLength - 1) / size;
+        return new RangeOpeningInputStream(segments, opened, first, lastNeeded, finalIndex,
+                plaintextOffset - first * size, plaintextLength);
+    }
+
+    @Override
     public void ping() {
         call("ping", location().orElse(""), () -> {
             driver.ping();

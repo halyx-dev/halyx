@@ -278,10 +278,29 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
     }
 
     /**
-     * @param provider the provider name; may be omitted when exactly one provider is configured
-     * @param bucket   bucket or container name; defaults to the bean name
+     * @param provider         the provider name; may be omitted when exactly one provider is configured
+     * @param bucket           bucket or container name; defaults to the bean name
+     * @param encryptionKey    a key to seal every blob with before it leaves the application; none when omitted
+     * @param encryptionPrefix with {@code encryptionKey}, seal only blob keys under this prefix
      */
-    public record BlobStoreProperties(String provider, String bucket) {
+    public record BlobStoreProperties(String provider, String bucket, EncryptionKey encryptionKey,
+                                      String encryptionPrefix) {
+
+        @ConstructorBinding
+        public BlobStoreProperties {
+        }
+
+        /** A store without encryption, as configured before encryption keys. */
+        public BlobStoreProperties(String provider, String bucket) {
+            this(provider, bucket, null, null);
+        }
+    }
+
+    /**
+     * @param store the {@code halyx.key-stores} entry the key is in; may be omitted when exactly one is configured
+     * @param name  the key's name in that store
+     */
+    public record EncryptionKey(String store, String name) {
     }
 
     /**

@@ -34,6 +34,7 @@ import dev.halyx.keys.KeyOptions;
 import dev.halyx.keys.KeyStore;
 import dev.halyx.keys.KeyStoreStatistics;
 import dev.halyx.keys.SealedData;
+import dev.halyx.keys.SealedHeader;
 import dev.halyx.keys.Signature;
 import dev.halyx.keys.WrappedKey;
 import dev.halyx.messaging.ConsumerOptions;
@@ -367,6 +368,12 @@ final class BlockingViews {
                     public byte[] decrypt(SealedData sealed, byte[] aad) { return await(rx.decrypt(sealed, aad)); }
                     public DataKey decryptDataKey(WrappedKey wrapped) { return await(rx.decryptDataKey(wrapped)); }
                     public InputStream decryptingStream(InputStream sealed, byte[] aad) { return inputStream(rx.decryptBody(body(sealed), aad)); }
+                    // No reactive form: the ranged read is a building block for blob views, which use the blocking store.
+                    public InputStream decryptingStream(SealedHeader header, InputStream segments, long sealedLength,
+                                                        long plaintextOffset, long plaintextLength, byte[] aad) {
+                        return rx.blocking().decryptingStream(header, segments, sealedLength, plaintextOffset,
+                                plaintextLength, aad);
+                    }
                     public void ping() { await(rx.ping()); }
                     public KeyStoreStatistics statistics() { return rx.statistics(); }
                     public Capabilities capabilities() { return rx.capabilities(); }

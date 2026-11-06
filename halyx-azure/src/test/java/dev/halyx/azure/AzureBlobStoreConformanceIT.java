@@ -62,7 +62,7 @@ class AzureBlobStoreConformanceIT extends BlobStoreConformanceTest {
             .withExposedPorts(PORT)
             .waitingFor(Wait.forListeningPort());
 
-    private static Halyx halyx;
+    static Halyx halyx;
 
     @BeforeAll
     static void start() {

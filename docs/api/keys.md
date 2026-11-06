@@ -172,6 +172,14 @@ signature. `signDigest(digest)` signs a digest you computed yourself. `publicKey
 on AWS KMS, Google Cloud KMS and Vault Transit (`KeyCapability.MAC`). Azure Key Vault offers it only on Managed HSM,
 which Halyx doesn't support yet.
 
+## Services that use keys
+
+Other services take a key and do the sealing for you:
+
+- **Blob stores:** `blobStore.encryptedWith(key)` seals every blob before it leaves the application, with ranged and
+  parallel reads, a key per blob, and prefix views for buckets encrypted in part. See
+  [Client-side encryption](storage.md#client-side-encryption).
+
 ## Errors
 
 The same on every cloud:
