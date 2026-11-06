@@ -262,6 +262,26 @@ ProviderConfig.of("gcp").property(GcpProperties.PROJECT_ID, "acme-prod")
 | `gcp.functions.url` | on a `FunctionConfig`: the function's URL, such as a `run.app` URL, instead of the default |
 | `gcp.functions.audience` | on a `FunctionConfig`: the ID tokens' audience, if it isn't the function's URL |
 
+### Keys on Cloud KMS
+
+A key store is one key ring, its full name the store's `location`, such as
+`projects/acme/locations/global/keyRings/orders`, and a key's name is the crypto key's id. With `nativeNames(true)`,
+the full crypto key name in that key ring is accepted too. Halyx never creates, rotates or deletes keys: create them
+yourself, `ENCRYPT_DECRYPT` (`GOOGLE_SYMMETRIC_ENCRYPTION`) for encryption, `ASYMMETRIC_SIGN` with an
+`RSA_SIGN_PSS_*_SHA256`, `RSA_SIGN_PKCS1_*_SHA256`, `EC_SIGN_P256_SHA256` or `EC_SIGN_P384_SHA384` algorithm for
+signing, and `MAC` with `HMAC_SHA256` for MACs. A signing key signs with its one algorithm, padding included.
+
+Data keys are wrapped with the key's primary version, and sealed data names the crypto key and the version that
+wrapped it, so data keeps opening after a rotation while that version is enabled. Signing and MAC keys have no
+primary: Halyx signs and makes MACs with the newest enabled version, and checks a MAC against every enabled version.
+Every request and response carries a CRC32C checksum, as Google recommends, and a mismatch is a
+`DataIntegrityException`. A disabled or destroyed version is refused with `AccessDeniedException`. Every call except
+`keys(prefix)` has a non-blocking path.
+
+Give the application `roles/cloudkms.cryptoKeyEncrypterDecrypter` for encryption, `roles/cloudkms.signerVerifier`
+for signing and MACs, and `roles/cloudkms.viewer` for metadata, `keys(prefix)` and health checks, on the key ring or
+its keys.
+
 ## HashiCorp Vault
 
 ```java

@@ -26,8 +26,11 @@ import com.google.auth.oauth2.IdTokenProvider;
 import com.google.cloud.eventarc.publishing.v1.PublisherClient;
 import com.google.cloud.eventarc.publishing.v1.PublisherSettings;
 import dev.halyx.events.EventBusConfig;
+import dev.halyx.keys.KeyStoreConfig;
+import dev.halyx.keys.spi.KeyStoreDriver;
 import dev.halyx.events.spi.EventPublisherDriver;
 import dev.halyx.gcp.eventarc.EventarcPublisherDriver;
+import dev.halyx.gcp.kms.CloudKmsKeyStoreDriver;
 import dev.halyx.gcp.functions.CloudRunFunctionsInvokerDriver;
 import dev.halyx.functions.FunctionConfig;
 import dev.halyx.functions.spi.FunctionInvokerDriver;
@@ -40,6 +43,8 @@ import com.google.cloud.firestore.Firestore;
 import com.google.cloud.firestore.FirestoreOptions;
 import com.google.cloud.parametermanager.v1.ParameterManagerClient;
 import com.google.cloud.parametermanager.v1.ParameterManagerSettings;
+import com.google.cloud.kms.v1.KeyManagementServiceClient;
+import com.google.cloud.kms.v1.KeyManagementServiceSettings;
 import com.google.cloud.secretmanager.v1.SecretManagerServiceClient;
 import com.google.cloud.secretmanager.v1.SecretManagerServiceSettings;
 import io.grpc.ManagedChannelBuilder;
@@ -122,6 +127,7 @@ final class GcpConnection implements ProviderConnection {
     private PublisherClient eventarc;
     private KafkaStreamClients streams;
     private SecretManagerServiceClient secretManager;
+    private KeyManagementServiceClient kms;
     private final Map<String, ParameterManagerClient> parameterManagers = new HashMap<>();
     private GoogleCredentials googleCredentials;
 
@@ -192,6 +198,36 @@ final class GcpConnection implements ProviderConnection {
             secretManager = secretManagerClient();
         }
         return new SecretManagerDriver(secretManager, project, storeConfig.nativeNames());
+    }
+
+    /** The crypto keys of the key ring at the store's location, through one Cloud KMS client per connection. */
+    @Override
+    public synchronized KeyStoreDriver keyStore(KeyStoreConfig storeConfig) {
+        String keyRing = storeConfig.location().orElseThrow(() -> new IllegalArgumentException(
+                "Cloud KMS keys need the key ring as the store location, such as "
+                        + "projects/acme/locations/global/keyRings/orders"));
+        if (kms == null) {
+            kms = kmsClient();
+        }
+        return new CloudKmsKeyStoreDriver(kms, keyRing, storeConfig.nativeNames());
+    }
+
+    /** With an endpoint override (an emulator), Cloud KMS is reached over plaintext gRPC on the same host and port. */
+    private KeyManagementServiceClient kmsClient() {
+        try {
+            var settings = KeyManagementServiceSettings.newBuilder();
+            if (config.endpoint().isPresent()) {
+                var endpoint = config.endpoint().get();
+                var channel = ManagedChannelBuilder.forAddress(endpoint.getHost(), endpoint.getPort()).usePlaintext().build();
+                settings.setTransportChannelProvider(FixedTransportChannelProvider.create(GrpcTransportChannel.create(channel)))
+                        .setCredentialsProvider(NoCredentialsProvider.create());
+            } else {
+                credentialsProvider().ifPresent(settings::setCredentialsProvider);
+            }
+            return KeyManagementServiceClient.create(settings.build());
+        } catch (IOException e) {
+            throw new UncheckedIOException("Could not create the Cloud KMS client", e);
+        }
     }
 
     /** Regional locations are served by regional endpoints; an endpoint override (emulator or fake) wins. */
@@ -547,6 +583,10 @@ final class GcpConnection implements ProviderConnection {
         if (secretManager != null) {
             secretManager.close();
             secretManager = null;
+        }
+        if (kms != null) {
+            kms.close();
+            kms = null;
         }
         parameterManagers.values().forEach(ParameterManagerClient::close);
         parameterManagers.clear();
