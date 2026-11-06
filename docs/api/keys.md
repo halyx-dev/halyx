@@ -221,6 +221,35 @@ On Azure Key Vault, every wrap and unwrap is an RSA operation on the vault, and 
 per 10 seconds, so a busy service is throttled sooner there than on AWS or Google Cloud. Turn both caches on for busy
 paths on Azure, and give busy services their own vault; see [Keys on Key Vault](../providers.md#keys-on-key-vault).
 
+**What Halyx does for you,** with no setting and no trade-off:
+
+- A key's metadata is read once and kept for 5 minutes. When it's due, one caller reads it again while the others
+  carry on with the copy they have, so a busy key makes one call per refresh, not one per request.
+- With `dataKeyReuse`, one caller wraps the next data key while the others wait for it, without holding a lock
+  through the call.
+- Sealing for several keys wraps the data key with all of them in parallel, so two keys on two clouds cost the slower
+  round trip, not both. Each wrap starts on your thread as an asynchronous call, so interceptors that implement
+  `interceptAsync`, as tracing does, see your context; one that only implements `intercept` runs on a virtual thread,
+  as it does for any asynchronous call.
+- Decryptions that hit `dataKeyCache` don't wait on each other.
+
+**Your responsibilities,** because each is a trade-off only you can make, or infrastructure Halyx doesn't run:
+
+- **The caches.** `dataKeyReuse` and `dataKeyCache` trade some security for fewer calls (above). Both are off until
+  you turn them on.
+- **Key layout.** A key per service or per tenant, a vault per busy service on Azure, software or HSM keys, and key
+  sizes: larger RSA keys and HSM keys have lower limits.
+- **Quotas.** Each key service limits requests per account, project or vault. Watch `statistics()` and raise the
+  quota with your cloud when you need to.
+- **Freshness.** `cacheTtl` on parameter stores decides how often secrets are read, and decrypted, again.
+- **Access patterns.** Fewer, larger reads cost fewer calls than many small ones: an encrypted blob's range read
+  unwraps its data key each time unless `dataKeyCache` is on. Call `head` only where you need a blob's exact size.
+- **Health probes.** A key store's health check pings the key service: put it in readiness, not liveness, and probe
+  at an interval your quota allows.
+- **Your executors.** When you pass your own executor to `async(executor)`, or use a reactive scheduler, propagating
+  your context (traces, MDC) on it is yours, as anywhere in Halyx.
+- **IAM, key creation and rotation.** Halyx never creates, rotates or deletes keys.
+
 ## Testing with the memory provider
 
 The memory provider holds real JDK keys, so sealed data and signatures are real. Create keys through

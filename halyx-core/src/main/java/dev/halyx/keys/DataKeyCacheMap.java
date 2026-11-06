@@ -20,22 +20,53 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.Base64;
-import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * The opt-in decrypt cache: unwrapped data keys by the digest of their wrapped form, least recently used first out.
  * Hands out copies, and zeroes keys when they expire, are evicted or the cache is cleared.
+ *
+ * <p>Hits take no shared lock, since every decryption of cached data goes through here. Each entry guards its own key,
+ * so a key being zeroed is never handed out; finding the least recently used entry scans the map, but only when a
+ * put overflows it, and a put follows a key service call that costs far more.
  */
 final class DataKeyCacheMap {
 
-    private record Entry(byte[] dek, long expiresAtNanos) {
+    private static final class Entry {
+        private final byte[] dek;
+        private final long expiresAtNanos;
+        private volatile long usedAtNanos;
+        private boolean zeroed; // guarded by this entry
+
+        Entry(byte[] dek, long expiresAtNanos) {
+            this.dek = dek;
+            this.expiresAtNanos = expiresAtNanos;
+            this.usedAtNanos = System.nanoTime();
+        }
+
+        /** A copy of the key, or null once it's been zeroed. */
+        synchronized byte[] copy() {
+            if (zeroed) {
+                return null;
+            }
+            usedAtNanos = System.nanoTime();
+            return dek.clone();
+        }
+
+        synchronized void zero() {
+            Arrays.fill(dek, (byte) 0);
+            zeroed = true;
+        }
+
+        boolean expired(long now) {
+            return now - expiresAtNanos > 0;
+        }
     }
 
     private final long ttlNanos;
     private final int maxEntries;
-    private final LinkedHashMap<String, Entry> entries = new LinkedHashMap<>(16, 0.75f, true);
+    private final ConcurrentHashMap<String, Entry> entries = new ConcurrentHashMap<>();
 
     DataKeyCacheMap(KeyStoreConfig.DataKeyCache config) {
         this.ttlNanos = config.ttl().toNanos();
@@ -57,33 +88,53 @@ final class DataKeyCacheMap {
     }
 
     /** A copy of the cached data key, or null. */
-    synchronized byte[] get(String key) {
+    byte[] get(String key) {
         Entry entry = entries.get(key);
         if (entry == null) {
             return null;
         }
-        if (System.nanoTime() - entry.expiresAtNanos() > 0) {
-            entries.remove(key);
-            Arrays.fill(entry.dek(), (byte) 0);
+        if (entry.expired(System.nanoTime())) {
+            if (entries.remove(key, entry)) {
+                entry.zero();
+            }
             return null;
         }
-        return entry.dek().clone();
+        return entry.copy();
     }
 
-    synchronized void put(String key, byte[] dek) {
+    void put(String key, byte[] dek) {
         Entry previous = entries.put(key, new Entry(dek.clone(), System.nanoTime() + ttlNanos));
         if (previous != null) {
-            Arrays.fill(previous.dek(), (byte) 0);
+            previous.zero();
         }
-        Iterator<Map.Entry<String, Entry>> eldest = entries.entrySet().iterator();
-        while (entries.size() > maxEntries && eldest.hasNext()) {
-            Arrays.fill(eldest.next().getValue().dek(), (byte) 0);
-            eldest.remove();
+        while (entries.size() > maxEntries) {
+            evictOne();
         }
     }
 
-    synchronized void clear() {
-        entries.values().forEach(entry -> Arrays.fill(entry.dek(), (byte) 0));
-        entries.clear();
+    /** Evicts an expired entry if there is one, else the least recently used. */
+    private void evictOne() {
+        long now = System.nanoTime();
+        Map.Entry<String, Entry> victim = null;
+        for (Map.Entry<String, Entry> candidate : entries.entrySet()) {
+            if (candidate.getValue().expired(now)) {
+                victim = candidate;
+                break;
+            }
+            if (victim == null || candidate.getValue().usedAtNanos - victim.getValue().usedAtNanos < 0) {
+                victim = candidate;
+            }
+        }
+        if (victim != null && entries.remove(victim.getKey(), victim.getValue())) {
+            victim.getValue().zero();
+        }
+    }
+
+    void clear() {
+        for (Map.Entry<String, Entry> entry : entries.entrySet()) {
+            if (entries.remove(entry.getKey(), entry.getValue())) {
+                entry.getValue().zero();
+            }
+        }
     }
 }

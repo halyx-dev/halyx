@@ -55,8 +55,12 @@ final class DefaultCryptoKey implements CryptoKey {
 
     private volatile KeyMetadata metadata;
     private volatile long metadataReadAtNanos;
+    /** The one metadata read in flight once the cached copy is stale; guarded by {@code this}. */
+    private CompletableFuture<KeyMetadata> refreshing;
     /** The data key in use while reuse is on; guarded by {@code this}. */
     private ReusedKey reused;
+    /** While one caller wraps the next reused data key, the others wait on this; guarded by {@code this}. */
+    private CompletableFuture<ReusedKey> rotation;
 
     private static final class ReusedKey {
         final byte[] dek;
@@ -98,13 +102,22 @@ final class DefaultCryptoKey implements CryptoKey {
 
     // --- metadata and checks ----------------------------------------------------------------------------------
 
+    /**
+     * The key's metadata, read again once the cached copy is {@link #METADATA_TTL} old. Only one caller reads it: the
+     * others keep using the stale copy meanwhile, or wait for that read when there's none yet, so a busy key makes
+     * one key service call per refresh rather than one per caller.
+     */
     @Override
     public KeyMetadata metadata() {
         KeyMetadata current = metadata;
         if (current != null && fresh()) {
             return current;
         }
-        return accept(store.call("metadata", nativeName, () -> store.driver().metadata(nativeName)));
+        CompletableFuture<KeyMetadata> refresh = claimRefresh();
+        if (refresh == null) {
+            return refreshNow();
+        }
+        return current != null ? current : await(refresh);
     }
 
     private CompletableFuture<KeyMetadata> metadataAsync(Executor blocking) {
@@ -112,8 +125,61 @@ final class DefaultCryptoKey implements CryptoKey {
         if (current != null && fresh()) {
             return CompletableFuture.completedFuture(current);
         }
-        return store.callAsync("metadata", nativeName, () -> store.driver().metadataAsync(nativeName, blocking),
-                blocking).thenApply(this::accept);
+        CompletableFuture<KeyMetadata> refresh = claimRefresh();
+        if (refresh != null) {
+            return current != null ? CompletableFuture.completedFuture(current) : refresh;
+        }
+        CompletableFuture<KeyMetadata> mine = ownRefresh();
+        store.callAsync("metadata", nativeName, () -> store.driver().metadataAsync(nativeName, blocking), blocking)
+                .thenApply(this::accept)
+                .whenComplete((read, error) -> finishRefresh(mine, read, error));
+        return mine;
+    }
+
+    /** Null when the caller should read the metadata itself; otherwise the read another caller has in flight. */
+    private synchronized CompletableFuture<KeyMetadata> claimRefresh() {
+        if (refreshing != null) {
+            return refreshing;
+        }
+        refreshing = new CompletableFuture<>();
+        return null;
+    }
+
+    private synchronized CompletableFuture<KeyMetadata> ownRefresh() {
+        return refreshing;
+    }
+
+    private KeyMetadata refreshNow() {
+        CompletableFuture<KeyMetadata> mine = ownRefresh();
+        try {
+            KeyMetadata read = accept(store.call("metadata", nativeName, () -> store.driver().metadata(nativeName)));
+            finishRefresh(mine, read, null);
+            return read;
+        } catch (RuntimeException | Error e) {
+            finishRefresh(mine, null, e);
+            throw e;
+        }
+    }
+
+    private void finishRefresh(CompletableFuture<KeyMetadata> refresh, KeyMetadata read, Throwable error) {
+        synchronized (this) {
+            if (refreshing == refresh) {
+                refreshing = null;
+            }
+        }
+        if (error != null) {
+            refresh.completeExceptionally(error);
+        } else {
+            refresh.complete(read);
+        }
+    }
+
+    private static KeyMetadata await(CompletableFuture<KeyMetadata> refresh) {
+        try {
+            return refresh.join();
+        } catch (CompletionException e) {
+            throw e.getCause() instanceof RuntimeException cause ? cause : e;
+        }
     }
 
     private boolean fresh() {
@@ -211,23 +277,66 @@ final class DefaultCryptoKey implements CryptoKey {
                 Arrays.fill(dek, (byte) 0);
             }
         }
-        synchronized (this) {
-            if (reused != null && System.nanoTime() - reused.createdAtNanos < reuse.get().maxAge().toNanos()
-                    && reused.messages < reuse.get().maxMessages()) {
-                reused.messages++;
-                store.stats().reusedDataKey();
-                return new Lease(reused.dek.clone(), reused.wrapped);
+        while (true) {
+            CompletableFuture<ReusedKey> next;
+            boolean rotate = false;
+            synchronized (this) {
+                if (reused != null && System.nanoTime() - reused.createdAtNanos < reuse.get().maxAge().toNanos()
+                        && reused.messages < reuse.get().maxMessages()) {
+                    reused.messages++;
+                    store.stats().reusedDataKey();
+                    return new Lease(reused.dek.clone(), reused.wrapped);
+                }
+                if (rotation == null) {
+                    rotation = new CompletableFuture<>();
+                    rotate = true;
+                }
+                next = rotation;
             }
-            if (reused != null) {
-                Arrays.fill(reused.dek, (byte) 0);
-                reused = null;
+            if (rotate) {
+                return rotate(next);
             }
-            byte[] dek = Hlxs.newDataKey();
-            WrappedKey wrapped = wrapNow(dek);
-            reused = new ReusedKey(dek, wrapped);
-            reused.messages = 1;
-            return new Lease(dek.clone(), wrapped);
+            // Another caller is wrapping the next data key: wait for it without holding the monitor, then take a
+            // message from it, or rotate again if others used it up first.
+            try {
+                next.join();
+            } catch (CompletionException e) {
+                throw e.getCause() instanceof RuntimeException cause ? cause : e;
+            }
         }
+    }
+
+    /**
+     * Wraps the next reused data key outside the monitor: a key service call there would hold up every encryption
+     * with this key, and on Java 21 pin a virtual thread's carrier for the whole call. Waiting callers get the new
+     * key, or this call's failure.
+     */
+    private Lease rotate(CompletableFuture<ReusedKey> next) {
+        byte[] dek = Hlxs.newDataKey();
+        WrappedKey wrapped;
+        try {
+            wrapped = wrapNow(dek);
+        } catch (RuntimeException | Error e) {
+            Arrays.fill(dek, (byte) 0);
+            synchronized (this) {
+                rotation = null;
+            }
+            next.completeExceptionally(e);
+            throw e;
+        }
+        ReusedKey key = new ReusedKey(dek, wrapped);
+        key.messages = 1;
+        ReusedKey previous;
+        synchronized (this) {
+            previous = reused;
+            reused = key;
+            rotation = null;
+        }
+        if (previous != null) {
+            Arrays.fill(previous.dek, (byte) 0); // every lease of it holds its own copy
+        }
+        next.complete(key);
+        return new Lease(dek.clone(), wrapped);
     }
 
     /** Zeroes the reused data key, when the store closes. */
@@ -301,6 +410,16 @@ final class DefaultCryptoKey implements CryptoKey {
         Objects.requireNonNull(wrapped, "wrapped");
         KeyMetadata current = require(KeyPurpose.ENCRYPTION);
         return new DataKey(store.unwrap(ownEntry(current, List.of(wrapped))), wrapped);
+    }
+
+    /**
+     * Starts wrapping a data key made elsewhere, so {@link CryptoKeys} can wrap one data key with several keys at once.
+     * The purpose check and the call's interceptors start on the calling thread, as for any asynchronous call, so a
+     * trace or other context the caller carries reaches each wrap; only the wait for the key service happens elsewhere.
+     */
+    CompletableFuture<WrappedKey> wrapRawAsync(byte[] dek) {
+        require(KeyPurpose.ENCRYPTION);
+        return ((Async) async).wrapAsync(dek);
     }
 
     @Override
