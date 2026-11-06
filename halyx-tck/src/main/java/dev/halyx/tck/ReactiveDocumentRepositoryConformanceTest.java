@@ -17,6 +17,7 @@ package dev.halyx.tck;
 
 import dev.halyx.nosql.DocumentStore;
 import dev.halyx.nosql.Key;
+import dev.halyx.nosql.TableConfig;
 import dev.halyx.reactor.ReactiveHalyx;
 import dev.halyx.spring.data.document.ReactiveDocumentRepository;
 import dev.halyx.spring.data.document.repository.HalyxReactiveRepositoryFactory;
@@ -98,10 +99,30 @@ public abstract class ReactiveDocumentRepositoryConformanceTest {
         return Map.of();
     }
 
+    /**
+     * Tests that don't apply when the kit runs through encryption, mapped to the reason. Empty unless a subclass runs
+     * the kit through an encrypted view; every entry needs a reason, such as "asserts the provider's stored size of the
+     * raw bytes". A test that fails through the view is a bug until shown otherwise, so keep this short.
+     */
+    protected Map<String, String> notApplicableWithEncryption() {
+        return Map.of();
+    }
+
+    /**
+     * The table a test's store is over, as the subclass built it: {@code store(sorted)} passes its builder through
+     * here, after {@link #indexes}. Unchanged by default; a subclass that runs the kit with encrypted fields adds them
+     * here, on attributes that are neither keys nor indexed.
+     */
+    protected TableConfig.Builder tables(TableConfig.Builder table) {
+        return table;
+    }
+
     @BeforeEach
     void repositories(TestInfo test) {
         test.getTestMethod().map(m -> knownEnvironmentGaps().get(m.getName()))
                 .ifPresent(reason -> assumeTrue(false, "Known environment gap: " + reason));
+        test.getTestMethod().map(m -> notApplicableWithEncryption().get(m.getName()))
+                .ifPresent(reason -> assumeTrue(false, "Not applicable with encryption: " + reason));
         prefix = "tck-" + UUID.randomUUID().toString().substring(0, 8) + "-";
         DocumentStore sorted = store(true);
         DocumentStore plain = store(false);

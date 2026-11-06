@@ -169,7 +169,7 @@ class RealAzureIT {
             if (sorted) {
                 table.sortKey("sk");
             }
-            return azure().documentStore(indexes(table, sorted).build());
+            return azure().documentStore(tables(indexes(table, sorted)).build());
         }
     }
 
@@ -181,7 +181,7 @@ class RealAzureIT {
             if (sorted) {
                 table.sortKey("sk");
             }
-            return azure().documentStore(DocumentStoreConformanceTest.indexes(table, sorted).build());
+            return azure().documentStore(tables(DocumentStoreConformanceTest.indexes(table, sorted)).build());
         }
 
         @Override
@@ -198,7 +198,7 @@ class RealAzureIT {
             if (sorted) {
                 table.sortKey("sk");
             }
-            return azure().documentStore(DocumentStoreConformanceTest.indexes(table, sorted).build());
+            return azure().documentStore(tables(DocumentStoreConformanceTest.indexes(table, sorted)).build());
         }
     }
 

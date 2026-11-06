@@ -112,10 +112,35 @@ public abstract class StreamConformanceTest {
         return Map.of();
     }
 
+    /**
+     * Tests that don't apply when the kit runs through encryption, mapped to the reason. Empty unless a subclass runs
+     * the kit through an encrypted view; every entry needs a reason, such as "asserts the provider's stored size of the
+     * raw bytes". A test that fails through the view is a bug until shown otherwise, so keep this short.
+     */
+    protected Map<String, String> notApplicableWithEncryption() {
+        return Map.of();
+    }
+
+    /**
+     * The claim-check store the kit tests, as {@link #claimCheckStore()} gives it. Unchanged by default; a subclass
+     * that runs the claim-check cases through an encrypted view returns the view here.
+     */
+    protected BlobStore wrap(BlobStore store) {
+        return store;
+    }
+
+    /** {@link #claimCheckStore()} through {@link #wrap}, or null when there is none. */
+    private BlobStore claimChecks() {
+        BlobStore store = claimCheckStore();
+        return store == null ? null : wrap(store);
+    }
+
     @BeforeEach
     void newTopic(TestInfo test) {
         test.getTestMethod().map(m -> knownEnvironmentGaps().get(m.getName()))
                 .ifPresent(reason -> assumeTrue(false, "Known environment gap: " + reason));
+        test.getTestMethod().map(m -> notApplicableWithEncryption().get(m.getName()))
+                .ifPresent(reason -> assumeTrue(false, "Not applicable with encryption: " + reason));
         topic = newTopicName();
         createTopic(topic, PARTITIONS);
     }
@@ -322,7 +347,7 @@ public abstract class StreamConformanceTest {
 
     @Test
     void largeValuesTravelThroughAClaimCheck() {
-        BlobStore store = claimCheckStore();
+        BlobStore store = claimChecks();
         assumeTrue(store != null, "no claim-check store");
         ClaimCheck claims = new ClaimCheck(store, 1024, "tck-claims/" + topic + "/");
         byte[] value = new byte[2 * 1024 * 1024];
@@ -353,7 +378,7 @@ public abstract class StreamConformanceTest {
 
     @Test
     void asyncLargeValuesTravelThroughAClaimCheck() throws Exception {
-        BlobStore store = claimCheckStore();
+        BlobStore store = claimChecks();
         assumeTrue(store != null, "no claim-check store");
         ClaimCheck claims = new ClaimCheck(store, 1024, "tck-claims/" + topic + "/async/");
         byte[] value = new byte[256 * 1024];

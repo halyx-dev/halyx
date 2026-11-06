@@ -83,10 +83,29 @@ public abstract class ParameterStoreConformanceTest {
         return Map.of();
     }
 
+    /**
+     * Tests that don't apply when the kit runs through encryption, mapped to the reason. Empty unless a subclass runs
+     * the kit through an encrypted view; every entry needs a reason, such as "asserts the provider's stored size of the
+     * raw bytes". A test that fails through the view is a bug until shown otherwise, so keep this short.
+     */
+    protected Map<String, String> notApplicableWithEncryption() {
+        return Map.of();
+    }
+
+    /**
+     * The store the kit tests, as {@link #newStore} opened it. Unchanged by default; a subclass that runs the kit
+     * through an encrypted view returns the view here.
+     */
+    protected ParameterStore wrap(ParameterStore store) {
+        return store;
+    }
+
     @BeforeEach
     void newPrefix(TestInfo test) {
         test.getTestMethod().map(m -> knownEnvironmentGaps().get(m.getName()))
                 .ifPresent(reason -> assumeTrue(false, "Known environment gap: " + reason));
+        test.getTestMethod().map(m -> notApplicableWithEncryption().get(m.getName()))
+                .ifPresent(reason -> assumeTrue(false, "Not applicable with encryption: " + reason));
         prefix = "tck-" + UUID.randomUUID().toString().substring(0, 8);
     }
 
@@ -182,7 +201,7 @@ public abstract class ParameterStoreConformanceTest {
 
     @AfterEach
     void cleanUp() {
-        ParameterStore store = newStore(config().prefix(prefix).build());
+        ParameterStore store = wrap(newStore(config().prefix(prefix).build()));
         store.getAll("").keySet().forEach(name -> {
             try {
                 store.delete(name);
@@ -193,11 +212,11 @@ public abstract class ParameterStoreConformanceTest {
     }
 
     protected ParameterStore store() {
-        return newStore(config().prefix(prefix).build());
+        return wrap(newStore(config().prefix(prefix).build()));
     }
 
     private ParameterStore cachingStore(Duration ttl) {
-        return newStore(config().prefix(prefix).cacheTtl(ttl).build());
+        return wrap(newStore(config().prefix(prefix).cacheTtl(ttl).build()));
     }
 
     @Test
@@ -272,7 +291,7 @@ public abstract class ParameterStoreConformanceTest {
     @Test
     void storesAreIsolatedByPrefix() {
         store().put("shared", "mine");
-        ParameterStore other = newStore(config().prefix(prefix + "-other").build());
+        ParameterStore other = wrap(newStore(config().prefix(prefix + "-other").build()));
 
         assertThat(other.get("shared")).isEmpty();
         assertThat(other.getAll("")).isEmpty();
@@ -455,14 +474,14 @@ public abstract class ParameterStoreConformanceTest {
     @Test
     void nativeNamesAreUsedAsTheyAre() {
         String nativePrefix = nativePrefix(prefix);
-        ParameterStore nativeStore = newStore(config().prefix(nativePrefix).nativeNames(true).build());
+        ParameterStore nativeStore = wrap(newStore(config().prefix(nativePrefix).nativeNames(true).build()));
         assertThatThrownBy(() -> store().put(nativeName(), "v")).isInstanceOf(IllegalArgumentException.class);
         try {
             nativeStore.put(nativeName(), "native-value");
 
             assertThat(nativeStore.require(nativeName())).isEqualTo("native-value");
             assertThat(listed(nativeStore, "", nativeName())).containsOnlyKeys(nativeName());
-            ParameterStore unprefixed = newStore(config().nativeNames(true).build());
+            ParameterStore unprefixed = wrap(newStore(config().nativeNames(true).build()));
             assertThat(unprefixed.require(nativePrefix + nativeName())).isEqualTo("native-value");
         } finally {
             nativeStore.delete(nativeName());

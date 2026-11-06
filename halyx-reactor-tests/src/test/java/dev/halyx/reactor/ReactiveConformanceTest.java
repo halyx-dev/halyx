@@ -111,7 +111,7 @@ class ReactiveConformanceTest {
             if (sorted) {
                 table.sortKey("sk");
             }
-            return BlockingViews.of(rx.provider("test").documentStore(indexes(table, sorted).build()));
+            return BlockingViews.of(rx.provider("test").documentStore(tables(indexes(table, sorted)).build()));
         }
     }
 

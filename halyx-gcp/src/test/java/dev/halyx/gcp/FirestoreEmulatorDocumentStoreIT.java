@@ -84,7 +84,7 @@ class FirestoreEmulatorDocumentStoreIT extends DocumentStoreConformanceTest {
         if (sorted) {
             table.sortKey("sk");
         }
-        return halyx.provider("gcp").documentStore(indexes(table, sorted).build());
+        return halyx.provider("gcp").documentStore(tables(indexes(table, sorted)).build());
     }
 
     /** The repository kit on the same tables. */

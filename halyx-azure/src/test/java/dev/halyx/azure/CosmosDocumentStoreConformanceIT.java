@@ -130,7 +130,7 @@ class CosmosDocumentStoreConformanceIT extends DocumentStoreConformanceTest {
         if (sorted) {
             table.sortKey("sk");
         }
-        return halyx.provider("azure").documentStore(indexes(table, sorted).build());
+        return halyx.provider("azure").documentStore(tables(indexes(table, sorted)).build());
     }
 
     /** The repository kit on the same tables. */

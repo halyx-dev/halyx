@@ -139,6 +139,14 @@ either portable or explicitly declared as a capability:
 | Parameter store | 26 | CRUD, the asynchronous view, ping past the cache, versions, prefixes, caching, JSON fields, native names, watching |
 | Key store | 63 | round trips from empty to many segments, with and without AAD; every header field, key entry and segment changed, reordered, truncated or extended; wrong keys and keys outside the store; data sealed for several keys and for 16 at most, keys added and removed with the body unchanged, unknown entries skipped; the key commitment; data keys and streams; rewrap after rotation, across keys and across stores; signing per algorithm, checked by the JDK alone, and after rotation; purposes, missing and disabled keys; data key reuse and the decrypt cache; names, metadata, ping, MACs and the asynchronous view. Several-key cases seal next to a memory key store the kit starts itself |
 
+The kits for services that can use keys run unchanged through encryption, rather than through parallel kits. Each
+has a hook that defaults to doing nothing: `wrap(...)` on the blob store, the parameter store and the claim-check
+store of the messaging and stream kits, and `tables(...)` on the document kits' table configuration, which every
+subclass's `store(sorted)` builds through. An encrypted subclass overrides the hook, so the whole kit runs again
+through the encrypted view. A test that can't apply under encryption is named in `notApplicableWithEncryption()` with
+its reason, and is reported as skipped, as an environment gap is; a test that fails through the view is a bug until
+shown otherwise.
+
 ### Emulators
 
 Integration tests (`*IT`) run the kits through Testcontainers against

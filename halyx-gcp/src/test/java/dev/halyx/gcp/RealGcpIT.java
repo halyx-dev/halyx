@@ -151,7 +151,7 @@ class RealGcpIT {
             if (sorted) {
                 table.sortKey("sk");
             }
-            return gcp().documentStore(indexes(table, sorted).build());
+            return gcp().documentStore(tables(indexes(table, sorted)).build());
         }
     }
 
@@ -163,7 +163,7 @@ class RealGcpIT {
             if (sorted) {
                 table.sortKey("sk");
             }
-            return gcp().documentStore(DocumentStoreConformanceTest.indexes(table, sorted).build());
+            return gcp().documentStore(tables(DocumentStoreConformanceTest.indexes(table, sorted)).build());
         }
 
         @Override
@@ -180,7 +180,7 @@ class RealGcpIT {
             if (sorted) {
                 table.sortKey("sk");
             }
-            return gcp().documentStore(DocumentStoreConformanceTest.indexes(table, sorted).build());
+            return gcp().documentStore(tables(DocumentStoreConformanceTest.indexes(table, sorted)).build());
         }
     }
 
