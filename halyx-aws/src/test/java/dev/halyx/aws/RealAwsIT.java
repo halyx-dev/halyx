@@ -146,7 +146,7 @@ class RealAwsIT {
             if (sorted) {
                 table.sortKey("sk");
             }
-            return aws().documentStore(indexes(table, sorted).build());
+            return aws().documentStore(tables(indexes(table, sorted)).build());
         }
     }
 
@@ -215,7 +215,7 @@ class RealAwsIT {
             if (sorted) {
                 table.sortKey("sk");
             }
-            return aws().documentStore(DocumentStoreConformanceTest.indexes(table, sorted).build());
+            return aws().documentStore(tables(DocumentStoreConformanceTest.indexes(table, sorted)).build());
         }
 
         @Override
@@ -232,7 +232,7 @@ class RealAwsIT {
             if (sorted) {
                 table.sortKey("sk");
             }
-            return aws().documentStore(DocumentStoreConformanceTest.indexes(table, sorted).build());
+            return aws().documentStore(tables(DocumentStoreConformanceTest.indexes(table, sorted)).build());
         }
     }
 

@@ -43,6 +43,6 @@ class InMemoryDocumentStoreConformanceTest extends DocumentStoreConformanceTest 
         if (sorted) {
             table.sortKey("sk");
         }
-        return halyx.provider("test").documentStore(indexes(table, sorted).build());
+        return halyx.provider("test").documentStore(tables(indexes(table, sorted)).build());
     }
 }

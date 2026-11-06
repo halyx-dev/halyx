@@ -122,7 +122,7 @@ class DynamoDocumentStoreConformanceIT extends DocumentStoreConformanceTest {
         if (sorted) {
             table.sortKey("sk");
         }
-        return halyx.provider("aws").documentStore(indexes(table, sorted).build());
+        return halyx.provider("aws").documentStore(tables(indexes(table, sorted)).build());
     }
 
     /** The repository kit on the same tables. */

@@ -84,10 +84,35 @@ public abstract class MessagingConformanceTest {
         return Map.of();
     }
 
+    /**
+     * Tests that don't apply when the kit runs through encryption, mapped to the reason. Empty unless a subclass runs
+     * the kit through an encrypted view; every entry needs a reason, such as "asserts the provider's stored size of the
+     * raw bytes". A test that fails through the view is a bug until shown otherwise, so keep this short.
+     */
+    protected Map<String, String> notApplicableWithEncryption() {
+        return Map.of();
+    }
+
+    /**
+     * The claim-check store the kit tests, as {@link #claimCheckStore()} gives it. Unchanged by default; a subclass
+     * that runs the claim-check cases through an encrypted view returns the view here.
+     */
+    protected BlobStore wrap(BlobStore store) {
+        return store;
+    }
+
+    /** {@link #claimCheckStore()} through {@link #wrap}, or null when there is none. */
+    private BlobStore claimChecks() {
+        BlobStore store = claimCheckStore();
+        return store == null ? null : wrap(store);
+    }
+
     @BeforeEach
     void newName(TestInfo test) {
         test.getTestMethod().map(m -> knownEnvironmentGaps().get(m.getName()))
                 .ifPresent(reason -> assumeTrue(false, "Known environment gap: " + reason));
+        test.getTestMethod().map(m -> notApplicableWithEncryption().get(m.getName()))
+                .ifPresent(reason -> assumeTrue(false, "Not applicable with encryption: " + reason));
         name = "tck-" + UUID.randomUUID().toString().substring(0, 8);
     }
 
@@ -260,7 +285,7 @@ public abstract class MessagingConformanceTest {
 
     @Test
     void claimCheckSendsLargeBodiesThroughBlobStorage() {
-        BlobStore store = claimCheckStore();
+        BlobStore store = claimChecks();
         assumeTrue(store != null, "no blob store for claim checks");
         Channel c = channel(name + "-cc", new ClaimCheck(store, 64 * 1024, "tck-claims/" + name + "/"));
         byte[] large = new byte[300 * 1024];
@@ -421,7 +446,7 @@ public abstract class MessagingConformanceTest {
 
     @Test
     void asyncPublishSendsLargeBodiesThroughTheClaimCheck() throws Exception {
-        BlobStore store = claimCheckStore();
+        BlobStore store = claimChecks();
         assumeTrue(store != null, "no blob store for claim checks");
         Channel c = channel(name + "-acc", new ClaimCheck(store, 64 * 1024, "tck-claims/" + name + "/"));
         byte[] large = new byte[300 * 1024];
@@ -477,7 +502,7 @@ public abstract class MessagingConformanceTest {
 
     @Test
     void asyncReceiveFetchesClaimCheckedBodies() throws Exception {
-        BlobStore store = claimCheckStore();
+        BlobStore store = claimChecks();
         assumeTrue(store != null, "no blob store for claim checks");
         Channel c = channel(name + "-arc", new ClaimCheck(store, 64 * 1024, "tck-claims/" + name + "/"));
         byte[] large = new byte[300 * 1024];

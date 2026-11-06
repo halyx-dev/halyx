@@ -46,7 +46,7 @@ class InMemoryReactiveDocumentRepositoryConformanceTest extends ReactiveDocument
         if (sorted) {
             table.sortKey("sk");
         }
-        return halyx.provider("test").documentStore(DocumentStoreConformanceTest.indexes(table, sorted).build());
+        return halyx.provider("test").documentStore(tables(DocumentStoreConformanceTest.indexes(table, sorted)).build());
     }
 
     @Override
