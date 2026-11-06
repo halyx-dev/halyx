@@ -61,6 +61,18 @@ public interface KeyStore {
      */
     InputStream decryptingStream(InputStream sealed, byte[] aad);
 
+    /**
+     * A plaintext range of sealed data stored elsewhere, such as a blob, without reading the rest: {@code header} was
+     * read with {@link SealedHeader#read}, the sealed data is {@code sealedLength} bytes long, and {@code segments}
+     * starts at {@code header.segmentStart(plaintextOffset)} and reaches at least
+     * {@code header.segmentEnd(plaintextOffset + plaintextLength, sealedLength)}. Each segment read is authenticated,
+     * and the final segment is known from {@code sealedLength}, so changed, truncated or extended data fails with
+     * {@code DataIntegrityException}. A range outside the plaintext is {@code InvalidArgumentException}. Closing the
+     * stream closes {@code segments}.
+     */
+    InputStream decryptingStream(SealedHeader header, InputStream segments, long sealedLength, long plaintextOffset,
+                                 long plaintextLength, byte[] aad);
+
     /** Checks that the key service answers an authenticated read, past every cache, for health checks. */
     void ping();
 

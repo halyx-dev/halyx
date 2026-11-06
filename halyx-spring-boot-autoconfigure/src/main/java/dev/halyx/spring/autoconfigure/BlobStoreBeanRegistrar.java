@@ -278,12 +278,21 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
                     names.register(name, "halyx.stream-consumers." + name, "topic and .group", definition);
                 });
         stores.forEach((name, store) -> {
+            String property = "halyx.blob-stores." + name;
             String bucket = store.bucket() == null || store.bucket().isBlank() ? name : store.bucket();
-            RootBeanDefinition definition = serviceBean(BlobStore.class, "blobStore", "halyx.blob-stores." + name,
-                    store.provider());
-            definition.getConstructorArgumentValues().addIndexedArgumentValue(2, bucket);
-            definition.setDescription("Halyx blob store " + bucket);
-            names.register(name, "halyx.blob-stores." + name, "bucket", definition);
+            RootBeanDefinition definition;
+            if (store.encryptionKey() == null) {
+                if (store.encryptionPrefix() != null && !store.encryptionPrefix().isBlank()) {
+                    throw new IllegalStateException(property + ".encryption-prefix needs " + property
+                            + ".encryption-key: the key to seal the blobs under the prefix with");
+                }
+                definition = serviceBean(BlobStore.class, "blobStore", property, store.provider());
+                definition.getConstructorArgumentValues().addIndexedArgumentValue(2, bucket);
+                definition.setDescription("Halyx blob store " + bucket);
+            } else {
+                definition = encryptedBlobBean(property, store, bucket, keyStores.keySet());
+            }
+            names.register(name, property, "bucket", definition);
         });
     }
 
@@ -338,6 +347,30 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
             throw new IllegalStateException(property + " must name one of halyx.key-stores " + new TreeSet<>(keyStores));
         }
         return store;
+    }
+
+    /**
+     * A blob store sealed with a key from a key store bean, which is created first: the {@code encryptedBlobStore}
+     * factory method opens the store and wraps it in the view.
+     */
+    private static RootBeanDefinition encryptedBlobBean(String property, HalyxProperties.BlobStoreProperties store,
+                                                        String bucket, Set<String> keyStores) {
+        HalyxProperties.EncryptionKey key = store.encryptionKey();
+        if (key.name() == null || key.name().isBlank()) {
+            throw new IllegalStateException(property + ".encryption-key.name is required: the key to seal blobs with");
+        }
+        String keyStore = keyStore(property + ".encryption-key.store", key.store(), keyStores);
+        String prefix = store.encryptionPrefix() == null || store.encryptionPrefix().isBlank() ? null
+                : store.encryptionPrefix();
+        RootBeanDefinition definition = serviceBean(BlobStore.class, "encryptedBlobStore", property, store.provider());
+        ConstructorArgumentValues args = definition.getConstructorArgumentValues();
+        args.addIndexedArgumentValue(2, bucket);
+        args.addIndexedArgumentValue(3, new RuntimeBeanReference(keyStore));
+        args.addIndexedArgumentValue(4, key.name());
+        args.addIndexedArgumentValue(5, new ConstructorArgumentValues.ValueHolder(prefix, String.class.getName()));
+        definition.setDescription("Halyx blob store " + bucket + ", encrypted with " + keyStore + "/" + key.name()
+                + (prefix == null ? "" : " under " + prefix));
+        return definition;
     }
 
     /** A {@code CryptoKey} from its store bean, which is created first and destroyed after it. */

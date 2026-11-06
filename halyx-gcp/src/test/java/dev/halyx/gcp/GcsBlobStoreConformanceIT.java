@@ -46,7 +46,7 @@ class GcsBlobStoreConformanceIT extends BlobStoreConformanceTest {
             .withExposedPorts(PORT)
             .waitingFor(Wait.forHttp("/health").forPort(PORT));
 
-    private static Halyx halyx;
+    static Halyx halyx;
 
     @BeforeAll
     static void start() {
