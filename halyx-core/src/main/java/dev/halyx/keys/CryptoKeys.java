@@ -19,8 +19,11 @@ import dev.halyx.error.InvalidArgumentException;
 
 import java.io.OutputStream;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 
 /**
  * Sealing for several keys at once, which may be on different providers and clouds: any one of them can then open
@@ -41,9 +44,8 @@ public final class CryptoKeys {
         Objects.requireNonNull(plaintext, "plaintext");
         Objects.requireNonNull(aad, "aad");
         checkCount(keys);
-        try (DataKey dataKey = keys[0].generateDataKey()) {
-            List<WrappedKey> entries = entries(dataKey, keys);
-            return SealedData.of(Hlxs.seal(dataKey.plaintextUnsafe(), entries, plaintext, aad, segmentSize(keys[0]),
+        try (Sealing sealing = sealing(keys)) {
+            return SealedData.of(Hlxs.seal(sealing.dek, sealing.entries, plaintext, aad, segmentSize(keys[0]),
                     Hlxs.randomSalt(), Hlxs.randomNoncePrefix()));
         }
     }
@@ -53,9 +55,8 @@ public final class CryptoKeys {
         Objects.requireNonNull(sink, "sink");
         Objects.requireNonNull(aad, "aad");
         checkCount(keys);
-        try (DataKey dataKey = keys[0].generateDataKey()) {
-            return DefaultCryptoKey.sealingStream(sink, aad, dataKey.plaintextUnsafe(), entries(dataKey, keys),
-                    segmentSize(keys[0]));
+        try (Sealing sealing = sealing(keys)) {
+            return DefaultCryptoKey.sealingStream(sink, aad, sealing.dek, sealing.entries, segmentSize(keys[0]));
         }
     }
 
@@ -70,13 +71,52 @@ public final class CryptoKeys {
         }
     }
 
-    private static List<WrappedKey> entries(DataKey dataKey, CryptoKey[] keys) {
-        List<WrappedKey> entries = new ArrayList<>(keys.length);
-        entries.add(dataKey.wrapped());
-        for (int i = 1; i < keys.length; i++) {
-            entries.add(keys[i].wrap(dataKey));
+    /** A data key and its entries, one per key in the caller's order; closing zeroes the data key. */
+    private record Sealing(byte[] dek, List<WrappedKey> entries) implements AutoCloseable {
+        @Override
+        public void close() {
+            Arrays.fill(dek, (byte) 0);
         }
-        return entries; // the header refuses duplicate key ids
+    }
+
+    /**
+     * A new data key wrapped by every key. With several keys of Halyx's own stores, the wraps run in parallel: sealing
+     * for an AWS key and an Azure key then costs the slower round trip, not both. Each wrap starts on the calling thread
+     * as an asynchronous call, so interceptors see the caller's context, such as its trace. The header refuses
+     * duplicate key ids.
+     */
+    private static Sealing sealing(CryptoKey[] keys) {
+        if (keys.length > 1 && Arrays.stream(keys).allMatch(DefaultCryptoKey.class::isInstance)) {
+            byte[] dek = Hlxs.newDataKey();
+            try {
+                List<CompletableFuture<WrappedKey>> wraps = new ArrayList<>(keys.length);
+                for (CryptoKey key : keys) {
+                    wraps.add(((DefaultCryptoKey) key).wrapRawAsync(dek));
+                }
+                List<WrappedKey> entries = new ArrayList<>(keys.length);
+                for (CompletableFuture<WrappedKey> wrap : wraps) {
+                    entries.add(wrap.join());
+                }
+                return new Sealing(dek, entries);
+            } catch (CompletionException e) {
+                Arrays.fill(dek, (byte) 0);
+                throw e.getCause() instanceof RuntimeException cause ? cause : e;
+            } catch (RuntimeException | Error e) {
+                Arrays.fill(dek, (byte) 0);
+                throw e;
+            }
+        }
+        DataKey dataKey = keys[0].generateDataKey();
+        try {
+            List<WrappedKey> entries = new ArrayList<>(keys.length);
+            entries.add(dataKey.wrapped());
+            for (int i = 1; i < keys.length; i++) {
+                entries.add(keys[i].wrap(dataKey));
+            }
+            return new Sealing(dataKey.plaintextUnsafe().clone(), entries);
+        } finally {
+            dataKey.close();
+        }
     }
 
     private static int segmentSize(CryptoKey first) {
