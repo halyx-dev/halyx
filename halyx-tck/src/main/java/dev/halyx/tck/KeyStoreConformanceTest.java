@@ -28,6 +28,7 @@ import dev.halyx.error.AccessDeniedException;
 import dev.halyx.error.DataIntegrityException;
 import dev.halyx.error.InvalidArgumentException;
 import dev.halyx.error.NotFoundException;
+import dev.halyx.error.UnsupportedFeatureException;
 import dev.halyx.keys.AsyncCryptoKey;
 import dev.halyx.keys.CryptoKey;
 import dev.halyx.keys.CryptoKeys;
@@ -681,8 +682,10 @@ public abstract class KeyStoreConformanceTest {
 
         assertThat(encryption.metadata().purposes()).contains(KeyPurpose.ENCRYPTION);
         assertThatThrownBy(() -> encryption.sign(DATA)).isInstanceOf(InvalidArgumentException.class);
+        // A store that makes no MACs says so before any key is consulted: the capability, not the purpose.
         assertThatThrownBy(() -> store().key(encryptionKey(), KeyOptions.builder().purpose(KeyPurpose.MAC).build())
-                .mac(DATA)).isInstanceOf(InvalidArgumentException.class);
+                .mac(DATA)).isInstanceOf(store().capabilities().supports(KeyCapability.MAC)
+                ? InvalidArgumentException.class : UnsupportedFeatureException.class);
         declaredAlgorithms().stream().findFirst().ifPresent(algorithm -> {
             CryptoKey signing = store().key(signingKey(algorithm), KeyOptions.builder().signingAlgorithm(algorithm)
                     .purpose(KeyPurpose.SIGNING).build());
