@@ -25,7 +25,8 @@ import java.util.Objects;
  * {@value #ATTRIBUTE}). Subscriptions with the same claim check fetch the body transparently. Use it for
  * payloads above the provider's limit (256 KiB on SNS, SQS and Service Bus standard; 10 MB on Pub/Sub).
  * Stored bodies are not deleted on ack (other subscriptions may still need them): expire them with a
- * bucket lifecycle rule.
+ * bucket lifecycle rule. To keep stored bodies sealed at rest, pass an encrypted view of the store,
+ * {@code ClaimCheck.of(store.encryptedWith(key))}, on both sides.
  */
 public record ClaimCheck(BlobStore store, int thresholdBytes, String prefix) {
 

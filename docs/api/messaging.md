@@ -162,6 +162,24 @@ Subscription billing = aws.subscription(SubscriptionConfig.builder("orders-billi
 Stored bodies aren't deleted on ack, since other subscriptions may still need them. Expire them with a
 bucket lifecycle rule.
 
+### Encrypted claim checks
+
+To keep offloaded bodies sealed at rest, give the claim check an [encrypted view](storage.md#client-side-encryption)
+of the store. Nothing else changes:
+
+```java
+CryptoKey key = aws.keyStore().key("message-bodies");
+var claims = ClaimCheck.of(aws.blobStore("message-bodies").encryptedWith(key));
+```
+
+- The bucket holds only sealed bodies. The message itself is unchanged and carries only the blob key.
+- Every subscription that reads them needs the same encrypted view. A subscription whose claim check uses the plain
+  store gets the sealed bytes as the body, never the plaintext.
+- Only offloaded bodies touch the key: one wrap per body stored, and one unwrap per delivery. Bodies under the
+  threshold travel in the message with no key call. For high volumes, see the data key caches in
+  [Performance and caches](keys.md#performance-and-caches).
+- The lifecycle rule still expires them. The key isn't needed to delete them.
+
 ## Provider notes
 
 - **SNS and SQS:** binary bodies travel base64-encoded, and messages carry at most 10 attributes. Halyx's

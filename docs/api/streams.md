@@ -191,6 +191,10 @@ on the other clouds.
 
 Values over a size threshold can go through a blob store with the same `ClaimCheck` as messaging, on both the
 producer and the consumer config. Without one, a value over the limit fails with `InvalidArgumentException`.
+To keep offloaded values sealed at rest, give the claim check an encrypted view of the store,
+`ClaimCheck.of(blobStore.encryptedWith(key))`, on both sides. A consumer whose claim check uses the plain store
+reads the sealed bytes, never the plaintext. See
+[Encrypted claim checks](messaging.md#encrypted-claim-checks).
 
 ## Provider notes
 

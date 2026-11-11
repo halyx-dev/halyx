@@ -179,6 +179,8 @@ Other services take a key and do the sealing for you:
 - **Blob stores:** `blobStore.encryptedWith(key)` seals every blob before it leaves the application, with ranged and
   parallel reads, a key per blob, and prefix views for buckets encrypted in part. See
   [Client-side encryption](storage.md#client-side-encryption).
+- **Claim checks:** `ClaimCheck.of(blobStore.encryptedWith(key))` seals the message bodies and stream values that
+  go through a blob store. See [Encrypted claim checks](messaging.md#encrypted-claim-checks).
 
 ## Errors
 
