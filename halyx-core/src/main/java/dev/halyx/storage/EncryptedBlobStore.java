@@ -170,6 +170,7 @@ final class EncryptedBlobStore implements BlobStore {
             b.ifNotExists();
         }
         options.tier().ifPresent(b::tier);
+        options.serverSideKey().ifPresent(b::serverSideKey);
         if (options.validateChecksum()) {
             b.validateChecksum();
         }
@@ -483,6 +484,12 @@ final class EncryptedBlobStore implements BlobStore {
             kept.remove(StorageCapability.PRESIGNED_MULTIPART);
         }
         return Capabilities.of(kept.toArray(Capability[]::new));
+    }
+
+    /** The same view over the store's server-side key view: sealed by Halyx, then encrypted again at rest. */
+    @Override
+    public BlobStore withServerSideKey(CryptoKey key) {
+        return new EncryptedBlobStore(delegate.withServerSideKey(key), keys, opener, prefix);
     }
 
     @Override

@@ -18,6 +18,7 @@ package dev.halyx.storage;
 import dev.halyx.interceptor.InterceptorChain;
 
 import dev.halyx.capability.Capabilities;
+import dev.halyx.error.UnsupportedFeatureException;
 import dev.halyx.keys.CryptoKey;
 import dev.halyx.keys.KeyStore;
 
@@ -277,6 +278,26 @@ public interface BlobStore {
         Objects.requireNonNull(keyName, "keyName");
         Objects.requireNonNull(prefix, "prefix");
         return new EncryptedBlobStore(this, blobKey -> keys.key(keyName.apply(blobKey)), keys, prefix);
+    }
+
+    /**
+     * A view of this store whose writes the storage service encrypts with {@code key}, an encryption key from this
+     * store's provider: S3 SSE-KMS, a GCS customer-managed key, or an Azure encryption scope (give the key the option
+     * {@code azure.storage.encryption-scope}). It applies to puts, uploads in parts, copies to this view, metadata and
+     * tier changes, presigned upload URLs and presigned multipart uploads; a put with its own
+     * {@link PutOptions#serverSideKey()} keeps that key. Reads are unchanged, and presigned download URLs keep
+     * working. Requires {@link StorageCapability#SERVER_SIDE_KMS}.
+     *
+     * <p>Unlike {@link #encryptedWith(CryptoKey)}, the service sees the plaintext, and anyone the bucket and key
+     * policies allow can read it. Use both for both.
+     *
+     * @throws dev.halyx.error.UnsupportedFeatureException if the store doesn't support server-side keys
+     * @throws dev.halyx.error.InvalidArgumentException    if the key belongs to another provider
+     */
+    default BlobStore withServerSideKey(CryptoKey key) {
+        Objects.requireNonNull(key, "key");
+        throw new UnsupportedFeatureException("Server-side keys need the store itself; apply withServerSideKey before "
+                + "other views", null, provider(), null);
     }
 
     /**

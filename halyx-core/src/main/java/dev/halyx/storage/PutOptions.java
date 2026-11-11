@@ -15,6 +15,8 @@
  */
 package dev.halyx.storage;
 
+import dev.halyx.keys.CryptoKey;
+
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -39,6 +41,7 @@ public final class PutOptions {
     private final StorageTier tier;
     private final boolean validateChecksum;
     private final int uploadConcurrency;
+    private final CryptoKey serverSideKey;
 
     /** Default number of parts uploaded at once. */
     public static final int DEFAULT_UPLOAD_CONCURRENCY = 4;
@@ -53,6 +56,7 @@ public final class PutOptions {
         this.ifMatch = b.ifMatch;
         this.ifNotExists = b.ifNotExists;
         this.partSize = b.partSize;
+        this.serverSideKey = b.serverSideKey;
     }
 
     public static PutOptions defaults() {
@@ -122,6 +126,15 @@ public final class PutOptions {
         return validateChecksum;
     }
 
+    /**
+     * The key the storage service encrypts the stored blob with, from the store's own provider: S3 SSE-KMS, a GCS
+     * customer-managed key, or an Azure encryption scope. Empty for the bucket's default encryption, or the key of a
+     * {@link BlobStore#withServerSideKey} view. Requires {@link StorageCapability#SERVER_SIDE_KMS}.
+     */
+    public Optional<CryptoKey> serverSideKey() {
+        return Optional.ofNullable(serverSideKey);
+    }
+
     public static final class Builder {
         private BlobHeaders headers = BlobHeaders.none();
         private final Map<String, String> metadata = new LinkedHashMap<>();
@@ -131,6 +144,7 @@ public final class PutOptions {
         private StorageTier tier;
         private boolean validateChecksum;
         private int uploadConcurrency = DEFAULT_UPLOAD_CONCURRENCY;
+        private CryptoKey serverSideKey;
 
         private Builder() {
         }
@@ -151,6 +165,15 @@ public final class PutOptions {
 
         public Builder validateChecksum() {
             this.validateChecksum = true;
+            return this;
+        }
+
+        /**
+         * Has the storage service encrypt the blob with {@code key}, an encryption key from the store's provider. On
+         * Azure, the key needs the option {@code azure.storage.encryption-scope}: the scope bound to it.
+         */
+        public Builder serverSideKey(CryptoKey key) {
+            this.serverSideKey = Objects.requireNonNull(key, "key");
             return this;
         }
 

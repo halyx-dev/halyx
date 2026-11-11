@@ -46,9 +46,11 @@ import dev.halyx.storage.StorageCapability;
 import dev.halyx.storage.StorageTier;
 import dev.halyx.storage.UploadedPart;
 import dev.halyx.storage.spi.AbstractBlobStoreDriver;
+import dev.halyx.storage.spi.BlobStoreDriver;
 import dev.halyx.storage.spi.BufferPool;
 import dev.halyx.storage.spi.MultipartUploadSession;
 import dev.halyx.storage.spi.PartUploader;
+import dev.halyx.storage.spi.ServerSideKey;
 import software.amazon.awssdk.awscore.presigner.PresignedRequest;
 import software.amazon.awssdk.core.ResponseBytes;
 import software.amazon.awssdk.core.ResponseInputStream;
@@ -71,6 +73,7 @@ import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
 import software.amazon.awssdk.services.s3.model.MetadataDirective;
 import software.amazon.awssdk.services.s3.model.ObjectIdentifier;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.ServerSideEncryption;
 import software.amazon.awssdk.services.s3.model.PutObjectResponse;
 import software.amazon.awssdk.services.s3.model.S3Error;
 import software.amazon.awssdk.services.s3.model.S3Exception;
@@ -101,6 +104,8 @@ public final class S3BlobStoreDriver extends AbstractBlobStoreDriver {
     private final S3Presigner presigner;
     private final long multipartThreshold;
     private final Supplier<S3AsyncClient> s3Async;
+    /** The SSE-KMS key ARN writes use, for a driver from {@link #withServerSideKey}; null for the bucket's default. */
+    private final String kmsKeyId;
 
     /**
      * @param multipartThreshold content longer than this is uploaded with a multipart upload (a single
@@ -109,11 +114,23 @@ public final class S3BlobStoreDriver extends AbstractBlobStoreDriver {
      */
     public S3BlobStoreDriver(String bucket, S3Client s3, S3Presigner presigner, long multipartThreshold,
                              Supplier<S3AsyncClient> s3Async) {
+        this(bucket, s3, presigner, multipartThreshold, s3Async, null);
+    }
+
+    private S3BlobStoreDriver(String bucket, S3Client s3, S3Presigner presigner, long multipartThreshold,
+                              Supplier<S3AsyncClient> s3Async, String kmsKeyId) {
         super(AwsProvider.ID, bucket, Capabilities.of(StorageCapability.values()));
         this.s3 = s3;
         this.presigner = presigner;
         this.multipartThreshold = multipartThreshold;
         this.s3Async = s3Async;
+        this.kmsKeyId = kmsKeyId;
+    }
+
+    /** SSE-KMS with the key's ARN on every write: puts, multipart uploads, copies, presigned uploads. */
+    @Override
+    public BlobStoreDriver withServerSideKey(ServerSideKey key) {
+        return new S3BlobStoreDriver(bucket, s3, presigner, multipartThreshold, s3Async, key.nativeId());
     }
 
     @Override
@@ -152,6 +169,9 @@ public final class S3BlobStoreDriver extends AbstractBlobStoreDriver {
             request.metadata(options.metadata());
         }
         options.tier().ifPresent(tier -> request.storageClass(S3Tiers.toNative(tier)));
+        if (kmsKeyId != null) {
+            request.serverSideEncryption(ServerSideEncryption.AWS_KMS).ssekmsKeyId(kmsKeyId);
+        }
         options.ifMatch().ifPresent(etag -> request.ifMatch(etag.value()));
         if (options.ifNotExists()) {
             request.ifNoneMatch("*");
@@ -168,12 +188,12 @@ public final class S3BlobStoreDriver extends AbstractBlobStoreDriver {
 
     @Override
     public MultipartUploadSession startMultipartUpload(BlobKey key, PutOptions options) {
-        return new S3MultipartUpload(s3, bucket, key, options);
+        return new S3MultipartUpload(s3, bucket, key, options, kmsKeyId);
     }
 
     private PutResult putInParts(BlobKey key, BlobContent.Sized content, PutOptions options, Checksums expected) {
         BufferPool pool = BufferPool.shared();
-        var upload = new PartUploader(new S3MultipartUpload(s3, bucket, key, options), options.uploadConcurrency(),
+        var upload = new PartUploader(new S3MultipartUpload(s3, bucket, key, options, kmsKeyId), options.uploadConcurrency(),
                 pool, Function.identity());
         try (InputStream in = content.openStream()) {
             int part = 0;
@@ -303,16 +323,23 @@ public final class S3BlobStoreDriver extends AbstractBlobStoreDriver {
     @Override
     public BlobMetadata updateMetadata(BlobKey key, MetadataUpdate update) {
         // S3 cannot edit metadata in place: copy the object onto itself, replacing its metadata and
-        // keeping its storage class (which a copy would otherwise reset to STANDARD).
+        // keeping its storage class (which a copy would otherwise reset to STANDARD) and its SSE-KMS key (which a
+        // copy would otherwise reset to the bucket's default). Without a key of our own, the key needs a HEAD.
         var request = CopyObjectRequest.builder()
                 .sourceBucket(bucket).sourceKey(key.value())
                 .destinationBucket(bucket).destinationKey(key.value())
                 .metadataDirective(MetadataDirective.REPLACE)
                 .metadata(update.metadata());
-        String storageClass = update.basis().flatMap(S3BlobStoreDriver::exactStorageClass)
-                .orElseGet(() -> currentOrThrow(key, update.ifMatch().isPresent()).storageClassAsString());
+        Optional<String> exactClass = update.basis().flatMap(S3BlobStoreDriver::exactStorageClass);
+        HeadObjectResponse current = exactClass.isPresent() && kmsKeyId != null ? null
+                : currentOrThrow(key, update.ifMatch().isPresent());
+        String storageClass = exactClass.orElseGet(() -> current.storageClassAsString());
         if (storageClass != null) {
             request.storageClass(storageClass);
+        }
+        String keyId = kmsKeyId != null ? kmsKeyId : kmsKeyOf(current);
+        if (keyId != null) {
+            request.serverSideEncryption(ServerSideEncryption.AWS_KMS).ssekmsKeyId(keyId);
         }
         var headers = update.headers();
         headers.contentType().ifPresent(request::contentType);
@@ -334,18 +361,31 @@ public final class S3BlobStoreDriver extends AbstractBlobStoreDriver {
 
     @Override
     public void setTier(BlobKey key, StorageTier tier) {
-        // One request: S3 rejects a copy onto itself that changes nothing, which means the tier is already set.
+        // A copy onto itself, which S3 rejects if it changes nothing: then the tier is already set. A copy resets the
+        // SSE-KMS key to the bucket's default, so the object's own key is carried over, read with a HEAD unless this
+        // driver has a key of its own.
+        String keyId = kmsKeyId != null ? kmsKeyId : kmsKeyOf(currentOrThrow(key, false));
         try {
-            s3.copyObject(b -> b.sourceBucket(bucket).sourceKey(key.value())
-                    .destinationBucket(bucket).destinationKey(key.value())
-                    .metadataDirective(MetadataDirective.COPY)
-                    .storageClass(S3Tiers.toNative(tier)));
+            s3.copyObject(b -> {
+                b.sourceBucket(bucket).sourceKey(key.value())
+                        .destinationBucket(bucket).destinationKey(key.value())
+                        .metadataDirective(MetadataDirective.COPY)
+                        .storageClass(S3Tiers.toNative(tier));
+                if (keyId != null) {
+                    b.serverSideEncryption(ServerSideEncryption.AWS_KMS).ssekmsKeyId(keyId);
+                }
+            });
         } catch (S3Exception e) {
             if (isCopyOntoItself(e)) {
                 return;
             }
             throw e;
         }
+    }
+
+    /** The SSE-KMS key an object is encrypted with, or null for any other encryption. */
+    private static String kmsKeyOf(HeadObjectResponse head) {
+        return head.serverSideEncryption() == ServerSideEncryption.AWS_KMS ? head.ssekmsKeyId() : null;
     }
 
     /** The native storage class for tiers that map to exactly one class; others need a lookup. */
@@ -403,14 +443,18 @@ public final class S3BlobStoreDriver extends AbstractBlobStoreDriver {
 
     @Override
     public PutResult copy(BlobKey source, BlobKey target) {
-        var r = s3.copyObject(b -> b.sourceBucket(bucket).sourceKey(source.value())
-                .destinationBucket(bucket).destinationKey(target.value()));
+        var r = s3.copyObject(b -> {
+            b.sourceBucket(bucket).sourceKey(source.value()).destinationBucket(bucket).destinationKey(target.value());
+            if (kmsKeyId != null) {
+                b.serverSideEncryption(ServerSideEncryption.AWS_KMS).ssekmsKeyId(kmsKeyId);
+            }
+        });
         return new PutResult(target, new ETag(r.copyObjectResult().eTag()));
     }
 
     @Override
     public PresignedUpload startPresignedUpload(BlobKey key, PutOptions options) {
-        String uploadId = s3.createMultipartUpload(S3MultipartUpload.createRequest(bucket, key, options).build()).uploadId();
+        String uploadId = s3.createMultipartUpload(S3MultipartUpload.createRequest(bucket, key, options, kmsKeyId).build()).uploadId();
         return new PresignedUpload(key, uploadId);
     }
 
@@ -458,6 +502,10 @@ public final class S3BlobStoreDriver extends AbstractBlobStoreDriver {
                     .putObjectRequest(put -> {
                         put.bucket(bucket).key(key.value());
                         request.contentType().ifPresent(put::contentType);
+                        // Signed headers: the client must send them, so it can't upload under another key or none.
+                        if (kmsKeyId != null) {
+                            put.serverSideEncryption(ServerSideEncryption.AWS_KMS).ssekmsKeyId(kmsKeyId);
+                        }
                     }));
         };
         return toPresignedUrl(request.method(), presigned);

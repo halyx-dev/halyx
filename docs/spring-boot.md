@@ -153,10 +153,19 @@ halyx:
       #   store: kms               # a halyx.key-stores entry; optional when there's only one
       #   name: invoices           # the key's name in that store
       # encryption-prefix: private/  # with encryption-key: seal only blob keys under this prefix
+      # server-side-key:           # have the storage service encrypt every write with a key of the same cloud
+      #   store: kms               # a halyx.key-stores entry; optional when there's only one
+      #   name: invoices
+      #   properties:              # on Azure, the encryption scope bound to the key
+      #     "[azure.storage.encryption-scope]": invoices-scope
 ```
 
 With `encryption-key`, the bean is the store's encrypted view, created after its key store: see
 [Client-side encryption](api/storage.md#client-side-encryption). Its listings report stored sizes, not plaintext ones.
+With `server-side-key`, the storage service encrypts every write at rest with that key, and presigned URLs keep
+working: see [Server-side encryption with a key](api/storage.md#server-side-encryption-with-a-key). The key must
+belong to the store's provider, which is checked at startup. With both, blobs are sealed, then encrypted at rest.
+Write the scope option's name in brackets, as above, so Spring keeps its dots.
 
 ## NoSQL documents
 

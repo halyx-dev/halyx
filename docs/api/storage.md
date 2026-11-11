@@ -321,7 +321,7 @@ reserved for the view's own entries, such as the `halyx_encryption` marker.
 | Sizes | `head` and `get` report the plaintext size. **`list` reports the stored size**, which is larger: a header of about 100 bytes to a few KB, depending on the key, plus 16 bytes per segment (64 KiB by default). A listing never sees a blob's header, and reading each one would cost a request per blob, so for a blob's exact size call `head`. Totals summed from a listing are overstated, the more so for small blobs |
 | `head` | Free when the size was known at write time (`put` of bytes, a file or a sized stream); after a streamed `write`, it reads the header once |
 | Plain data | Reading a blob that isn't sealed through the view fails with `InvalidArgumentException`. Reading a sealed blob without the key returns the ciphertext, starting with `HLXS`, never plaintext |
-| Presigned URLs | Dropped: a presigned upload would bypass the key, and a presigned download would hand out ciphertext. For presigned access to encrypted data, use the store's server-side encryption with a key (S3 SSE-KMS, GCS CMEK, Azure encryption scopes) |
+| Presigned URLs | Dropped: a presigned upload would bypass the key, and a presigned download would hand out ciphertext. For presigned access to encrypted data, use [server-side encryption with a key](#server-side-encryption-with-a-key) |
 | `copy` | Through the application: the blob is opened and sealed again for its new key, so it costs a download and an upload. `SERVER_SIDE_COPY` is dropped |
 | Checksums | `CHECKSUM` is dropped: the stored checksums are the ciphertext's, which you can't compare with anything you hold. Each segment's tag authenticates every read instead, and `validateChecksum` still protects the upload of the stored bytes |
 | Asynchronous calls | `async()` seals and opens too, on a virtual thread, since sealing streams the content |
@@ -335,6 +335,45 @@ each blob, such as a key per tenant; any key of the store opens what any other s
 
 Each write wraps a new data key and each read unwraps one, so the key service sees a call per blob. On busy paths,
 turn on the key store's `dataKeyReuse` and `dataKeyCache` (see [Performance and caches](keys.md#performance-and-caches)).
+
+## Server-side encryption with a key
+
+`withServerSideKey(key)` gives a view of a store whose writes the storage service encrypts at rest with a key from
+the same cloud's key service: S3 SSE-KMS, a customer-managed key on GCS, or an Azure encryption scope. The
+service decrypts on read, so reads, ranges and presigned downloads work as usual. Presigned uploads work too, and
+they are encrypted with the key.
+
+```java
+CryptoKey key = halyx.provider("cloud").keyStore().key("receipts");
+BlobStore receipts = halyx.provider("cloud").blobStore("acme-orders").withServerSideKey(key);
+
+receipts.put(BlobKey.of("o-1001/receipt.pdf"), BlobContent.ofFile(pdf));      // encrypted at rest with the key
+PresignedUrl upload = receipts.presignUpload(BlobKey.of("o-1002/scan.png"), Duration.ofMinutes(15));
+```
+
+For one write, `PutOptions.builder().serverSideKey(key)` does the same. It takes precedence over the view's key.
+
+| | |
+|---|---|
+| Writes | Puts, streamed writes and uploads in parts, copies to the view, `updateMetadata` and `setTier` (where the provider rewrites the object), presigned uploads and presigned multipart uploads all use the key |
+| Presigned uploads | The URL carries the key as headers the client must send: S3 signs `x-amz-server-side-encryption` and the key id, GCS signs `x-goog-encryption-kms-key-name`, and an Azure SAS names the scope. Send every header in `PresignedUrl.headers()` |
+| Copies | S3 and GCS copy on the server with the key. Azure's server-side copy can't name a scope, so a copy through the view downloads and uploads instead. A copy through a store without the key gets the bucket's default encryption |
+| Rewrites in place | On S3, changing metadata or the tier is a copy onto itself. Through any store, Halyx carries the object's own key over; without that, S3 would apply the bucket's default. GCS does the same for tier changes |
+| Key service calls | None per write: the storage service uses the key. Halyx reads the key's metadata once, for its id, and keeps it with the key's other metadata |
+| Checks | The key must be an encryption key of the store's own provider (`InvalidArgumentException` otherwise), and the store must support `SERVER_SIDE_KMS` |
+
+**On Azure**, Blob Storage encrypts with the Key Vault key that an encryption scope is bound to, and requests name
+the scope, not the key. Open the key with the scope's name as an option:
+
+```java
+CryptoKey key = keys.key("receipts", KeyOptions.builder()
+        .property("azure.storage.encryption-scope", "receipts-scope").build());
+```
+
+**With client-side encryption.** The two views stack: `withServerSideKey(serverKey).encryptedWith(sealingKey)`
+seals each blob in the application, then the storage service encrypts the sealed bytes at rest. Either order works.
+Server-side encryption alone protects data at rest. Anyone the bucket and key policies allow can read the
+plaintext. Client-side encryption keeps it from the storage service too.
 
 ## Performance
 

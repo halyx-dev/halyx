@@ -38,5 +38,10 @@ public enum StorageCapability implements Capability {
     /** {@link PutOptions#tier()} and {@code setTier}. */
     STORAGE_TIERS,
     /** Multipart uploads sent by clients through presigned part URLs ({@code startPresignedUpload}). */
-    PRESIGNED_MULTIPART
+    PRESIGNED_MULTIPART,
+    /**
+     * Server-side encryption with a key from the provider's own key service ({@link PutOptions#serverSideKey()} and
+     * {@link BlobStore#withServerSideKey}): S3 SSE-KMS, a GCS customer-managed key, an Azure encryption scope.
+     */
+    SERVER_SIDE_KMS
 }

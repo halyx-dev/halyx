@@ -108,6 +108,11 @@ final class DefaultCryptoKey implements CryptoKey {
      * one key service call per refresh rather than one per caller.
      */
     @Override
+    public KeyOptions options() {
+        return options;
+    }
+
+    @Override
     public KeyMetadata metadata() {
         KeyMetadata current = metadata;
         if (current != null && fresh()) {

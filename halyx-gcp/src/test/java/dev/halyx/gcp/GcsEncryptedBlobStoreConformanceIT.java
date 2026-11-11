@@ -25,17 +25,22 @@ import dev.halyx.keys.KeyPurpose;
 import dev.halyx.keys.KeyStore;
 import dev.halyx.keys.KeyStoreConfig;
 import dev.halyx.memory.InMemoryKeys;
+import com.google.cloud.storage.BlobId;
+import com.google.cloud.storage.Storage;
+import dev.halyx.storage.BlobKey;
 import dev.halyx.storage.BlobStore;
 import dev.halyx.tck.BlobEncryptionConformanceTest;
+import dev.halyx.tck.BlobServerSideKeyConformanceTest;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Nested;
 
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Cloud Storage on Floci-gcp, encrypted: the whole blob kit through a view sealed with a memory key, then the
- * encryption kit with a memory key and with keys on Floci-gcp's Cloud KMS.
+ * encryption kit with a memory key and with keys on Floci-gcp's Cloud KMS, and customer-managed keys on writes.
  */
 class GcsEncryptedBlobStoreConformanceIT extends GcsBlobStoreConformanceIT {
 
@@ -44,6 +49,7 @@ class GcsEncryptedBlobStoreConformanceIT extends GcsBlobStoreConformanceIT {
     private static Halyx memory;
     private static CryptoKey key;
     private static KeyStore kms;
+    private static CryptoKey serverSide;
 
     @BeforeAll
     static void keys() {
@@ -57,6 +63,7 @@ class GcsEncryptedBlobStoreConformanceIT extends GcsBlobStoreConformanceIT {
     static void closeKeys() {
         memory.close();
         kms = null;
+        serverSide = null;
     }
 
     @Override
@@ -101,6 +108,45 @@ class GcsEncryptedBlobStoreConformanceIT extends GcsBlobStoreConformanceIT {
                 }
                 return kms;
             }
+        }
+    }
+
+    @Nested
+    class ServerSideKey extends BlobServerSideKeyConformanceTest {
+        @Override
+        protected BlobStore blobStore() {
+            return GcsEncryptedBlobStoreConformanceIT.this.blobStore();
+        }
+
+        /** Crypto key storage in its own key ring on Floci-gcp, made once. */
+        @Override
+        protected CryptoKey serverSideKey() {
+            synchronized (GcsEncryptedBlobStoreConformanceIT.class) {
+                if (serverSide == null) {
+                    String ring = "projects/floci-local/locations/global/keyRings/tck-storage";
+                    KeyStore keys = halyx.provider("gcp").keyStore(KeyStoreConfig.builder().location(ring).build());
+                    KeyManagementServiceClient admin = keys.unwrap(KeyManagementServiceClient.class);
+                    admin.createKeyRing("projects/floci-local/locations/global", "tck-storage",
+                            KeyRing.getDefaultInstance());
+                    admin.createCryptoKey(ring, "storage", com.google.cloud.kms.v1.CryptoKey.newBuilder()
+                            .setPurpose(CryptoKeyPurpose.ENCRYPT_DECRYPT).build());
+                    serverSide = keys.key("storage");
+                }
+                return serverSide;
+            }
+        }
+
+        /** The object's {@code kmsKeyName}, without its version. */
+        @Override
+        protected Optional<String> storedServerSideKey(BlobKey key) {
+            var blob = blobStore().unwrap(Storage.class).get(BlobId.of(blobStore().bucket(), key.value()));
+            return Optional.ofNullable(blob.getKmsKeyName()).map(name -> name.replaceFirst("/cryptoKeyVersions/.*$", ""));
+        }
+
+        /** A0: Floci-gcp accepts {@code kmsKeyName} on uploads but doesn't record it; the real-cloud tier checks it. */
+        @Override
+        protected boolean reportsServerSideKeys() {
+            return false;
         }
     }
 }

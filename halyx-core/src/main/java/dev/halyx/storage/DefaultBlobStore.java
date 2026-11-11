@@ -25,9 +25,13 @@ import dev.halyx.error.UnsupportedFeatureException;
 import dev.halyx.interceptor.AsyncInvocation;
 import dev.halyx.interceptor.InterceptorChain;
 import dev.halyx.interceptor.OperationContext;
+import dev.halyx.keys.CryptoKey;
+import dev.halyx.keys.KeyMetadata;
+import dev.halyx.keys.KeyPurpose;
 import dev.halyx.storage.spi.BlobStoreDriver;
 import dev.halyx.storage.spi.BufferPool;
 import dev.halyx.storage.spi.ChecksumCalculator;
+import dev.halyx.storage.spi.ServerSideKey;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -68,14 +72,59 @@ public final class DefaultBlobStore implements BlobStore {
     private final String bucket;
     private final BlobStoreDriver driver;
     private final InterceptorChain interceptors;
+    /** The key of a {@link #withServerSideKey} view, or null. */
+    private final CryptoKey serverSideKey;
 
     private final AsyncBlobStore async = new Async(InterceptorChain.blocking());
 
     public DefaultBlobStore(String provider, String bucket, BlobStoreDriver driver, InterceptorChain interceptors) {
+        this(provider, bucket, driver, interceptors, null);
+    }
+
+    private DefaultBlobStore(String provider, String bucket, BlobStoreDriver driver, InterceptorChain interceptors,
+                             CryptoKey serverSideKey) {
         this.provider = Objects.requireNonNull(provider, "provider");
         this.bucket = Objects.requireNonNull(bucket, "bucket");
         this.driver = Objects.requireNonNull(driver, "driver");
         this.interceptors = Objects.requireNonNull(interceptors, "interceptors");
+        this.serverSideKey = serverSideKey;
+    }
+
+    @Override
+    public BlobStore withServerSideKey(CryptoKey key) {
+        checkServerSideKey(Objects.requireNonNull(key, "key"));
+        return new DefaultBlobStore(provider, bucket, driver, interceptors, key);
+    }
+
+    /** Checks what needs no key service call: the capability, and that the key is this provider's. */
+    private void checkServerSideKey(CryptoKey key) {
+        require(StorageCapability.SERVER_SIDE_KMS);
+        if (!key.provider().equals(provider)) {
+            throw new InvalidArgumentException("Server-side key '" + key.name() + "' is a " + key.provider()
+                    + " key; a " + provider + " store can only encrypt with " + provider + " keys", null, provider, null);
+        }
+    }
+
+    /**
+     * The driver for a call that writes stored bytes: keyed with the put's own server-side key, else this view's, else
+     * the plain driver. The key's metadata is cached, so this costs a key service call only on first use and refresh.
+     */
+    private BlobStoreDriver writer(PutOptions options) {
+        CryptoKey key = options.serverSideKey().orElse(serverSideKey);
+        if (key == null) {
+            return driver;
+        }
+        KeyMetadata metadata = key.metadata();
+        if (!metadata.purposes().contains(KeyPurpose.ENCRYPTION)) {
+            throw new InvalidArgumentException("Server-side key '" + key.name() + "' can't encrypt: its purposes are "
+                    + metadata.purposes(), null, provider, null);
+        }
+        return driver.withServerSideKey(new ServerSideKey(metadata.nativeId(), key.options().properties()));
+    }
+
+    /** Whether a write with {@code options} is encrypted with a server-side key. */
+    private boolean keyed(PutOptions options) {
+        return serverSideKey != null || options.serverSideKey().isPresent();
     }
 
     @Override
@@ -118,7 +167,7 @@ public final class DefaultBlobStore implements BlobStore {
                 BlobContent.Sized body = options.validateChecksum() && sized instanceof BlobContent.OfFile file
                         ? new BlobContent.OfBytes(readFile(file)) : sized;
                 Checksums expected = options.validateChecksum() ? checksumsOf(body) : Checksums.none();
-                return verifyWrite(driver, key, driver.put(key, body, options, expected), expected);
+                return verifyWrite(driver, key, writer(options).put(key, body, options, expected), expected);
             });
             case BlobContent.OfUnsizedStream stream -> write(key, stream.stream()::transferTo, options);
         };
@@ -131,7 +180,7 @@ public final class DefaultBlobStore implements BlobStore {
         checkWrite(options);
         OperationContext context = new OperationContext(SERVICE, "write", provider, bucket + "/" + key, false);
         return interceptors.execute(context, () -> {
-            ChunkingOutputStream out = new ChunkingOutputStream(driver, key, options);
+            ChunkingOutputStream out = new ChunkingOutputStream(writer(options), key, options);
             PutResult result;
             try {
                 sink.writeTo(out);
@@ -162,6 +211,7 @@ public final class DefaultBlobStore implements BlobStore {
         if (options.validateChecksum()) {
             require(StorageCapability.CHECKSUM);
         }
+        options.serverSideKey().ifPresent(this::checkServerSideKey);
     }
 
     /**
@@ -390,7 +440,7 @@ public final class DefaultBlobStore implements BlobStore {
         if (!update.metadata().isEmpty()) {
             require(StorageCapability.USER_METADATA);
         }
-        return execute("updateMetadata", key, true, () -> driver.updateMetadata(key, update));
+        return execute("updateMetadata", key, true, () -> writer(PutOptions.defaults()).updateMetadata(key, update));
     }
 
     @Override
@@ -399,7 +449,7 @@ public final class DefaultBlobStore implements BlobStore {
         Objects.requireNonNull(tier, "tier");
         require(StorageCapability.STORAGE_TIERS);
         execute("setTier", key, true, () -> {
-            driver.setTier(key, tier);
+            writer(PutOptions.defaults()).setTier(key, tier);
             return null;
         });
     }
@@ -418,7 +468,7 @@ public final class DefaultBlobStore implements BlobStore {
         Objects.requireNonNull(target, "target");
         if (capabilities().supports(StorageCapability.SERVER_SIDE_COPY)) {
             try {
-                return execute("copy", target, true, () -> driver.copy(source, target));
+                return execute("copy", target, true, () -> writer(PutOptions.defaults()).copy(source, target));
             } catch (UnsupportedFeatureException e) {
                 // The endpoint (e.g. an emulator or S3-compatible store) lacks server-side copy.
             }
@@ -449,8 +499,9 @@ public final class DefaultBlobStore implements BlobStore {
         if (options.tier().isPresent()) {
             require(StorageCapability.STORAGE_TIERS);
         }
+        options.serverSideKey().ifPresent(this::checkServerSideKey);
         // Creating an upload is not idempotent (each call starts a new one), so it is never retried.
-        return execute("startPresignedUpload", key, false, () -> driver.startPresignedUpload(key, options));
+        return execute("startPresignedUpload", key, false, () -> writer(options).startPresignedUpload(key, options));
     }
 
     @Override
@@ -465,7 +516,7 @@ public final class DefaultBlobStore implements BlobStore {
             throw new IllegalArgumentException("expiry must be positive");
         }
         return execute("presignUploadPart", upload.key(), true,
-                () -> driver.presignUploadPart(upload, partNumber, expiry));
+                () -> writer(PutOptions.defaults()).presignUploadPart(upload, partNumber, expiry));
     }
 
     @Override
@@ -483,7 +534,7 @@ public final class DefaultBlobStore implements BlobStore {
             }
         }
         return execute("completePresignedUpload", upload.key(), true,
-                () -> driver.completePresignedUpload(upload, sorted));
+                () -> writer(PutOptions.defaults()).completePresignedUpload(upload, sorted));
     }
 
     @Override
@@ -501,7 +552,9 @@ public final class DefaultBlobStore implements BlobStore {
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(request, "request");
         require(StorageCapability.PRESIGNED_URL);
-        return execute("presign", key, true, () -> driver.presign(key, request));
+        // An upload URL carries the key, so what the client uploads is encrypted with it; downloads need nothing.
+        return execute("presign", key, true, () -> (request.method() == PresignRequest.Method.PUT
+                ? writer(PutOptions.defaults()) : driver).presign(key, request));
     }
 
     @Override
@@ -576,8 +629,9 @@ public final class DefaultBlobStore implements BlobStore {
             } catch (RuntimeException e) {
                 return CompletableFuture.failedFuture(e);
             }
-            if (!(content instanceof BlobContent.OfBytes bytes)) {
-                // Files and streams are read with blocking I/O: on a virtual thread, as a whole put.
+            if (!(content instanceof BlobContent.OfBytes bytes) || keyed(options)) {
+                // Files and streams are read with blocking I/O, and a server-side key's metadata may need a key service
+                // call: on a virtual thread, as a whole put.
                 return CompletableFuture.supplyAsync(() -> DefaultBlobStore.this.put(key, content, options), blocking);
             }
             Checksums expected = options.validateChecksum() ? checksumsOf(bytes) : Checksums.none();

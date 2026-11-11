@@ -23,6 +23,9 @@ import dev.halyx.keys.Signature;
 import dev.halyx.reactor.ReactiveCryptoKey;
 import dev.halyx.spring.autoconfigure.HalyxAutoConfiguration;
 import dev.halyx.spring.autoconfigure.reactor.HalyxReactorAutoConfiguration;
+import dev.halyx.storage.BlobContent;
+import dev.halyx.storage.BlobKey;
+import dev.halyx.storage.BlobStore;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -39,12 +42,15 @@ import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.kms.KmsClient;
 import software.amazon.awssdk.services.kms.model.KeySpec;
 import software.amazon.awssdk.services.kms.model.KeyUsageType;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.ServerSideEncryption;
 
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -120,6 +126,27 @@ class HalyxAwsKeysIT {
             assertThat(reactive.decrypt(sealed, AAD).block(Duration.ofSeconds(10))).isEqualTo(DATA);
             assertThat(tokens.verify(DATA, signature)).isTrue();
             assertThat(kms.statistics().metadataReads()).isPositive(); // check-on-startup read it
+        });
+    }
+
+    @Test
+    void aBlobStoreWithAServerSideKeyWritesSseKms() {
+        String bucket = "sse-" + UUID.randomUUID().toString().substring(0, 8);
+        runner.withPropertyValues("halyx.providers.aws.properties.aws.s3.path-style=true",
+                "halyx.blob-stores.receipts.bucket=" + bucket,
+                "halyx.blob-stores.receipts.server-side-key.name=data").run(context -> {
+            assertThat(context).hasNotFailed();
+            BlobStore receipts = context.getBean("receipts", BlobStore.class);
+            S3Client s3 = receipts.unwrap(S3Client.class);
+            s3.createBucket(b -> b.bucket(bucket));
+            String arn = admin.describeKey(b -> b.keyId("alias/orders-data")).keyMetadata().arn();
+
+            receipts.put(BlobKey.of("r-1.json"), BlobContent.ofBytes(DATA));
+
+            var head = s3.headObject(b -> b.bucket(bucket).key("r-1.json"));
+            assertThat(head.serverSideEncryption()).isEqualTo(ServerSideEncryption.AWS_KMS);
+            assertThat(head.ssekmsKeyId()).isEqualTo(arn);
+            assertThat(receipts.getBytes(BlobKey.of("r-1.json"))).isEqualTo(DATA);
         });
     }
 

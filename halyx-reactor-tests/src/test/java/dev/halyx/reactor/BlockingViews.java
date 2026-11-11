@@ -400,6 +400,7 @@ final class BlockingViews {
                 public KeyStore store() { return of(rx.store()); }
                 public String name() { return rx.name(); }
                 public String provider() { return rx.provider(); }
+                public KeyOptions options() { return blocking.options(); }
                 public KeyMetadata metadata() { return await(rx.metadata()); }
                 public SealedData encrypt(byte[] plaintext, byte[] aad) { return await(rx.encrypt(plaintext, aad)); }
                 public byte[] decrypt(SealedData sealed, byte[] aad) { return await(rx.decrypt(sealed, aad)); }

@@ -69,7 +69,9 @@ import dev.halyx.storage.StorageCapability;
 import dev.halyx.storage.StorageTier;
 import dev.halyx.storage.UploadedPart;
 import dev.halyx.storage.spi.AbstractBlobStoreDriver;
+import dev.halyx.storage.spi.BlobStoreDriver;
 import dev.halyx.storage.spi.MultipartUploadSession;
+import dev.halyx.storage.spi.ServerSideKey;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -108,16 +110,37 @@ public final class GcsBlobStoreDriver extends AbstractBlobStoreDriver {
     /** GCS JSON batch requests carry at most 100 calls. */
     private static final int MAX_BATCH = 100;
 
+    /** The Cloud KMS key writes use, for a driver from {@link #withServerSideKey}; null for the bucket's default. */
+    private final String kmsKeyName;
+    /** The driver this one was keyed from, whose multipart client it shares. */
+    private final GcsBlobStoreDriver unkeyed;
+
     public GcsBlobStoreDriver(String bucket, Storage storage, boolean customEndpoint) {
         super(GcpProvider.ID, bucket, capabilities(storage));
         this.storage = storage;
         this.customEndpoint = customEndpoint;
+        this.kmsKeyName = null;
+        this.unkeyed = this;
+    }
+
+    private GcsBlobStoreDriver(GcsBlobStoreDriver unkeyed, String kmsKeyName) {
+        super(GcpProvider.ID, unkeyed.bucket, unkeyed.capabilities());
+        this.storage = unkeyed.storage;
+        this.customEndpoint = unkeyed.customEndpoint;
+        this.kmsKeyName = kmsKeyName;
+        this.unkeyed = unkeyed;
+    }
+
+    /** A customer-managed key, the Cloud KMS crypto key, on every write: uploads, copies, rewrites, signed uploads. */
+    @Override
+    public BlobStoreDriver withServerSideKey(ServerSideKey key) {
+        return new GcsBlobStoreDriver(unkeyed, key.nativeId());
     }
 
     @Override
     public PutResult put(BlobKey key, BlobContent.Sized content, PutOptions options, Checksums expected) {
         BlobInfo info = blobInfo(key, options);
-        List<BlobWriteOption> conditions = new ArrayList<>(List.of(writeConditions(options)));
+        List<BlobWriteOption> conditions = new ArrayList<>(List.of(writeOptions(options)));
         if (!expected.isEmpty()) {
             // GCS rejects the upload before committing if the content does not match.
             BlobInfo.Builder checked = info.toBuilder();
@@ -139,7 +162,7 @@ public final class GcsBlobStoreDriver extends AbstractBlobStoreDriver {
 
     @Override
     public MultipartUploadSession startMultipartUpload(BlobKey key, PutOptions options) {
-        return new GcsResumableUpload(storage, blobInfo(key, options), writeConditions(options), key);
+        return new GcsResumableUpload(storage, blobInfo(key, options), writeOptions(options), key);
     }
 
     private BlobInfo blobInfo(BlobKey key, PutOptions options) {
@@ -159,11 +182,28 @@ public final class GcsBlobStoreDriver extends AbstractBlobStoreDriver {
         return info.build();
     }
 
-    /** Generation 0 in the blob id means "must not exist"; any other value "must currently be this generation". */
-    private static BlobWriteOption[] writeConditions(PutOptions options) {
-        return options.isConditional()
-                ? new BlobWriteOption[] {BlobWriteOption.generationMatch()}
-                : new BlobWriteOption[0];
+    /**
+     * The write's conditions and key. Generation 0 in the blob id means "must not exist"; any other value "must
+     * currently be this generation".
+     */
+    private BlobWriteOption[] writeOptions(PutOptions options) {
+        List<BlobWriteOption> writeOptions = new ArrayList<>(2);
+        if (options.isConditional()) {
+            writeOptions.add(BlobWriteOption.generationMatch());
+        }
+        if (kmsKeyName != null) {
+            writeOptions.add(BlobWriteOption.kmsKeyName(kmsKeyName));
+        }
+        return writeOptions.toArray(BlobWriteOption[]::new);
+    }
+
+    /** The key, without the version GCS reports an object was encrypted with: writes name the crypto key. */
+    private static String cryptoKeyOf(String kmsKeyVersionName) {
+        if (kmsKeyVersionName == null) {
+            return null;
+        }
+        int version = kmsKeyVersionName.indexOf("/cryptoKeyVersions/");
+        return version < 0 ? kmsKeyVersionName : kmsKeyVersionName.substring(0, version);
     }
 
     @Override
@@ -329,12 +369,19 @@ public final class GcsBlobStoreDriver extends AbstractBlobStoreDriver {
         if (current == null) {
             throw new NotFoundException("No blob " + bucket + "/" + key, null, provider, "notFound");
         }
-        // Changing the storage class rewrites the object in place, keeping its metadata.
+        // Changing the storage class rewrites the object in place, keeping its metadata and its key: this driver's,
+        // or the one the object has.
         BlobInfo target = current.toBuilder().setBlobId(BlobId.of(bucket, key.value()))
                 .setStorageClass(GcsTiers.toNative(tier)).build();
+        String keyName = kmsKeyName != null ? kmsKeyName : cryptoKeyOf(current.getKmsKeyName());
+        List<BlobTargetOption> targetOptions = new ArrayList<>(List.of(
+                BlobTargetOption.generationMatch(current.getGeneration())));
+        if (keyName != null) {
+            targetOptions.add(BlobTargetOption.kmsKeyName(keyName));
+        }
         storage.copy(CopyRequest.newBuilder()
                 .setSource(BlobId.of(bucket, key.value(), current.getGeneration()))
-                .setTarget(target, BlobTargetOption.generationMatch(current.getGeneration()))
+                .setTarget(target, targetOptions.toArray(BlobTargetOption[]::new))
                 .build()).getResult();
     }
 
@@ -362,8 +409,13 @@ public final class GcsBlobStoreDriver extends AbstractBlobStoreDriver {
 
     @Override
     public PutResult copy(BlobKey source, BlobKey target) {
-        var copied = storage.copy(CopyRequest.of(BlobId.of(bucket, source.value()), BlobId.of(bucket, target.value())))
-                .getResult();
+        var request = CopyRequest.newBuilder().setSource(BlobId.of(bucket, source.value()));
+        if (kmsKeyName != null) {
+            request.setTarget(BlobId.of(bucket, target.value()), BlobTargetOption.kmsKeyName(kmsKeyName));
+        } else {
+            request.setTarget(BlobId.of(bucket, target.value()));
+        }
+        var copied = storage.copy(request.build()).getResult();
         return new PutResult(target, etagOf(copied));
     }
 
@@ -380,6 +432,9 @@ public final class GcsBlobStoreDriver extends AbstractBlobStoreDriver {
             request.metadata(options.metadata());
         }
         options.tier().ifPresent(tier -> request.storageClass(GcsTiers.toNative(tier)));
+        if (kmsKeyName != null) {
+            request.kmsKeyName(kmsKeyName);
+        }
         return new PresignedUpload(key, multipart().createMultipartUpload(request.build()).uploadId());
     }
 
@@ -438,6 +493,9 @@ public final class GcsBlobStoreDriver extends AbstractBlobStoreDriver {
     }
 
     private MultipartUploadClient multipart() {
+        if (unkeyed != this) {
+            return unkeyed.multipart();
+        }
         MultipartUploadClient client = multipart;
         if (client == null) {
             synchronized (this) {
@@ -466,6 +524,12 @@ public final class GcsBlobStoreDriver extends AbstractBlobStoreDriver {
             signOptions.add(SignUrlOption.withContentType());
             headers.put("Content-Type", ct);
         });
+        if (request.method() == PresignRequest.Method.PUT && kmsKeyName != null) {
+            // Signed, so the uploader must send it: the upload can't land under another key or none.
+            Map<String, String> keyHeader = Map.of("x-goog-encryption-kms-key-name", kmsKeyName);
+            signOptions.add(SignUrlOption.withExtHeaders(keyHeader));
+            headers.putAll(keyHeader);
+        }
         if (customEndpoint) {
             signOptions.add(SignUrlOption.withHostName(storage.getOptions().getHost()));
         }

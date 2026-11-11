@@ -48,6 +48,9 @@ public interface CryptoKey {
 
     String provider();
 
+    /** The options the key was opened with ({@link KeyStore#key(String, KeyOptions)}); defaults when none. */
+    KeyOptions options();
+
     /** The key's metadata, read on first use and refreshed every few minutes. */
     KeyMetadata metadata();
 

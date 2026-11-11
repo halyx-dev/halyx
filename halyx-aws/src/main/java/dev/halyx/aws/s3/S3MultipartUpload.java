@@ -24,6 +24,7 @@ import dev.halyx.storage.spi.ChecksumCalculator;
 import dev.halyx.storage.spi.MultipartUploadSession;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.ServerSideEncryption;
 import software.amazon.awssdk.services.s3.model.ChecksumAlgorithm;
 import software.amazon.awssdk.services.s3.model.ChecksumType;
 import software.amazon.awssdk.services.s3.model.CompletedPart;
@@ -45,12 +46,13 @@ final class S3MultipartUpload implements MultipartUploadSession {
     private final String uploadId;
     private final ConcurrentSkipListMap<Integer, CompletedPart> parts = new ConcurrentSkipListMap<>();
 
-    S3MultipartUpload(S3Client s3, String bucket, BlobKey key, PutOptions options) {
+    /** @param kmsKeyId the SSE-KMS key the object is encrypted with, or null for the bucket's default */
+    S3MultipartUpload(S3Client s3, String bucket, BlobKey key, PutOptions options, String kmsKeyId) {
         this.s3 = s3;
         this.bucket = bucket;
         this.key = key;
         this.options = options;
-        var request = createRequest(bucket, key, options);
+        var request = createRequest(bucket, key, options, kmsKeyId);
         if (options.validateChecksum()) {
             // A full-object CRC32C (not a checksum of part checksums), so it can be validated end to end.
             request.checksumAlgorithm(ChecksumAlgorithm.CRC32_C).checksumType(ChecksumType.FULL_OBJECT);
@@ -58,8 +60,9 @@ final class S3MultipartUpload implements MultipartUploadSession {
         this.uploadId = s3.createMultipartUpload(request.build()).uploadId();
     }
 
-    /** CreateMultipartUpload carrying the blob's headers, metadata and storage class. */
-    static CreateMultipartUploadRequest.Builder createRequest(String bucket, BlobKey key, PutOptions options) {
+    /** CreateMultipartUpload carrying the blob's headers, metadata, storage class and SSE-KMS key. */
+    static CreateMultipartUploadRequest.Builder createRequest(String bucket, BlobKey key, PutOptions options,
+                                                              String kmsKeyId) {
         var request = CreateMultipartUploadRequest.builder().bucket(bucket).key(key.value());
         var headers = options.headers();
         headers.contentType().ifPresent(request::contentType);
@@ -71,6 +74,9 @@ final class S3MultipartUpload implements MultipartUploadSession {
             request.metadata(options.metadata());
         }
         options.tier().ifPresent(tier -> request.storageClass(S3Tiers.toNative(tier)));
+        if (kmsKeyId != null) {
+            request.serverSideEncryption(ServerSideEncryption.AWS_KMS).ssekmsKeyId(kmsKeyId);
+        }
         return request;
     }
 
