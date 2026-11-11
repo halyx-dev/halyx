@@ -18,7 +18,12 @@ package dev.halyx.tck;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInfo;
+import dev.halyx.Halyx;
+import dev.halyx.config.ProviderConfig;
 import dev.halyx.error.InvalidArgumentException;
+import dev.halyx.keys.KeyPurpose;
+import dev.halyx.keys.KeyStore;
+import dev.halyx.memory.InMemoryKeys;
 import dev.halyx.messaging.ClaimCheck;
 import dev.halyx.messaging.ConsumerOptions;
 import dev.halyx.messaging.MessageConsumer;
@@ -29,7 +34,9 @@ import dev.halyx.messaging.Publisher;
 import dev.halyx.messaging.ReceivedMessage;
 import dev.halyx.messaging.Subscription;
 import dev.halyx.storage.BlobStore;
+import dev.halyx.storage.BlobSummary;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -305,6 +312,48 @@ public abstract class MessagingConformanceTest {
         assertThat(received.get("large").body()).isEqualTo(large);
         assertThat(received.get("large").attributes()).doesNotContainKey(ClaimCheck.ATTRIBUTE);
         assertThat(received.get("small").bodyAsString()).isEqualTo("small");
+    }
+
+    /**
+     * A claim check over an encrypted view of {@link #claimCheckStore()}, keyed by a memory key so no key service is
+     * needed: the store holds only sealed bodies, subscribers read the plaintext, and only offloaded bodies cost a key
+     * call (one wrap per publish).
+     */
+    @Test
+    void anEncryptedClaimCheckStoresOnlySealedBodies() {
+        BlobStore store = claimCheckStore();
+        assumeTrue(store != null, "no blob store for claim checks");
+        try (Halyx memory = Halyx.builder().register("tck-keys", ProviderConfig.of("memory")).build()) {
+            KeyStore keys = memory.provider("tck-keys").keyStore();
+            keys.unwrap(InMemoryKeys.class).create("claims", KeyPurpose.ENCRYPTION);
+            String prefix = "tck-claims/" + name + "/sealed/";
+            Channel c = channel(name + "-ecc", new ClaimCheck(store.encryptedWith(keys.key("claims")), 64 * 1024,
+                    prefix));
+            String marker = "card=4111111111111111;";
+            byte[] large = marker.repeat(300 * 1024 / marker.length()).getBytes(StandardCharsets.UTF_8);
+
+            c.publisher().publish(OutgoingMessage.builder(large).attribute("kind", "large").build());
+            c.publisher().publish("small");
+            Map<String, ReceivedMessage> received = new LinkedHashMap<>();
+            long deadline = System.nanoTime() + Duration.ofSeconds(60).toNanos();
+            while (received.size() < 2 && System.nanoTime() < deadline) {
+                for (ReceivedMessage m : c.subscription().receive(10, Duration.ofSeconds(5))) {
+                    received.put(m.attribute("kind").orElse("small"), m);
+                    m.ack();
+                }
+            }
+
+            assertThat(received.get("large").body()).isEqualTo(large);
+            assertThat(received.get("large").attributes()).doesNotContainKey(ClaimCheck.ATTRIBUTE);
+            assertThat(received.get("small").bodyAsString()).isEqualTo("small");
+            List<BlobSummary> stored = store.listAll(prefix).toList();
+            assertThat(stored).as("only the large body is offloaded").hasSize(1);
+            byte[] raw = store.getBytes(stored.getFirst().key());
+            assertThat(new String(raw, 0, 4, StandardCharsets.US_ASCII)).isEqualTo("HLXS");
+            assertThat(new String(raw, StandardCharsets.ISO_8859_1)).doesNotContain(marker);
+            assertThat(keys.statistics().wraps()).as("the small body costs no key call").isEqualTo(1);
+            assertThat(keys.statistics().unwraps()).as("at least once per delivery").isPositive();
+        }
     }
 
     @Test

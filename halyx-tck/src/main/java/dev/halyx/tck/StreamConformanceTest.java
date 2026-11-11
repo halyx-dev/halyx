@@ -20,8 +20,13 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInfo;
 import dev.halyx.CloudContext;
+import dev.halyx.Halyx;
+import dev.halyx.config.ProviderConfig;
 import dev.halyx.error.InvalidArgumentException;
 import dev.halyx.error.UnsupportedFeatureException;
+import dev.halyx.keys.KeyPurpose;
+import dev.halyx.keys.KeyStore;
+import dev.halyx.memory.InMemoryKeys;
 import dev.halyx.messaging.ClaimCheck;
 import dev.halyx.storage.BlobStore;
 import dev.halyx.stream.AsyncStreamConsumer;
@@ -39,6 +44,7 @@ import dev.halyx.stream.StreamListener;
 import dev.halyx.stream.StreamProducer;
 import dev.halyx.stream.StreamProducerConfig;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -359,6 +365,46 @@ public abstract class StreamConformanceTest {
 
         assertThat(record.value()).isEqualTo(value);
         assertThat(record.headers()).containsEntry("type", "blob").doesNotContainKey(ClaimCheck.ATTRIBUTE);
+    }
+
+    /**
+     * A claim check over an encrypted view of {@link #claimCheckStore()}, keyed by a memory key so no key service is
+     * needed: the store holds only sealed values, a consumer with the key reads the plaintext, one reading the same
+     * store without it gets the sealed bytes, and only offloaded values cost a key call.
+     */
+    @Test
+    void anEncryptedClaimCheckStoresOnlySealedValues() {
+        BlobStore store = claimCheckStore();
+        assumeTrue(store != null, "no claim-check store");
+        try (Halyx memory = Halyx.builder().register("tck-keys", ProviderConfig.of("memory")).build()) {
+            KeyStore keys = memory.provider("tck-keys").keyStore();
+            keys.unwrap(InMemoryKeys.class).create("claims", KeyPurpose.ENCRYPTION);
+            String prefix = "tck-claims/" + topic + "/sealed/";
+            ClaimCheck sealed = new ClaimCheck(store.encryptedWith(keys.key("claims")), 1024, prefix);
+            String marker = "card=4111111111111111;";
+            byte[] value = marker.repeat(64 * 1024 / marker.length()).getBytes(StandardCharsets.UTF_8);
+
+            StreamProducer producer = producer(topic, b -> b.claimCheck(sealed));
+            producer.send(OutgoingRecord.builder(value).key("big").build());
+            producer.send("small", "small");
+            List<ReceivedRecord> read = pollAtLeast(consumer(group(), b -> b.startPosition(StartPosition.EARLIEST)
+                    .claimCheck(sealed)), 2);
+            ReceivedRecord withoutKey = pollAtLeast(consumer(group(), b -> b.startPosition(StartPosition.EARLIEST)
+                    .claimCheck(new ClaimCheck(store, 1024, prefix))), 2).stream()
+                    .filter(r -> r.key().filter("big"::equals).isPresent()).findFirst().orElseThrow();
+
+            assertThat(read).filteredOn(r -> r.key().filter("big"::equals).isPresent()).first().satisfies(r -> {
+                assertThat(r.value()).isEqualTo(value);
+                assertThat(r.headers()).doesNotContainKey(ClaimCheck.ATTRIBUTE);
+            });
+            assertThat(read).filteredOn(r -> r.key().filter("small"::equals).isPresent()).first()
+                    .extracting(ReceivedRecord::valueAsString).isEqualTo("small");
+            assertThat(new String(withoutKey.value(), 0, 4, StandardCharsets.US_ASCII))
+                    .as("read without the key").isEqualTo("HLXS");
+            assertThat(new String(withoutKey.value(), StandardCharsets.ISO_8859_1)).doesNotContain(marker);
+            assertThat(store.listAll(prefix).toList()).as("only the large value is offloaded").hasSize(1);
+            assertThat(keys.statistics().wraps()).as("the small value costs no key call").isEqualTo(1);
+        }
     }
 
     @Test

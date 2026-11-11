@@ -236,6 +236,11 @@ halyx:
       listener: { concurrency: 32, max-backoff: 2m }
 ```
 
+A claim check's `blob-store` names a `halyx.blob-stores` bean. When that store has an `encryption-key`, the claim
+check uses its encrypted view, so offloaded bodies are sealed at rest. Point every topic, subscription and stream
+consumer that shares the bodies at the same store. See
+[Encrypted claim checks](api/messaging.md#encrypted-claim-checks).
+
 `@HalyxListener("<subscription bean>")` methods take a `String` body, a `byte[]` body, a `CloudEvent` or the whole
 `ReceivedMessage`. Returning acks the message; throwing nacks it for redelivery with backoff. Override
 the subscription's concurrency per listener with `@HalyxListener(value = "billing", concurrency = 8)`.
