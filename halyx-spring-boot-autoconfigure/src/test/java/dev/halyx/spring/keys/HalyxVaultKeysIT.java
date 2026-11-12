@@ -22,6 +22,7 @@ import dev.halyx.keys.SealedData;
 import dev.halyx.keys.Signature;
 import dev.halyx.reactor.ReactiveCryptoKey;
 import dev.halyx.spring.autoconfigure.HalyxAutoConfiguration;
+import dev.halyx.spring.autoconfigure.security.HalyxJwtAutoConfiguration;
 import dev.halyx.spring.autoconfigure.reactor.HalyxReactorAutoConfiguration;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -59,7 +60,8 @@ class HalyxVaultKeysIT {
             .waitingFor(Wait.forHttp("/v1/sys/health").forPort(8200));
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
-            .withConfiguration(AutoConfigurations.of(HalyxAutoConfiguration.class, HalyxReactorAutoConfiguration.class))
+            .withConfiguration(AutoConfigurations.of(HalyxAutoConfiguration.class, HalyxReactorAutoConfiguration.class,
+                    HalyxJwtAutoConfiguration.class))
             .withPropertyValues(
                     "halyx.providers.vault.type=vault",
                     "halyx.providers.vault.endpoint=" + address(),
@@ -119,5 +121,15 @@ class HalyxVaultKeysIT {
                     HttpResponse.BodyHandlers.ofString());
             assertThat(response.statusCode()).as("%s: %s", path, response.body()).isLessThan(300);
         }
+    }
+
+    @Test
+    void jwtsAreSignedWithTheKeyVersionAsKid() throws Exception {
+        runner.withPropertyValues(JwtChecks.properties("tokens")).run(context -> {
+            assertThat(context).hasNotFailed();
+            String kid = JwtChecks.signAndVerify(context, "ES256");
+            assertThat(kid).isEqualTo(context.getBean("tokens", CryptoKey.class).metadata().currentVersion()
+                    .orElseThrow());
+        });
     }
 }

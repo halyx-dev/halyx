@@ -178,7 +178,9 @@ CryptoKey rsa = keys.key("legacy-signing", KeyOptions.builder()
 A signature records the key version that made it, so it still verifies after the key is rotated.
 `signature.bytes()` are what the algorithm defines (DER for ECDSA), for formats such as JWS that need the raw
 signature. `signDigest(digest)` signs a digest you computed yourself. `publicKey(version)`, `currentPublicKey()` and
-`publicKeys()` give the public keys as `java.security.PublicKey`, for publishing in a JWK set.
+`publicKeys()` give the public keys as `java.security.PublicKey`, for publishing in a JWK set. With Spring Boot, a
+signing key can sign JWTs directly and publish its JWK set: see
+[JWTs signed by a key](../spring-boot.md#jwts-signed-by-a-key).
 
 ## MACs
 
@@ -199,6 +201,9 @@ Other services take a key and do the sealing for you:
   [Server-side encryption with a key](storage.md#server-side-encryption-with-a-key).
 - **Claim checks:** `ClaimCheck.of(blobStore.encryptedWith(key))` seals the message bodies and stream values that
   go through a blob store. See [Encrypted claim checks](messaging.md#encrypted-claim-checks).
+- **JWTs, with Spring Boot:** `halyx.security.jwt.key` makes a Spring Security `JwtEncoder` that signs with the key,
+  a JWK set endpoint with its public keys, and optionally a decoder. See
+  [JWTs signed by a key](../spring-boot.md#jwts-signed-by-a-key).
 - **Document fields:** `TableConfig.Builder.encryptedField("email", key)`, or `@Encrypted` on a Spring Data record
   component, seals chosen fields of every document, with one wrap per document write and one unwrap per document
   read. See [Encrypted fields](nosql.md#encrypted-fields).
