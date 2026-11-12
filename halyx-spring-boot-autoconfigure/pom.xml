@@ -190,6 +190,18 @@
             </exclusions>
         </dependency>
 
+        <!-- JWTs signed by a halyx.keys key: Spring Security's JwtEncoder, and the JWK set endpoint on MVC or WebFlux -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-oauth2-jose</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-webmvc</artifactId>
+            <optional>true</optional>
+        </dependency>
+
         <!-- Tests (shared tests in src/test/java also run on Boot 4 in halyx-spring-boot4-tests) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -282,6 +294,12 @@
         <dependency>
             <groupId>org.springframework</groupId>
             <artifactId>spring-webflux</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <!-- The JWK set endpoint on MVC, tested with MockMvc -->
+        <dependency>
+            <groupId>jakarta.servlet</groupId>
+            <artifactId>jakarta.servlet-api</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>

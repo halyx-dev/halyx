@@ -613,6 +613,56 @@ logins and key-store settings are fixed roots: they come from configuration, the
 or a store on another provider. Everything that uses keys can then use them freely. Use a workload or managed identity
 for key service access.
 
+### JWTs signed by a key
+
+With `spring-security-oauth2-jose` on the classpath, a `halyx.keys` signing key can sign the JWTs the application
+issues, so the private key never leaves the key service:
+
+```yaml
+halyx:
+  keys:
+    tokens: { name: token-signing, signing-algorithm: ecdsa-p256-sha256 }
+  security:
+    jwt:
+      key: tokens                          # turns it on
+      # jwk-set-path: /.well-known/jwks.json   # (default); blank serves none
+      # decoder: { enabled: true, issuer: https://orders.example.com }
+```
+
+```java
+Jwt jwt = jwtEncoder.encode(JwtEncoderParameters.from(JwtClaimsSet.builder()
+        .issuer("https://orders.example.com").subject(user).expiresAt(Instant.now().plusSeconds(900))
+        .claim("scope", "orders:read").build()));
+```
+
+| Bean | |
+|---|---|
+| `JwtEncoder` (`HalyxJwtEncoder`) | signs with the key: one key service call per token. The header gets the key's `alg` (RS256, PS256, ES256 or ES384) and a `kid`: the key version, or on AWS, where keys have no visible versions, the key's name. Header parameters from `JwtEncoderParameters`, such as `typ`, are kept; an `alg` other than the key's is refused |
+| `HalyxJwkSource` | the public keys of the key's enabled versions as a JWK set, `use: sig`, with the same `kid` and `alg` |
+| JWK set endpoint | `GET /.well-known/jwks.json` on Spring MVC or WebFlux, for the services that verify the tokens. Permit it in your `SecurityFilterChain`; it serves public keys only |
+| `JwtDecoder`, `ReactiveJwtDecoder` | with `decoder.enabled: true`: verify the application's own tokens against the JWK set, with Spring Security's default checks (expiry, not-before) and `iss` when `issuer` is set. No key service call per token |
+
+Each bean backs off when the application defines its own. Spring Authorization Server can use the `JwtEncoder`
+bean: give its token customizer the key's algorithm, since it asks for RS256 by default. Turning the decoder on makes
+it the application's `JwtDecoder`, so `spring.security.oauth2.resourceserver.jwt.*` is ignored, with a warning; leave
+it off when tokens come from an identity provider.
+
+**When to use it.** When your service issues tokens and the signing key must stay in the key service: for
+compliance (HSM-backed or FIPS keys), for an audit log of every signature, or so no exportable secret exists to leak.
+If an identity provider (Cognito, Entra ID, Google Identity, Auth0, Keycloak) issues your tokens, you don't need this:
+point Spring Security at its JWK set instead.
+
+**What it costs.** Each token is one call to the key service: a few to tens of milliseconds, and asymmetric signing
+has lower request quotas than encryption on every cloud (lower again for RSA and HSM keys) and costs more per request
+on some. Issue tokens at login or token exchange, with a sensible lifetime, rather than per request. Verifying costs
+nothing: the public keys are cached.
+
+**Rotation.** Make a new key version and the encoder signs with it once the key's metadata refreshes, within five
+minutes; the JWK set lists every enabled version, so tokens signed by the old one keep verifying. Disable the old
+version only after its tokens have expired. On AWS, asymmetric KMS keys don't rotate: move `name` to a new key, and
+keep the old one listed by your verifiers until its tokens expire. RSA keys can sign either way, so they need
+`signing-algorithm`.
+
 ## Reactive applications
 
 With `halyx-reactor` on the classpath, every service bean from `halyx.*` properties also has a reactive view

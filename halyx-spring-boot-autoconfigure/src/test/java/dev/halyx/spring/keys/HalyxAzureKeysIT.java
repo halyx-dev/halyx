@@ -30,6 +30,7 @@ import dev.halyx.keys.SealedData;
 import dev.halyx.keys.Signature;
 import dev.halyx.reactor.ReactiveCryptoKey;
 import dev.halyx.spring.autoconfigure.HalyxAutoConfiguration;
+import dev.halyx.spring.autoconfigure.security.HalyxJwtAutoConfiguration;
 import dev.halyx.spring.autoconfigure.reactor.HalyxReactorAutoConfiguration;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -67,7 +68,8 @@ class HalyxAzureKeysIT {
             .waitingFor(Wait.forListeningPort());
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
-            .withConfiguration(AutoConfigurations.of(HalyxAutoConfiguration.class, HalyxReactorAutoConfiguration.class))
+            .withConfiguration(AutoConfigurations.of(HalyxAutoConfiguration.class, HalyxReactorAutoConfiguration.class,
+                    HalyxJwtAutoConfiguration.class))
             .withPropertyValues(
                     "halyx.providers.azure.type=azure",
                     "halyx.providers.azure.credentials.type=anonymous",
@@ -141,5 +143,15 @@ class HalyxAzureKeysIT {
             chain.add(t);
         }
         return chain;
+    }
+
+    @Test
+    void jwtsAreSignedWithTheKeyVersionAsKid() throws Exception {
+        runner.withPropertyValues(JwtChecks.properties("tokens")).run(context -> {
+            assertThat(context).hasNotFailed();
+            String kid = JwtChecks.signAndVerify(context, "ES256");
+            assertThat(kid).isEqualTo(context.getBean("tokens", CryptoKey.class).metadata().currentVersion()
+                    .orElseThrow());
+        });
     }
 }

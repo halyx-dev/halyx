@@ -22,6 +22,7 @@ import dev.halyx.keys.SealedData;
 import dev.halyx.keys.Signature;
 import dev.halyx.reactor.ReactiveCryptoKey;
 import dev.halyx.spring.autoconfigure.HalyxAutoConfiguration;
+import dev.halyx.spring.autoconfigure.security.HalyxJwtAutoConfiguration;
 import dev.halyx.spring.autoconfigure.reactor.HalyxReactorAutoConfiguration;
 import dev.halyx.storage.BlobContent;
 import dev.halyx.storage.BlobKey;
@@ -70,7 +71,8 @@ class HalyxAwsKeysIT {
     private static KmsClient admin;
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
-            .withConfiguration(AutoConfigurations.of(HalyxAutoConfiguration.class, HalyxReactorAutoConfiguration.class))
+            .withConfiguration(AutoConfigurations.of(HalyxAutoConfiguration.class, HalyxReactorAutoConfiguration.class,
+                    HalyxJwtAutoConfiguration.class))
             .withPropertyValues(
                     "halyx.providers.aws.type=aws",
                     "halyx.providers.aws.region=us-east-1",
@@ -90,6 +92,7 @@ class HalyxAwsKeysIT {
                 .build();
         create("orders-data", KeySpec.SYMMETRIC_DEFAULT, KeyUsageType.ENCRYPT_DECRYPT);
         create("orders-signing", KeySpec.ECC_NIST_P256, KeyUsageType.SIGN_VERIFY);
+        create("orders-rsa", KeySpec.RSA_2048, KeyUsageType.SIGN_VERIFY);
     }
 
     @AfterAll
@@ -167,5 +170,17 @@ class HalyxAwsKeysIT {
             chain.add(t);
         }
         return chain;
+    }
+
+    @Test
+    void jwtsAreSignedOnKmsWithTheKeyNameAsKid() throws Exception {
+        runner.withPropertyValues(JwtChecks.properties("tokens")).run(context -> {
+            assertThat(context).hasNotFailed();
+            assertThat(JwtChecks.signAndVerify(context, "ES256")).as("KMS keys have no visible versions")
+                    .isEqualTo("signing");
+        });
+        runner.withPropertyValues("halyx.keys.pss.name=rsa", "halyx.keys.pss.signing-algorithm=rsa-pss-sha256")
+                .withPropertyValues(JwtChecks.properties("pss"))
+                .run(context -> assertThat(JwtChecks.signAndVerify(context, "PS256")).isEqualTo("rsa"));
     }
 }

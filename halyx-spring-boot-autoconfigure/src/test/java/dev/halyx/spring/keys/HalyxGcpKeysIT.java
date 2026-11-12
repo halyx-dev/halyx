@@ -31,6 +31,7 @@ import dev.halyx.keys.SealedData;
 import dev.halyx.keys.Signature;
 import dev.halyx.reactor.ReactiveCryptoKey;
 import dev.halyx.spring.autoconfigure.HalyxAutoConfiguration;
+import dev.halyx.spring.autoconfigure.security.HalyxJwtAutoConfiguration;
 import dev.halyx.spring.autoconfigure.reactor.HalyxReactorAutoConfiguration;
 import io.grpc.ManagedChannelBuilder;
 import org.junit.jupiter.api.BeforeAll;
@@ -66,7 +67,8 @@ class HalyxGcpKeysIT {
             .waitingFor(Wait.forListeningPort());
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
-            .withConfiguration(AutoConfigurations.of(HalyxAutoConfiguration.class, HalyxReactorAutoConfiguration.class))
+            .withConfiguration(AutoConfigurations.of(HalyxAutoConfiguration.class, HalyxReactorAutoConfiguration.class,
+                    HalyxJwtAutoConfiguration.class))
             .withPropertyValues(
                     "halyx.providers.gcp.type=gcp",
                     "halyx.providers.gcp.endpoint=http://" + FLOCI.getHost() + ":" + FLOCI.getMappedPort(4588),
@@ -134,5 +136,15 @@ class HalyxGcpKeysIT {
             chain.add(t);
         }
         return chain;
+    }
+
+    @Test
+    void jwtsAreSignedWithTheKeyVersionAsKid() throws Exception {
+        runner.withPropertyValues(JwtChecks.properties("tokens")).run(context -> {
+            assertThat(context).hasNotFailed();
+            String kid = JwtChecks.signAndVerify(context, "ES256");
+            assertThat(kid).isEqualTo(context.getBean("tokens", CryptoKey.class).metadata().currentVersion()
+                    .orElseThrow());
+        });
     }
 }
