@@ -282,9 +282,11 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
      * @param bucket           bucket or container name; defaults to the bean name
      * @param encryptionKey    a key to seal every blob with before it leaves the application; none when omitted
      * @param encryptionPrefix with {@code encryptionKey}, seal only blob keys under this prefix
+     * @param serverSideKey    a key, of the store's provider, that the storage service encrypts every write with
+     *                         (S3 SSE-KMS, a GCS customer-managed key, an Azure encryption scope); none when omitted
      */
     public record BlobStoreProperties(String provider, String bucket, EncryptionKey encryptionKey,
-                                      String encryptionPrefix) {
+                                      String encryptionPrefix, EncryptionKey serverSideKey) {
 
         @ConstructorBinding
         public BlobStoreProperties {
@@ -292,15 +294,27 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
 
         /** A store without encryption, as configured before encryption keys. */
         public BlobStoreProperties(String provider, String bucket) {
-            this(provider, bucket, null, null);
+            this(provider, bucket, null, null, null);
         }
     }
 
     /**
-     * @param store the {@code halyx.key-stores} entry the key is in; may be omitted when exactly one is configured
-     * @param name  the key's name in that store
+     * @param store      the {@code halyx.key-stores} entry the key is in; may be omitted when exactly one is configured
+     * @param name       the key's name in that store
+     * @param properties the key's options, such as {@code azure.storage.encryption-scope} for a server-side key on
+     *                   Azure
      */
-    public record EncryptionKey(String store, String name) {
+    public record EncryptionKey(String store, String name, Map<String, String> properties) {
+
+        public EncryptionKey {
+            properties = ordered(properties);
+        }
+
+        KeyOptions toKeyOptions() {
+            KeyOptions.Builder options = KeyOptions.builder();
+            properties.forEach(options::property);
+            return options.build();
+        }
     }
 
     /**

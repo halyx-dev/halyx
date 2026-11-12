@@ -43,6 +43,7 @@ provider: GCS can presign only with credentials that can sign.
 | `RANGE_READ`, `SERVER_SIDE_COPY`, `USER_METADATA` | yes | yes | yes |
 | `CHECKSUM`, `BATCH_DELETE`, `STORAGE_TIERS` | yes | yes | yes |
 | `PRESIGNED_URL`, `PRESIGNED_MULTIPART` | yes | yes | with signing credentials |
+| `SERVER_SIDE_KMS` | SSE-KMS | an encryption scope, named by a key option | customer-managed keys |
 
 ### Messaging
 

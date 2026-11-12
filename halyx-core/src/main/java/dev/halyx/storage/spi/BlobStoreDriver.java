@@ -133,6 +133,17 @@ public interface BlobStoreDriver {
 
     PresignedUrl presign(BlobKey key, PresignRequest request);
 
+    /**
+     * This driver, with every call that writes stored bytes encrypted by the storage service under {@code key}: puts,
+     * uploads in parts, copies (to the target), rewrites in place such as a metadata or tier change where the provider
+     * rewrites the object, presigned upload URLs and presigned multipart uploads. Reads are unchanged. The returned
+     * driver shares this one's clients and is cheap to create; core makes one per call. Drivers that declare
+     * {@link StorageCapability#SERVER_SIDE_KMS} override this.
+     */
+    default BlobStoreDriver withServerSideKey(ServerSideKey key) {
+        throw new UnsupportedFeatureException("Server-side encryption with a key is not supported");
+    }
+
     // --- asynchronous calls ------------------------------------------------------------------------
     // Each defaults to its blocking call on the blocking executor (virtual threads). A driver whose SDK has
     // non-blocking clients overrides the ones worth it; the API layer, the interceptors and the reactive views use

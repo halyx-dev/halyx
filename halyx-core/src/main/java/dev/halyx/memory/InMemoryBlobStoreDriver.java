@@ -39,8 +39,10 @@ import dev.halyx.storage.PutOptions;
 import dev.halyx.storage.PutResult;
 import dev.halyx.storage.StorageCapability;
 import dev.halyx.storage.spi.AbstractBlobStoreDriver;
+import dev.halyx.storage.spi.BlobStoreDriver;
 import dev.halyx.storage.spi.ChecksumCalculator;
 import dev.halyx.storage.spi.MultipartUploadSession;
+import dev.halyx.storage.spi.ServerSideKey;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -52,6 +54,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentNavigableMap;
@@ -59,17 +62,24 @@ import java.util.concurrent.ConcurrentSkipListMap;
 
 final class InMemoryBlobStoreDriver extends AbstractBlobStoreDriver {
 
+    /** A stored blob; {@code serverSideKey} is the native id of the key it is encrypted with at rest, or null. */
     record Entry(byte[] data, BlobHeaders headers, Map<String, String> metadata, ETag etag, Instant lastModified,
-                 StorageTier tier, Checksums checksums) {
+                 StorageTier tier, Checksums checksums, String serverSideKey) {
 
         Entry with(BlobHeaders newHeaders, Map<String, String> newMetadata, StorageTier newTier) {
-            return new Entry(data, newHeaders, newMetadata, newETag(), Instant.now(), newTier, checksums);
+            return new Entry(data, newHeaders, newMetadata, newETag(), Instant.now(), newTier, checksums, serverSideKey);
         }
     }
 
     private final ConcurrentNavigableMap<String, Entry> blobs;
+    /** The key writes are encrypted with, for a driver from {@link #withServerSideKey}, or null. */
+    private final ServerSideKey writeKey;
 
     InMemoryBlobStoreDriver(String bucket, ConcurrentNavigableMap<String, Entry> blobs) {
+        this(bucket, blobs, null);
+    }
+
+    private InMemoryBlobStoreDriver(String bucket, ConcurrentNavigableMap<String, Entry> blobs, ServerSideKey writeKey) {
         super(InMemoryProvider.ID, bucket, Capabilities.of(
                 StorageCapability.CONDITIONAL_WRITE,
                 StorageCapability.RANGE_READ,
@@ -77,8 +87,21 @@ final class InMemoryBlobStoreDriver extends AbstractBlobStoreDriver {
                 StorageCapability.USER_METADATA,
                 StorageCapability.CHECKSUM,
                 StorageCapability.CONDITIONAL_DELETE,
-                StorageCapability.STORAGE_TIERS));
+                StorageCapability.STORAGE_TIERS,
+                StorageCapability.SERVER_SIDE_KMS));
         this.blobs = blobs;
+        this.writeKey = writeKey;
+    }
+
+    /** Records the key's native id on what it writes, as a cloud's storage service would encrypt with it. */
+    @Override
+    public BlobStoreDriver withServerSideKey(ServerSideKey serverSideKey) {
+        return new InMemoryBlobStoreDriver(bucket, blobs, Objects.requireNonNull(serverSideKey, "serverSideKey"));
+    }
+
+    /** The key id new writes get: this driver's key, or none (the bucket's default encryption). */
+    private String keyId() {
+        return writeKey == null ? null : writeKey.nativeId();
     }
 
     @Override
@@ -120,7 +143,7 @@ final class InMemoryBlobStoreDriver extends AbstractBlobStoreDriver {
                 }
             });
             return new Entry(data, options.headers(), options.metadata(), newETag(), Instant.now(),
-                    options.tier().orElse(StorageTier.HOT), ChecksumCalculator.of(data, 0, data.length));
+                    options.tier().orElse(StorageTier.HOT), ChecksumCalculator.of(data, 0, data.length), keyId());
         });
         return new PutResult(key, stored.etag(), stored.checksums());
     }
@@ -168,7 +191,8 @@ final class InMemoryBlobStoreDriver extends AbstractBlobStoreDriver {
             if (update.ifMatch().isPresent() && !existing.etag().equals(update.ifMatch().get())) {
                 throw new PreconditionFailedException("ETag mismatch for " + key);
             }
-            return existing.with(update.headers(), update.metadata(), existing.tier());
+            Entry changed = existing.with(update.headers(), update.metadata(), existing.tier());
+            return writeKey == null ? changed : withKey(changed, writeKey.nativeId());
         });
         return metadata(key, updated);
     }
@@ -180,7 +204,8 @@ final class InMemoryBlobStoreDriver extends AbstractBlobStoreDriver {
                 throw new NotFoundException("No blob " + bucket + "/" + key, null, provider, null);
             }
             return new Entry(existing.data(), existing.headers(), existing.metadata(), existing.etag(),
-                    existing.lastModified(), tier, existing.checksums());
+                    existing.lastModified(), tier, existing.checksums(),
+                    writeKey == null ? existing.serverSideKey() : writeKey.nativeId());
         });
     }
 
@@ -234,8 +259,9 @@ final class InMemoryBlobStoreDriver extends AbstractBlobStoreDriver {
     @Override
     public PutResult copy(BlobKey source, BlobKey target) {
         Entry entry = require(source);
+        // As on S3, a copy gets the key it is made with, not the source's: without one, the bucket's default.
         Entry copy = new Entry(entry.data(), entry.headers(), entry.metadata(), newETag(), Instant.now(), entry.tier(),
-                entry.checksums());
+                entry.checksums(), keyId());
         blobs.put(target.value(), copy);
         return new PutResult(target, copy.etag());
     }
@@ -247,7 +273,12 @@ final class InMemoryBlobStoreDriver extends AbstractBlobStoreDriver {
 
     @Override
     protected List<Object> nativeClients() {
-        return List.of();
+        return List.of(new InMemoryBlobs(blobs));
+    }
+
+    private static Entry withKey(Entry entry, String serverSideKey) {
+        return new Entry(entry.data(), entry.headers(), entry.metadata(), entry.etag(), entry.lastModified(),
+                entry.tier(), entry.checksums(), serverSideKey);
     }
 
     private Entry require(BlobKey key) {

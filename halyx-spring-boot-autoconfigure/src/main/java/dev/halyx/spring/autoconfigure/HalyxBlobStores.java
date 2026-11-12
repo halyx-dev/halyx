@@ -26,6 +26,7 @@ import dev.halyx.events.EventBusConfig;
 import dev.halyx.events.EventPublisher;
 import dev.halyx.functions.FunctionConfig;
 import dev.halyx.functions.FunctionInvoker;
+import dev.halyx.error.CloudException;
 import dev.halyx.keys.CryptoKey;
 import dev.halyx.keys.KeyMetadata;
 import dev.halyx.keys.KeyOptions;
@@ -131,11 +132,24 @@ public final class HalyxBlobStores {
      * The blob store {@code bucket}, seen through a view that seals blobs with the key {@code keyName} of {@code keys},
      * all of them or only those under {@code prefix}.
      */
-    public BlobStore encryptedBlobStore(String property, String provider, String bucket, KeyStore keys,
-                                        String keyName, String prefix) {
+    /**
+     * A blob store with keys: encrypted at rest by the storage service with {@code serverSideKey}, then sealed by Halyx
+     * with {@code encryptionKey} (under {@code prefix} only, when given). Either key may be null.
+     */
+    public BlobStore keyedBlobStore(String property, String provider, String bucket, CryptoKey serverSideKey,
+                                    CryptoKey encryptionKey, String prefix) {
         BlobStore store = blobStore(property, provider, bucket);
-        CryptoKey key = keys.key(keyName);
-        return prefix == null ? store.encryptedWith(key) : store.encryptedWith(key, prefix);
+        if (serverSideKey != null) {
+            try {
+                store = store.withServerSideKey(serverSideKey);
+            } catch (CloudException e) {
+                throw new IllegalStateException(property + ".server-side-key: " + e.getMessage(), e);
+            }
+        }
+        if (encryptionKey == null) {
+            return store;
+        }
+        return prefix == null ? store.encryptedWith(encryptionKey) : store.encryptedWith(encryptionKey, prefix);
     }
 
     public KeyStore keyStore(String property, String provider, KeyStoreConfig config) {

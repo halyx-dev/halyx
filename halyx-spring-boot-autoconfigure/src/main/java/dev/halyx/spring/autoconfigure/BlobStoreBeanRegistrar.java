@@ -281,11 +281,11 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
             String property = "halyx.blob-stores." + name;
             String bucket = store.bucket() == null || store.bucket().isBlank() ? name : store.bucket();
             RootBeanDefinition definition;
-            if (store.encryptionKey() == null) {
-                if (store.encryptionPrefix() != null && !store.encryptionPrefix().isBlank()) {
-                    throw new IllegalStateException(property + ".encryption-prefix needs " + property
-                            + ".encryption-key: the key to seal the blobs under the prefix with");
-                }
+            if (store.encryptionKey() == null && store.encryptionPrefix() != null && !store.encryptionPrefix().isBlank()) {
+                throw new IllegalStateException(property + ".encryption-prefix needs " + property
+                        + ".encryption-key: the key to seal the blobs under the prefix with");
+            }
+            if (store.encryptionKey() == null && store.serverSideKey() == null) {
                 definition = serviceBean(BlobStore.class, "blobStore", property, store.provider());
                 definition.getConstructorArgumentValues().addIndexedArgumentValue(2, bucket);
                 definition.setDescription("Halyx blob store " + bucket);
@@ -350,27 +350,54 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
     }
 
     /**
-     * A blob store sealed with a key from a key store bean, which is created first: the {@code encryptedBlobStore}
-     * factory method opens the store and wraps it in the view.
+     * A blob store with keys from key store beans, which are created first and destroyed after it: the
+     * {@code keyedBlobStore} factory method opens the store, applies the server-side key, then the sealing view.
      */
     private static RootBeanDefinition encryptedBlobBean(String property, HalyxProperties.BlobStoreProperties store,
                                                         String bucket, Set<String> keyStores) {
-        HalyxProperties.EncryptionKey key = store.encryptionKey();
-        if (key.name() == null || key.name().isBlank()) {
-            throw new IllegalStateException(property + ".encryption-key.name is required: the key to seal blobs with");
-        }
-        String keyStore = keyStore(property + ".encryption-key.store", key.store(), keyStores);
         String prefix = store.encryptionPrefix() == null || store.encryptionPrefix().isBlank() ? null
                 : store.encryptionPrefix();
-        RootBeanDefinition definition = serviceBean(BlobStore.class, "encryptedBlobStore", property, store.provider());
+        RootBeanDefinition definition = serviceBean(BlobStore.class, "keyedBlobStore", property, store.provider());
         ConstructorArgumentValues args = definition.getConstructorArgumentValues();
         args.addIndexedArgumentValue(2, bucket);
-        args.addIndexedArgumentValue(3, new RuntimeBeanReference(keyStore));
-        args.addIndexedArgumentValue(4, key.name());
+        args.addIndexedArgumentValue(3, keyArgument(property + ".server-side-key", store.serverSideKey(),
+                "the key the storage service encrypts blobs with", keyStores));
+        args.addIndexedArgumentValue(4, keyArgument(property + ".encryption-key", store.encryptionKey(),
+                "the key to seal blobs with", keyStores));
         args.addIndexedArgumentValue(5, new ConstructorArgumentValues.ValueHolder(prefix, String.class.getName()));
-        definition.setDescription("Halyx blob store " + bucket + ", encrypted with " + keyStore + "/" + key.name()
-                + (prefix == null ? "" : " under " + prefix));
+        StringBuilder description = new StringBuilder("Halyx blob store ").append(bucket);
+        if (store.serverSideKey() != null) {
+            description.append(", encrypted at rest with ").append(store.serverSideKey().name());
+        }
+        if (store.encryptionKey() != null) {
+            description.append(", sealed with ").append(store.encryptionKey().name())
+                    .append(prefix == null ? "" : " under " + prefix);
+        }
+        definition.setDescription(description.toString());
         return definition;
+    }
+
+    /** A {@code CryptoKey} argument from a key reference, as an inner bean on its store bean; null when there's none. */
+    private static ConstructorArgumentValues.ValueHolder keyArgument(String property, HalyxProperties.EncryptionKey key,
+                                                                     String what, Set<String> keyStores) {
+        if (key == null) {
+            return new ConstructorArgumentValues.ValueHolder(null, CryptoKey.class.getName());
+        }
+        if (key.name() == null || key.name().isBlank()) {
+            throw new IllegalStateException(property + ".name is required: " + what);
+        }
+        String keyStore = keyStore(property + ".store", key.store(), keyStores);
+        RootBeanDefinition definition = new RootBeanDefinition(CryptoKey.class);
+        definition.setFactoryBeanName(FACTORY_BEAN);
+        definition.setFactoryMethodName("cryptoKey");
+        definition.setTargetType(CryptoKey.class);
+        ConstructorArgumentValues args = definition.getConstructorArgumentValues();
+        args.addIndexedArgumentValue(0, property);
+        args.addIndexedArgumentValue(1, new RuntimeBeanReference(keyStore));
+        args.addIndexedArgumentValue(2, key.name());
+        args.addIndexedArgumentValue(3, key.toKeyOptions());
+        args.addIndexedArgumentValue(4, false);
+        return new ConstructorArgumentValues.ValueHolder(definition, CryptoKey.class.getName());
     }
 
     /** A {@code CryptoKey} from its store bean, which is created first and destroyed after it. */

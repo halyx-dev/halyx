@@ -249,11 +249,15 @@ class KeyConcurrencyTest {
 
     @Test
     void theDecryptCacheServesConcurrentHitsCorrectly() throws Exception {
-        CryptoKey key = key("a", KeyStoreConfig.builder().dataKeyCache(Duration.ofMinutes(5), 4).build());
+        // Room for every data key, so nothing is evicted; misses aren't single-flight, so warm the cache first.
+        CryptoKey key = key("a", KeyStoreConfig.builder().dataKeyCache(Duration.ofMinutes(5), 8).build());
         delayMillis = 0;
         List<SealedData> sealed = new ArrayList<>();
         for (int i = 0; i < 8; i++) {
             sealed.add(key.encrypt(("message " + i).getBytes(StandardCharsets.UTF_8), AAD));
+        }
+        for (SealedData data : sealed) {
+            key.decrypt(data, AAD);
         }
         calls.clear();
 
@@ -265,8 +269,7 @@ class KeyConcurrencyTest {
         });
 
         assertThat(opened).containsOnly("ok");
-        assertThat(calls("unwrap")).as("at most one unwrap per data key, give or take evictions")
-                .isLessThan(CALLERS);
+        assertThat(calls("unwrap")).as("every concurrent decrypt is a cache hit").isZero();
     }
 
     // Helpers

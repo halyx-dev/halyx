@@ -19,6 +19,9 @@ import com.google.auth.ServiceAccountSigner;
 import com.google.auth.oauth2.AccessToken;
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.auth.oauth2.ServiceAccountCredentials;
+import com.google.cloud.kms.v1.CryptoKey.CryptoKeyPurpose;
+import com.google.cloud.kms.v1.KeyManagementServiceClient;
+import com.google.cloud.kms.v1.KeyRing;
 import com.google.cloud.storage.BucketInfo;
 import com.google.cloud.storage.Storage;
 import com.google.cloud.storage.StorageOptions;
@@ -30,6 +33,8 @@ import dev.halyx.config.Credentials;
 import dev.halyx.config.ProviderConfig;
 import dev.halyx.gcp.storage.GcsBlobStoreDriver;
 import dev.halyx.interceptor.InterceptorChain;
+import dev.halyx.keys.KeyStore;
+import dev.halyx.keys.KeyStoreConfig;
 import dev.halyx.storage.BlobContent;
 import dev.halyx.storage.BlobKey;
 import dev.halyx.storage.BlobStore;
@@ -205,6 +210,27 @@ class GcsPresignedUrlIT {
         signingStore.abortPresignedUpload(upload);
 
         assertThat(store.exists(key)).isFalse();
+    }
+
+    @Test
+    void uploadUrlsOfAKeyedViewSignTheKey() throws Exception {
+        String ring = "projects/" + PROJECT + "/locations/global/keyRings/presign";
+        KeyStore keys = halyx.provider("gcp").keyStore(KeyStoreConfig.builder().location(ring).build());
+        KeyManagementServiceClient admin = keys.unwrap(KeyManagementServiceClient.class);
+        admin.createKeyRing("projects/" + PROJECT + "/locations/global", "presign", KeyRing.getDefaultInstance());
+        admin.createCryptoKey(ring, "storage", com.google.cloud.kms.v1.CryptoKey.newBuilder()
+                .setPurpose(CryptoKeyPurpose.ENCRYPT_DECRYPT).build());
+        BlobStore keyed = signingStore.withServerSideKey(keys.key("storage"));
+        BlobKey key = newKey();
+
+        PresignedUrl url = keyed.presignUpload(key, Duration.ofMinutes(5));
+        HttpResponse<String> response = PresignedRequests.send(url, HttpRequest.BodyPublishers.ofString("keyed"));
+
+        assertThat(url.headers()).containsEntry("x-goog-encryption-kms-key-name", ring + "/cryptoKeys/storage");
+        assertThat(url.uri().getQuery()).contains("x-goog-encryption-kms-key-name");
+        assertThat(response.statusCode()).as(response.body()).isEqualTo(200);
+        assertThat(store.getBytes(key)).asString().isEqualTo("keyed");
+        assertThat(signingStore.presignDownload(key, Duration.ofMinutes(5)).headers()).isEmpty();
     }
 
     /**

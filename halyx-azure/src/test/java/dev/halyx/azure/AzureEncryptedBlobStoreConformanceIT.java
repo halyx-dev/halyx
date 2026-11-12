@@ -30,8 +30,13 @@ import dev.halyx.keys.KeyPurpose;
 import dev.halyx.keys.KeyStore;
 import dev.halyx.keys.KeyStoreConfig;
 import dev.halyx.memory.InMemoryKeys;
+import dev.halyx.azure.blob.AzureBlobStoreDriver;
+import dev.halyx.keys.KeyOptions;
+import dev.halyx.storage.BlobKey;
 import dev.halyx.storage.BlobStore;
 import dev.halyx.tck.BlobEncryptionConformanceTest;
+import dev.halyx.tck.BlobServerSideKeyConformanceTest;
+import com.azure.storage.blob.BlobContainerClient;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Nested;
@@ -39,6 +44,7 @@ import reactor.core.publisher.Mono;
 
 import java.time.OffsetDateTime;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Blob Storage on Floci-az, encrypted: the whole blob kit through a view sealed with a memory key, then the encryption
@@ -54,6 +60,8 @@ class AzureEncryptedBlobStoreConformanceIT extends AzureBlobStoreConformanceIT {
     private static CryptoKey key;
     private static Halyx vault;
     private static KeyStore kms;
+    private static Halyx scopeVault;
+    private static CryptoKey serverSide;
 
     @BeforeAll
     static void keys() {
@@ -71,6 +79,11 @@ class AzureEncryptedBlobStoreConformanceIT extends AzureBlobStoreConformanceIT {
             vault = null;
         }
         kms = null;
+        if (scopeVault != null) {
+            scopeVault.close();
+            scopeVault = null;
+        }
+        serverSide = null;
     }
 
     @Override
@@ -131,6 +144,62 @@ class AzureEncryptedBlobStoreConformanceIT extends AzureBlobStoreConformanceIT {
                 }
                 return kms;
             }
+        }
+    }
+
+    @Nested
+    class ServerSideKey extends BlobServerSideKeyConformanceTest {
+
+        @Override
+        protected Map<String, String> knownEnvironmentGaps() {
+            return Map.of("metadataAndTierChangesKeepTheKey", "Floci-az 0.14.0 does not implement Set Blob Properties (501)");
+        }
+
+        @Override
+        protected BlobStore blobStore() {
+            return AzureEncryptedBlobStoreConformanceIT.this.blobStore();
+        }
+
+        /** RSA key storage in Floci-az's vault, made once, opened with the encryption scope tck-scope. */
+        @Override
+        protected CryptoKey serverSideKey() {
+            synchronized (AzureEncryptedBlobStoreConformanceIT.class) {
+                if (serverSide == null) {
+                    String vaultUrl = "https://" + FLOCI.getHost() + ":" + FLOCI.getMappedPort(4577)
+                            + "/devstoreaccount1-keyvault";
+                    KeyClient admin = new KeyClientBuilder().vaultUrl(vaultUrl)
+                            .credential(request -> Mono.just(new AccessToken("emulator",
+                                    OffsetDateTime.now().plusHours(1))))
+                            .addPolicy(new ForceHttpPolicy()).disableChallengeResourceVerification().buildClient();
+                    admin.createRsaKey(new CreateRsaKeyOptions("storage").setKeySize(2048)
+                            .setKeyOperations(KeyOperation.WRAP_KEY, KeyOperation.UNWRAP_KEY));
+                    scopeVault = Halyx.builder().register("vault", ProviderConfig.of("azure")
+                            .credentials(Credentials.anonymous())).build();
+                    KeyStore keys = scopeVault.provider("vault").keyStore(KeyStoreConfig.builder().location(vaultUrl)
+                            .property(AzureParameterProperties.INSECURE_HTTP, "true").build());
+                    serverSide = keys.key("storage", KeyOptions.builder()
+                            .property(AzureBlobStoreDriver.ENCRYPTION_SCOPE, "tck-scope").build());
+                }
+                return serverSide;
+            }
+        }
+
+        @Override
+        protected String expectedServerSideKey() {
+            return "tck-scope";
+        }
+
+        /** The blob's encryption scope. */
+        @Override
+        protected Optional<String> storedServerSideKey(BlobKey key) {
+            return Optional.ofNullable(blobStore().unwrap(BlobContainerClient.class).getBlobClient(key.value())
+                    .getProperties().getEncryptionScope());
+        }
+
+        /** A0: Floci-az accepts {@code x-ms-encryption-scope} but doesn't record it; the real-cloud tier checks it. */
+        @Override
+        protected boolean reportsServerSideKeys() {
+            return false;
         }
     }
 }

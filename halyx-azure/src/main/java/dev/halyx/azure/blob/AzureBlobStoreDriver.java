@@ -53,6 +53,7 @@ import dev.halyx.azure.AzureProvider;
 import dev.halyx.capability.Capabilities;
 import dev.halyx.error.CloudException;
 import dev.halyx.error.InvalidArgumentException;
+import dev.halyx.error.UnsupportedFeatureException;
 import dev.halyx.error.PreconditionFailedException;
 import dev.halyx.interceptor.AsyncInvocation;
 import dev.halyx.storage.BatchDeleteResult;
@@ -79,7 +80,9 @@ import dev.halyx.storage.StorageCapability;
 import dev.halyx.storage.StorageTier;
 import dev.halyx.storage.UploadedPart;
 import dev.halyx.storage.spi.AbstractBlobStoreDriver;
+import dev.halyx.storage.spi.BlobStoreDriver;
 import dev.halyx.storage.spi.MultipartUploadSession;
+import dev.halyx.storage.spi.ServerSideKey;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -117,6 +120,12 @@ public final class AzureBlobStoreDriver extends AbstractBlobStoreDriver {
 
     private final BlobBatchClient batch;
 
+    /** The key option naming the storage account's encryption scope bound to a Key Vault key. */
+    public static final String ENCRYPTION_SCOPE = "azure.storage.encryption-scope";
+
+    /** The encryption scope writes use, for a driver from {@link #withServerSideKey}; null for the container's. */
+    private final String encryptionScope;
+
     public AzureBlobStoreDriver(String container, BlobServiceClient service, BlobServiceAsyncClient asyncService,
                                 boolean sharedKey) {
         super(AzureProvider.ID, container, Capabilities.of(StorageCapability.values()));
@@ -125,6 +134,30 @@ public final class AzureBlobStoreDriver extends AbstractBlobStoreDriver {
         this.asyncContainer = asyncService.getBlobContainerAsyncClient(container);
         this.sharedKey = sharedKey;
         this.batch = new BlobBatchClientBuilder(service).buildClient();
+        this.encryptionScope = null;
+    }
+
+    private AzureBlobStoreDriver(AzureBlobStoreDriver unscoped, String encryptionScope) {
+        super(AzureProvider.ID, unscoped.bucket, unscoped.capabilities());
+        this.service = unscoped.service;
+        this.container = unscoped.container;
+        this.asyncContainer = unscoped.asyncContainer;
+        this.sharedKey = unscoped.sharedKey;
+        this.batch = unscoped.batch;
+        this.encryptionScope = encryptionScope;
+    }
+
+    /**
+     * Writes in the encryption scope named by the key's option {@value #ENCRYPTION_SCOPE}: Azure Storage encrypts with
+     * the Key Vault key a scope is bound to, and requests name the scope, not the key.
+     */
+    @Override
+    public BlobStoreDriver withServerSideKey(ServerSideKey key) {
+        String scope = key.property(ENCRYPTION_SCOPE).filter(name -> !name.isBlank()).orElseThrow(() ->
+                new InvalidArgumentException("An Azure server-side key needs the key option " + ENCRYPTION_SCOPE
+                        + ": the storage account's encryption scope bound to the key " + key.nativeId(), null, provider,
+                        null));
+        return new AzureBlobStoreDriver(this, scope);
     }
 
     @Override
@@ -413,6 +446,12 @@ public final class AzureBlobStoreDriver extends AbstractBlobStoreDriver {
 
     @Override
     public PutResult copy(BlobKey source, BlobKey target) {
+        if (encryptionScope != null) {
+            // Copy Blob, the asynchronous server-side copy, can't name a scope: the copy would land in the container's.
+            // Core falls back to a download and an upload in the scope.
+            throw new UnsupportedFeatureException("A server-side copy can't carry an encryption scope", null, provider,
+                    null);
+        }
         BlobClient from = blob(source);
         BlobClient to = blob(target);
         to.beginCopy(from.getBlobUrl(), COPY_POLL_INTERVAL).waitForCompletion();
@@ -507,11 +546,16 @@ public final class AzureBlobStoreDriver extends AbstractBlobStoreDriver {
         return List.of(container, service);
     }
 
+    /** The blob's client, in this driver's encryption scope if it has one: its writes and SAS tokens carry it. */
     private BlobClient blob(BlobKey key) {
-        return container.getBlobClient(key.value());
+        BlobClient blob = container.getBlobClient(key.value());
+        return encryptionScope == null ? blob : blob.getEncryptionScopeClient(encryptionScope);
     }
 
     private BlobAsyncClient asyncBlob(BlobKey key) {
+        if (encryptionScope != null) {
+            return asyncContainer.getBlobAsyncClient(key.value()).getEncryptionScopeAsyncClient(encryptionScope);
+        }
         return asyncContainer.getBlobAsyncClient(key.value());
     }
 
