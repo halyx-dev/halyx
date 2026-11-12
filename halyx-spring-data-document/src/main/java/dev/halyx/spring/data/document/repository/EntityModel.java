@@ -22,6 +22,7 @@ import dev.halyx.nosql.RecordMapper;
 import dev.halyx.nosql.TableConfig;
 import dev.halyx.nosql.Version;
 import dev.halyx.spring.data.document.DocumentTable;
+import dev.halyx.spring.data.document.Encrypted;
 import dev.halyx.spring.data.document.PartitionKey;
 import dev.halyx.spring.data.document.SortKey;
 
@@ -32,6 +33,7 @@ import java.lang.reflect.RecordComponent;
 import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -53,6 +55,7 @@ final class EntityModel<T extends Record> {
     private final RecordComponent sort;
     private final RecordComponent version;
     private final Set<String> stored;
+    private final Map<String, String> encrypted;
 
     private EntityModel(Class<T> type) {
         this.type = type;
@@ -79,6 +82,23 @@ final class EntityModel<T extends Record> {
             elsewhere.add(version.getName());
         }
         this.stored = Set.copyOf(elsewhere);
+        Map<String, String> sealed = new LinkedHashMap<>();
+        for (RecordComponent component : components) {
+            Encrypted annotation = encryptedAnnotation(component);
+            if (annotation == null) {
+                continue;
+            }
+            if (elsewhere.contains(component.getName())) {
+                throw new IllegalStateException(type.getName() + "." + component.getName()
+                        + ": keys and the version can't be @Encrypted; the store needs them in the clear");
+            }
+            if (annotation.value().isBlank()) {
+                throw new IllegalStateException(type.getName() + "." + component.getName()
+                        + ": @Encrypted needs the name of a CryptoKey bean");
+            }
+            sealed.put(component.getName(), annotation.value());
+        }
+        this.encrypted = Map.copyOf(sealed);
         Class<?>[] types = new Class<?>[components.length];
         for (int i = 0; i < components.length; i++) {
             types[i] = components[i].getType();
@@ -101,6 +121,11 @@ final class EntityModel<T extends Record> {
 
     Class<T> type() {
         return type;
+    }
+
+    /** The components to encrypt, each with the {@code CryptoKey} bean named by its {@link Encrypted}. */
+    Map<String, String> encrypted() {
+        return encrypted;
     }
 
     /** The {@code DocumentStore} bean named by {@link DocumentTable}, if any. */
@@ -241,6 +266,18 @@ final class EntityModel<T extends Record> {
             default -> throw new IllegalArgumentException(what + ": index values must be strings, numbers, "
                     + "booleans, UUIDs, dates or enums, not " + value.getClass().getSimpleName());
         };
+    }
+
+    private Encrypted encryptedAnnotation(RecordComponent component) {
+        Encrypted annotation = component.getAnnotation(Encrypted.class);
+        if (annotation != null) {
+            return annotation;
+        }
+        try {
+            return type.getDeclaredField(component.getName()).getAnnotation(Encrypted.class);
+        } catch (NoSuchFieldException e) {
+            return null;
+        }
     }
 
     private Optional<RecordComponent> annotated(Class<? extends Annotation> annotation) {

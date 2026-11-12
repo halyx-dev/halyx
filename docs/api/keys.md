@@ -136,6 +136,20 @@ unwraps and wraps, with the same result.
 yourself. `decryptDataKey(wrapped)` unwraps it again, and `wrap(dataKey)` wraps it with another key. Close a
 `DataKey` as soon as you can: closing zeroes the key held in it.
 
+A `DataKey` can also seal several messages with one key service call, in the standard format:
+
+```java
+try (DataKey dataKey = key.generateDataKey()) {                      // one wrap call
+    SealedData email = dataKey.seal(emailBytes, aad("email"));       // no call
+    SealedData phone = dataKey.seal(phoneBytes, aad("phone"));       // no call
+}
+byte[] plain = key.decrypt(email, aad("email"));                     // opens like any sealed data
+```
+
+Each message gets its own salt and nonce prefix, so its own subkey, and opens on its own with `decrypt`, or with
+`dataKey.open(sealed, aad)` and no call when you already hold the data key. Encrypted document fields work this
+way.
+
 ## Signing
 
 ```java
@@ -185,6 +199,9 @@ Other services take a key and do the sealing for you:
   [Server-side encryption with a key](storage.md#server-side-encryption-with-a-key).
 - **Claim checks:** `ClaimCheck.of(blobStore.encryptedWith(key))` seals the message bodies and stream values that
   go through a blob store. See [Encrypted claim checks](messaging.md#encrypted-claim-checks).
+- **Document fields:** `TableConfig.Builder.encryptedField("email", key)`, or `@Encrypted` on a Spring Data record
+  component, seals chosen fields of every document, with one wrap per document write and one unwrap per document
+  read. See [Encrypted fields](nosql.md#encrypted-fields).
 
 ## Errors
 
@@ -238,6 +255,8 @@ paths on Azure, and give busy services their own vault; see [Keys on Key Vault](
   `interceptAsync`, as tracing does, see your context; one that only implements `intercept` runs on a virtual thread,
   as it does for any asynchronous call.
 - Decryptions that hit `dataKeyCache` don't wait on each other.
+- Encrypted document fields share one data key per document write, and a read unwraps each document's data key once
+  for all its fields; a query page unwraps its documents' keys in parallel, 16 at a time.
 - MACs use the key versions Halyx already knows: making one is a single call, and checking one tries those versions
   without listing them first. Before a check answers false, the key's versions are read again, so a version made
   since still verifies; a mismatch costs that one read.
@@ -253,6 +272,8 @@ paths on Azure, and give busy services their own vault; see [Keys on Key Vault](
 - **Freshness.** `cacheTtl` on parameter stores decides how often secrets are read, and decrypted, again.
 - **Access patterns.** Fewer, larger reads cost fewer calls than many small ones: an encrypted blob's range read
   unwraps its data key each time unless `dataKeyCache` is on. Call `head` only where you need a blob's exact size.
+  A table with encrypted fields that's read far more than it's written is the main case for `dataKeyCache`: without
+  it, every document read is one call.
 - **Health probes.** A key store's health check pings the key service, and the Spring health entry keeps each
   answer, failures included, for 30 seconds. Put it in readiness, not liveness: a key service outage should take a pod
   out of rotation, not restart it.

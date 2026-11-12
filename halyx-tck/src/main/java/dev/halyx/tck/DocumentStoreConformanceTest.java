@@ -21,6 +21,7 @@ import org.junit.jupiter.api.TestInfo;
 import dev.halyx.error.InvalidArgumentException;
 import dev.halyx.error.NotFoundException;
 import dev.halyx.error.PreconditionFailedException;
+import dev.halyx.keys.CryptoKey;
 import dev.halyx.nosql.AsyncDocumentStore;
 import dev.halyx.nosql.Document;
 import dev.halyx.nosql.DocumentStore;
@@ -72,6 +73,19 @@ public abstract class DocumentStoreConformanceTest {
         if (!sorted) {
             table.index(BY_OWNER, "owner");
         }
+        return table;
+    }
+
+    /**
+     * The fields the kit writes that an encrypted run seals: every type of value, and none a key, an index attribute or
+     * incremented.
+     */
+    public static final List<String> ENCRYPTED_FIELDS = List.of("text", "bytes", "nested", "tags", "big", "ratio",
+            "name", "a", "s", "title", "price", "total");
+
+    /** Encrypts {@link #ENCRYPTED_FIELDS} with {@code key}: what an encrypted subclass's {@link #tables} returns. */
+    public static TableConfig.Builder encrypted(TableConfig.Builder table, CryptoKey key) {
+        ENCRYPTED_FIELDS.forEach(field -> table.encryptedField(field, key));
         return table;
     }
 

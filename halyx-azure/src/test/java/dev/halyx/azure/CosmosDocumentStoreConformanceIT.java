@@ -57,6 +57,8 @@ import dev.halyx.tck.ReactiveDocumentRepositoryConformanceTest;
 class CosmosDocumentStoreConformanceIT extends DocumentStoreConformanceTest {
 
     private static final int TLS_PORT = 4578;
+    /** Floci-az's plain HTTP port, for Key Vault in the encrypted run. */
+    static final int HTTP_PORT = 4577;
     /** The well-known Cosmos DB emulator key. */
     private static final String KEY = "C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw==";
     private static final Path KEYSTORE = selfSignedKeystore();
@@ -70,10 +72,10 @@ class CosmosDocumentStoreConformanceIT extends DocumentStoreConformanceTest {
             .withEnv("QUARKUS_HTTP_SSL_CERTIFICATE_KEY_STORE_FILE", "/certs/cosmos.p12")
             .withEnv("QUARKUS_HTTP_SSL_CERTIFICATE_KEY_STORE_PASSWORD", "changeit")
             .withEnv("QUARKUS_HTTP_INSECURE_REQUESTS", "enabled")
-            .withExposedPorts(TLS_PORT)
+            .withExposedPorts(TLS_PORT, HTTP_PORT)
             .waitingFor(Wait.forLogMessage(".*Listening on.*https.*", 1));
 
-    private static Halyx halyx;
+    static Halyx halyx;
     private static String endpoint;
 
     private static Path selfSignedKeystore() {

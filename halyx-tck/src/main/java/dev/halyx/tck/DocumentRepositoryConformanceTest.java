@@ -15,11 +15,18 @@
  */
 package dev.halyx.tck;
 
+import dev.halyx.Halyx;
+import dev.halyx.config.ProviderConfig;
+import dev.halyx.keys.CryptoKey;
+import dev.halyx.keys.KeyPurpose;
+import dev.halyx.keys.KeyStore;
+import dev.halyx.memory.InMemoryKeys;
 import dev.halyx.nosql.DocumentStore;
 import dev.halyx.nosql.Key;
 import dev.halyx.nosql.TableConfig;
 import dev.halyx.nosql.Version;
 import dev.halyx.spring.data.document.DocumentRepository;
+import dev.halyx.spring.data.document.Encrypted;
 import dev.halyx.spring.data.document.PartitionKey;
 import dev.halyx.spring.data.document.SortKey;
 import dev.halyx.spring.data.document.repository.HalyxRepositoryFactory;
@@ -33,6 +40,7 @@ import org.springframework.data.domain.ScrollPosition;
 import org.springframework.data.domain.Window;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -67,6 +75,33 @@ public abstract class DocumentRepositoryConformanceTest {
 
     /** An unversioned note in the plain table. */
     public record KitNote(@PartitionKey String id, String text) {
+    }
+
+    /** The {@code CryptoKey} name {@link KitCustomer}'s {@code @Encrypted} components use: a memory key. */
+    public static final String KIT_KEY = "kit-key";
+
+    /** A customer in the plain table, with an encrypted email and credit limit. */
+    public record KitCustomer(@PartitionKey String id, String name, @Encrypted(KIT_KEY) String email,
+                              @Encrypted(KIT_KEY) BigDecimal creditLimit) {
+    }
+
+    private static CryptoKey kitKey;
+
+    /** The key named {@value #KIT_KEY}, a memory key made once; any other name is a configuration error. */
+    public static synchronized CryptoKey kitKey(String name) {
+        if (!KIT_KEY.equals(name)) {
+            throw new IllegalStateException("No key named " + name);
+        }
+        if (kitKey == null) {
+            KeyStore keys = Halyx.builder().register("kit-keys", ProviderConfig.of("memory")).build()
+                    .provider("kit-keys").keyStore();
+            keys.unwrap(InMemoryKeys.class).create(KIT_KEY, KeyPurpose.ENCRYPTION);
+            kitKey = keys.key(KIT_KEY);
+        }
+        return kitKey;
+    }
+
+    public interface KitCustomers extends DocumentRepository<KitCustomer, String> {
     }
 
     public interface KitOrders extends DocumentRepository<KitOrder, Key> {
@@ -104,6 +139,8 @@ public abstract class DocumentRepositoryConformanceTest {
     private KitOrders orders;
     private KitAccounts accounts;
     private KitNotes notes;
+    private KitCustomers customers;
+    private DocumentStore plainTable;
 
     /** A store over a table keyed by partition key only ({@code sorted = false}) or with a sort key. */
     protected abstract DocumentStore store(boolean sorted);
@@ -140,10 +177,33 @@ public abstract class DocumentRepositoryConformanceTest {
         prefix = "tck-" + UUID.randomUUID().toString().substring(0, 8) + "-";
         DocumentStore sorted = store(true);
         DocumentStore plain = store(false);
-        HalyxRepositoryFactory factory = new HalyxRepositoryFactory(type -> type == KitOrder.class ? sorted : plain);
+        plainTable = plain;
+        HalyxRepositoryFactory factory = new HalyxRepositoryFactory(type -> type == KitOrder.class ? sorted : plain,
+                DocumentRepositoryConformanceTest::kitKey);
         orders = factory.getRepository(KitOrders.class);
         accounts = factory.getRepository(KitAccounts.class);
         notes = factory.getRepository(KitNotes.class);
+        customers = factory.getRepository(KitCustomers.class);
+    }
+
+    @Test
+    void encryptedComponentsAreSealedInTheTable() {
+        KitCustomer ana = new KitCustomer(prefix + "ana", "Ana", "ana@example.com", new BigDecimal("2500.00"));
+
+        customers.save(ana);
+
+        assertThat(customers.findById(ana.id())).hasValue(ana);
+        assertThat(customers.findAllById(List.of(ana.id()))).containsExactly(ana);
+        var stored = plainTable.get(Key.of(ana.id())).orElseThrow().document();
+        assertThat(stored.get("email")).as("sealed in the table").isInstanceOf(byte[].class);
+        assertThat(new String((byte[]) stored.get("email"), StandardCharsets.ISO_8859_1))
+                .startsWith("HLXS").doesNotContain("ana@example.com");
+        assertThat(stored.get("creditLimit")).isInstanceOf(byte[].class);
+        assertThat(stored.getString("name")).hasValue("Ana");
+
+        KitCustomer moved = new KitCustomer(ana.id(), "Ana", "ana@example.org", null);
+        customers.save(moved);
+        assertThat(customers.findById(ana.id())).hasValue(moved);
     }
 
     private String customer(String name) {

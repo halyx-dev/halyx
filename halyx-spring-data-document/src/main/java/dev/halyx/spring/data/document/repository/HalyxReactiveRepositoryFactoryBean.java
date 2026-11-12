@@ -53,6 +53,7 @@ public class HalyxReactiveRepositoryFactoryBean<R extends Repository<T, ID>, T, 
                     + "repositories off too, with halyx.document-repositories.enabled=false); without Boot, declare "
                     + "ReactiveHalyx.of(halyx, scheduler)");
         });
-        return new HalyxReactiveRepositoryFactory(entity -> DocumentStores.forEntity(beans, entity), reactive);
+        return new HalyxReactiveRepositoryFactory(entity -> DocumentStores.forEntity(beans, entity),
+                name -> DocumentStores.key(beans, name), reactive);
     }
 }

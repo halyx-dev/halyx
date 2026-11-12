@@ -15,7 +15,9 @@
  */
 package dev.halyx.nosql;
 
+import dev.halyx.error.UnsupportedFeatureException;
 import dev.halyx.interceptor.InterceptorChain;
+import dev.halyx.keys.CryptoKey;
 
 import java.util.Collection;
 import java.util.Map;
@@ -34,6 +36,16 @@ public interface DocumentStore {
      * The asynchronous view of this store, whose calls return {@code CompletableFuture}s; non-blocking where the
      * provider's driver has a non-blocking path. Cheap to call: Halyx' stores keep one.
      */
+    /**
+     * A view of this store that also encrypts {@code field} with {@code key}, as
+     * {@link TableConfig.Builder#encryptedField(String, CryptoKey)} does, for code handed a store already built, such as
+     * Spring Data repositories with {@code @Encrypted}. The view's {@link #table()} lists the field; it shares this
+     * store's client. Throws {@code IllegalStateException} for a key or index attribute.
+     */
+    default DocumentStore withEncryptedField(String field, CryptoKey key) {
+        throw new UnsupportedFeatureException(getClass().getSimpleName() + " can't encrypt fields");
+    }
+
     default AsyncDocumentStore async() {
         return async(InterceptorChain.blocking());
     }

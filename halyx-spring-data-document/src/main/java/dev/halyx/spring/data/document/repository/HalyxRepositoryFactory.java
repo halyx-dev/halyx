@@ -15,6 +15,7 @@
  */
 package dev.halyx.spring.data.document.repository;
 
+import dev.halyx.keys.CryptoKey;
 import dev.halyx.nosql.DocumentStore;
 import org.springframework.data.repository.core.EntityInformation;
 import org.springframework.data.repository.core.RepositoryInformation;
@@ -36,6 +37,7 @@ import java.util.function.Function;
 public class HalyxRepositoryFactory extends RepositoryFactorySupport {
 
     private final Function<Class<?>, DocumentStore> stores;
+    private final Function<String, CryptoKey> keys;
     private final Map<Class<?>, EntityModel<?>> models = new ConcurrentHashMap<>();
 
     /**
@@ -43,7 +45,16 @@ public class HalyxRepositoryFactory extends RepositoryFactorySupport {
      *               {@code @DocumentTable}
      */
     public HalyxRepositoryFactory(Function<Class<?>, DocumentStore> stores) {
+        this(stores, DocumentStores::noKeys);
+    }
+
+    /**
+     * @param stores the document store of an entity type
+     * @param keys   the key an {@code @Encrypted} component names, such as the {@code CryptoKey} bean of that name
+     */
+    public HalyxRepositoryFactory(Function<Class<?>, DocumentStore> stores, Function<String, CryptoKey> keys) {
         this.stores = stores;
+        this.keys = keys;
     }
 
     @Override
@@ -80,6 +91,6 @@ public class HalyxRepositoryFactory extends RepositoryFactorySupport {
     private DocumentStore store(EntityModel<?> model) {
         DocumentStore store = stores.apply(model.type());
         model.checkAgainst(store.table(), model.storeName().orElse(store.table().name()));
-        return store;
+        return DocumentStores.encrypted(store, model, keys);
     }
 }

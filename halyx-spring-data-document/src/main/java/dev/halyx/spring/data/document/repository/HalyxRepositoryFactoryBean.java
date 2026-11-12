@@ -48,7 +48,7 @@ public class HalyxRepositoryFactoryBean<R extends Repository<T, ID>, T, ID>
 
     @Override
     protected RepositoryFactorySupport createRepositoryFactory() {
-        return new HalyxRepositoryFactory(this::store);
+        return new HalyxRepositoryFactory(this::store, name -> DocumentStores.key(beans, name));
     }
 
     private DocumentStore store(Class<?> entity) {
