@@ -21,6 +21,7 @@ import dev.halyx.error.PreconditionFailedException;
 import dev.halyx.interceptor.AsyncInvocation;
 import dev.halyx.interceptor.InterceptorChain;
 import dev.halyx.interceptor.OperationContext;
+import dev.halyx.keys.CryptoKey;
 import dev.halyx.nosql.spi.DocumentStoreDriver;
 import dev.halyx.nosql.spi.TransactionWrite;
 import dev.halyx.nosql.spi.WriteCondition;
@@ -43,7 +44,8 @@ import java.util.function.Supplier;
 
 /**
  * The portable document store: key and document validation, expiry (expired items are never returned and
- * don't block {@code ifNotExists}), batching and interceptors over a driver.
+ * don't block {@code ifNotExists}), batching, client-side field encryption ({@link TableConfig#encryptedFields()})
+ * and interceptors over a driver.
  */
 public final class DefaultDocumentStore implements DocumentStore {
 
@@ -52,7 +54,9 @@ public final class DefaultDocumentStore implements DocumentStore {
     private final DocumentStoreDriver driver;
     private final InterceptorChain interceptors;
     private final Clock clock;
+    private final TableConfig table;
     private final Set<String> reserved;
+    private final FieldEncryption encryption;
 
     private final AsyncDocumentStore async = new Async(InterceptorChain.blocking());
 
@@ -61,13 +65,21 @@ public final class DefaultDocumentStore implements DocumentStore {
     }
 
     DefaultDocumentStore(DocumentStoreDriver driver, InterceptorChain interceptors, Clock clock) {
+        this(driver, interceptors, clock, driver.table());
+    }
+
+    /** A view over {@code driver} with {@code table}: the driver's table, with more encrypted fields. */
+    private DefaultDocumentStore(DocumentStoreDriver driver, InterceptorChain interceptors, Clock clock,
+                                 TableConfig table) {
         this.driver = Objects.requireNonNull(driver, "driver");
         this.interceptors = Objects.requireNonNull(interceptors, "interceptors");
         this.clock = clock;
+        this.table = table;
         Set<String> names = new LinkedHashSet<>(driver.reservedFields());
         names.add(driver.table().partitionKey());
         driver.table().sortKey().ifPresent(names::add);
         this.reserved = Set.copyOf(names);
+        this.encryption = new FieldEncryption(table, driver.provider());
     }
 
     @Override
@@ -77,13 +89,21 @@ public final class DefaultDocumentStore implements DocumentStore {
 
     @Override
     public TableConfig table() {
-        return driver.table();
+        return table;
+    }
+
+    @Override
+    public DocumentStore withEncryptedField(String field, CryptoKey key) {
+        return new DefaultDocumentStore(driver, interceptors, clock, table.withEncryptedField(field, key));
     }
 
     @Override
     public Optional<Item> get(Key key) {
         checkKey(key);
-        return execute("get", key, true, () -> driver.get(key)).filter(this::live);
+        Optional<Item> item = execute("get", key, true, () -> driver.get(key)).filter(this::live);
+        try (FieldEncryption.Session session = session()) {
+            return AsyncInvocation.join(session.open(item));
+        }
     }
 
     @Override
@@ -95,9 +115,13 @@ public final class DefaultDocumentStore implements DocumentStore {
         WriteCondition condition = options.notExists() ? new WriteCondition.NotExists()
                 : options.version().<WriteCondition>map(WriteCondition.IfVersion::new).orElse(WriteCondition.NONE);
         boolean idempotent = condition instanceof WriteCondition.None;
+        Document stored;
+        try (FieldEncryption.Session session = session()) {
+            stored = AsyncInvocation.join(session.seal(key, document));
+        }
         Version version;
         try {
-            version = execute("put", key, idempotent, () -> driver.put(key, document, condition, expiresAt));
+            version = execute("put", key, idempotent, () -> driver.put(key, stored, condition, expiresAt));
         } catch (PreconditionFailedException e) {
             if (!(condition instanceof WriteCondition.NotExists)) {
                 throw e;
@@ -115,7 +139,7 @@ public final class DefaultDocumentStore implements DocumentStore {
                     throw e; // someone wrote a new item meanwhile
                 }
             }
-            version = execute("put", key, false, () -> driver.put(key, document, condition, expiresAt));
+            version = execute("put", key, false, () -> driver.put(key, stored, condition, expiresAt));
         }
         return new Item(key, document, version, Optional.ofNullable(expiresAt));
     }
@@ -131,13 +155,17 @@ public final class DefaultDocumentStore implements DocumentStore {
         for (String field : update.fields()) {
             checkField(field);
         }
+        encryption.checkUpdate(update);
         Instant expiresAt = options.expiresAt(clock.instant());
         boolean idempotent = update.increment().isEmpty() && options.version().isEmpty();
-        Item item = execute("update", key, idempotent, () -> driver.update(key, update, options.version(), expiresAt));
-        if (!live(item)) {
-            throw new NotFoundException("No item " + key + " (expired)", null, provider(), null);
+        try (FieldEncryption.Session session = session()) {
+            DocumentUpdate stored = AsyncInvocation.join(session.seal(key, update));
+            Item item = execute("update", key, idempotent, () -> driver.update(key, stored, options.version(), expiresAt));
+            if (!live(item)) {
+                throw new NotFoundException("No item " + key + " (expired)", null, provider(), null);
+            }
+            return AsyncInvocation.join(session.open(item));
         }
-        return item;
     }
 
     @Override
@@ -163,7 +191,9 @@ public final class DefaultDocumentStore implements DocumentStore {
                 }
             }
         }
-        return found;
+        try (FieldEncryption.Session session = session()) {
+            return AsyncInvocation.join(session.open(found));
+        }
     }
 
     @Override
@@ -173,7 +203,11 @@ public final class DefaultDocumentStore implements DocumentStore {
             checkKey(key);
             checkDocument(document);
         });
-        List<Map.Entry<Key, Document>> entries = new ArrayList<>(items.entrySet());
+        Map<Key, Document> stored;
+        try (FieldEncryption.Session session = session()) {
+            stored = AsyncInvocation.join(session.sealAll(items));
+        }
+        List<Map.Entry<Key, Document>> entries = new ArrayList<>(stored.entrySet());
         int size = Math.max(1, driver.maxBatchWrite());
         for (int from = 0; from < entries.size(); from += size) {
             Map<Key, Document> batch = new LinkedHashMap<>();
@@ -193,8 +227,9 @@ public final class DefaultDocumentStore implements DocumentStore {
                     null, provider(), null);
         }
         QueryPage page = execute("query", Key.of(query.partitionKey()), true, () -> driver.query(query));
-        List<Item> live = page.items().stream().filter(this::live).toList();
-        return live.size() == page.items().size() ? page : new QueryPage(live, page.nextPageToken());
+        try (FieldEncryption.Session session = session()) {
+            return AsyncInvocation.join(session.open(livePage(page)));
+        }
     }
 
     @Override
@@ -202,25 +237,40 @@ public final class DefaultDocumentStore implements DocumentStore {
         Objects.requireNonNull(transaction, "transaction");
         Instant now = clock.instant();
         List<TransactionWrite> writes = new ArrayList<>();
-        for (Transaction.Operation operation : transaction.operations()) {
-            checkKey(operation.key());
-            writes.add(switch (operation) {
-                case Transaction.Put put -> {
-                    checkDocument(put.document());
-                    WriteCondition condition = put.options().notExists() ? new WriteCondition.NotExists()
-                            : put.options().version().<WriteCondition>map(WriteCondition.IfVersion::new).orElse(WriteCondition.NONE);
-                    yield new TransactionWrite.Put(put.key(), put.document(), condition, put.options().expiresAt(now));
-                }
-                case Transaction.Update update -> {
-                    update.update().fields().forEach(this::checkField);
-                    yield new TransactionWrite.Update(update.key(), update.update(), update.options().version(),
-                            update.options().expiresAt(now));
-                }
-                case Transaction.Delete delete -> new TransactionWrite.Delete(delete.key(), delete.ifVersion());
-                case Transaction.Check check -> new TransactionWrite.Check(check.key(), check.version());
-            });
+        try (FieldEncryption.Session session = session()) {
+            for (Transaction.Operation operation : transaction.operations()) {
+                writes.add(write(operation, now, session));
+            }
         }
         return execute("transact", Key.of(transaction.partition()), false, () -> driver.transact(writes));
+    }
+
+    /** One transaction operation, checked, with its encrypted fields sealed (one data key per document write). */
+    private TransactionWrite write(Transaction.Operation operation, Instant now, FieldEncryption.Session session) {
+        checkKey(operation.key());
+        return switch (operation) {
+            case Transaction.Put put -> {
+                checkDocument(put.document());
+                WriteCondition condition = put.options().notExists() ? new WriteCondition.NotExists()
+                        : put.options().version().<WriteCondition>map(WriteCondition.IfVersion::new).orElse(WriteCondition.NONE);
+                yield new TransactionWrite.Put(put.key(), AsyncInvocation.join(session.seal(put.key(), put.document())),
+                        condition, put.options().expiresAt(now));
+            }
+            case Transaction.Update update -> {
+                update.update().fields().forEach(this::checkField);
+                encryption.checkUpdate(update.update());
+                yield new TransactionWrite.Update(update.key(),
+                        AsyncInvocation.join(session.seal(update.key(), update.update())),
+                        update.options().version(), update.options().expiresAt(now));
+            }
+            case Transaction.Delete delete -> new TransactionWrite.Delete(delete.key(), delete.ifVersion());
+            case Transaction.Check check -> new TransactionWrite.Check(check.key(), check.version());
+        };
+    }
+
+    /** A session for one blocking call; key service calls run on the blocking executor. */
+    private FieldEncryption.Session session() {
+        return encryption.session(InterceptorChain.blocking());
     }
 
     @Override
@@ -232,8 +282,9 @@ public final class DefaultDocumentStore implements DocumentStore {
             throw new IllegalArgumentException("Index " + index.name() + " has no sort attribute to put a condition on");
         }
         QueryPage page = execute("queryIndex", Key.of(index.name()), true, () -> driver.queryIndex(index, query));
-        List<Item> live = page.items().stream().filter(this::live).toList();
-        return live.size() == page.items().size() ? page : new QueryPage(live, page.nextPageToken());
+        try (FieldEncryption.Session session = session()) {
+            return AsyncInvocation.join(session.open(livePage(page)));
+        }
     }
 
     @Override
@@ -323,6 +374,19 @@ public final class DefaultDocumentStore implements DocumentStore {
             this.blocking = blocking;
         }
 
+        /** Runs {@code call} with a session for this call, closed (its data keys zeroed) when the call completes. */
+        private <T> CompletableFuture<T> withSession(Function<FieldEncryption.Session, CompletableFuture<T>> call) {
+            FieldEncryption.Session session = encryption.session(blocking);
+            CompletableFuture<T> result;
+            try {
+                result = call.apply(session);
+            } catch (RuntimeException e) {
+                session.close();
+                return CompletableFuture.failedFuture(e);
+            }
+            return result.whenComplete((value, error) -> session.close());
+        }
+
         @Override
         public String provider() {
             return DefaultDocumentStore.this.provider();
@@ -335,8 +399,9 @@ public final class DefaultDocumentStore implements DocumentStore {
 
         @Override
         public CompletableFuture<Optional<Item>> get(Key key) {
-            return checked(() -> checkKey(key), () -> executeAsync("get", key, true, blocking,
-                    executor -> driver.getAsync(key, executor)).thenApply(item -> item.filter(DefaultDocumentStore.this::live)));
+            return checked(() -> checkKey(key), () -> withSession(session -> executeAsync("get", key, true, blocking,
+                    executor -> driver.getAsync(key, executor))
+                    .thenCompose(item -> session.open(item.filter(DefaultDocumentStore.this::live)))));
         }
 
         @Override
@@ -350,10 +415,11 @@ public final class DefaultDocumentStore implements DocumentStore {
                 WriteCondition condition = options.notExists() ? new WriteCondition.NotExists()
                         : options.version().<WriteCondition>map(WriteCondition.IfVersion::new).orElse(WriteCondition.NONE);
                 boolean idempotent = condition instanceof WriteCondition.None;
-                return executeAsync("put", key, idempotent, blocking,
-                        executor -> driver.putAsync(key, document, condition, expiresAt, executor))
-                        .exceptionallyCompose(error -> retryOverExpired(key, document, condition, expiresAt,
-                                AsyncInvocation.unwrap(error)))
+                return withSession(session -> session.seal(key, document)).thenCompose(stored ->
+                        executeAsync("put", key, idempotent, blocking,
+                                executor -> driver.putAsync(key, stored, condition, expiresAt, executor))
+                        .exceptionallyCompose(error -> retryOverExpired(key, stored, condition, expiresAt,
+                                AsyncInvocation.unwrap(error))))
                         .thenApply(version -> new Item(key, document, version, Optional.ofNullable(expiresAt)));
             });
         }
@@ -394,17 +460,19 @@ public final class DefaultDocumentStore implements DocumentStore {
                     throw new IllegalArgumentException("update needs an existing item; use put with ifNotExists");
                 }
                 update.fields().forEach(DefaultDocumentStore.this::checkField);
+                encryption.checkUpdate(update);
             }, () -> {
                 Instant expiresAt = options.expiresAt(clock.instant());
                 boolean idempotent = update.increment().isEmpty() && options.version().isEmpty();
-                return executeAsync("update", key, idempotent, blocking,
-                        executor -> driver.updateAsync(key, update, options.version(), expiresAt, executor))
-                        .thenApply(item -> {
+                return withSession(session -> session.seal(key, update).thenCompose(stored ->
+                        executeAsync("update", key, idempotent, blocking,
+                                executor -> driver.updateAsync(key, stored, options.version(), expiresAt, executor)))
+                        .thenCompose(item -> {
                             if (!live(item)) {
                                 throw new NotFoundException("No item " + key + " (expired)", null, provider(), null);
                             }
-                            return item;
-                        });
+                            return session.open(item);
+                        }));
             });
         }
 
@@ -422,8 +490,9 @@ public final class DefaultDocumentStore implements DocumentStore {
                     throw new InvalidArgumentException("Queries need a table with a sort key; " + table().name()
                             + " has none", null, provider(), null);
                 }
-            }, () -> executeAsync("query", Key.of(query.partitionKey()), true, blocking,
-                    executor -> driver.queryAsync(query, executor)).thenApply(DefaultDocumentStore.this::livePage));
+            }, () -> withSession(session -> executeAsync("query", Key.of(query.partitionKey()), true, blocking,
+                    executor -> driver.queryAsync(query, executor))
+                    .thenCompose(page -> session.open(livePage(page)))));
         }
 
         @Override
@@ -436,8 +505,9 @@ public final class DefaultDocumentStore implements DocumentStore {
                 if (query.condition().isPresent() && index[0].sortAttribute().isEmpty()) {
                     throw new IllegalArgumentException("Index " + index[0].name() + " has no sort attribute to put a condition on");
                 }
-            }, () -> executeAsync("queryIndex", Key.of(index[0].name()), true, blocking,
-                    executor -> driver.queryIndexAsync(index[0], query, executor)).thenApply(DefaultDocumentStore.this::livePage));
+            }, () -> withSession(session -> executeAsync("queryIndex", Key.of(index[0].name()), true, blocking,
+                    executor -> driver.queryIndexAsync(index[0], query, executor))
+                    .thenCompose(page -> session.open(livePage(page)))));
         }
 
         @Override

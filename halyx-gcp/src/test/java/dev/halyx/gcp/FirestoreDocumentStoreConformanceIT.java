@@ -51,7 +51,7 @@ class FirestoreDocumentStoreConformanceIT extends DocumentStoreConformanceTest {
             .waitingFor(Wait.forHttp("/health").forPort(PORT))
             .withStartupTimeout(Duration.ofMinutes(2));
 
-    private static Halyx halyx;
+    static Halyx halyx;
 
     @BeforeAll
     static void start() {

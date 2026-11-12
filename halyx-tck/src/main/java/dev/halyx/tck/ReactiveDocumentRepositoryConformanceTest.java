@@ -22,6 +22,7 @@ import dev.halyx.reactor.ReactiveHalyx;
 import dev.halyx.spring.data.document.ReactiveDocumentRepository;
 import dev.halyx.spring.data.document.repository.HalyxReactiveRepositoryFactory;
 import dev.halyx.tck.DocumentRepositoryConformanceTest.KitAccount;
+import dev.halyx.tck.DocumentRepositoryConformanceTest.KitCustomer;
 import dev.halyx.tck.DocumentRepositoryConformanceTest.KitNote;
 import dev.halyx.tck.DocumentRepositoryConformanceTest.KitOrder;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,6 +38,7 @@ import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -80,6 +82,9 @@ public abstract class ReactiveDocumentRepositoryConformanceTest {
         Flux<KitAccount> findByOwner(String owner);
     }
 
+    public interface ReactiveKitCustomers extends ReactiveDocumentRepository<KitCustomer, String> {
+    }
+
     public interface ReactiveKitNotes extends ReactiveDocumentRepository<KitNote, String> {
     }
 
@@ -87,6 +92,8 @@ public abstract class ReactiveDocumentRepositoryConformanceTest {
     private ReactiveKitOrders orders;
     private ReactiveKitAccounts accounts;
     private ReactiveKitNotes notes;
+    private ReactiveKitCustomers customers;
+    private DocumentStore plainTable;
 
     /** A store over a table keyed by partition key only ({@code sorted = false}) or with a sort key. */
     protected abstract DocumentStore store(boolean sorted);
@@ -126,11 +133,27 @@ public abstract class ReactiveDocumentRepositoryConformanceTest {
         prefix = "tck-" + UUID.randomUUID().toString().substring(0, 8) + "-";
         DocumentStore sorted = store(true);
         DocumentStore plain = store(false);
+        plainTable = plain;
         HalyxReactiveRepositoryFactory factory = new HalyxReactiveRepositoryFactory(
-                type -> type == KitOrder.class ? sorted : plain, reactive());
+                type -> type == KitOrder.class ? sorted : plain, DocumentRepositoryConformanceTest::kitKey, reactive());
         orders = factory.getRepository(ReactiveKitOrders.class);
         accounts = factory.getRepository(ReactiveKitAccounts.class);
         notes = factory.getRepository(ReactiveKitNotes.class);
+        customers = factory.getRepository(ReactiveKitCustomers.class);
+    }
+
+    @Test
+    void encryptedComponentsAreSealedInTheTable() {
+        KitCustomer ana = new KitCustomer(prefix + "ana", "Ana", "ana@example.com", new BigDecimal("2500.00"));
+
+        customers.save(ana).block();
+
+        assertThat(customers.findById(ana.id()).block()).isEqualTo(ana);
+        var stored = plainTable.get(Key.of(ana.id())).orElseThrow().document();
+        assertThat(stored.get("email")).as("sealed in the table").isInstanceOf(byte[].class);
+        assertThat(new String((byte[]) stored.get("email"), StandardCharsets.ISO_8859_1))
+                .startsWith("HLXS").doesNotContain("ana@example.com");
+        assertThat(stored.get("creditLimit")).isInstanceOf(byte[].class);
     }
 
     private String customer(String name) {

@@ -15,6 +15,7 @@
  */
 package dev.halyx.spring.data.document.repository;
 
+import dev.halyx.keys.CryptoKey;
 import dev.halyx.nosql.DocumentStore;
 import dev.halyx.reactor.ReactiveHalyx;
 import org.springframework.data.repository.core.EntityInformation;
@@ -36,6 +37,7 @@ import java.util.function.Function;
 public class HalyxReactiveRepositoryFactory extends ReactiveRepositoryFactorySupport {
 
     private final Function<Class<?>, DocumentStore> stores;
+    private final Function<String, CryptoKey> keys;
     private final ReactiveHalyx reactive;
     private final Map<Class<?>, EntityModel<?>> models = new ConcurrentHashMap<>();
 
@@ -44,7 +46,18 @@ public class HalyxReactiveRepositoryFactory extends ReactiveRepositoryFactorySup
      * @param reactive where the repositories' calls run
      */
     public HalyxReactiveRepositoryFactory(Function<Class<?>, DocumentStore> stores, ReactiveHalyx reactive) {
+        this(stores, DocumentStores::noKeys, reactive);
+    }
+
+    /**
+     * @param stores   the document store of an entity type, as for {@link HalyxRepositoryFactory}
+     * @param keys     the key an {@code @Encrypted} component names, such as the {@code CryptoKey} bean of that name
+     * @param reactive where the repositories' calls run
+     */
+    public HalyxReactiveRepositoryFactory(Function<Class<?>, DocumentStore> stores, Function<String, CryptoKey> keys,
+                                          ReactiveHalyx reactive) {
         this.stores = stores;
+        this.keys = keys;
         this.reactive = reactive;
     }
 
@@ -84,6 +97,6 @@ public class HalyxReactiveRepositoryFactory extends ReactiveRepositoryFactorySup
     private DocumentStore store(EntityModel<?> model) {
         DocumentStore store = stores.apply(model.type());
         model.checkAgainst(store.table(), model.storeName().orElse(store.table().name()));
-        return store;
+        return DocumentStores.encrypted(store, model, keys);
     }
 }

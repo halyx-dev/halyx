@@ -187,6 +187,34 @@ class KeyStoreTest {
     }
 
     @Test
+    void oneDataKeySealsSeveralIndependentMessages() {
+        CryptoKey data = store.key("data");
+        byte[] otherAad = "orders/o-1002".getBytes(StandardCharsets.UTF_8);
+
+        SealedData first;
+        SealedData second;
+        try (DataKey dataKey = data.generateDataKey()) {
+            long wraps = store.statistics().wraps();
+            first = dataKey.seal(DATA, AAD);
+            second = dataKey.seal(DATA, otherAad);
+            assertThat(store.statistics().wraps()).as("sealing makes no key service call").isEqualTo(wraps);
+            assertThat(first.keys()).containsExactly(dataKey.wrapped());
+            assertThat(first.toBytes()).as("own salt and nonce prefix").isNotEqualTo(second.toBytes());
+            assertThat(dataKey.open(second, otherAad)).isEqualTo(DATA);
+            assertThatThrownBy(() -> dataKey.open(first, otherAad)).isInstanceOf(DataIntegrityException.class);
+        }
+
+        assertThat(data.decrypt(first, AAD)).isEqualTo(DATA);
+        assertThat(store.decrypt(second, otherAad)).isEqualTo(DATA);
+        try (DataKey another = data.generateDataKey()) {
+            assertThatThrownBy(() -> another.open(first, AAD)).isInstanceOf(InvalidArgumentException.class);
+        }
+        DataKey closed = data.generateDataKey();
+        closed.close();
+        assertThatThrownBy(() -> closed.seal(DATA, AAD)).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
     void streamsSealAndOpenOneSegmentAtATime() throws IOException {
         KeyStore small = halyx.provider("local").keyStore(KeyStoreConfig.builder().segmentSize(4096).build());
         byte[] large = random(20_000);

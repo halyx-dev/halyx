@@ -68,7 +68,7 @@ class DynamoDocumentStoreConformanceIT extends DocumentStoreConformanceTest {
             .withExposedPorts(4566)
             .waitingFor(Wait.forListeningPort());
 
-    private static Halyx halyx;
+    static Halyx halyx;
 
     @BeforeAll
     static void start() {

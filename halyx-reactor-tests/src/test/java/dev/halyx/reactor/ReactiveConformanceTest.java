@@ -115,6 +115,15 @@ class ReactiveConformanceTest {
         }
     }
 
+    /** The document kit through the reactive views again, with the kit's non-key fields encrypted. */
+    @Nested
+    class EncryptedDocuments extends Documents {
+        @Override
+        protected TableConfig.Builder tables(TableConfig.Builder table) {
+            return encrypted(table, context().keyStore().key("tck-data"));
+        }
+    }
+
     @Nested
     class Keys extends KeyStoreConformanceTest {
         private final BlockingViews.KeyViews views = new BlockingViews.KeyViews(rx::wrap);

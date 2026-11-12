@@ -59,7 +59,7 @@ class FirestoreEmulatorDocumentStoreIT extends DocumentStoreConformanceTest {
             .waitingFor(Wait.forLogMessage(".*Dev App Server is now running.*", 1))
             .withStartupTimeout(Duration.ofMinutes(2));
 
-    private static Halyx halyx;
+    static Halyx halyx;
 
     @BeforeAll
     static void start() {

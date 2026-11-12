@@ -15,13 +15,16 @@
  */
 package dev.halyx.keys;
 
+import dev.halyx.error.InvalidArgumentException;
+
 import java.util.Arrays;
+import java.util.List;
 import java.util.Objects;
 
 /**
- * A 256-bit data key and its wrapped form, for applications with their own format. Close it as soon as the key is no
- * longer needed: closing zeroes the plaintext held here (copies returned by {@link #plaintext()} are the caller's to
- * clear). Not thread-safe once closed.
+ * A 256-bit data key and its wrapped form, for applications with their own format, or for sealing several messages
+ * with one key service call ({@link #seal}). Close it as soon as the key is no longer needed: closing zeroes the
+ * plaintext held here (copies returned by {@link #plaintext()} are the caller's to clear). Not thread-safe once closed.
  */
 public final class DataKey implements AutoCloseable {
 
@@ -42,6 +45,34 @@ public final class DataKey implements AutoCloseable {
     /** The key as wrapped by the key service: what to store next to the data. */
     public WrappedKey wrapped() {
         return wrapped;
+    }
+
+    /**
+     * Seals {@code plaintext}, bound to {@code aad} (may be empty), with this data key: HLXS, with this key's wrapped
+     * form as the only key entry. No key service call. Each message gets its own salt and nonce prefix, so its own
+     * subkey: messages sealed with one data key stay independent, and each opens with {@link CryptoKey#decrypt} or
+     * {@link KeyStore#decrypt} like any other.
+     */
+    public SealedData seal(byte[] plaintext, byte[] aad) {
+        Objects.requireNonNull(plaintext, "plaintext");
+        Objects.requireNonNull(aad, "aad");
+        return SealedData.of(Hlxs.seal(plaintextUnsafe(), List.of(wrapped), plaintext, aad,
+                KeyStoreConfig.DEFAULT_SEGMENT_SIZE, Hlxs.randomSalt(), Hlxs.randomNoncePrefix()));
+    }
+
+    /**
+     * Opens data sealed with this data key, with no key service call. Throws {@code InvalidArgumentException} if
+     * {@code sealed} doesn't list this key's wrapped form, and {@code DataIntegrityException} for wrong {@code aad} or
+     * changed data.
+     */
+    public byte[] open(SealedData sealed, byte[] aad) {
+        Objects.requireNonNull(sealed, "sealed");
+        Objects.requireNonNull(aad, "aad");
+        if (!sealed.keys().contains(wrapped)) {
+            throw new InvalidArgumentException("The data isn't sealed with this data key: it's sealed under "
+                    + sealed.keys().stream().map(WrappedKey::keyId).toList());
+        }
+        return Hlxs.open(plaintextUnsafe(), sealed.header(), sealed.bytesUnsafe(), aad);
     }
 
     byte[] plaintextUnsafe() {
