@@ -20,14 +20,17 @@ import dev.halyx.aws.AwsProvider;
 import dev.halyx.capability.Capabilities;
 import dev.halyx.error.CloudException;
 import dev.halyx.interceptor.AsyncInvocation;
+import dev.halyx.keys.spi.ServerSideKey;
 import dev.halyx.parameters.Parameter;
 import dev.halyx.parameters.ParameterCapability;
 import dev.halyx.parameters.spi.AbstractParameterDriver;
+import dev.halyx.parameters.spi.ParameterDriver;
 import software.amazon.awssdk.services.ssm.SsmAsyncClient;
 import software.amazon.awssdk.services.ssm.SsmClient;
 import software.amazon.awssdk.services.ssm.model.ParameterNotFoundException;
 import software.amazon.awssdk.services.ssm.model.ParameterType;
 import software.amazon.awssdk.services.ssm.model.ParameterVersionNotFoundException;
+import software.amazon.awssdk.services.ssm.model.PutParameterRequest;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -41,7 +44,9 @@ import java.util.function.Supplier;
 /**
  * Parameters on SSM Parameter Store. Portable names map to hierarchical parameters with a leading
  * slash ({@code orders/db/url} becomes {@code /orders/db/url}). Values are written as {@code String}
- * parameters, or {@code SecureString} (KMS-encrypted) with the {@code aws.ssm.secure} store property.
+ * parameters, or {@code SecureString} (KMS-encrypted) with the {@code aws.ssm.secure} store property. Secure stores
+ * declare {@code SERVER_SIDE_KMS}: a keyed driver passes the key's ARN as {@code KeyId} on every put, so each new
+ * version is encrypted with it.
  */
 public final class SsmParameterDriver extends AbstractParameterDriver {
 
@@ -50,16 +55,40 @@ public final class SsmParameterDriver extends AbstractParameterDriver {
     private final SsmClient ssm;
     private final Supplier<SsmAsyncClient> ssmAsync;
     private final boolean secure;
+    /** The ARN puts encrypt with, for a driver from {@link #withServerSideKey}, or null for the account's default. */
+    private final String keyId;
 
     /** GetParameters accepts up to 10 names. */
     private static final int BATCH = 10;
 
     /** @param ssmAsync the non-blocking client for asynchronous calls, made when first asked for */
     public SsmParameterDriver(SsmClient ssm, boolean secure, boolean nativeNames, Supplier<SsmAsyncClient> ssmAsync) {
-        super(AwsProvider.ID, Capabilities.of(ParameterCapability.VERSIONS), nativeNames);
+        this(ssm, secure, nativeNames, ssmAsync, null);
+    }
+
+    private SsmParameterDriver(SsmClient ssm, boolean secure, boolean nativeNames, Supplier<SsmAsyncClient> ssmAsync,
+                               String keyId) {
+        super(AwsProvider.ID, secure ? Capabilities.of(ParameterCapability.VERSIONS, ParameterCapability.SERVER_SIDE_KMS)
+                : Capabilities.of(ParameterCapability.VERSIONS), nativeNames);
         this.ssm = ssm;
         this.ssmAsync = ssmAsync;
         this.secure = secure;
+        this.keyId = keyId;
+    }
+
+    @Override
+    public ParameterDriver withServerSideKey(ServerSideKey key) {
+        return new SsmParameterDriver(ssm, secure, nativeNames, ssmAsync, key.nativeId());
+    }
+
+    /** An overwriting put of {@code value}, as a String, or a SecureString under the driver's key. */
+    private PutParameterRequest putRequest(String name, String value) {
+        var request = PutParameterRequest.builder().name(ssmName(name)).value(value).overwrite(true)
+                .type(secure ? ParameterType.SECURE_STRING : ParameterType.STRING);
+        if (keyId != null) {
+            request.keyId(keyId);
+        }
+        return request.build();
     }
 
     /** Portable names gain a leading slash; native names are used as they are. */
@@ -132,8 +161,7 @@ public final class SsmParameterDriver extends AbstractParameterDriver {
 
     @Override
     public Parameter put(String name, String value) {
-        var response = ssm.putParameter(b -> b.name(ssmName(name)).value(value).overwrite(true)
-                .type(secure ? ParameterType.SECURE_STRING : ParameterType.STRING));
+        var response = ssm.putParameter(putRequest(name, value));
         return new Parameter(name, value, String.valueOf(response.version()), null);
     }
 
@@ -214,8 +242,7 @@ public final class SsmParameterDriver extends AbstractParameterDriver {
 
     @Override
     public CompletableFuture<Parameter> putAsync(String name, String value, Executor blocking) {
-        return ssmAsync.get().putParameter(b -> b.name(ssmName(name)).value(value).overwrite(true)
-                        .type(secure ? ParameterType.SECURE_STRING : ParameterType.STRING))
+        return ssmAsync.get().putParameter(putRequest(name, value))
                 .thenApply(response -> new Parameter(name, value, String.valueOf(response.version()), null));
     }
 

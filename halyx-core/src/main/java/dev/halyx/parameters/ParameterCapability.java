@@ -20,5 +20,10 @@ import dev.halyx.capability.Capability;
 /** Optional parameter store features. */
 public enum ParameterCapability implements Capability {
     /** Reading earlier versions with {@link ParameterStore#get(String, String)}. */
-    VERSIONS
+    VERSIONS,
+    /**
+     * Having the service encrypt values at rest with a key from the provider's key service
+     * ({@link ParameterStoreConfig.Builder#serverSideKey}).
+     */
+    SERVER_SIDE_KMS
 }

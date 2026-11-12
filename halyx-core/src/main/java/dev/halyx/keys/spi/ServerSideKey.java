@@ -13,15 +13,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package dev.halyx.storage.spi;
+package dev.halyx.keys.spi;
 
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
 /**
- * The key a driver asks the storage service to encrypt with, resolved by core from a {@code CryptoKey} of the same
- * provider. Drivers that declare {@code SERVER_SIDE_KMS} apply it through {@link BlobStoreDriver#withServerSideKey}.
+ * The key a driver asks a cloud service to encrypt stored data with, resolved by core from a {@code CryptoKey} of the
+ * same provider. Blob and parameter drivers that declare {@code SERVER_SIDE_KMS} apply it through their
+ * {@code withServerSideKey} hook.
  *
  * @param nativeId   the key service's own id of the key: an AWS key ARN, a Cloud KMS crypto key name, an Azure Key
  *                   Vault key URL

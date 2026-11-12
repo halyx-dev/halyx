@@ -21,6 +21,7 @@ import com.google.cloud.secretmanager.v1.AccessSecretVersionRequest;
 import com.google.cloud.secretmanager.v1.AccessSecretVersionResponse;
 import com.google.cloud.secretmanager.v1.AddSecretVersionRequest;
 import com.google.cloud.secretmanager.v1.CreateSecretRequest;
+import com.google.cloud.secretmanager.v1.CustomerManagedEncryption;
 import com.google.cloud.secretmanager.v1.DeleteSecretRequest;
 import com.google.cloud.secretmanager.v1.ListSecretsRequest;
 import com.google.cloud.secretmanager.v1.ProjectName;
@@ -36,9 +37,11 @@ import dev.halyx.error.CloudException;
 import dev.halyx.gcp.GcpErrors;
 import dev.halyx.gcp.GcpFutures;
 import dev.halyx.gcp.GcpProvider;
+import dev.halyx.keys.spi.ServerSideKey;
 import dev.halyx.parameters.Parameter;
 import dev.halyx.parameters.ParameterCapability;
 import dev.halyx.parameters.spi.AbstractParameterDriver;
+import dev.halyx.parameters.spi.ParameterDriver;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -52,17 +55,34 @@ import java.util.concurrent.Executor;
 /**
  * Secrets on Google Secret Manager. Secret ids allow letters, digits, {@code -} and {@code _}, so the
  * portable separator {@code /} is stored as {@code __} (portable names never contain underscores).
- * Each write adds a secret version; versions are the version numbers.
+ * Each write adds a secret version; versions are the version numbers. New secrets replicate automatically; a keyed
+ * driver creates them with a customer-managed key, which automatic replication needs in a {@code global} key ring. A
+ * secret that exists keeps its own encryption.
  */
 public final class SecretManagerDriver extends AbstractParameterDriver {
 
     private final SecretManagerServiceClient client;
     private final String project;
+    /** The crypto key name new secrets are created with, for a driver from {@link #withServerSideKey}, or null. */
+    private final String kmsKeyName;
 
     public SecretManagerDriver(SecretManagerServiceClient client, String project, boolean nativeNames) {
-        super(GcpProvider.ID, Capabilities.of(ParameterCapability.VERSIONS), nativeNames);
+        this(client, project, nativeNames, null);
+    }
+
+    private SecretManagerDriver(SecretManagerServiceClient client, String project, boolean nativeNames,
+                                String kmsKeyName) {
+        super(GcpProvider.ID, Capabilities.of(ParameterCapability.VERSIONS, ParameterCapability.SERVER_SIDE_KMS),
+                nativeNames);
         this.client = client;
         this.project = project;
+        this.kmsKeyName = kmsKeyName;
+    }
+
+    @Override
+    public ParameterDriver withServerSideKey(ServerSideKey key) {
+        return new SecretManagerDriver(client, project, nativeNames,
+                CustomerManagedKeys.inLocation(key, "global", "Secret Manager with automatic replication"));
     }
 
     String encode(String name) {
@@ -139,10 +159,12 @@ public final class SecretManagerDriver extends AbstractParameterDriver {
         return SecretPayload.newBuilder().setData(ByteString.copyFrom(value, StandardCharsets.UTF_8)).build();
     }
 
-    private static Secret newSecret() {
-        return Secret.newBuilder()
-                .setReplication(Replication.newBuilder().setAutomatic(Replication.Automatic.getDefaultInstance()))
-                .build();
+    private Secret newSecret() {
+        Replication.Automatic.Builder automatic = Replication.Automatic.newBuilder();
+        if (kmsKeyName != null) {
+            automatic.setCustomerManagedEncryption(CustomerManagedEncryption.newBuilder().setKmsKeyName(kmsKeyName));
+        }
+        return Secret.newBuilder().setReplication(Replication.newBuilder().setAutomatic(automatic)).build();
     }
 
     private static Parameter toPortable(String name, String value, String versionName) {

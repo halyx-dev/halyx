@@ -31,7 +31,7 @@ import dev.halyx.keys.KeyPurpose;
 import dev.halyx.storage.spi.BlobStoreDriver;
 import dev.halyx.storage.spi.BufferPool;
 import dev.halyx.storage.spi.ChecksumCalculator;
-import dev.halyx.storage.spi.ServerSideKey;
+import dev.halyx.keys.spi.ServerSideKey;
 
 import java.io.IOException;
 import java.io.InputStream;

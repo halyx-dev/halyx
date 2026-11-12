@@ -15,6 +15,12 @@
  */
 package dev.halyx.gcp;
 
+import com.google.cloud.kms.v1.CryptoKey;
+import com.google.cloud.kms.v1.CryptoKeyVersion;
+import com.google.cloud.kms.v1.GetCryptoKeyRequest;
+import com.google.cloud.kms.v1.KeyManagementServiceGrpc;
+import com.google.cloud.kms.v1.ListCryptoKeyVersionsRequest;
+import com.google.cloud.kms.v1.ListCryptoKeyVersionsResponse;
 import com.google.cloud.parametermanager.v1.CreateParameterRequest;
 import com.google.cloud.parametermanager.v1.CreateParameterVersionRequest;
 import com.google.cloud.parametermanager.v1.DeleteParameterRequest;
@@ -41,6 +47,7 @@ import io.grpc.stub.StreamObserver;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -49,7 +56,8 @@ import java.util.concurrent.atomic.AtomicLong;
  * An in-memory Parameter Manager speaking the real gRPC protocol, following the documented behaviour:
  * caller-chosen version ids, version listings without payloads, deletes refused while versions exist,
  * and rendering of {@code __REF__(...)} secret references. It checks the driver's use of the API, not
- * GCP's exact semantics; run the same TCK against real GCP to confirm those.
+ * GCP's exact semantics; run the same TCK against real GCP to confirm those. It also serves the metadata of any Cloud
+ * KMS key as a symmetric key, for customer-managed keys.
  */
 final class FakeParameterManager extends ParameterManagerGrpc.ParameterManagerImplBase implements AutoCloseable {
 
@@ -61,11 +69,41 @@ final class FakeParameterManager extends ParameterManagerGrpc.ParameterManagerIm
     private final Server server;
 
     FakeParameterManager() throws IOException {
-        server = ServerBuilder.forPort(0).addService(this).build().start();
+        server = ServerBuilder.forPort(0).addService(this).addService(new FakeKms()).build().start();
     }
 
     int port() {
         return server.getPort();
+    }
+
+    /** The customer-managed key the parameter was created with ({@code kms_key}); empty for Google's default. */
+    Optional<String> kmsKey(String parameterName) {
+        return Optional.ofNullable(parameters.get(parameterName)).filter(Parameter::hasKmsKey).map(Parameter::getKmsKey);
+    }
+
+    /** Every crypto key is an enabled symmetric key with one version. */
+    private static final class FakeKms extends KeyManagementServiceGrpc.KeyManagementServiceImplBase {
+
+        private static CryptoKeyVersion version(String key) {
+            return CryptoKeyVersion.newBuilder().setName(key + "/cryptoKeyVersions/1")
+                    .setState(CryptoKeyVersion.CryptoKeyVersionState.ENABLED)
+                    .setAlgorithm(CryptoKeyVersion.CryptoKeyVersionAlgorithm.GOOGLE_SYMMETRIC_ENCRYPTION).build();
+        }
+
+        @Override
+        public void getCryptoKey(GetCryptoKeyRequest request, StreamObserver<CryptoKey> response) {
+            response.onNext(CryptoKey.newBuilder().setName(request.getName())
+                    .setPurpose(CryptoKey.CryptoKeyPurpose.ENCRYPT_DECRYPT).setPrimary(version(request.getName())).build());
+            response.onCompleted();
+        }
+
+        @Override
+        public void listCryptoKeyVersions(ListCryptoKeyVersionsRequest request,
+                                          StreamObserver<ListCryptoKeyVersionsResponse> response) {
+            response.onNext(ListCryptoKeyVersionsResponse.newBuilder().addCryptoKeyVersions(version(request.getParent()))
+                    .setTotalSize(1).build());
+            response.onCompleted();
+        }
     }
 
     /** Adds a version with a caller-chosen id, as another tool would. */

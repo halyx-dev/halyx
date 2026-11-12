@@ -37,6 +37,7 @@ import dev.halyx.cache.spi.CacheDriver;
 import dev.halyx.config.Credentials;
 import dev.halyx.config.HttpSettings;
 import dev.halyx.config.ProviderConfig;
+import dev.halyx.error.InvalidArgumentException;
 import dev.halyx.error.UnsupportedFeatureException;
 import dev.halyx.jdbc.JdbcDatabases;
 import dev.halyx.keys.KeyStoreConfig;
@@ -295,9 +296,13 @@ final class AwsConnection implements ProviderConnection {
                     config.endpoint().ifPresent(builder::endpointOverride);
                     ssm = builder.build();
                 }
-                yield new SsmParameterDriver(ssm,
-                        Boolean.parseBoolean(storeConfig.property(SsmParameterDriver.SECURE).orElse("false")),
-                        storeConfig.nativeNames(), this::ssmAsync);
+                boolean secure = Boolean.parseBoolean(storeConfig.property(SsmParameterDriver.SECURE).orElse("false"));
+                if (storeConfig.serverSideKey().isPresent() && !secure) {
+                    throw new InvalidArgumentException("SSM encrypts only SecureString parameters with a key: set the '"
+                            + SsmParameterDriver.SECURE + "' store property to true to use a server-side key", null,
+                            AwsProvider.ID, null);
+                }
+                yield new SsmParameterDriver(ssm, secure, storeConfig.nativeNames(), this::ssmAsync);
             }
             case SECRETS -> {
                 if (secretsManager == null) {

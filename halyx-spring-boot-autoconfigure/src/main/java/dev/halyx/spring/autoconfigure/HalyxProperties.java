@@ -21,6 +21,7 @@ import dev.halyx.config.Credentials;
 import dev.halyx.config.ProviderConfig;
 import dev.halyx.error.NotFoundException;
 import dev.halyx.interceptor.RetryPolicy;
+import dev.halyx.keys.CryptoKey;
 import dev.halyx.keys.KeyOptions;
 import dev.halyx.keys.KeyPurpose;
 import dev.halyx.keys.KeyStoreConfig;
@@ -1015,19 +1016,39 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
      *                    properties in place; no reloading when omitted
      * @param startupAttempts for {@code spring.config.import}: attempts when the backend is temporarily unavailable
      * @param properties provider-specific settings, such as {@code aws.ssm.secure}
+     * @param serverSideKey a key, of the store's provider, that the service encrypts new values with at rest (an SSM
+     *                    {@code SecureString}, a Secrets Manager, Secret Manager or Parameter Manager customer-managed
+     *                    key); none when omitted. {@code spring.config.import} only reads, so it doesn't use it
      */
     public record ParameterStoreProperties(String provider, @DefaultValue("secrets") ParameterKind kind, String location,
                                            @DefaultValue("") String prefix, Duration cacheTtl,
                                            @DefaultValue("false") boolean nativeNames, @DefaultValue("true") boolean expandJson,
                                            Duration reloadInterval, @DefaultValue("3") int startupAttempts,
-                                           Map<String, String> properties) {
+                                           Map<String, String> properties, EncryptionKey serverSideKey) {
 
+        @ConstructorBinding
         public ParameterStoreProperties {
             properties = ordered(properties);
         }
 
+        /** A store without a server-side key, as configured before server-side keys. */
+        public ParameterStoreProperties(String provider, ParameterKind kind, String location, String prefix,
+                                        Duration cacheTtl, boolean nativeNames, boolean expandJson,
+                                        Duration reloadInterval, int startupAttempts, Map<String, String> properties) {
+            this(provider, kind, location, prefix, cacheTtl, nativeNames, expandJson, reloadInterval, startupAttempts,
+                    properties, null);
+        }
+
         public ParameterStoreConfig toStoreConfig() {
+            return toStoreConfig(null);
+        }
+
+        /** The store's configuration, with {@code serverSideKey} when it isn't null. */
+        public ParameterStoreConfig toStoreConfig(CryptoKey serverSideKey) {
             ParameterStoreConfig.Builder config = ParameterStoreConfig.builder(kind).prefix(prefix).nativeNames(nativeNames);
+            if (serverSideKey != null) {
+                config.serverSideKey(serverSideKey);
+            }
             if (location != null) {
                 config.location(location);
             }

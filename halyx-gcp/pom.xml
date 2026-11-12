@@ -146,6 +146,12 @@
             <artifactId>grpc-google-cloud-parametermanager-v1</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- ...and the one Cloud KMS key it needs for customer-managed keys -->
+        <dependency>
+            <groupId>com.google.api.grpc</groupId>
+            <artifactId>grpc-google-cloud-kms-v1</artifactId>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>testcontainers-junit-jupiter</artifactId>
