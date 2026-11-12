@@ -505,7 +505,15 @@ halyx:
       # native-names: true         # use existing backend names as they are
       # expand-json: true          # (default) JSON values also become db.creds.password and so on
       # startup-attempts: 3        # (default) retries while the backend is briefly unavailable
+      # server-side-key:           # have the service encrypt new values with a key of the same cloud
+      #   store: kms               # a halyx.key-stores entry; optional when there's only one
+      #   name: orders-secrets
 ```
+
+With `server-side-key`, the service encrypts new values at rest with that key: see
+[Server-side encryption with a key](api/parameters.md#server-side-encryption-with-a-key). The store bean is created
+after its key store, and the key's provider is checked at startup without a key service call. `halyx:` imports only
+read, so they don't use the key.
 
 ### Secrets in settings
 

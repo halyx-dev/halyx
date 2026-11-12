@@ -42,7 +42,7 @@ import dev.halyx.storage.spi.AbstractBlobStoreDriver;
 import dev.halyx.storage.spi.BlobStoreDriver;
 import dev.halyx.storage.spi.ChecksumCalculator;
 import dev.halyx.storage.spi.MultipartUploadSession;
-import dev.halyx.storage.spi.ServerSideKey;
+import dev.halyx.keys.spi.ServerSideKey;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;

@@ -30,7 +30,7 @@ import dev.halyx.storage.PresignRequest;
 import dev.halyx.storage.PresignedUpload;
 import dev.halyx.storage.PutOptions;
 import dev.halyx.storage.spi.BlobStoreDriver;
-import dev.halyx.storage.spi.ServerSideKey;
+import dev.halyx.keys.spi.ServerSideKey;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Mono;
 

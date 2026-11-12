@@ -73,6 +73,7 @@ provider: GCS can presign only with credentials that can sign.
 | `ParameterCapability` | Supported by |
 |---|---|
 | `VERSIONS` | SSM Parameter Store, Secrets Manager, Key Vault, Secret Manager, Parameter Manager, Vault. Not App Configuration. |
+| `SERVER_SIDE_KMS` | SSM Parameter Store with `aws.ssm.secure`, Secrets Manager, Secret Manager, Parameter Manager. Not Key Vault, App Configuration or Vault. |
 
 ## Native clients with `unwrap`
 

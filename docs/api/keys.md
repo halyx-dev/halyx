@@ -199,6 +199,9 @@ Other services take a key and do the sealing for you:
   Azure Blob Storage encrypt every write with a key from the same cloud: S3 SSE-KMS, a customer-managed key, an
   encryption scope. Presigned uploads and downloads keep working. See
   [Server-side encryption with a key](storage.md#server-side-encryption-with-a-key).
+- **Parameters and secrets, encrypted at rest by the service:** `ParameterStoreConfig.Builder.serverSideKey(key)`
+  has SSM Parameter Store, Secrets Manager, Secret Manager or Parameter Manager encrypt new values with a key from
+  the same cloud. See [Server-side encryption with a key](parameters.md#server-side-encryption-with-a-key).
 - **Claim checks:** `ClaimCheck.of(blobStore.encryptedWith(key))` seals the message bodies and stream values that
   go through a blob store. See [Encrypted claim checks](messaging.md#encrypted-claim-checks).
 - **JWTs, with Spring Boot:** `halyx.security.jwt.key` makes a Spring Security `JwtEncoder` that signs with the key,

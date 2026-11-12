@@ -20,6 +20,7 @@ import dev.halyx.keys.CryptoKey;
 import dev.halyx.keys.KeyStore;
 import dev.halyx.keys.SealedData;
 import dev.halyx.keys.Signature;
+import dev.halyx.parameters.ParameterStore;
 import dev.halyx.reactor.ReactiveCryptoKey;
 import dev.halyx.spring.autoconfigure.HalyxAutoConfiguration;
 import dev.halyx.spring.autoconfigure.security.HalyxJwtAutoConfiguration;
@@ -44,6 +45,7 @@ import software.amazon.awssdk.services.kms.KmsClient;
 import software.amazon.awssdk.services.kms.model.KeySpec;
 import software.amazon.awssdk.services.kms.model.KeyUsageType;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
 import software.amazon.awssdk.services.s3.model.ServerSideEncryption;
 
 import java.net.URI;
@@ -150,6 +152,25 @@ class HalyxAwsKeysIT {
             assertThat(head.serverSideEncryption()).isEqualTo(ServerSideEncryption.AWS_KMS);
             assertThat(head.ssekmsKeyId()).isEqualTo(arn);
             assertThat(receipts.getBytes(BlobKey.of("r-1.json"))).isEqualTo(DATA);
+        });
+    }
+
+    @Test
+    void aSecretsStoreWithAServerSideKeyCreatesSecretsWithIt() {
+        String prefix = "sse-" + UUID.randomUUID().toString().substring(0, 8);
+        runner.withPropertyValues("halyx.parameter-stores.secrets.kind=secrets",
+                "halyx.parameter-stores.secrets.prefix=" + prefix,
+                "halyx.parameter-stores.secrets.server-side-key.name=data").run(context -> {
+            assertThat(context).hasNotFailed();
+            ParameterStore secrets = context.getBean("secrets", ParameterStore.class);
+            String arn = admin.describeKey(b -> b.keyId("alias/orders-data")).keyMetadata().arn();
+
+            secrets.put("db/password", "s3cr3t");
+
+            assertThat(secrets.unwrap(SecretsManagerClient.class)
+                    .describeSecret(b -> b.secretId(prefix + "/db/password")).kmsKeyId()).isEqualTo(arn);
+            assertThat(secrets.require("db/password")).isEqualTo("s3cr3t");
+            secrets.delete("db/password");
         });
     }
 

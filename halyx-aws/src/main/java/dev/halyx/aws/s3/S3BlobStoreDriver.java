@@ -50,7 +50,7 @@ import dev.halyx.storage.spi.BlobStoreDriver;
 import dev.halyx.storage.spi.BufferPool;
 import dev.halyx.storage.spi.MultipartUploadSession;
 import dev.halyx.storage.spi.PartUploader;
-import dev.halyx.storage.spi.ServerSideKey;
+import dev.halyx.keys.spi.ServerSideKey;
 import software.amazon.awssdk.awscore.presigner.PresignedRequest;
 import software.amazon.awssdk.core.ResponseBytes;
 import software.amazon.awssdk.core.ResponseInputStream;

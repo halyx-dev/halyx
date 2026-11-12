@@ -39,9 +39,11 @@ import dev.halyx.error.CloudException;
 import dev.halyx.gcp.GcpErrors;
 import dev.halyx.gcp.GcpFutures;
 import dev.halyx.gcp.GcpProvider;
+import dev.halyx.keys.spi.ServerSideKey;
 import dev.halyx.parameters.Parameter;
 import dev.halyx.parameters.ParameterCapability;
 import dev.halyx.parameters.spi.AbstractParameterDriver;
+import dev.halyx.parameters.spi.ParameterDriver;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -66,6 +68,9 @@ import java.util.concurrent.ThreadLocalRandom;
  *
  * <p>With the {@code gcp.parametermanager.render} store property, values are rendered: references to
  * Secret Manager secrets ({@code __REF__(//secretmanager.googleapis.com/...)}) are resolved.
+ *
+ * <p>A keyed driver creates new parameters with a customer-managed key ({@code kms_key}), which must be in a key ring
+ * in the store's location. A parameter that exists keeps its own encryption.
  */
 public final class ParameterManagerDriver extends AbstractParameterDriver {
 
@@ -75,14 +80,29 @@ public final class ParameterManagerDriver extends AbstractParameterDriver {
     private final String project;
     private final String location;
     private final boolean render;
+    /** The crypto key name new parameters are created with, for a driver from {@link #withServerSideKey}, or null. */
+    private final String kmsKey;
 
     public ParameterManagerDriver(ParameterManagerClient client, String project, String location, boolean render,
                                   boolean nativeNames) {
-        super(GcpProvider.ID, Capabilities.of(ParameterCapability.VERSIONS), nativeNames);
+        this(client, project, location, render, nativeNames, null);
+    }
+
+    private ParameterManagerDriver(ParameterManagerClient client, String project, String location, boolean render,
+                                   boolean nativeNames, String kmsKey) {
+        super(GcpProvider.ID, Capabilities.of(ParameterCapability.VERSIONS, ParameterCapability.SERVER_SIDE_KMS),
+                nativeNames);
         this.client = client;
         this.project = project;
         this.location = location;
         this.render = render;
+        this.kmsKey = kmsKey;
+    }
+
+    @Override
+    public ParameterDriver withServerSideKey(ServerSideKey key) {
+        return new ParameterManagerDriver(client, project, location, render, nativeNames,
+                CustomerManagedKeys.inLocation(key, location, "Parameter Manager"));
     }
 
     String encode(String name) {
@@ -193,8 +213,12 @@ public final class ParameterManagerDriver extends AbstractParameterDriver {
                 .build();
     }
 
-    private static com.google.cloud.parametermanager.v1.Parameter newParameter() {
-        return com.google.cloud.parametermanager.v1.Parameter.newBuilder().setFormat(ParameterFormat.UNFORMATTED).build();
+    private com.google.cloud.parametermanager.v1.Parameter newParameter() {
+        var parameter = com.google.cloud.parametermanager.v1.Parameter.newBuilder().setFormat(ParameterFormat.UNFORMATTED);
+        if (kmsKey != null) {
+            parameter.setKmsKey(kmsKey);
+        }
+        return parameter.build();
     }
 
     private static Parameter stored(String name, String value, ParameterVersion created) {

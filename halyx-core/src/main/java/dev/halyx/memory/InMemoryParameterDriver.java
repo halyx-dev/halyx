@@ -17,9 +17,11 @@ package dev.halyx.memory;
 
 import dev.halyx.capability.Capabilities;
 import dev.halyx.error.CloudException;
+import dev.halyx.keys.spi.ServerSideKey;
 import dev.halyx.parameters.Parameter;
 import dev.halyx.parameters.ParameterCapability;
 import dev.halyx.parameters.spi.AbstractParameterDriver;
+import dev.halyx.parameters.spi.ParameterDriver;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -29,35 +31,56 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentSkipListMap;
 
-/** In-memory parameters with numbered versions, like SSM Parameter Store. */
+/**
+ * In-memory parameters with numbered versions, like SSM Parameter Store. A server-side key is recorded when a parameter
+ * is created, as most services apply it, and read back through {@link InMemoryParameters}.
+ */
 final class InMemoryParameterDriver extends AbstractParameterDriver {
 
-    private final ConcurrentSkipListMap<String, List<Parameter>> values;
+    /** A parameter's versions, oldest first, and the native id of the key it was created with, or null. */
+    record Entry(List<Parameter> versions, String serverSideKey) {
+    }
 
-    InMemoryParameterDriver(ConcurrentSkipListMap<String, List<Parameter>> values, boolean nativeNames) {
-        super(InMemoryProvider.ID, Capabilities.of(ParameterCapability.VERSIONS), nativeNames);
+    private final ConcurrentSkipListMap<String, Entry> values;
+    /** The key new parameters are created with, for a driver from {@link #withServerSideKey}, or null. */
+    private final ServerSideKey writeKey;
+
+    InMemoryParameterDriver(ConcurrentSkipListMap<String, Entry> values, boolean nativeNames) {
+        this(values, nativeNames, null);
+    }
+
+    private InMemoryParameterDriver(ConcurrentSkipListMap<String, Entry> values, boolean nativeNames,
+                                    ServerSideKey writeKey) {
+        super(InMemoryProvider.ID, Capabilities.of(ParameterCapability.VERSIONS, ParameterCapability.SERVER_SIDE_KMS),
+                nativeNames);
         this.values = values;
+        this.writeKey = writeKey;
+    }
+
+    @Override
+    public ParameterDriver withServerSideKey(ServerSideKey key) {
+        return new InMemoryParameterDriver(values, nativeNames, key);
     }
 
     @Override
     public Optional<Parameter> get(String name) {
-        List<Parameter> versions = values.get(name);
-        return versions == null ? Optional.empty() : Optional.of(versions.getLast());
+        Entry entry = values.get(name);
+        return entry == null ? Optional.empty() : Optional.of(entry.versions().getLast());
     }
 
     @Override
     public Optional<Parameter> get(String name, String version) {
-        List<Parameter> versions = values.get(name);
-        return versions == null ? Optional.empty()
-                : versions.stream().filter(p -> p.version().equals(version)).findFirst();
+        Entry entry = values.get(name);
+        return entry == null ? Optional.empty()
+                : entry.versions().stream().filter(p -> p.version().equals(version)).findFirst();
     }
 
     @Override
     public Map<String, Parameter> list(String prefix) {
         Map<String, Parameter> found = new LinkedHashMap<>();
-        values.forEach((name, versions) -> {
+        values.forEach((name, entry) -> {
             if (matches(name, prefix)) {
-                found.put(name, versions.getLast());
+                found.put(name, entry.versions().getLast());
             }
         });
         return found;
@@ -65,12 +88,13 @@ final class InMemoryParameterDriver extends AbstractParameterDriver {
 
     @Override
     public Parameter put(String name, String value) {
-        List<Parameter> versions = values.compute(name, (k, existing) -> {
-            List<Parameter> next = existing == null ? new ArrayList<>() : new ArrayList<>(existing);
+        Entry stored = values.compute(name, (k, existing) -> {
+            List<Parameter> next = existing == null ? new ArrayList<>() : new ArrayList<>(existing.versions());
             next.add(new Parameter(name, value, String.valueOf(next.size() + 1), Instant.now()));
-            return List.copyOf(next);
+            String key = existing != null ? existing.serverSideKey() : writeKey != null ? writeKey.nativeId() : null;
+            return new Entry(List.copyOf(next), key);
         });
-        return versions.getLast();
+        return stored.versions().getLast();
     }
 
     @Override
@@ -85,6 +109,6 @@ final class InMemoryParameterDriver extends AbstractParameterDriver {
 
     @Override
     protected List<Object> nativeClients() {
-        return List.of();
+        return List.of(new InMemoryParameters(values));
     }
 }

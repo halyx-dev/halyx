@@ -19,6 +19,8 @@ import dev.halyx.keys.KeyPurpose;
 import dev.halyx.keys.KeyStore;
 import dev.halyx.memory.InMemoryBlobs;
 import dev.halyx.memory.InMemoryKeys;
+import dev.halyx.memory.InMemoryParameters;
+import dev.halyx.parameters.ParameterStore;
 import dev.halyx.spring.autoconfigure.HalyxAutoConfiguration;
 import dev.halyx.spring.autoconfigure.HalyxProperties;
 import dev.halyx.storage.BlobContent;
@@ -37,7 +39,10 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Blob stores the storage service encrypts with a key from properties, alone and under client-side sealing. */
+/**
+ * Blob stores the storage service encrypts with a key from properties, alone and under client-side sealing, and
+ * parameter stores whose service does.
+ */
 class HalyxServerSideKeysTest {
 
     private static final String TEXT = "{\"email\":\"ana@example.com\"}";
@@ -125,5 +130,40 @@ class HalyxServerSideKeysTest {
         runner.withPropertyValues("halyx.blob-stores.files.server-side-key.name=storage",
                 "halyx.blob-stores.files.server-side-key.store=nope").run(context ->
                 assertThat(context).getFailure().hasStackTraceContaining("halyx.blob-stores.files.server-side-key.store"));
+    }
+
+    @Test
+    void aServerSideKeyEncryptsNewParameters() {
+        runner.withPropertyValues("halyx.parameter-stores.secrets.kind=secrets",
+                "halyx.parameter-stores.secrets.prefix=orders",
+                "halyx.parameter-stores.secrets.server-side-key.name=storage",
+                "halyx.parameter-stores.plain.kind=secrets").run(context -> {
+            assertThat(context).hasNotFailed();
+            KeyStore kms = context.getBean("kms", KeyStore.class);
+            ParameterStore secrets = context.getBean("secrets", ParameterStore.class);
+            ParameterStore plain = context.getBean("plain", ParameterStore.class);
+            assertThat(kms.statistics().metadataReads()).as("no key service call at startup").isZero();
+            assertThat(context.getBeanFactory().getBeanDefinition("secrets").getDescription())
+                    .endsWith("encrypted at rest with storage");
+
+            secrets.put("db/password", "s3cr3t");
+            plain.put("api/token", "t0k3n");
+
+            InMemoryParameters stored = plain.unwrap(InMemoryParameters.class);
+            assertThat(stored.serverSideKey("orders/db/password")).contains(kms.key("storage").metadata().nativeId());
+            assertThat(stored.serverSideKey("api/token")).isEmpty();
+            assertThat(plain.require("orders/db/password")).as("reads need nothing").isEqualTo("s3cr3t");
+        });
+    }
+
+    @Test
+    void aParameterStoreKeyIsCheckedAtStartup() {
+        runner.withPropertyValues("halyx.parameter-stores.secrets.server-side-key.store=kms").run(context ->
+                assertThat(context).getFailure().hasStackTraceContaining(
+                        "halyx.parameter-stores.secrets.server-side-key.name is required"));
+        runner.withPropertyValues("halyx.parameter-stores.secrets.server-side-key.name=storage",
+                "halyx.parameter-stores.secrets.server-side-key.store=nope").run(context ->
+                assertThat(context).getFailure().hasStackTraceContaining(
+                        "halyx.parameter-stores.secrets.server-side-key.store must name one of halyx.key-stores"));
     }
 }

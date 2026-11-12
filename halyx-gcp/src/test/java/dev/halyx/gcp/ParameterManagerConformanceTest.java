@@ -27,14 +27,20 @@ import com.google.cloud.parametermanager.v1.ParameterManagerClient;
 import com.google.cloud.parametermanager.v1.ParameterVersionName;
 import dev.halyx.gcp.parameters.ParameterManagerDriver;
 import dev.halyx.gcp.parameters.ParameterManagerDriverAccess;
+import dev.halyx.error.InvalidArgumentException;
+import dev.halyx.keys.CryptoKey;
+import dev.halyx.keys.KeyStoreConfig;
 import dev.halyx.parameters.ParameterStore;
 import dev.halyx.parameters.ParameterStoreConfig;
+import dev.halyx.tck.ParameterServerSideKeyConformanceTest;
 import dev.halyx.tck.ParameterStoreConformanceTest;
 
 import java.net.URI;
 import java.time.Instant;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * The parameter store TCK on Parameter Manager, through the real client and gRPC stubs against
@@ -150,5 +156,69 @@ class ParameterManagerConformanceTest {
         String later = ParameterManagerDriverAccess.newVersionId(Instant.parse("2026-01-01T00:00:01Z"));
 
         assertThat(earlier).matches("v\\d{13}-[0-9a-f]{4}").isLessThan(later);
+    }
+
+    /** A key in a key ring in {@code location}, served by the fake. */
+    private static CryptoKey key(String location) {
+        return halyx.provider("gcp").keyStore(KeyStoreConfig.builder()
+                .location("projects/test-project/locations/" + location + "/keyRings/parameters").build()).key("values");
+    }
+
+    @Nested
+    class KeyedRegional extends ParameterStoreConformanceTest {
+        @Override
+        protected boolean nonBlockingAsync() {
+            return true;
+        }
+
+        @Override
+        protected CloudContext context() {
+            return halyx.provider("gcp");
+        }
+
+        @Override
+        protected ParameterStoreConfig.Builder config() {
+            return ParameterStoreConfig.parameters().location("europe-west2").serverSideKey(key("europe-west2"));
+        }
+
+        @Override
+        protected String nativePrefix(String unique) {
+            return unique + "_";
+        }
+    }
+
+    @Nested
+    class ServerSideKeys extends ParameterServerSideKeyConformanceTest {
+        private final CryptoKey key = key("global");
+
+        @Override
+        protected CloudContext context() {
+            return halyx.provider("gcp");
+        }
+
+        @Override
+        protected ParameterStoreConfig.Builder config() {
+            return ParameterStoreConfig.parameters();
+        }
+
+        @Override
+        protected CryptoKey serverSideKey() {
+            return key;
+        }
+
+        @Override
+        protected Optional<String> storedServerSideKey(ParameterStore store, String name) {
+            return fake.kmsKey("projects/test-project/locations/global/parameters/" + name.replace("/", "__"));
+        }
+    }
+
+    @Test
+    void theKeyMustBeInTheStoresLocation() {
+        ParameterStore store = halyx.provider("gcp").parameterStore(ParameterStoreConfig.parameters()
+                .location("europe-west2").prefix("sse-location").serverSideKey(key("global")).build());
+
+        assertThatThrownBy(() -> store.put("app/mode", "x")).isInstanceOf(InvalidArgumentException.class)
+                .hasMessageContaining("'europe-west2'").hasMessageContaining("'global'");
+        assertThat(store.get("app/mode")).isEmpty();
     }
 }

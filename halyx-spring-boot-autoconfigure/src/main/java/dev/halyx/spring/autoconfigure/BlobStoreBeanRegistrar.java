@@ -118,14 +118,29 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
                             secretStores));
                     names.register(name, "halyx.caches." + name, "namespace", definition);
                 });
+        Set<String> keyStoreNames = binder
+                .bind("halyx.key-stores", Bindable.mapOf(String.class, HalyxProperties.KeyStoreProperties.class))
+                .orElse(Map.of()).keySet();
         binder.bind("halyx.parameter-stores", Bindable.mapOf(String.class, HalyxProperties.ParameterStoreProperties.class))
                 .orElse(Map.of())
                 .forEach((name, store) -> {
-                    RootBeanDefinition definition = serviceBean(ParameterStore.class, "parameterStore",
-                            "halyx.parameter-stores." + name, store.provider());
-                    definition.getConstructorArgumentValues().addIndexedArgumentValue(2, store.toStoreConfig());
-                    definition.setDescription("Halyx " + store.kind().name().toLowerCase() + " store " + name);
-                    names.register(name, "halyx.parameter-stores." + name, null, definition);
+                    String property = "halyx.parameter-stores." + name;
+                    String description = "Halyx " + store.kind().name().toLowerCase() + " store " + name;
+                    RootBeanDefinition definition;
+                    if (store.serverSideKey() == null) {
+                        definition = serviceBean(ParameterStore.class, "parameterStore", property, store.provider());
+                        definition.getConstructorArgumentValues().addIndexedArgumentValue(2, store.toStoreConfig());
+                    } else {
+                        // the key is an inner bean on its store bean, created first and destroyed after this store
+                        definition = serviceBean(ParameterStore.class, "keyedParameterStore", property, store.provider());
+                        definition.getConstructorArgumentValues().addIndexedArgumentValue(2, store);
+                        definition.getConstructorArgumentValues().addIndexedArgumentValue(3, keyArgument(
+                                property + ".server-side-key", store.serverSideKey(),
+                                "the key the service encrypts values with", keyStoreNames));
+                        description += ", encrypted at rest with " + store.serverSideKey().name();
+                    }
+                    definition.setDescription(description);
+                    names.register(name, property, null, definition);
                 });
         // Bound on their own: an entry with only secrets binds as no key store at all.
         binder.bind("halyx.key-stores", Bindable.mapOf(String.class, KeyStoreSecrets.class)).orElse(Map.of())

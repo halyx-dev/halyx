@@ -17,6 +17,8 @@ package dev.halyx.parameters.spi;
 
 import dev.halyx.capability.Capabilities;
 import dev.halyx.error.CloudException;
+import dev.halyx.error.UnsupportedFeatureException;
+import dev.halyx.keys.spi.ServerSideKey;
 import dev.halyx.parameters.Parameter;
 
 import java.util.Map;
@@ -43,6 +45,14 @@ public interface ParameterDriver {
     Parameter put(String name, String value);
 
     void delete(String name);
+
+    /**
+     * A copy of this driver whose writes have the service encrypt new values with {@code key}, sharing this driver's
+     * clients. Drivers that declare {@code SERVER_SIDE_KMS} override it; core calls it on the first write.
+     */
+    default ParameterDriver withServerSideKey(ServerSideKey key) {
+        throw new UnsupportedFeatureException("Server-side encryption with a key is not supported");
+    }
 
     // Each defaults to its blocking call on the blocking executor; a driver whose client is non-blocking overrides
     // them. Failures may be native: the store translates them.

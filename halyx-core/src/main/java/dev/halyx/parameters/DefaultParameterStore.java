@@ -16,9 +16,14 @@
 package dev.halyx.parameters;
 
 import dev.halyx.capability.Capabilities;
+import dev.halyx.error.InvalidArgumentException;
 import dev.halyx.interceptor.AsyncInvocation;
 import dev.halyx.interceptor.InterceptorChain;
 import dev.halyx.interceptor.OperationContext;
+import dev.halyx.keys.CryptoKey;
+import dev.halyx.keys.KeyMetadata;
+import dev.halyx.keys.KeyPurpose;
+import dev.halyx.keys.spi.ServerSideKey;
 import dev.halyx.parameters.spi.ParameterDriver;
 
 import org.slf4j.Logger;
@@ -78,6 +83,42 @@ public final class DefaultParameterStore implements ParameterStore {
         this.config = Objects.requireNonNull(config, "config");
         this.driver = Objects.requireNonNull(driver, "driver");
         this.interceptors = Objects.requireNonNull(interceptors, "interceptors");
+        config.serverSideKey().ifPresent(this::checkServerSideKey);
+    }
+
+    /** Checks what needs no key service call: the capability, and that the key is this provider's. */
+    private void checkServerSideKey(CryptoKey key) {
+        driver.capabilities().require(ParameterCapability.SERVER_SIDE_KMS, provider);
+        if (!key.provider().equals(provider)) {
+            throw new InvalidArgumentException("Server-side key '" + key.name() + "' is a " + key.provider()
+                    + " key; a " + provider + " store can only encrypt with " + provider + " keys", null, provider, null);
+        }
+    }
+
+    /**
+     * The driver for a write: keyed with the store's server-side key, else the plain driver. The key's metadata is
+     * cached, so this costs a key service call only on first use and refresh.
+     */
+    private ParameterDriver writer() {
+        return config.serverSideKey().map(key -> keyed(key, key.metadata())).orElse(driver);
+    }
+
+    /** {@link #writer()} for an asynchronous write: the key's metadata is read without blocking where it can be. */
+    private CompletableFuture<ParameterDriver> writerAsync(Executor blocking) {
+        Optional<CryptoKey> configured = config.serverSideKey();
+        if (configured.isEmpty()) {
+            return CompletableFuture.completedFuture(driver);
+        }
+        CryptoKey key = configured.get();
+        return key.async(blocking).metadata().thenApply(metadata -> keyed(key, metadata));
+    }
+
+    private ParameterDriver keyed(CryptoKey key, KeyMetadata metadata) {
+        if (!metadata.purposes().contains(KeyPurpose.ENCRYPTION)) {
+            throw new InvalidArgumentException("Server-side key '" + key.name() + "' can't encrypt: its purposes are "
+                    + metadata.purposes(), null, provider, null);
+        }
+        return driver.withServerSideKey(new ServerSideKey(metadata.nativeId(), key.options().properties()));
     }
 
     @Override
@@ -132,7 +173,7 @@ public final class DefaultParameterStore implements ParameterStore {
     public Parameter put(String name, String value) {
         String full = full(name);
         Objects.requireNonNull(value, "value");
-        Parameter stored = execute("put", full, () -> driver.put(full, value));
+        Parameter stored = execute("put", full, () -> writer().put(full, value));
         cache.clear();
         return stored.rename(name);
     }
@@ -439,7 +480,8 @@ public final class DefaultParameterStore implements ParameterStore {
                 String full = full(name);
                 Objects.requireNonNull(value, "value");
                 return full;
-            }, full -> executeAsync("put", full, blocking, executor -> driver.putAsync(full, value, executor))
+            }, full -> executeAsync("put", full, blocking, executor -> writerAsync(executor)
+                            .thenCompose(writer -> writer.putAsync(full, value, executor)))
                     .thenApply(stored -> {
                         cache.clear();
                         return stored.rename(name);

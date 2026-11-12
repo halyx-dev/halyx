@@ -128,10 +128,16 @@ public final class HalyxBlobStores {
         return context(property, provider).parameterStore(config);
     }
 
-    /**
-     * The blob store {@code bucket}, seen through a view that seals blobs with the key {@code keyName} of {@code keys},
-     * all of them or only those under {@code prefix}.
-     */
+    /** A parameter store whose service encrypts new values at rest with {@code serverSideKey}. */
+    public ParameterStore keyedParameterStore(String property, String provider,
+                                              HalyxProperties.ParameterStoreProperties store, CryptoKey serverSideKey) {
+        try {
+            return parameterStore(property, provider, store.toStoreConfig(serverSideKey));
+        } catch (CloudException e) {
+            throw new IllegalStateException(property + ".server-side-key: " + e.getMessage(), e);
+        }
+    }
+
     /**
      * A blob store with keys: encrypted at rest by the storage service with {@code serverSideKey}, then sealed by Halyx
      * with {@code encryptionKey} (under {@code prefix} only, when given). Either key may be null.

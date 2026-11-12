@@ -18,6 +18,7 @@ package dev.halyx.storage.spi;
 import dev.halyx.capability.Capabilities;
 import dev.halyx.error.CloudException;
 import dev.halyx.error.UnsupportedFeatureException;
+import dev.halyx.keys.spi.ServerSideKey;
 import dev.halyx.storage.BatchDeleteResult;
 import dev.halyx.storage.ChecksumAlgorithm;
 import dev.halyx.storage.Checksums;

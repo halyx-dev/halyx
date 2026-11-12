@@ -202,6 +202,44 @@ What to plan for:
 - **Latency and egress.** A read after the cache expires crosses clouds. A `cacheTtl` of minutes makes reads rare.
 - **Bootstrap credentials** stay each cloud's workload identity, since they can't come from the store.
 
+## Server-side encryption with a key
+
+The services encrypt values at rest with a key they manage. `ParameterStoreConfig.Builder.serverSideKey(key)` has
+them use a key you choose from the same cloud's key service instead (`ParameterCapability.SERVER_SIDE_KMS`). Reads
+need nothing: the service decrypts with whatever key a value was stored with.
+
+```java
+CryptoKey key = halyx.provider("aws").keyStore().key("orders-secrets");
+ParameterStore secrets = halyx.provider("aws").parameterStore(
+        ParameterStoreConfig.secrets().prefix("orders").serverSideKey(key).build());
+secrets.put("db/password", password);   // a new secret, encrypted with orders-secrets
+```
+
+| Store | What the key is used for |
+|---|---|
+| SSM Parameter Store | `KeyId` on every put, so each new version uses it. Needs `aws.ssm.secure=true` (`SecureString`); a store without it is refused when created |
+| Secrets Manager | `KmsKeyId` when a secret is created |
+| Secret Manager | A customer-managed key in the automatic replication of new secrets, which must be in a `global` key ring |
+| Parameter Manager | `kms_key` on new parameters, which must be in a key ring in the store's location |
+| Azure Key Vault, App Configuration, Vault | Not supported: Key Vault and App Configuration encrypt with the vault's or store's own key, and Vault with its barrier |
+
+- **The key applies when a parameter is created.** One that already exists keeps the key it was created with, on
+  every store but SSM: a put adds a version, and the services fix the key per secret. To move an existing secret to
+  a new key, use the service's own tools (Secrets Manager `UpdateSecret`, or recreate it). SSM encrypts each new
+  version with the key the put names, so a put through a store without the key goes back to the account's default.
+- **Checks.** Creating the store checks the capability and that the key belongs to the store's provider, with no
+  key service call. The first put reads the key's metadata (cached, as for any key) and refuses a key that can't
+  encrypt. A key in the wrong location for Secret Manager or Parameter Manager is refused before anything is
+  written.
+- **Configurations with a key are separate stores.** `ParameterStoreConfig` compares the key by identity, so two
+  configurations with the same key handle share one store, and a configuration without it is another store.
+- **Permissions.** The service's caller needs to use the key: on AWS, `kms:Decrypt` on it for reads, and for writes
+  `kms:Encrypt` (SSM standard parameters) or `kms:GenerateDataKey` (Secrets Manager, SSM advanced parameters); on
+  Google Cloud, the Secret Manager or Parameter Manager service agent needs
+  `roles/cloudkms.cryptoKeyEncrypterDecrypter` on it.
+
+In Spring Boot, set `server-side-key` on the store: see [Spring Boot](../spring-boot.md#parameters-and-secrets).
+
 ## Native names
 
 `ParameterStoreConfig.nativeNames(true)` uses the backend's own names as they are, with no validation and

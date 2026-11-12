@@ -21,13 +21,16 @@ import dev.halyx.capability.Capabilities;
 import dev.halyx.error.CloudException;
 import dev.halyx.error.UnavailableException;
 import dev.halyx.interceptor.AsyncInvocation;
+import dev.halyx.keys.spi.ServerSideKey;
 import dev.halyx.parameters.Parameter;
 import dev.halyx.parameters.ParameterCapability;
 import dev.halyx.parameters.spi.AbstractParameterDriver;
+import dev.halyx.parameters.spi.ParameterDriver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.services.secretsmanager.SecretsManagerAsyncClient;
 import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
+import software.amazon.awssdk.services.secretsmanager.model.CreateSecretRequest;
 import software.amazon.awssdk.services.secretsmanager.model.FilterNameStringType;
 import software.amazon.awssdk.services.secretsmanager.model.GetSecretValueResponse;
 import software.amazon.awssdk.services.secretsmanager.model.ResourceNotFoundException;
@@ -56,13 +59,39 @@ public final class SecretsManagerDriver extends AbstractParameterDriver {
 
     private final SecretsManagerClient secrets;
     private final Supplier<SecretsManagerAsyncClient> secretsAsync;
+    /** The key new secrets are created with, for a driver from {@link #withServerSideKey}, or null. */
+    private final String kmsKeyId;
 
     /** @param secretsAsync the non-blocking client for asynchronous calls, made when first asked for */
     public SecretsManagerDriver(SecretsManagerClient secrets, boolean nativeNames,
                                 Supplier<SecretsManagerAsyncClient> secretsAsync) {
-        super(AwsProvider.ID, Capabilities.of(ParameterCapability.VERSIONS), nativeNames);
+        this(secrets, nativeNames, secretsAsync, null);
+    }
+
+    private SecretsManagerDriver(SecretsManagerClient secrets, boolean nativeNames,
+                                 Supplier<SecretsManagerAsyncClient> secretsAsync, String kmsKeyId) {
+        super(AwsProvider.ID, Capabilities.of(ParameterCapability.VERSIONS, ParameterCapability.SERVER_SIDE_KMS),
+                nativeNames);
         this.secrets = secrets;
         this.secretsAsync = secretsAsync;
+        this.kmsKeyId = kmsKeyId;
+    }
+
+    /**
+     * A driver that creates new secrets with {@code key} ({@code KmsKeyId}). A secret that exists keeps its own key: a
+     * new value goes in with PutSecretValue, which can't change it, and re-keying a secret is left to its owner.
+     */
+    @Override
+    public ParameterDriver withServerSideKey(ServerSideKey key) {
+        return new SecretsManagerDriver(secrets, nativeNames, secretsAsync, key.nativeId());
+    }
+
+    private CreateSecretRequest createRequest(String name, String value) {
+        var request = CreateSecretRequest.builder().name(name).secretString(value);
+        if (kmsKeyId != null) {
+            request.kmsKeyId(kmsKeyId);
+        }
+        return request.build();
     }
 
     @Override
@@ -143,7 +172,7 @@ public final class SecretsManagerDriver extends AbstractParameterDriver {
             var response = secrets.putSecretValue(b -> b.secretId(name).secretString(value));
             return new Parameter(name, value, response.versionId(), null);
         } catch (ResourceNotFoundException e) {
-            var response = secrets.createSecret(b -> b.name(name).secretString(value));
+            var response = secrets.createSecret(createRequest(name, value));
             return new Parameter(name, value, response.versionId(), null);
         }
     }
@@ -250,7 +279,7 @@ public final class SecretsManagerDriver extends AbstractParameterDriver {
         return secretsAsync.get().putSecretValue(b -> b.secretId(name).secretString(value))
                 .thenApply(response -> new Parameter(name, value, response.versionId(), null))
                 .exceptionallyCompose(error -> AsyncInvocation.unwrap(error) instanceof ResourceNotFoundException
-                        ? secretsAsync.get().createSecret(b -> b.name(name).secretString(value))
+                        ? secretsAsync.get().createSecret(createRequest(name, value))
                                 .thenApply(response -> new Parameter(name, value, response.versionId(), null))
                         : CompletableFuture.failedFuture(error));
     }

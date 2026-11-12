@@ -15,6 +15,8 @@
  */
 package dev.halyx.parameters;
 
+import dev.halyx.keys.CryptoKey;
+
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -38,8 +40,10 @@ public final class ParameterStoreConfig {
     private final Duration cacheTtl;
     private final boolean nativeNames;
     private final Map<String, String> properties;
+    private final CryptoKey serverSideKey;
 
     private ParameterStoreConfig(Builder b) {
+        this.serverSideKey = b.serverSideKey;
         this.nativeNames = b.nativeNames;
         this.kind = b.kind;
         this.location = b.location;
@@ -100,7 +104,18 @@ public final class ParameterStoreConfig {
         return properties;
     }
 
-    /** Configurations with the same settings are equal, so contexts can share one client per configuration. */
+    /**
+     * The key the service encrypts new values with at rest, from the store provider's key service; empty for the
+     * service's default encryption. See {@link Builder#serverSideKey}.
+     */
+    public Optional<CryptoKey> serverSideKey() {
+        return Optional.ofNullable(serverSideKey);
+    }
+
+    /**
+     * Configurations with the same settings are equal, so contexts can share one store per configuration. Server-side
+     * keys compare by identity, as the store keeps the handle.
+     */
     @Override
     public boolean equals(Object o) {
         return o instanceof ParameterStoreConfig other && Objects.equals(kind, other.kind)
@@ -108,17 +123,20 @@ public final class ParameterStoreConfig {
                 && Objects.equals(prefix, other.prefix)
                 && Objects.equals(cacheTtl, other.cacheTtl)
                 && nativeNames == other.nativeNames
-                && Objects.equals(properties, other.properties);
+                && Objects.equals(properties, other.properties)
+                && serverSideKey == other.serverSideKey;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(kind, location, prefix, cacheTtl, nativeNames, properties);
+        return Objects.hash(kind, location, prefix, cacheTtl, nativeNames, properties,
+                System.identityHashCode(serverSideKey));
     }
 
     @Override
     public String toString() {
-        return "ParameterStoreConfig[kind=" + kind + ", location=" + location + ", prefix=" + prefix + "]";
+        return "ParameterStoreConfig[kind=" + kind + ", location=" + location + ", prefix=" + prefix
+                + (serverSideKey != null ? ", serverSideKey=" + serverSideKey.name() : "") + "]";
     }
 
     public static final class Builder {
@@ -128,6 +146,7 @@ public final class ParameterStoreConfig {
         private Duration cacheTtl = Duration.ZERO;
         private boolean nativeNames;
         private final Map<String, String> properties = new LinkedHashMap<>();
+        private CryptoKey serverSideKey;
 
         private Builder(ParameterKind kind) {
             this.kind = Objects.requireNonNull(kind, "kind");
@@ -164,6 +183,21 @@ public final class ParameterStoreConfig {
             } else {
                 properties.put(key, value);
             }
+            return this;
+        }
+
+        /**
+         * Has the service encrypt values at rest with {@code key}, a key of the store's own provider, instead of its
+         * default key ({@code SERVER_SIDE_KMS}): SSM {@code SecureString} parameters (with {@code aws.ssm.secure}),
+         * Secrets Manager secrets, Secret Manager secrets (a key in a {@code global} key ring) and Parameter Manager
+         * parameters (a key in the store's location). The key must be an encryption key the service may use.
+         *
+         * <p>The key applies when a parameter is created; one that exists keeps the key it was created with. SSM is
+         * the exception: each put through the store encrypts the new version with the key. Reads need nothing. Creating
+         * the store makes no key service call; the first put reads the key's metadata.
+         */
+        public Builder serverSideKey(CryptoKey key) {
+            this.serverSideKey = Objects.requireNonNull(key, "key");
             return this;
         }
 

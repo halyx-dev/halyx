@@ -30,7 +30,6 @@ import dev.halyx.messaging.spi.PublisherDriver;
 import dev.halyx.messaging.spi.SubscriptionDriver;
 import dev.halyx.nosql.TableConfig;
 import dev.halyx.nosql.spi.DocumentStoreDriver;
-import dev.halyx.parameters.Parameter;
 import dev.halyx.parameters.ParameterStoreConfig;
 import dev.halyx.parameters.spi.ParameterDriver;
 import dev.halyx.spi.CloudProvider;
@@ -41,7 +40,6 @@ import dev.halyx.stream.StreamProducerConfig;
 import dev.halyx.stream.spi.ConsumerDriver;
 import dev.halyx.stream.spi.ProducerDriver;
 
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentNavigableMap;
@@ -73,7 +71,7 @@ public final class InMemoryProvider implements CloudProvider {
                 new ConcurrentHashMap<>();
         /** One store per endpoint, shared by every namespace on it, like a Redis server. */
         private final Map<String, CacheDriver> caches = new ConcurrentHashMap<>();
-        private final Map<String, ConcurrentSkipListMap<String, List<Parameter>>> parameters = new ConcurrentHashMap<>();
+        private final Map<String, ConcurrentSkipListMap<String, InMemoryParameterDriver.Entry>> parameters = new ConcurrentHashMap<>();
         private final InMemoryBroker broker = new InMemoryBroker();
         private final InMemoryStreams streams = new InMemoryStreams();
         private final InMemoryFunctions functions = new InMemoryFunctions();
