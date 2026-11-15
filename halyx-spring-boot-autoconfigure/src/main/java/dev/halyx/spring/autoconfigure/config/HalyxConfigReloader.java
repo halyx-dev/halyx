@@ -72,8 +72,7 @@ public class HalyxConfigReloader implements SmartLifecycle {
         ParameterStore store = context.containsBean(resource.storeName())
                 && context.isTypeMatch(resource.storeName(), ParameterStore.class)
                 ? context.getBean(resource.storeName(), ParameterStore.class)
-                : HalyxBlobStores.context(halyx, "halyx.parameter-stores." + resource.storeName(), resource.providerName())
-                        .parameterStore(resource.storeConfig());
+                : storeOf(resource);
         watches.add(store.watch(resource.subPrefix(), resource.reloadInterval().orElseThrow(), changes -> {
             Set<String> keys = imported.replace(HalyxPropertySource.load(store, resource));
             if (!keys.isEmpty()) {
@@ -82,6 +81,18 @@ public class HalyxConfigReloader implements SmartLifecycle {
                 publishSpringCloudEvent(keys);
             }
         }));
+    }
+
+    /** The import's store on the {@code Halyx} bean, through an encrypted view when it has a key. */
+    private ParameterStore storeOf(HalyxConfigDataResource resource) {
+        ParameterStore store = HalyxBlobStores.context(halyx, "halyx.parameter-stores." + resource.storeName(),
+                resource.providerName()).parameterStore(resource.storeConfig());
+        if (resource.key().isEmpty()) {
+            return store;
+        }
+        HalyxImportKey key = resource.key().get();
+        return key.view(store, HalyxBlobStores.context(halyx, "halyx.key-stores." + key.keyStoreName(),
+                key.provider()).keyStore(key.storeConfig()));
     }
 
     private void publishSpringCloudEvent(Set<String> keys) {

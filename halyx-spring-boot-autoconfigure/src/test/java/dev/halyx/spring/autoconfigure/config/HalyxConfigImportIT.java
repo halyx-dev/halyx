@@ -37,6 +37,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.BlockingQueue;
@@ -85,6 +88,36 @@ class HalyxConfigImportIT {
             store.put("rds/creds", "{\"username\":\"app\",\"password\":\"rds-pw\",\"port\":5432}");
             halyx.provider("vault").parameterStore(ParameterStoreConfig.secrets().prefix("legacy-svc/").nativeNames(true).build())
                     .put("db_password", "legacy-pw");
+            sealedSeed(halyx);
+        }
+    }
+
+    /** Values sealed with the Transit key {@code config}, under {@code sealed-svc}, and one in the clear beside them. */
+    private static void sealedSeed(Halyx halyx) {
+        vault("POST", "/v1/sys/mounts/transit", "{\"type\":\"transit\"}");
+        vault("POST", "/v1/transit/keys/config", "{}");
+        ParameterStore plain = halyx.provider("vault").parameterStore(ParameterStoreConfig.secrets().prefix("sealed-svc")
+                .build());
+        var sealed = plain.encryptedWith(halyx.provider("vault").keyStore().key("config"));
+        sealed.put("db/password", "sealed-pw");
+        sealed.put("rds/creds", "{\"username\":\"app\",\"password\":\"sealed-rds-pw\"}");
+        halyx.provider("vault").parameterStore(ParameterStoreConfig.secrets().prefix("mixed-svc").build())
+                .put("legacy/flag", "in-the-clear");
+        halyx.provider("vault").parameterStore(ParameterStoreConfig.secrets().prefix("mixed-svc").build())
+                .encryptedWith(halyx.provider("vault").keyStore().key("config")).put("db/password", "mixed-pw");
+    }
+
+    private static void vault(String method, String path, String body) {
+        try {
+            HttpResponse<String> response = HttpClient.newHttpClient().send(HttpRequest.newBuilder(address().resolve(path))
+                    .header("X-Vault-Token", "root-token").method(method, HttpRequest.BodyPublishers.ofString(body))
+                    .build(), HttpResponse.BodyHandlers.ofString());
+            assertThat(response.statusCode()).as(method + " " + path + ": " + response.body()).isLessThan(300);
+        } catch (java.io.IOException e) {
+            throw new java.io.UncheckedIOException(e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
         }
     }
 
@@ -109,6 +142,11 @@ class HalyxConfigImportIT {
                 halyx.parameter-stores.app.prefix=orders-svc
                 halyx.parameter-stores.legacy.prefix=legacy-svc/
                 halyx.parameter-stores.legacy.native-names=true
+                halyx.key-stores.kms.provider=vault
+                halyx.parameter-stores.sealed.prefix=sealed-svc
+                halyx.parameter-stores.sealed.encryption-key.name=config
+                halyx.parameter-stores.mixed.prefix=mixed-svc
+                halyx.parameter-stores.mixed.encryption-key.name=config
                 %s
                 spring.config.import=%s
                 """.formatted(address(), extra, imports));
@@ -204,6 +242,82 @@ class HalyxConfigImportIT {
 
         try (var context = start("optional:halyx:missing")) {
             assertThat(context.getEnvironment().getProperty("db.url")).isNull();
+        }
+    }
+
+    // Encrypted stores
+
+    @Test
+    void sealedValuesAreOpenedAtStartup() throws Exception {
+        try (var context = start("halyx:sealed")) {
+            var env = context.getEnvironment();
+
+            assertThat(env.getProperty("db.password")).isEqualTo("sealed-pw");
+            assertThat(env.getProperty("rds.creds.password")).as("JSON fields of an opened value")
+                    .isEqualTo("sealed-rds-pw");
+            assertThat(context.getBean("sealed", ParameterStore.class).require("db/password")).isEqualTo("sealed-pw");
+        }
+        assertThat(vaultStore("sealed-svc").require("db/password")).as("stored sealed").startsWith("hlxs1:");
+    }
+
+    @Test
+    void theKeyStoreMayBeOnAnotherProvider() throws Exception {
+        String other = """
+                halyx.providers.transit.type=vault
+                halyx.providers.transit.endpoint=%s
+                halyx.providers.transit.credentials.type=static
+                halyx.providers.transit.credentials.id=token
+                halyx.providers.transit.credentials.secret=root-token
+                halyx.key-stores.kms.provider=transit
+                halyx.parameter-stores.sealed.provider=vault
+                halyx.parameter-stores.app.provider=vault
+                halyx.parameter-stores.legacy.provider=vault
+                halyx.parameter-stores.mixed.provider=vault
+                """.formatted(address());
+        try (var context = start("halyx:sealed", other, event -> { })) {
+            assertThat(context.getEnvironment().getProperty("db.password")).isEqualTo("sealed-pw");
+        }
+    }
+
+    @Test
+    void plaintextFailsTheImportUnlessAllowed() throws Exception {
+        assertThatThrownBy(() -> start("halyx:mixed")).hasStackTraceContaining("mixed-svc/legacy/flag")
+                .hasStackTraceContaining("isn't encrypted");
+
+        try (var context = start("halyx:mixed", "halyx.parameter-stores.mixed.allow-plaintext=true", event -> { })) {
+            var env = context.getEnvironment();
+            assertThat(env.getProperty("legacy.flag")).isEqualTo("in-the-clear");
+            assertThat(env.getProperty("db.password")).isEqualTo("mixed-pw");
+        }
+    }
+
+    @Test
+    void aKeyStoreSettingOnlyTheImportWouldSetIsRefused() throws Exception {
+        assertThatThrownBy(() -> start("halyx:sealed", "halyx.key-stores.kms.location=${transit.mount}", event -> { }))
+                .hasStackTraceContaining("Unresolved placeholders in halyx.key-stores.kms.location")
+                .hasStackTraceContaining("read before its import");
+    }
+
+    @Test
+    void reloadOpensChangedValues() throws Exception {
+        BlockingQueue<HalyxParametersChangedEvent> events = new LinkedBlockingQueue<>();
+        try (Halyx halyx = Halyx.builder().register("vault", ProviderConfig.of("vault").endpoint(address())
+                .credentials(Credentials.of("token", "root-token"))).build()) {
+            var sealed = halyx.provider("vault").parameterStore(ParameterStoreConfig.secrets().prefix("sealed-svc").build())
+                    .encryptedWith(halyx.provider("vault").keyStore().key("config"));
+            sealed.put("rotating/password", "before");
+            try (var context = start("halyx:sealed", "halyx.parameter-stores.sealed.reload-interval=PT0.3S",
+                    events::add)) {
+                var env = context.getEnvironment();
+                assertThat(env.getProperty("rotating.password")).isEqualTo("before");
+
+                sealed.put("rotating/password", "after");
+
+                assertThat(events.poll(15, TimeUnit.SECONDS)).as("change event").isNotNull();
+                assertThat(env.getProperty("rotating.password")).isEqualTo("after");
+            } finally {
+                sealed.delete("rotating/password");
+            }
         }
     }
 }

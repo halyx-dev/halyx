@@ -17,10 +17,14 @@ package dev.halyx.parameters;
 
 import dev.halyx.capability.Capabilities;
 import dev.halyx.error.NotFoundException;
+import dev.halyx.error.UnsupportedFeatureException;
 import dev.halyx.interceptor.InterceptorChain;
+import dev.halyx.keys.CryptoKey;
+import dev.halyx.keys.KeyStore;
 
 import java.time.Duration;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
@@ -101,6 +105,39 @@ public interface ParameterStore {
     /** The asynchronous view, running any blocking work on {@code blocking}, such as an application's scheduler. */
     default AsyncParameterStore async(Executor blocking) {
         return AsyncParameterStore.onExecutor(this, blocking);
+    }
+
+    /**
+     * A view of this store that seals every value with {@code key} before it leaves the application, and opens it on
+     * the way back: a value is stored as {@code hlxs1:} text bound to the parameter's full name (the store's prefix and
+     * the name). {@code require(name, field)} opens the value, then reads the JSON field. The read cache holds opened
+     * values, so a cached read makes no key service call; listings open up to 16 values at a time. Reading a value
+     * stored in the clear is refused unless {@link EncryptedParameterStore#allowPlaintext()} is set.
+     *
+     * <p>Sealing adds a header of about a hundred bytes to a few hundred, depending on the key, and base64 grows the
+     * rest by a third: a put whose sealed value is longer than the backend stores (SSM 8 KB, App Configuration 10 KB,
+     * Key Vault 25 KB, Secrets Manager and Secret Manager 64 KB, Parameter Manager 1 MB) is refused before it is sent.
+     * SSM standard parameters take 4 KB.
+     *
+     * <p>Unlike {@link ParameterStoreConfig.Builder#serverSideKey}, the service never sees the value. Use both for
+     * both.
+     *
+     * @throws UnsupportedFeatureException if this isn't a store from a provider, or is already an encrypted view
+     */
+    default EncryptedParameterStore encryptedWith(CryptoKey key) {
+        Objects.requireNonNull(key, "key");
+        throw new UnsupportedFeatureException("Encrypted views need the store itself", null, provider(), null);
+    }
+
+    /**
+     * As {@link #encryptedWith(CryptoKey)}, with the key for each value named by {@code keyName} from the parameter's
+     * name (relative to the store's prefix), such as a key per tenant; any key of {@code keys} opens what any other
+     * sealed.
+     */
+    default EncryptedParameterStore encryptedWith(KeyStore keys, Function<String, String> keyName) {
+        Objects.requireNonNull(keys, "keys");
+        Objects.requireNonNull(keyName, "keyName");
+        throw new UnsupportedFeatureException("Encrypted views need the store itself", null, provider(), null);
     }
 
     /** Read and cache counters of this store instance. */

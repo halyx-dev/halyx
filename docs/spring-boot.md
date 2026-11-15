@@ -505,15 +505,26 @@ halyx:
       # native-names: true         # use existing backend names as they are
       # expand-json: true          # (default) JSON values also become db.creds.password and so on
       # startup-attempts: 3        # (default) retries while the backend is briefly unavailable
+      # encryption-key:            # seal every value with a key before it leaves the application
+      #   store: kms               # a halyx.key-stores entry; optional when there's only one
+      #   name: orders-config      # a key of any provider
+      # allow-plaintext: true      # with encryption-key: also read values stored in the clear
       # server-side-key:           # have the service encrypt new values with a key of the same cloud
       #   store: kms               # a halyx.key-stores entry; optional when there's only one
       #   name: orders-secrets
 ```
 
+With `encryption-key`, the bean is the store's encrypted view: values are stored as `hlxs1:` text, and every read
+through the bean, the [`secrets`](#secrets-in-settings) that other resources take from the store, and `halyx:`
+imports get the plaintext. See [Client-side encryption](api/parameters.md#client-side-encryption).
+`allow-plaintext` reads values stored in the clear as they are, for moving a store to encryption; without
+`encryption-key` it fails the start.
+
 With `server-side-key`, the service encrypts new values at rest with that key: see
-[Server-side encryption with a key](api/parameters.md#server-side-encryption-with-a-key). The store bean is created
-after its key store, and the key's provider is checked at startup without a key service call. `halyx:` imports only
-read, so they don't use the key.
+[Server-side encryption with a key](api/parameters.md#server-side-encryption-with-a-key). The key's provider is
+checked at startup without a key service call. `halyx:` imports only read, so they don't use it.
+
+With either key, the store bean is created after its key store. With both, values are sealed, then encrypted at rest.
 
 ### Secrets in settings
 
@@ -565,6 +576,10 @@ spring:
 - Names become property keys, with `/` replaced by `.`, so `db/password` becomes `db.password`. JSON
   values add their fields too, such as `db.creds.password`.
 - The providers and stores must be defined in the same configuration file or an earlier one.
+- A store with an `encryption-key` is imported through its encrypted view, so properties hold the plaintext. The key
+  store and its provider must be defined there too, and their settings can't come from the import itself: an
+  unresolved `${...}` in them fails the start, naming the setting. The key store may be on another provider, which the
+  import logs in to as well.
 - A briefly unavailable backend is retried with backoff (`startup-attempts`).
 - With `reload-interval`, imported properties are updated in place when values change or rotate. Halyx
   publishes a `HalyxParametersChangedEvent` with the store name and changed keys, and Spring Cloud's

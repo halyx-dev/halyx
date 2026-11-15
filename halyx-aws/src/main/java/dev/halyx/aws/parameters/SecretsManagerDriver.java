@@ -42,6 +42,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.Supplier;
@@ -304,6 +305,12 @@ public final class SecretsManagerDriver extends AbstractParameterDriver {
 
     private static Parameter toPortable(String name, GetSecretValueResponse r) {
         return new Parameter(name, r.secretString(), r.versionId(), r.createdDate());
+    }
+
+    /** A Secrets Manager secret value takes 64 KB. */
+    @Override
+    public OptionalInt maxValueBytes() {
+        return OptionalInt.of(64 * 1024);
     }
 
     @Override

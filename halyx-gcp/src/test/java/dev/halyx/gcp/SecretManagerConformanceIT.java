@@ -15,6 +15,8 @@
  */
 package dev.halyx.gcp;
 
+import java.util.OptionalInt;
+import dev.halyx.tck.ParameterEncryptionConformanceTest;
 import com.google.api.gax.core.NoCredentialsProvider;
 import com.google.api.gax.grpc.GrpcTransportChannel;
 import com.google.api.gax.rpc.FixedTransportChannelProvider;
@@ -123,6 +125,32 @@ class SecretManagerConformanceIT {
         @Override
         protected String nativePrefix(String unique) {
             return unique + "_";
+        }
+    }
+
+    @Nested
+    class EncryptedSecrets extends Secrets {
+        @Override
+        protected ParameterStore wrap(ParameterStore store) {
+            return store.encryptedWith(secretsKey());
+        }
+    }
+
+    @Nested
+    class SecretEncryption extends ParameterEncryptionConformanceTest {
+        @Override
+        protected CloudContext context() {
+            return halyx.provider("gcp");
+        }
+
+        @Override
+        protected ParameterStoreConfig.Builder config() {
+            return ParameterStoreConfig.secrets();
+        }
+
+        @Override
+        protected OptionalInt maxValueBytes() {
+            return OptionalInt.of(64 * 1024);
         }
     }
 

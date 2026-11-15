@@ -15,6 +15,8 @@
  */
 package dev.halyx.spring.keys;
 
+import software.amazon.awssdk.services.ssm.SsmClient;
+import dev.halyx.reactor.ReactiveParameterStore;
 import dev.halyx.error.NotFoundException;
 import dev.halyx.keys.CryptoKey;
 import dev.halyx.keys.KeyStore;
@@ -171,6 +173,29 @@ class HalyxAwsKeysIT {
                     .describeSecret(b -> b.secretId(prefix + "/db/password")).kmsKeyId()).isEqualTo(arn);
             assertThat(secrets.require("db/password")).isEqualTo("s3cr3t");
             secrets.delete("db/password");
+        });
+    }
+
+    @Test
+    void aParameterStoreWithAnEncryptionKeySealsValuesOnKms() {
+        String prefix = "sealed-" + UUID.randomUUID().toString().substring(0, 8);
+        runner.withPropertyValues("halyx.parameter-stores.config.kind=parameters",
+                "halyx.parameter-stores.config.prefix=" + prefix,
+                "halyx.parameter-stores.config.encryption-key.name=data").run(context -> {
+            assertThat(context).hasNotFailed();
+            ParameterStore config = context.getBean("config", ParameterStore.class);
+            ReactiveParameterStore reactive = context.getBean("configReactive", ReactiveParameterStore.class);
+            String arn = admin.describeKey(b -> b.keyId("alias/orders-data")).keyMetadata().arn();
+
+            config.put("db/password", "s3cr3t");
+
+            String stored = config.unwrap(SsmClient.class).getParameter(b -> b.name("/" + prefix + "/db/password"))
+                    .parameter().value();
+            assertThat(stored).startsWith("hlxs1:");
+            assertThat(SealedData.parseText(stored).keys().get(0).keyId()).isEqualTo("aws-kms:" + arn);
+            assertThat(config.require("db/password")).isEqualTo("s3cr3t");
+            assertThat(reactive.require("db/password").block(Duration.ofSeconds(10))).isEqualTo("s3cr3t");
+            config.delete("db/password");
         });
     }
 

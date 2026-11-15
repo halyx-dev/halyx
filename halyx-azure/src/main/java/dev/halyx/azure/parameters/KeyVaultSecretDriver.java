@@ -36,6 +36,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 
@@ -189,6 +190,12 @@ public final class KeyVaultSecretDriver extends AbstractParameterDriver {
         var updated = secret.getProperties().getUpdatedOn();
         return new Parameter(name, secret.getValue(), secret.getProperties().getVersion(),
                 updated == null ? null : updated.toInstant());
+    }
+
+    /** A Key Vault secret takes 25 KB. */
+    @Override
+    public OptionalInt maxValueBytes() {
+        return OptionalInt.of(25 * 1024);
     }
 
     @Override

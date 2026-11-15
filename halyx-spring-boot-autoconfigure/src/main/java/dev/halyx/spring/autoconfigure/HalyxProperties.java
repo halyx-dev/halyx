@@ -1019,12 +1019,18 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
      * @param serverSideKey a key, of the store's provider, that the service encrypts new values with at rest (an SSM
      *                    {@code SecureString}, a Secrets Manager, Secret Manager or Parameter Manager customer-managed
      *                    key); none when omitted. {@code spring.config.import} only reads, so it doesn't use it
+     * @param encryptionKey a key, of any provider, that Halyx seals every value with before it leaves the application,
+     *                    stored as {@code hlxs1:} text; reads, {@code secrets} that other resources take from this store,
+     *                    and {@code spring.config.import} open it. None when omitted
+     * @param allowPlaintext with {@code encryptionKey}: also read values stored in the clear, as they are, while moving
+     *                    a store to encryption; writes are still sealed
      */
     public record ParameterStoreProperties(String provider, @DefaultValue("secrets") ParameterKind kind, String location,
                                            @DefaultValue("") String prefix, Duration cacheTtl,
                                            @DefaultValue("false") boolean nativeNames, @DefaultValue("true") boolean expandJson,
                                            Duration reloadInterval, @DefaultValue("3") int startupAttempts,
-                                           Map<String, String> properties, EncryptionKey serverSideKey) {
+                                           Map<String, String> properties, EncryptionKey serverSideKey,
+                                           EncryptionKey encryptionKey, @DefaultValue("false") boolean allowPlaintext) {
 
         @ConstructorBinding
         public ParameterStoreProperties {
@@ -1036,7 +1042,7 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
                                         Duration cacheTtl, boolean nativeNames, boolean expandJson,
                                         Duration reloadInterval, int startupAttempts, Map<String, String> properties) {
             this(provider, kind, location, prefix, cacheTtl, nativeNames, expandJson, reloadInterval, startupAttempts,
-                    properties, null);
+                    properties, null, null, false);
         }
 
         public ParameterStoreConfig toStoreConfig() {
@@ -1083,7 +1089,7 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
             properties = ordered(properties);
         }
 
-        KeyStoreConfig toKeyStoreConfig(String key) {
+        public KeyStoreConfig toKeyStoreConfig(String key) {
             String property = "halyx.key-stores." + key;
             KeyStoreConfig.Builder config = KeyStoreConfig.builder().prefix(prefix).nativeNames(nativeNames);
             if (location != null && !location.isBlank()) {

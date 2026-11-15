@@ -16,6 +16,7 @@
 package dev.halyx.nosql;
 
 import dev.halyx.error.InvalidArgumentException;
+import dev.halyx.error.UnavailableException;
 import dev.halyx.interceptor.AsyncInvocation;
 import dev.halyx.keys.CryptoKey;
 import dev.halyx.keys.DataKey;
@@ -32,6 +33,8 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
@@ -73,8 +76,13 @@ final class FieldEncryption {
         }
     }
 
-    Session session(Executor blocking) {
-        return new Session(blocking);
+    /**
+     * A session for one store call; key service calls run on {@code blocking} where the key store has no
+     * non-blocking path. {@code callerWaits} for a blocking call: its caller's thread then starts every key service
+     * call, waiting for a free slot, so interceptors such as tracing see its context.
+     */
+    Session session(Executor blocking, boolean callerWaits) {
+        return new Session(blocking, callerWaits);
     }
 
     /** The store an entry list is opened with: fields sealed with one data key share it. */
@@ -85,12 +93,14 @@ final class FieldEncryption {
     final class Session implements AutoCloseable {
 
         private final Executor blocking;
+        private final boolean callerWaits;
         private final Map<Sealer, CompletableFuture<DataKey>> known = new ConcurrentHashMap<>();
         private final List<DataKey> held = new ArrayList<>();
         private boolean closed;
 
-        private Session(Executor blocking) {
+        private Session(Executor blocking, boolean callerWaits) {
             this.blocking = blocking;
+            this.callerWaits = callerWaits;
         }
 
         /** {@code document} with its encrypted fields sealed. */
@@ -310,8 +320,15 @@ final class FieldEncryption {
                     });
         }
 
-        /** Runs {@code calls} at most {@value #PARALLEL_UNWRAPS} at a time; the results in order. */
+        /**
+         * Runs {@code calls} at most {@value #PARALLEL_UNWRAPS} at a time; the results in order. For a blocking call,
+         * this thread starts each, waiting for a free slot; otherwise each after the first ones starts on the thread
+         * that completed the one before, as any call chained on another does.
+         */
         private <T> CompletableFuture<List<T>> bounded(List<Supplier<CompletableFuture<T>>> calls) {
+            if (callerWaits) {
+                return startAll(calls);
+            }
             List<T> results = new ArrayList<>(calls.size());
             for (int i = 0; i < calls.size(); i++) {
                 results.add(null);
@@ -342,6 +359,44 @@ final class FieldEncryption {
                     results.set(i, result);
                 }
                 return worker(calls, results, next);
+            });
+        }
+
+        /** Starts each of {@code calls} on this thread, waiting while {@value #PARALLEL_UNWRAPS} are running. */
+        private <T> CompletableFuture<List<T>> startAll(List<Supplier<CompletableFuture<T>>> calls) {
+            Semaphore slots = new Semaphore(PARALLEL_UNWRAPS);
+            List<CompletableFuture<T>> started = new ArrayList<>(calls.size());
+            AtomicBoolean failed = new AtomicBoolean();
+            for (Supplier<CompletableFuture<T>> next : calls) {
+                try {
+                    slots.acquire();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    started.add(CompletableFuture.failedFuture(new UnavailableException(
+                            "Interrupted opening encrypted fields of " + table.name(), e, provider, null)));
+                    break;
+                }
+                if (failed.get()) {
+                    break;
+                }
+                CompletableFuture<T> call;
+                try {
+                    call = next.get();
+                } catch (RuntimeException e) {
+                    call = CompletableFuture.failedFuture(e);
+                }
+                call.whenComplete((result, error) -> {
+                    if (error != null) {
+                        failed.set(true);
+                    }
+                    slots.release();
+                });
+                started.add(call);
+            }
+            return CompletableFuture.allOf(started.toArray(CompletableFuture<?>[]::new)).thenApply(done -> {
+                List<T> results = new ArrayList<>(started.size());
+                started.forEach(call -> results.add(call.join()));
+                return results;
             });
         }
 

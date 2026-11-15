@@ -17,12 +17,14 @@ package dev.halyx.parameters;
 
 import dev.halyx.capability.Capabilities;
 import dev.halyx.error.InvalidArgumentException;
+import dev.halyx.error.UnsupportedFeatureException;
 import dev.halyx.interceptor.AsyncInvocation;
 import dev.halyx.interceptor.InterceptorChain;
 import dev.halyx.interceptor.OperationContext;
 import dev.halyx.keys.CryptoKey;
 import dev.halyx.keys.KeyMetadata;
 import dev.halyx.keys.KeyPurpose;
+import dev.halyx.keys.KeyStore;
 import dev.halyx.keys.spi.ServerSideKey;
 import dev.halyx.parameters.spi.ParameterDriver;
 
@@ -51,7 +53,8 @@ import java.util.function.Supplier;
 /**
  * The portable {@link ParameterStore}: name validation, prefixing, a read cache, interceptors and
  * exception translation around a provider {@link ParameterDriver}. Writes and deletes through this
- * store invalidate its cache.
+ * store invalidate its cache. Its encrypted views ({@link #encryptedWith}) are stores of their own over the same driver,
+ * whose cache holds opened values.
  */
 public final class DefaultParameterStore implements ParameterStore {
 
@@ -76,9 +79,17 @@ public final class DefaultParameterStore implements ParameterStore {
     private final Map<String, Cached<?>> cache = new ConcurrentHashMap<>();
     private final ParameterStoreStatistics statistics = new ParameterStoreStatistics();
     private final Async async = new Async(InterceptorChain.blocking());
+    /** How values are sealed and opened, for an encrypted view; null for a plain store. */
+    private final ParameterSealing sealing;
 
     public DefaultParameterStore(String provider, ParameterStoreConfig config, ParameterDriver driver,
                                  InterceptorChain interceptors) {
+        this(provider, config, driver, interceptors, null);
+    }
+
+    private DefaultParameterStore(String provider, ParameterStoreConfig config, ParameterDriver driver,
+                                  InterceptorChain interceptors, ParameterSealing sealing) {
+        this.sealing = sealing;
         this.provider = Objects.requireNonNull(provider, "provider");
         this.config = Objects.requireNonNull(config, "config");
         this.driver = Objects.requireNonNull(driver, "driver");
@@ -134,7 +145,7 @@ public final class DefaultParameterStore implements ParameterStore {
     @Override
     public Optional<Parameter> get(String name) {
         String full = full(name);
-        return cached("get:" + full, () -> execute("get", full, () -> driver.get(full)))
+        return cached("get:" + full, () -> open(full, execute("get", full, () -> driver.get(full))))
                 .map(p -> p.rename(name));
     }
 
@@ -143,14 +154,15 @@ public final class DefaultParameterStore implements ParameterStore {
         String full = full(name);
         Objects.requireNonNull(version, "version");
         capabilities().require(ParameterCapability.VERSIONS, provider);
-        return cached("version:" + full + "@" + version, () -> execute("getVersion", full, () -> driver.get(full, version)))
+        return cached("version:" + full + "@" + version,
+                () -> open(full, execute("getVersion", full, () -> driver.get(full, version))))
                 .map(p -> p.rename(name));
     }
 
     @Override
     public Map<String, Parameter> getAll(String prefix) {
         String full = fullPrefix(prefix);
-        return relativeAll(cached("list:" + full, () -> execute("getAll", full, () -> driver.list(full))));
+        return relativeAll(cached("list:" + full, () -> openAll(execute("getAll", full, () -> driver.list(full)))));
     }
 
     /** A listing by relative names, sorted. */
@@ -173,9 +185,62 @@ public final class DefaultParameterStore implements ParameterStore {
     public Parameter put(String name, String value) {
         String full = full(name);
         Objects.requireNonNull(value, "value");
-        Parameter stored = execute("put", full, () -> writer().put(full, value));
+        String sent = sealing == null ? value : sealing.seal(name, full, value);
+        Parameter stored = execute("put", full, () -> writer().put(full, sent));
         cache.clear();
-        return stored.rename(name);
+        return written(name, value, stored);
+    }
+
+    /** What a put returns: the stored version, with the value as given rather than as sealed. */
+    private Parameter written(String name, String value, Parameter stored) {
+        return sealing == null ? stored.rename(name) : new Parameter(name, value, stored.version(), stored.lastModified());
+    }
+
+    @Override
+    public EncryptedParameterStore encryptedWith(CryptoKey key) {
+        Objects.requireNonNull(key, "key");
+        return encrypted(name -> key, key.store());
+    }
+
+    @Override
+    public EncryptedParameterStore encryptedWith(KeyStore keys, Function<String, String> keyName) {
+        Objects.requireNonNull(keys, "keys");
+        Objects.requireNonNull(keyName, "keyName");
+        return encrypted(name -> keys.key(keyName.apply(name)), keys);
+    }
+
+    private EncryptedParameterStore encrypted(Function<String, CryptoKey> keys, KeyStore opener) {
+        if (sealing != null) {
+            throw new UnsupportedFeatureException("This store is already an encrypted view", null, provider, null);
+        }
+        return new EncryptedView(new DefaultParameterStore(provider, config, driver, interceptors,
+                new ParameterSealing(keys, opener, false, provider, config.kind(), driver.maxValueBytes())));
+    }
+
+    private Optional<Parameter> open(String full, Optional<Parameter> found) {
+        return sealing == null ? found : sealing.open(full, found);
+    }
+
+    /** A listing, by full names, opened. */
+    private Map<String, Parameter> openAll(Map<String, Parameter> found) {
+        return sealing == null || found.isEmpty() ? found : sealing.openAll(found, InterceptorChain.blocking());
+    }
+
+    /** What the watch found, by relative names, opened. */
+    private ParameterChanges open(ParameterChanges changes) {
+        if (sealing == null) {
+            return changes;
+        }
+        return new ParameterChanges(openRelative(changes.added()), openRelative(changes.updated()), changes.removed());
+    }
+
+    private Map<String, Parameter> openRelative(Map<String, Parameter> byRelative) {
+        Map<String, Parameter> byFull = new LinkedHashMap<>();
+        byRelative.forEach((name, p) -> byFull.put(fullOf(name), p));
+        Map<String, Parameter> opened = openAll(byFull);
+        Map<String, Parameter> out = new LinkedHashMap<>();
+        byRelative.keySet().forEach(name -> out.put(name, opened.get(fullOf(name))));
+        return out;
     }
 
     @Override
@@ -225,7 +290,11 @@ public final class DefaultParameterStore implements ParameterStore {
         ScheduledFuture<?> task = WATCHERS.scheduleWithFixedDelay(() -> {
             ParameterChanges changes;
             try {
-                changes = confirmedChanges(reported, poll(full));
+                Map<String, Parameter> next = new LinkedHashMap<>(reported);
+                changes = open(confirmedChanges(next, poll(full)));
+                // only once every change opened, so a failure reports the same changes at the next poll
+                reported.clear();
+                reported.putAll(next);
             } catch (RuntimeException e) {
                 statistics.watchFailed();
                 LOG.warn("Watching {} store '{}' failed; retrying in {}", provider, full, interval, e);
@@ -451,7 +520,7 @@ public final class DefaultParameterStore implements ParameterStore {
         @Override
         public CompletableFuture<Optional<Parameter>> get(String name) {
             return checked(() -> full(name), full -> cachedAsync("get:" + full,
-                    () -> executeAsync("get", full, blocking, executor -> driver.getAsync(full, executor)))
+                    () -> openAsync(full, executeAsync("get", full, blocking, executor -> driver.getAsync(full, executor))))
                     .thenApply(found -> found.map(p -> p.rename(name))));
         }
 
@@ -463,14 +532,18 @@ public final class DefaultParameterStore implements ParameterStore {
                 capabilities().require(ParameterCapability.VERSIONS, provider);
                 return full;
             }, full -> cachedAsync("version:" + full + "@" + version,
-                    () -> executeAsync("getVersion", full, blocking, executor -> driver.getAsync(full, version, executor)))
+                    () -> openAsync(full, executeAsync("getVersion", full, blocking,
+                            executor -> driver.getAsync(full, version, executor))))
                     .thenApply(found -> found.map(p -> p.rename(name))));
         }
 
         @Override
         public CompletableFuture<Map<String, Parameter>> getAll(String prefix) {
             return checked(() -> fullPrefix(prefix), full -> cachedAsync("list:" + full,
-                    () -> executeAsync("getAll", full, blocking, executor -> driver.listAsync(full, executor)))
+                    () -> executeAsync("getAll", full, blocking, executor -> driver.listAsync(full, executor))
+                            .thenCompose(found -> sealing == null || found.isEmpty()
+                                    ? CompletableFuture.completedFuture(found)
+                                    : sealing.openAllAsync(found, blocking)))
                     .thenApply(DefaultParameterStore.this::relativeAll));
         }
 
@@ -480,12 +553,27 @@ public final class DefaultParameterStore implements ParameterStore {
                 String full = full(name);
                 Objects.requireNonNull(value, "value");
                 return full;
-            }, full -> executeAsync("put", full, blocking, executor -> writerAsync(executor)
-                            .thenCompose(writer -> writer.putAsync(full, value, executor)))
+            }, full -> sealAsync(name, full, value).thenCompose(sealed -> executeAsync("put", full, blocking,
+                            executor -> writerAsync(executor).thenCompose(writer -> writer.putAsync(full, sealed, executor))))
                     .thenApply(stored -> {
                         cache.clear();
-                        return stored.rename(name);
+                        return written(name, value, stored);
                     }));
+        }
+
+        private CompletableFuture<Optional<Parameter>> openAsync(String full, CompletableFuture<Optional<Parameter>> found) {
+            return sealing == null ? found : found.thenCompose(p -> sealing.openAsync(full, p, blocking));
+        }
+
+        private CompletableFuture<String> sealAsync(String name, String full, String value) {
+            if (sealing == null) {
+                return CompletableFuture.completedFuture(value);
+            }
+            try {
+                return sealing.sealAsync(name, full, value, blocking);
+            } catch (RuntimeException e) {
+                return CompletableFuture.failedFuture(e);
+            }
         }
 
         @Override
@@ -503,6 +591,164 @@ public final class DefaultParameterStore implements ParameterStore {
         @Override
         public ParameterStore blocking() {
             return DefaultParameterStore.this;
+        }
+    }
+
+    /**
+     * The encrypted view {@link #encryptedWith} returns: a store of its own over the same driver, sealing and opening
+     * values, with its own cache of opened values and its own statistics.
+     */
+    private static final class EncryptedView implements EncryptedParameterStore {
+
+        private final DefaultParameterStore store;
+
+        EncryptedView(DefaultParameterStore store) {
+            this.store = store;
+        }
+
+        @Override
+        public EncryptedParameterStore allowPlaintext() {
+            return store.sealing.allowsPlaintext() ? this : new EncryptedView(new DefaultParameterStore(store.provider,
+                    store.config, store.driver, store.interceptors, store.sealing.allowingPlaintext()));
+        }
+
+        @Override
+        public String provider() {
+            return store.provider();
+        }
+
+        @Override
+        public ParameterKind kind() {
+            return store.kind();
+        }
+
+        @Override
+        public Optional<Parameter> get(String name) {
+            return store.get(name);
+        }
+
+        @Override
+        public Optional<Parameter> get(String name, String version) {
+            return store.get(name, version);
+        }
+
+        @Override
+        public Map<String, Parameter> getAll(String prefix) {
+            return store.getAll(prefix);
+        }
+
+        @Override
+        public Parameter put(String name, String value) {
+            return store.put(name, value);
+        }
+
+        @Override
+        public void delete(String name) {
+            store.delete(name);
+        }
+
+        @Override
+        public void refresh() {
+            store.refresh();
+        }
+
+        @Override
+        public AutoCloseable watch(String prefix, Duration interval, Consumer<ParameterChanges> listener) {
+            return store.watch(prefix, interval, listener);
+        }
+
+        @Override
+        public void ping() {
+            store.ping();
+        }
+
+        @Override
+        public AsyncParameterStore async() {
+            return new AsyncView(store.async(), this);
+        }
+
+        @Override
+        public AsyncParameterStore async(Executor blocking) {
+            return new AsyncView(store.async(blocking), this);
+        }
+
+        @Override
+        public EncryptedParameterStore encryptedWith(CryptoKey key) {
+            return store.encryptedWith(key);
+        }
+
+        @Override
+        public EncryptedParameterStore encryptedWith(KeyStore keys, Function<String, String> keyName) {
+            return store.encryptedWith(keys, keyName);
+        }
+
+        @Override
+        public ParameterStoreStatistics statistics() {
+            return store.statistics();
+        }
+
+        @Override
+        public Capabilities capabilities() {
+            return store.capabilities();
+        }
+
+        @Override
+        public <T> T unwrap(Class<T> nativeType) {
+            return store.unwrap(nativeType);
+        }
+
+        @Override
+        public String toString() {
+            return "EncryptedParameterStore[" + store.provider + ", " + store.config + "]";
+        }
+    }
+
+    /** An encrypted view's asynchronous view, whose {@link #blocking()} is the encrypted view itself. */
+    private record AsyncView(AsyncParameterStore async, EncryptedParameterStore view) implements AsyncParameterStore {
+
+        @Override
+        public String provider() {
+            return async.provider();
+        }
+
+        @Override
+        public ParameterKind kind() {
+            return async.kind();
+        }
+
+        @Override
+        public CompletableFuture<Optional<Parameter>> get(String name) {
+            return async.get(name);
+        }
+
+        @Override
+        public CompletableFuture<Optional<Parameter>> get(String name, String version) {
+            return async.get(name, version);
+        }
+
+        @Override
+        public CompletableFuture<Map<String, Parameter>> getAll(String prefix) {
+            return async.getAll(prefix);
+        }
+
+        @Override
+        public CompletableFuture<Parameter> put(String name, String value) {
+            return async.put(name, value);
+        }
+
+        @Override
+        public CompletableFuture<Void> delete(String name) {
+            return async.delete(name);
+        }
+
+        @Override
+        public CompletableFuture<Void> ping() {
+            return async.ping();
+        }
+
+        @Override
+        public ParameterStore blocking() {
+            return view;
         }
     }
 }

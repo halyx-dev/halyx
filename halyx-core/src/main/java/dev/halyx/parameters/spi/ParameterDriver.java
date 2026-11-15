@@ -23,6 +23,7 @@ import dev.halyx.parameters.Parameter;
 
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 
@@ -52,6 +53,14 @@ public interface ParameterDriver {
      */
     default ParameterDriver withServerSideKey(ServerSideKey key) {
         throw new UnsupportedFeatureException("Server-side encryption with a key is not supported");
+    }
+
+    /**
+     * The largest value, in bytes of UTF-8, the backend stores; empty for no fixed limit. Encrypted views check a sealed
+     * value against it before sending, since sealing makes a value longer.
+     */
+    default OptionalInt maxValueBytes() {
+        return OptionalInt.empty();
     }
 
     // Each defaults to its blocking call on the blocking executor; a driver whose client is non-blocking overrides

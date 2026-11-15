@@ -15,6 +15,8 @@
  */
 package dev.halyx.vault;
 
+import dev.halyx.keys.KeyStore;
+import dev.halyx.tck.ParameterEncryptionConformanceTest;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Nested;
@@ -63,10 +65,14 @@ class VaultParameterStoreIT {
     private static Halyx halyx;
 
     @BeforeAll
-    static void start() {
+    static void start() throws Exception {
         halyx = Halyx.builder()
                 .register("vault", ProviderConfig.of("vault").endpoint(address()).credentials(Credentials.of("token", ROOT)))
                 .build();
+        root("POST", "sys/mounts/transit", "{\"type\":\"transit\"}");
+        for (String key : new String[] {"parameters", "tenant-a", "tenant-b"}) {
+            root("POST", "transit/keys/" + key, "{\"type\":\"aes256-gcm96\"}");
+        }
     }
 
     @AfterAll
@@ -74,6 +80,11 @@ class VaultParameterStoreIT {
         if (halyx != null) {
             halyx.close();
         }
+    }
+
+    /** Transit on the same server, holding encryption keys parameters, tenant-a and tenant-b. */
+    private static KeyStore transit() {
+        return halyx.provider("vault").keyStore();
     }
 
     static URI address() {
@@ -95,6 +106,33 @@ class VaultParameterStoreIT {
         @Override
         protected ParameterStoreConfig.Builder config() {
             return ParameterStoreConfig.secrets();
+        }
+    }
+
+    /** The whole kit through a view sealing with a Transit key. */
+    @Nested
+    class EncryptedKvSecrets extends KvSecrets {
+        @Override
+        protected ParameterStore wrap(ParameterStore store) {
+            return store.encryptedWith(transit().key("parameters"));
+        }
+    }
+
+    @Nested
+    class KvEncryption extends ParameterEncryptionConformanceTest {
+        @Override
+        protected CloudContext context() {
+            return halyx.provider("vault");
+        }
+
+        @Override
+        protected ParameterStoreConfig.Builder config() {
+            return ParameterStoreConfig.secrets();
+        }
+
+        @Override
+        protected KeyStore keys() {
+            return transit();
         }
     }
 

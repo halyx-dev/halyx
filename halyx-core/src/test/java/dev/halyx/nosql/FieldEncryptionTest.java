@@ -18,6 +18,7 @@ package dev.halyx.nosql;
 import dev.halyx.Halyx;
 import dev.halyx.config.ProviderConfig;
 import dev.halyx.error.DataIntegrityException;
+import dev.halyx.interceptor.AsyncInvocation;
 import dev.halyx.interceptor.Interceptor;
 import dev.halyx.interceptor.Invocation;
 import dev.halyx.interceptor.OperationContext;
@@ -33,6 +34,9 @@ import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -43,6 +47,8 @@ class FieldEncryptionTest {
     private final AtomicInteger inFlight = new AtomicInteger();
     private final AtomicInteger mostInFlight = new AtomicInteger();
     private final AtomicInteger unwraps = new AtomicInteger();
+    private final ThreadLocal<String> trace = new ThreadLocal<>();
+    private final List<String> unwrapTraces = new CopyOnWriteArrayList<>();
     private volatile long delayMillis;
     private Halyx halyx;
     private CryptoKey key;
@@ -68,6 +74,15 @@ class FieldEncryptionTest {
                         } finally {
                             inFlight.decrementAndGet();
                         }
+                    }
+
+                    @Override
+                    public <T> CompletableFuture<T> interceptAsync(OperationContext context, AsyncInvocation<T> next,
+                                                                   Executor blocking) {
+                        if (context.service().equals("keys") && context.operation().equals("unwrap")) {
+                            unwrapTraces.add(String.valueOf(trace.get()));
+                        }
+                        return Interceptor.super.interceptAsync(context, next, blocking);
                     }
                 })
                 .build();
@@ -131,6 +146,29 @@ class FieldEncryptionTest {
         assertThat(page.items().get(7).document().getString("email")).hasValue("7@example.com");
         assertThat(unwraps.get()).as("one per document, not per field").isEqualTo(40);
         assertThat(mostInFlight.get()).isGreaterThan(1).isLessThanOrEqualTo(FieldEncryption.PARALLEL_UNWRAPS);
+    }
+
+    /** A blocking query starts every unwrap on the caller's thread, so an interceptor there sees its context. */
+    @Test
+    void aBlockingPageStartsEveryUnwrapOnTheCallersThread() {
+        TableConfig table = TableConfig.builder("people").sortKey("sk").encryptedField("email", key).build();
+        DocumentStore store = halyx.provider("test").documentStore(table);
+        for (int i = 0; i < 40; i++) {
+            store.put(Key.of("p", "item#" + String.format("%02d", i)), Document.builder()
+                    .put("email", i + "@example.com").build());
+        }
+        delayMillis = 20;
+        unwrapTraces.clear();
+
+        trace.set("request-42");
+        try {
+            assertThat(store.query(Query.partition("p")).items()).hasSize(40);
+        } finally {
+            trace.remove();
+        }
+
+        assertThat(unwrapTraces).hasSize(40).containsOnly("request-42");
+        assertThat(mostInFlight.get()).isLessThanOrEqualTo(FieldEncryption.PARALLEL_UNWRAPS);
     }
 
     @Test

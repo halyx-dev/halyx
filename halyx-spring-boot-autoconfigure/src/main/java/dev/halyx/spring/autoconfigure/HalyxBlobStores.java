@@ -36,6 +36,7 @@ import dev.halyx.messaging.Publisher;
 import dev.halyx.nosql.DocumentStore;
 import dev.halyx.messaging.Subscription;
 import dev.halyx.messaging.SubscriptionConfig;
+import dev.halyx.parameters.EncryptedParameterStore;
 import dev.halyx.parameters.ParameterStore;
 import dev.halyx.parameters.ParameterStoreConfig;
 import dev.halyx.spring.autoconfigure.cache.CacheCodecs;
@@ -128,14 +129,26 @@ public final class HalyxBlobStores {
         return context(property, provider).parameterStore(config);
     }
 
-    /** A parameter store whose service encrypts new values at rest with {@code serverSideKey}. */
+    /**
+     * A parameter store with keys: its service encrypts new values at rest with {@code serverSideKey}, and Halyx seals
+     * them with {@code encryptionKey} first, reading plaintext too when the store allows it. Either key may be null.
+     */
     public ParameterStore keyedParameterStore(String property, String provider,
-                                              HalyxProperties.ParameterStoreProperties store, CryptoKey serverSideKey) {
+                                              HalyxProperties.ParameterStoreProperties store, CryptoKey serverSideKey,
+                                              CryptoKey encryptionKey) {
+        ParameterStore keyed;
         try {
-            return parameterStore(property, provider, store.toStoreConfig(serverSideKey));
+            keyed = parameterStore(property, provider, store.toStoreConfig(serverSideKey));
         } catch (CloudException e) {
             throw new IllegalStateException(property + ".server-side-key: " + e.getMessage(), e);
         }
+        return encryptionKey == null ? keyed : encrypted(keyed, encryptionKey, store.allowPlaintext());
+    }
+
+    /** {@code store} sealing values with {@code key}, and reading plaintext too when {@code allowPlaintext}. */
+    private static ParameterStore encrypted(ParameterStore store, CryptoKey key, boolean allowPlaintext) {
+        EncryptedParameterStore encrypted = store.encryptedWith(key);
+        return allowPlaintext ? encrypted.allowPlaintext() : encrypted;
     }
 
     /**

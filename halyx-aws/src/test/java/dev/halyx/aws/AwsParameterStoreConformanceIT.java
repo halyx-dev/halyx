@@ -31,6 +31,7 @@ import dev.halyx.keys.spi.ServerSideKey;
 import dev.halyx.parameters.ParameterStore;
 import dev.halyx.parameters.ParameterStoreConfig;
 import dev.halyx.parameters.spi.ParameterDriver;
+import dev.halyx.tck.ParameterEncryptionConformanceTest;
 import dev.halyx.tck.ParameterServerSideKeyConformanceTest;
 import dev.halyx.tck.ParameterStoreConformanceTest;
 import org.testcontainers.containers.GenericContainer;
@@ -57,6 +58,7 @@ import java.net.URI;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -64,7 +66,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * The parameter store TCK on SSM Parameter Store and Secrets Manager emulated by Floci, without and with a server-side
- * key from Floci's KMS.
+ * key from Floci's KMS, and through encrypted views.
  */
 @Testcontainers(disabledWithoutDocker = true)
 class AwsParameterStoreConformanceIT {
@@ -133,6 +135,59 @@ class AwsParameterStoreConformanceIT {
         @Override
         protected ParameterStoreConfig.Builder config() {
             return ParameterStoreConfig.secrets();
+        }
+    }
+
+    /** The whole kit through a view sealing with a key on Floci's KMS. */
+    @Nested
+    class EncryptedSsmParameterStore extends SsmParameterStore {
+        @Override
+        protected ParameterStore wrap(ParameterStore store) {
+            return store.encryptedWith(parametersKey());
+        }
+    }
+
+    @Nested
+    class EncryptedSecretsManager extends SecretsManager {
+        @Override
+        protected ParameterStore wrap(ParameterStore store) {
+            return store.encryptedWith(parametersKey());
+        }
+    }
+
+    @Nested
+    class SsmEncryption extends ParameterEncryptionConformanceTest {
+        @Override
+        protected CloudContext context() {
+            return halyx.provider("aws");
+        }
+
+        @Override
+        protected ParameterStoreConfig.Builder config() {
+            return ParameterStoreConfig.parameters();
+        }
+
+        @Override
+        protected OptionalInt maxValueBytes() {
+            return OptionalInt.of(8 * 1024);
+        }
+    }
+
+    @Nested
+    class SecretsManagerEncryption extends ParameterEncryptionConformanceTest {
+        @Override
+        protected CloudContext context() {
+            return halyx.provider("aws");
+        }
+
+        @Override
+        protected ParameterStoreConfig.Builder config() {
+            return ParameterStoreConfig.secrets();
+        }
+
+        @Override
+        protected OptionalInt maxValueBytes() {
+            return OptionalInt.of(64 * 1024);
         }
     }
 

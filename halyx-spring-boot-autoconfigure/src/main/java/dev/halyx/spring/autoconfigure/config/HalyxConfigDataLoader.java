@@ -31,7 +31,9 @@ import java.util.List;
  * property whose key is its name with {@code /} replaced by {@code .} ({@code db/pool/size} becomes
  * {@code db.pool.size}), and JSON object values also add their fields ({@code db.creds.password}).
  * A temporarily unavailable backend is retried with backoff. With a {@code reload-interval}, the
- * {@code HalyxConfigReloader} keeps the properties up to date afterwards.
+ * {@code HalyxConfigReloader} keeps the properties up to date afterwards. A store with an {@code encryption-key} is
+ * read through an encrypted view, with the key from its {@code halyx.key-stores} entry, whose provider is registered
+ * alongside the store's.
  */
 public class HalyxConfigDataLoader implements ConfigDataLoader<HalyxConfigDataResource> {
 
@@ -40,14 +42,24 @@ public class HalyxConfigDataLoader implements ConfigDataLoader<HalyxConfigDataRe
         if (resource.isSwitchedOff()) {
             return ConfigData.EMPTY;
         }
-        try (Halyx halyx = Halyx.builder()
+        Halyx.Builder builder = Halyx.builder()
                 .classLoader(HalyxConfigDataLoader.class.getClassLoader())
                 .register(resource.providerName(), resource.providerConfig())
                 .interceptor(new RetryInterceptor(new RetryPolicy(resource.startupAttempts(), Duration.ofSeconds(1),
-                        Duration.ofSeconds(10), 2.0)))
-                .build()) {
+                        Duration.ofSeconds(10), 2.0)));
+        resource.key().filter(key -> !key.provider().equals(resource.providerName()))
+                .ifPresent(key -> builder.register(key.provider(), key.providerConfig()));
+        try (Halyx halyx = builder.build()) {
             ParameterStore store = halyx.provider(resource.providerName()).parameterStore(resource.storeConfig());
+            if (resource.key().isPresent()) {
+                store = encrypted(halyx, store, resource.key().get());
+            }
             return new ConfigData(List.of(new HalyxPropertySource(resource, HalyxPropertySource.load(store, resource))));
         }
+    }
+
+    /** {@code store} opening values with {@code key}, from a key store on {@code halyx}. */
+    static ParameterStore encrypted(Halyx halyx, ParameterStore store, HalyxImportKey key) {
+        return key.view(store, halyx.provider(key.provider()).keyStore(key.storeConfig()));
     }
 }

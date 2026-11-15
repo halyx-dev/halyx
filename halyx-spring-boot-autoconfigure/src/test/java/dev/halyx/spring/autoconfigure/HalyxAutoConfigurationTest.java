@@ -18,6 +18,9 @@ package dev.halyx.spring.autoconfigure;
 import io.micrometer.observation.tck.TestObservationRegistry;
 import io.micrometer.observation.tck.TestObservationRegistryAssert;
 import org.junit.jupiter.api.Test;
+import dev.halyx.memory.InMemoryKeys;
+import dev.halyx.keys.KeyPurpose;
+import dev.halyx.keys.KeyStore;
 import dev.halyx.Halyx;
 import dev.halyx.cache.Cache;
 import dev.halyx.cache.CacheAuth;
@@ -208,6 +211,27 @@ class HalyxAutoConfigurationTest {
             secrets.put("resize-key", "rotated");
             assertThat(config.property("azure.functions.key")).hasValue("rotated");
             assertThat(config.property("azure.functions.endpoint")).hasValue("https://orders.azurewebsites.net");
+        }
+    }
+
+    @Test
+    void functionSecretsFromAnEncryptedStoreAreOpened() {
+        try (Halyx halyx = Halyx.builder().register("local", ProviderConfig.of("memory")).build()) {
+            KeyStore keys = halyx.provider("local").keyStore();
+            keys.unwrap(InMemoryKeys.class).create("sealing", KeyPurpose.ENCRYPTION);
+            ParameterStore plain = halyx.provider("local").parameterStore(ParameterStoreConfig.secrets().build());
+            ParameterStore secrets = plain.encryptedWith(keys.key("sealing"));
+            var function = new HalyxProperties.FunctionProperties(null, null, null, null, null, Map.of(),
+                    List.of(new HalyxProperties.SecretProperty("azure.functions.key", "secrets", "resize-key", null),
+                            new HalyxProperties.SecretProperty("x.json", "secrets", "json", "value")));
+            FunctionConfig config = function.toFunctionConfig("resize", Map.of("secrets", secrets)::get);
+
+            secrets.put("resize-key", "function-key");
+            secrets.put("json", "{\"value\":\"field\"}");
+
+            assertThat(plain.require("resize-key")).startsWith("hlxs1:");
+            assertThat(config.property("azure.functions.key")).hasValue("function-key");
+            assertThat(config.property("x.json")).hasValue("field");
         }
     }
 
