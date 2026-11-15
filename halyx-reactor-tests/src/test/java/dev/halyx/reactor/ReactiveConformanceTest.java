@@ -312,6 +312,16 @@ class ReactiveConformanceTest {
         }
     }
 
+    /** The parameter kit through the reactive views again, over a store encrypted with a memory key. */
+    @Nested
+    class EncryptedParameters extends Parameters {
+        @Override
+        protected ParameterStore newStore(ParameterStoreConfig config) {
+            return BlockingViews.of(rx.wrap(context().parameterStore(config)
+                    .encryptedWith(context().keyStore().key("tck-data"))));
+        }
+    }
+
     @Nested
     class Streams extends StreamConformanceTest {
         @Override

@@ -15,10 +15,8 @@
  */
 package dev.halyx.vault;
 
+import dev.halyx.keys.KeyStore;
 import dev.halyx.tck.ParameterEncryptionConformanceTest;
-import dev.halyx.memory.InMemoryKeys;
-import dev.halyx.keys.KeyPurpose;
-import dev.halyx.keys.CryptoKey;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Nested;
@@ -65,17 +63,16 @@ class VaultParameterStoreIT {
             .waitingFor(Wait.forHttp("/v1/sys/health").forPort(8200));
 
     private static Halyx halyx;
-    private static Halyx memoryKeys;
-    private static CryptoKey memoryKey;
 
     @BeforeAll
-    static void start() {
+    static void start() throws Exception {
         halyx = Halyx.builder()
                 .register("vault", ProviderConfig.of("vault").endpoint(address()).credentials(Credentials.of("token", ROOT)))
                 .build();
-        memoryKeys = Halyx.builder().register("keys", ProviderConfig.of("memory")).build();
-        memoryKeys.provider("keys").keyStore().unwrap(InMemoryKeys.class).create("parameters", KeyPurpose.ENCRYPTION);
-        memoryKey = memoryKeys.provider("keys").keyStore().key("parameters");
+        root("POST", "sys/mounts/transit", "{\"type\":\"transit\"}");
+        for (String key : new String[] {"parameters", "tenant-a", "tenant-b"}) {
+            root("POST", "transit/keys/" + key, "{\"type\":\"aes256-gcm96\"}");
+        }
     }
 
     @AfterAll
@@ -83,9 +80,11 @@ class VaultParameterStoreIT {
         if (halyx != null) {
             halyx.close();
         }
-        if (memoryKeys != null) {
-            memoryKeys.close();
-        }
+    }
+
+    /** Transit on the same server, holding encryption keys parameters, tenant-a and tenant-b. */
+    private static KeyStore transit() {
+        return halyx.provider("vault").keyStore();
     }
 
     static URI address() {
@@ -110,18 +109,12 @@ class VaultParameterStoreIT {
         }
     }
 
-    /** The whole kit through a view sealing with a memory key. */
+    /** The whole kit through a view sealing with a Transit key. */
     @Nested
     class EncryptedKvSecrets extends KvSecrets {
         @Override
         protected ParameterStore wrap(ParameterStore store) {
-            return store.encryptedWith(memoryKey);
-        }
-
-        /** The memory key store's calls run on the blocking executor; runs with a cloud's key service check this. */
-        @Override
-        protected boolean nonBlockingAsync() {
-            return false;
+            return store.encryptedWith(transit().key("parameters"));
         }
     }
 
@@ -135,6 +128,11 @@ class VaultParameterStoreIT {
         @Override
         protected ParameterStoreConfig.Builder config() {
             return ParameterStoreConfig.secrets();
+        }
+
+        @Override
+        protected KeyStore keys() {
+            return transit();
         }
     }
 

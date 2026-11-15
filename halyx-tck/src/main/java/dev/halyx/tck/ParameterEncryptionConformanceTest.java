@@ -23,6 +23,7 @@ import dev.halyx.error.InvalidArgumentException;
 import dev.halyx.keys.CryptoKey;
 import dev.halyx.keys.KeyPurpose;
 import dev.halyx.keys.KeyStore;
+import dev.halyx.keys.KeyStoreConfig;
 import dev.halyx.keys.SealedData;
 import dev.halyx.memory.InMemoryKeys;
 import dev.halyx.parameters.EncryptedParameterStore;
@@ -45,10 +46,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
- * What encrypting a parameter store adds, beyond the parameter kit run through the view: what is stored, the binding to
- * the full name, values stored in the clear, a key per name, key service calls and the cache, listings, and the size
- * check. Keys come from a memory key store, so emulators need no key service; a subclass can use its provider's own
- * keys with {@link #keys()}.
+ * What encrypting a parameter store adds, beyond the parameter kit run through the view: what is stored, tampering,
+ * the binding to the full name, wrong keys, values stored in the clear, a key per name, key service calls and the cache,
+ * listings, and the size check. Keys come from a memory key store, so emulators need no key service; a subclass can use
+ * its provider's own keys with {@link #keys()}.
  */
 public abstract class ParameterEncryptionConformanceTest {
 
@@ -63,12 +64,13 @@ public abstract class ParameterEncryptionConformanceTest {
 
     /**
      * The key store the views seal with, holding encryption keys {@code parameters}, {@code tenant-a} and
-     * {@code tenant-b}. A memory store by default.
+     * {@code tenant-b}. A memory store by default, at its own location, so its key IDs differ from those of another
+     * memory store's keys of the same names.
      */
     protected KeyStore keys() {
         if (keys == null) {
             memory = Halyx.builder().register("tck-keys", ProviderConfig.of("memory")).build();
-            keys = memory.provider("tck-keys").keyStore();
+            keys = memory.provider("tck-keys").keyStore(KeyStoreConfig.builder().location("tck-parameters").build());
             InMemoryKeys created = keys.unwrap(InMemoryKeys.class);
             for (String name : new String[] {"parameters", "tenant-a", "tenant-b"}) {
                 created.create(name, KeyPurpose.ENCRYPTION);
@@ -185,6 +187,31 @@ public abstract class ParameterEncryptionConformanceTest {
 
         plain().put("db/moved", plain().require("db/password"));
         assertThatThrownBy(() -> sealed().require("db/moved")).isInstanceOf(DataIntegrityException.class);
+    }
+
+    @Test
+    void aChangedValueIsRefused() {
+        sealed().put("db/password", "s3cret");
+        byte[] stored = SealedData.parseText(plain().require("db/password")).toBytes();
+        stored[stored.length - 1] ^= 1;
+        plain().put("db/password", SealedData.parse(stored).toText());
+
+        assertThatThrownBy(() -> sealed().require("db/password")).isInstanceOf(DataIntegrityException.class)
+                .hasMessageNotContaining("s3cret");
+        assertThatThrownBy(() -> sealed().async().require("db/password").join())
+                .isInstanceOf(CompletionException.class).hasCauseInstanceOf(DataIntegrityException.class);
+    }
+
+    @Test
+    void aKeyFromAnotherStoreCantOpenIt() {
+        sealed().put("db/password", "s3cret");
+        try (Halyx other = Halyx.builder().register("other", ProviderConfig.of("memory")).build()) {
+            KeyStore elsewhere = other.provider("other").keyStore();
+            elsewhere.unwrap(InMemoryKeys.class).create("parameters", KeyPurpose.ENCRYPTION);
+
+            assertThatThrownBy(() -> plain().encryptedWith(elsewhere.key("parameters")).require("db/password"))
+                    .isInstanceOf(InvalidArgumentException.class);
+        }
     }
 
     // Values stored in the clear

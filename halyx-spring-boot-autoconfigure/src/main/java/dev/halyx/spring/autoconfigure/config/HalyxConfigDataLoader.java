@@ -18,9 +18,7 @@ package dev.halyx.spring.autoconfigure.config;
 import dev.halyx.Halyx;
 import dev.halyx.interceptor.RetryInterceptor;
 import dev.halyx.interceptor.RetryPolicy;
-import dev.halyx.keys.CryptoKey;
 import dev.halyx.parameters.ParameterStore;
-import dev.halyx.spring.autoconfigure.HalyxBlobStores;
 import org.springframework.boot.context.config.ConfigData;
 import org.springframework.boot.context.config.ConfigDataLoader;
 import org.springframework.boot.context.config.ConfigDataLoaderContext;
@@ -62,7 +60,6 @@ public class HalyxConfigDataLoader implements ConfigDataLoader<HalyxConfigDataRe
 
     /** {@code store} opening values with {@code key}, from a key store on {@code halyx}. */
     static ParameterStore encrypted(Halyx halyx, ParameterStore store, HalyxImportKey key) {
-        CryptoKey cryptoKey = halyx.provider(key.provider()).keyStore(key.storeConfig()).key(key.name(), key.options());
-        return HalyxBlobStores.encrypted(store, cryptoKey, key.allowPlaintext());
+        return key.view(store, halyx.provider(key.provider()).keyStore(key.storeConfig()));
     }
 }

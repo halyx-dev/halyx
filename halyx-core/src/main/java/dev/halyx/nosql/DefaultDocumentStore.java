@@ -270,7 +270,7 @@ public final class DefaultDocumentStore implements DocumentStore {
 
     /** A session for one blocking call; key service calls run on the blocking executor. */
     private FieldEncryption.Session session() {
-        return encryption.session(InterceptorChain.blocking());
+        return encryption.session(InterceptorChain.blocking(), true);
     }
 
     @Override
@@ -376,7 +376,7 @@ public final class DefaultDocumentStore implements DocumentStore {
 
         /** Runs {@code call} with a session for this call, closed (its data keys zeroed) when the call completes. */
         private <T> CompletableFuture<T> withSession(Function<FieldEncryption.Session, CompletableFuture<T>> call) {
-            FieldEncryption.Session session = encryption.session(blocking);
+            FieldEncryption.Session session = encryption.session(blocking, false);
             CompletableFuture<T> result;
             try {
                 result = call.apply(session);

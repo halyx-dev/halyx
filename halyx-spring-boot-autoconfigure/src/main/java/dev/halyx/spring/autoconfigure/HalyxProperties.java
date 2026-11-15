@@ -311,7 +311,7 @@ public record HalyxProperties(Map<String, Provider> providers, Map<String, BlobS
             properties = ordered(properties);
         }
 
-        public KeyOptions toKeyOptions() {
+        KeyOptions toKeyOptions() {
             KeyOptions.Builder options = KeyOptions.builder();
             properties.forEach(options::property);
             return options.build();

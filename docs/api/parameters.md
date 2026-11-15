@@ -213,7 +213,7 @@ be on any provider or cloud: a Vault Transit key can seal SSM parameters.
 CryptoKey key = halyx.provider("aws").keyStore().key("orders-config");
 EncryptedParameterStore secrets = halyx.provider("aws").parameterStore(
         ParameterStoreConfig.secrets().prefix("orders").cacheTtl(Duration.ofMinutes(5)).build()).encryptedWith(key);
-secrets.put("db/password", password);                 // stored as hlxs1:..., one wrap call
+secrets.put("db/password", "s3cret");                 // stored as hlxs1:..., one wrap call
 String password = secrets.require("db/password");      // one unwrap call, then cached for 5 minutes
 String user = secrets.require("db/creds", "username"); // opens the value, then reads the JSON field
 ```
@@ -224,7 +224,8 @@ String user = secrets.require("db/creds", "username"); // opens the value, then 
 - **The cache holds opened values.** With `cacheTtl`, a cached read makes no key service call, as a plain store's
   cache holds plaintext. Without one, every read unwraps once. A view is a store of its own, with its own cache and
   statistics; writes through it drop its cache.
-- **Listings** (`getAll`, watches, config reloads) open up to 16 values at a time.
+- **Listings** (`getAll`, watches, config reloads) open up to 16 values at a time. A blocking listing starts each
+  key service call on the caller's thread, so interceptors such as tracing see the caller's context.
 - **A key per name:** `encryptedWith(keyStore, name -> "tenant-" + tenantOf(name))` picks the key for each value from
   its name, relative to the store's prefix. Any key of the store opens what another sealed, since the sealed data
   names its key.

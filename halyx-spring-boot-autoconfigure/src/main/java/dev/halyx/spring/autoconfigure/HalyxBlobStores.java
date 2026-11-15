@@ -146,7 +146,7 @@ public final class HalyxBlobStores {
     }
 
     /** {@code store} sealing values with {@code key}, and reading plaintext too when {@code allowPlaintext}. */
-    public static ParameterStore encrypted(ParameterStore store, CryptoKey key, boolean allowPlaintext) {
+    private static ParameterStore encrypted(ParameterStore store, CryptoKey key, boolean allowPlaintext) {
         EncryptedParameterStore encrypted = store.encryptedWith(key);
         return allowPlaintext ? encrypted.allowPlaintext() : encrypted;
     }

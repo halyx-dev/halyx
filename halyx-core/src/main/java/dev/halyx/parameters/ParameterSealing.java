@@ -16,6 +16,7 @@
 package dev.halyx.parameters;
 
 import dev.halyx.error.InvalidArgumentException;
+import dev.halyx.error.UnavailableException;
 import dev.halyx.keys.CryptoKey;
 import dev.halyx.keys.KeyStore;
 import dev.halyx.keys.SealedData;
@@ -32,13 +33,16 @@ import java.util.OptionalInt;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
 /**
  * How an encrypted view seals and opens values: each value is HLXS text sealed for the key {@code keys} names, with
  * the parameter's full name as AAD, and opened by {@code opener}, which finds the key from the sealed data. Listings
- * open {@value #PARALLEL_OPENS} values at a time.
+ * open {@value #PARALLEL_OPENS} values at a time; a blocking one starts every key service call on the caller's
+ * thread, so interceptors such as tracing see its context.
  */
 final class ParameterSealing {
 
@@ -148,18 +152,21 @@ final class ParameterSealing {
         return openAsync(fullName, parameter.get(), blocking).thenApply(Optional::of);
     }
 
-    /** Every value of {@code byFullName} opened, keeping its order and keys. */
+    /**
+     * Every value of {@code byFullName} opened, keeping its order and keys: at most {@value #PARALLEL_OPENS} key
+     * service calls at once, each started on the caller's thread, which waits for a free slot.
+     */
     Map<String, Parameter> openAll(Map<String, Parameter> byFullName, Executor blocking) {
         try {
-            return openAllAsync(byFullName, blocking).join();
+            return opened(byFullName, startAll(byFullName, blocking)).join();
         } catch (CompletionException e) {
             throw e.getCause() instanceof RuntimeException cause ? cause : e;
         }
     }
 
     /**
-     * Every value of {@code byFullName} opened, at most {@value #PARALLEL_OPENS} key service calls at a time; each call
-     * starts on the thread that completed the one before, or the caller's.
+     * {@link #openAll} without waiting, at most {@value #PARALLEL_OPENS} key service calls at once: each call after
+     * the first ones starts on the thread that completed the one before, as any call chained on another does.
      */
     CompletableFuture<Map<String, Parameter>> openAllAsync(Map<String, Parameter> byFullName, Executor blocking) {
         List<String> names = List.copyOf(byFullName.keySet());
@@ -207,6 +214,50 @@ final class ParameterSealing {
         synchronized (opened) {
             opened.set(i, parameter);
         }
+    }
+
+    /**
+     * Each value's open, started in order on this thread, at most {@value #PARALLEL_OPENS} running at once: past
+     * that, this thread waits for one to finish. No more start once one has failed.
+     */
+    private List<CompletableFuture<Parameter>> startAll(Map<String, Parameter> byFullName, Executor blocking) {
+        Semaphore slots = new Semaphore(PARALLEL_OPENS);
+        List<CompletableFuture<Parameter>> started = new ArrayList<>(byFullName.size());
+        AtomicBoolean failed = new AtomicBoolean();
+        for (Map.Entry<String, Parameter> entry : byFullName.entrySet()) {
+            try {
+                slots.acquire();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                started.add(CompletableFuture.failedFuture(new UnavailableException("Interrupted opening "
+                        + noun() + "s", e, provider, null)));
+                break;
+            }
+            if (failed.get()) {
+                break;
+            }
+            CompletableFuture<Parameter> call = openAsync(entry.getKey(), entry.getValue(), blocking);
+            call.whenComplete((parameter, error) -> {
+                if (error != null) {
+                    failed.set(true);
+                }
+                slots.release();
+            });
+            started.add(call);
+        }
+        return started;
+    }
+
+    private static CompletableFuture<Map<String, Parameter>> opened(Map<String, Parameter> byFullName,
+                                                                    List<CompletableFuture<Parameter>> started) {
+        return CompletableFuture.allOf(started.toArray(CompletableFuture<?>[]::new)).thenApply(done -> {
+            Map<String, Parameter> out = new LinkedHashMap<>();
+            int i = 0;
+            for (String fullName : byFullName.keySet()) {
+                out.put(fullName, started.get(i++).join());
+            }
+            return out;
+        });
     }
 
     /** The sealed data of a stored value; empty for plaintext that's allowed. */

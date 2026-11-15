@@ -16,7 +16,6 @@
 package dev.halyx.spring.autoconfigure.config;
 
 import dev.halyx.Halyx;
-import dev.halyx.keys.CryptoKey;
 import dev.halyx.parameters.ParameterStore;
 import dev.halyx.spring.autoconfigure.HalyxBlobStores;
 import org.slf4j.Logger;
@@ -92,9 +91,8 @@ public class HalyxConfigReloader implements SmartLifecycle {
             return store;
         }
         HalyxImportKey key = resource.key().get();
-        CryptoKey cryptoKey = HalyxBlobStores.context(halyx, "halyx.key-stores." + key.keyStoreName(), key.provider())
-                .keyStore(key.storeConfig()).key(key.name(), key.options());
-        return HalyxBlobStores.encrypted(store, cryptoKey, key.allowPlaintext());
+        return key.view(store, HalyxBlobStores.context(halyx, "halyx.key-stores." + key.keyStoreName(),
+                key.provider()).keyStore(key.storeConfig()));
     }
 
     private void publishSpringCloudEvent(Set<String> keys) {

@@ -15,6 +15,7 @@
  */
 package dev.halyx.spring.autoconfigure.config;
 
+import dev.halyx.keys.KeyOptions;
 import dev.halyx.spring.autoconfigure.HalyxProperties;
 import org.springframework.boot.context.config.ConfigDataLocation;
 import org.springframework.boot.context.config.ConfigDataLocationNotFoundException;
@@ -135,8 +136,14 @@ public class HalyxConfigDataLocationResolver implements ConfigDataLocationResolv
         requireResolved(binder, keyStoreProperty, storeProperty);
         requireResolved(binder, "halyx.providers." + provider, storeProperty);
         return new HalyxImportKey(keyStoreName, provider, providerProperties.toProviderConfig(provider),
-                keyStore.toKeyStoreConfig(keyStoreName), reference.name(), reference.toKeyOptions(),
+                keyStore.toKeyStoreConfig(keyStoreName), reference.name(), keyOptions(reference.properties()),
                 store.allowPlaintext());
+    }
+
+    private static KeyOptions keyOptions(Map<String, String> properties) {
+        KeyOptions.Builder options = KeyOptions.builder();
+        properties.forEach(options::property);
+        return options.build();
     }
 
     /**

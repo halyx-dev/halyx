@@ -24,6 +24,7 @@ import dev.halyx.error.InvalidArgumentException;
 import dev.halyx.error.NotFoundException;
 import dev.halyx.error.UnknownCloudException;
 import dev.halyx.error.UnsupportedFeatureException;
+import dev.halyx.interceptor.AsyncInvocation;
 import dev.halyx.interceptor.Interceptor;
 import dev.halyx.interceptor.InterceptorChain;
 import dev.halyx.interceptor.Invocation;
@@ -43,11 +44,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -115,6 +119,85 @@ class EncryptedParameterStoreTest {
         });
         assertThat(encrypted.get("missing")).isEmpty();
         assertThatThrownBy(() -> encrypted.require("missing")).isInstanceOf(NotFoundException.class);
+    }
+
+    @Test
+    void aStoreWithoutAKeyMakesNoKeyCalls() throws Exception {
+        ParameterStore plain = store("app", Duration.ofMinutes(5));
+        plain.put("db/password", "s3cret");
+        plain.put("db/user", "orders");
+        plain.require("db/password");
+        plain.getAll("db");
+        plain.async().put("db/token", "t0k3n").join();
+        plain.async().getAll("db").join();
+        plain.refresh();
+        plain.require("db/user");
+
+        assertThat(keyCalls).isEmpty();
+    }
+
+    /**
+     * A blocking listing opens its values 16 at a time, yet starts every unwrap on the caller's thread, where an
+     * asynchronous interceptor such as the observation one picks up the caller's context: here a thread-local trace.
+     */
+    @Test
+    void aBlockingListingStartsEveryUnwrapOnTheCallersThread() {
+        ThreadLocal<String> trace = new ThreadLocal<>();
+        List<String> traces = new CopyOnWriteArrayList<>();
+        AtomicInteger inFlight = new AtomicInteger();
+        AtomicInteger mostInFlight = new AtomicInteger();
+        try (Halyx traced = Halyx.builder()
+                .register("test", ProviderConfig.of("memory"))
+                .interceptor(new Interceptor() {
+                    @Override
+                    public <T> T intercept(OperationContext context, Invocation<T> next) {
+                        if (!context.operation().equals("unwrap")) {
+                            return next.proceed();
+                        }
+                        mostInFlight.accumulateAndGet(inFlight.incrementAndGet(), Math::max);
+                        try {
+                            Thread.sleep(20);
+                            return next.proceed();
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            throw new IllegalStateException(e);
+                        } finally {
+                            inFlight.decrementAndGet();
+                        }
+                    }
+
+                    @Override
+                    public <T> CompletableFuture<T> interceptAsync(OperationContext context, AsyncInvocation<T> next,
+                                                                   Executor blocking) {
+                        if (context.operation().equals("unwrap")) {
+                            traces.add(String.valueOf(trace.get()));
+                        }
+                        return Interceptor.super.interceptAsync(context, next, blocking);
+                    }
+                })
+                .build()) {
+            KeyStore store = traced.provider("test").keyStore();
+            store.unwrap(InMemoryKeys.class).create("config", KeyPurpose.ENCRYPTION);
+            EncryptedParameterStore encrypted = traced.provider("test")
+                    .parameterStore(ParameterStoreConfig.secrets().prefix("app").build())
+                    .encryptedWith(store.key("config"));
+            for (int i = 0; i < 40; i++) {
+                encrypted.put("items/" + i, "value-" + i);
+            }
+
+            trace.set("request-42");
+            Map<String, Parameter> all;
+            try {
+                all = encrypted.getAll("items");
+            } finally {
+                trace.remove();
+            }
+
+            assertThat(all).hasSize(40);
+            assertThat(all.get("items/7").value()).isEqualTo("value-7");
+            assertThat(traces).hasSize(40).containsOnly("request-42");
+            assertThat(mostInFlight.get()).isGreaterThan(1).isLessThanOrEqualTo(ParameterSealing.PARALLEL_OPENS);
+        }
     }
 
     @Test

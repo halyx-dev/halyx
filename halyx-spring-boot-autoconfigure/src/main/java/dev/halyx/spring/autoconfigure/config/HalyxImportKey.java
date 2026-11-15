@@ -17,7 +17,10 @@ package dev.halyx.spring.autoconfigure.config;
 
 import dev.halyx.config.ProviderConfig;
 import dev.halyx.keys.KeyOptions;
+import dev.halyx.keys.KeyStore;
 import dev.halyx.keys.KeyStoreConfig;
+import dev.halyx.parameters.EncryptedParameterStore;
+import dev.halyx.parameters.ParameterStore;
 
 /**
  * The key a {@code halyx:} import opens its store's values with: the store's {@code encryption-key}, resolved to its
@@ -33,4 +36,10 @@ import dev.halyx.keys.KeyStoreConfig;
  */
 record HalyxImportKey(String keyStoreName, String provider, ProviderConfig providerConfig, KeyStoreConfig storeConfig,
                       String name, KeyOptions options, boolean allowPlaintext) {
+
+    /** {@code store} opening its values with this key from {@code keys}, the key store this one describes. */
+    ParameterStore view(ParameterStore store, KeyStore keys) {
+        EncryptedParameterStore view = store.encryptedWith(keys.key(name, options));
+        return allowPlaintext ? view.allowPlaintext() : view;
+    }
 }

@@ -225,7 +225,8 @@ key: about 256 bytes on Azure's RSA-2048 keys) and a 16-byte tag; count that aga
 `update` costs one wrap call however many fields it encrypts; each field is still sealed on its own, with its own
 subkey and nonces. A read unwraps each document's data key once, so a `get` costs one call and a 100-item query page
 100. A page's data keys are unwrapped in parallel, 16 at a time, so the page waits for about one round trip per 16
-items rather than one per item. Data keys live only for the call: nothing is cached unless you turn on the key
+items rather than one per item; a blocking call starts each unwrap on the caller's thread, so interceptors such as
+tracing see the caller's context. Data keys live only for the call: nothing is cached unless you turn on the key
 store's `dataKeyCache`.
 
 **Read-heavy tables.** For tables read far more often than written, turn on `dataKeyCache` on the key store: repeat
