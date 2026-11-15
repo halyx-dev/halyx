@@ -15,6 +15,10 @@
  */
 package dev.halyx.gcp;
 
+import java.util.OptionalInt;
+import dev.halyx.tck.ParameterEncryptionConformanceTest;
+import dev.halyx.memory.InMemoryKeys;
+import dev.halyx.keys.KeyPurpose;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Nested;
@@ -50,6 +54,8 @@ class ParameterManagerConformanceTest {
 
     private static FakeParameterManager fake;
     private static Halyx halyx;
+    private static Halyx memoryKeys;
+    private static CryptoKey memoryKey;
 
     @BeforeAll
     static void start() throws Exception {
@@ -60,12 +66,16 @@ class ParameterManagerConformanceTest {
                         .credentials(Credentials.anonymous())
                         .property(GcpProperties.PROJECT_ID, "test-project"))
                 .build();
+        memoryKeys = Halyx.builder().register("keys", ProviderConfig.of("memory")).build();
+        memoryKeys.provider("keys").keyStore().unwrap(InMemoryKeys.class).create("parameters", KeyPurpose.ENCRYPTION);
+        memoryKey = memoryKeys.provider("keys").keyStore().key("parameters");
     }
 
     @AfterAll
     static void stop() {
         halyx.close();
         fake.close();
+        memoryKeys.close();
     }
 
     @Nested
@@ -111,6 +121,39 @@ class ParameterManagerConformanceTest {
         @Override
         protected String nativePrefix(String unique) {
             return unique + "_";
+        }
+    }
+
+    /** The whole kit through a view sealing with a memory key. */
+    @Nested
+    class EncryptedGlobal extends Global {
+        @Override
+        protected ParameterStore wrap(ParameterStore store) {
+            return store.encryptedWith(memoryKey);
+        }
+
+        /** The memory key store's calls run on the blocking executor; runs with a cloud's key service check this. */
+        @Override
+        protected boolean nonBlockingAsync() {
+            return false;
+        }
+    }
+
+    @Nested
+    class GlobalEncryption extends ParameterEncryptionConformanceTest {
+        @Override
+        protected CloudContext context() {
+            return halyx.provider("gcp");
+        }
+
+        @Override
+        protected ParameterStoreConfig.Builder config() {
+            return ParameterStoreConfig.parameters();
+        }
+
+        @Override
+        protected OptionalInt maxValueBytes() {
+            return OptionalInt.of(1024 * 1024);
         }
     }
 

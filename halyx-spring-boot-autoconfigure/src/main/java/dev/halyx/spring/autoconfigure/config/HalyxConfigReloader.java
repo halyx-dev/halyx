@@ -16,6 +16,7 @@
 package dev.halyx.spring.autoconfigure.config;
 
 import dev.halyx.Halyx;
+import dev.halyx.keys.CryptoKey;
 import dev.halyx.parameters.ParameterStore;
 import dev.halyx.spring.autoconfigure.HalyxBlobStores;
 import org.slf4j.Logger;
@@ -72,8 +73,7 @@ public class HalyxConfigReloader implements SmartLifecycle {
         ParameterStore store = context.containsBean(resource.storeName())
                 && context.isTypeMatch(resource.storeName(), ParameterStore.class)
                 ? context.getBean(resource.storeName(), ParameterStore.class)
-                : HalyxBlobStores.context(halyx, "halyx.parameter-stores." + resource.storeName(), resource.providerName())
-                        .parameterStore(resource.storeConfig());
+                : storeOf(resource);
         watches.add(store.watch(resource.subPrefix(), resource.reloadInterval().orElseThrow(), changes -> {
             Set<String> keys = imported.replace(HalyxPropertySource.load(store, resource));
             if (!keys.isEmpty()) {
@@ -82,6 +82,19 @@ public class HalyxConfigReloader implements SmartLifecycle {
                 publishSpringCloudEvent(keys);
             }
         }));
+    }
+
+    /** The import's store on the {@code Halyx} bean, through an encrypted view when it has a key. */
+    private ParameterStore storeOf(HalyxConfigDataResource resource) {
+        ParameterStore store = HalyxBlobStores.context(halyx, "halyx.parameter-stores." + resource.storeName(),
+                resource.providerName()).parameterStore(resource.storeConfig());
+        if (resource.key().isEmpty()) {
+            return store;
+        }
+        HalyxImportKey key = resource.key().get();
+        CryptoKey cryptoKey = HalyxBlobStores.context(halyx, "halyx.key-stores." + key.keyStoreName(), key.provider())
+                .keyStore(key.storeConfig()).key(key.name(), key.options());
+        return HalyxBlobStores.encrypted(store, cryptoKey, key.allowPlaintext());
     }
 
     private void publishSpringCloudEvent(Set<String> keys) {

@@ -32,6 +32,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 
@@ -140,6 +141,12 @@ public final class AppConfigurationDriver extends AbstractParameterDriver {
         var modified = setting.getLastModified();
         return new Parameter(setting.getKey(), setting.getValue(), setting.getETag() == null ? "" : setting.getETag(),
                 modified == null ? null : modified.toInstant());
+    }
+
+    /** An App Configuration setting takes 10 KB, its key and label included. */
+    @Override
+    public OptionalInt maxValueBytes() {
+        return OptionalInt.of(10 * 1024);
     }
 
     @Override

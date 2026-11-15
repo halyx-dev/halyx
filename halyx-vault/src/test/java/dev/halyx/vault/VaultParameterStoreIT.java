@@ -15,6 +15,10 @@
  */
 package dev.halyx.vault;
 
+import dev.halyx.tck.ParameterEncryptionConformanceTest;
+import dev.halyx.memory.InMemoryKeys;
+import dev.halyx.keys.KeyPurpose;
+import dev.halyx.keys.CryptoKey;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Nested;
@@ -61,18 +65,26 @@ class VaultParameterStoreIT {
             .waitingFor(Wait.forHttp("/v1/sys/health").forPort(8200));
 
     private static Halyx halyx;
+    private static Halyx memoryKeys;
+    private static CryptoKey memoryKey;
 
     @BeforeAll
     static void start() {
         halyx = Halyx.builder()
                 .register("vault", ProviderConfig.of("vault").endpoint(address()).credentials(Credentials.of("token", ROOT)))
                 .build();
+        memoryKeys = Halyx.builder().register("keys", ProviderConfig.of("memory")).build();
+        memoryKeys.provider("keys").keyStore().unwrap(InMemoryKeys.class).create("parameters", KeyPurpose.ENCRYPTION);
+        memoryKey = memoryKeys.provider("keys").keyStore().key("parameters");
     }
 
     @AfterAll
     static void stop() {
         if (halyx != null) {
             halyx.close();
+        }
+        if (memoryKeys != null) {
+            memoryKeys.close();
         }
     }
 
@@ -87,6 +99,34 @@ class VaultParameterStoreIT {
             return true;
         }
 
+        @Override
+        protected CloudContext context() {
+            return halyx.provider("vault");
+        }
+
+        @Override
+        protected ParameterStoreConfig.Builder config() {
+            return ParameterStoreConfig.secrets();
+        }
+    }
+
+    /** The whole kit through a view sealing with a memory key. */
+    @Nested
+    class EncryptedKvSecrets extends KvSecrets {
+        @Override
+        protected ParameterStore wrap(ParameterStore store) {
+            return store.encryptedWith(memoryKey);
+        }
+
+        /** The memory key store's calls run on the blocking executor; runs with a cloud's key service check this. */
+        @Override
+        protected boolean nonBlockingAsync() {
+            return false;
+        }
+    }
+
+    @Nested
+    class KvEncryption extends ParameterEncryptionConformanceTest {
         @Override
         protected CloudContext context() {
             return halyx.provider("vault");

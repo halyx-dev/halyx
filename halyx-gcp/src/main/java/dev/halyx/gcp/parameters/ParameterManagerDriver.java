@@ -53,6 +53,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ThreadLocalRandom;
@@ -338,6 +339,12 @@ public final class ParameterManagerDriver extends AbstractParameterDriver {
     private static Instant instant(Timestamp timestamp) {
         return timestamp.getSeconds() == 0 && timestamp.getNanos() == 0
                 ? null : Instant.ofEpochSecond(timestamp.getSeconds(), timestamp.getNanos());
+    }
+
+    /** A Parameter Manager version takes 1 MiB. */
+    @Override
+    public OptionalInt maxValueBytes() {
+        return OptionalInt.of(1024 * 1024);
     }
 
     @Override

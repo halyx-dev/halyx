@@ -35,11 +35,13 @@ public final class HalyxConfigDataResource extends ConfigDataResource {
     private final boolean expandJson;
     private final Duration reloadInterval;
     private final int startupAttempts;
+    private final HalyxImportKey key;
 
     HalyxConfigDataResource(String location, String storeName, String providerName, ProviderConfig providerConfig,
                               ParameterStoreConfig storeConfig, String subPrefix, boolean optional, boolean expandJson,
-                              Duration reloadInterval, int startupAttempts) {
+                              Duration reloadInterval, int startupAttempts, HalyxImportKey key) {
         super(optional);
+        this.key = key;
         this.location = location;
         this.storeName = storeName;
         this.providerName = providerName;
@@ -53,7 +55,7 @@ public final class HalyxConfigDataResource extends ConfigDataResource {
 
     /** An import with {@code halyx.config-import.enabled=false}: it loads nothing and connects nowhere. */
     static HalyxConfigDataResource switchedOff(String location, boolean optional) {
-        return new HalyxConfigDataResource(location, null, null, null, null, "", optional, false, null, 1);
+        return new HalyxConfigDataResource(location, null, null, null, null, "", optional, false, null, 1, null);
     }
 
     boolean isSwitchedOff() {
@@ -74,6 +76,11 @@ public final class HalyxConfigDataResource extends ConfigDataResource {
 
     int startupAttempts() {
         return startupAttempts;
+    }
+
+    /** The key the store's values are opened with, when the store has an {@code encryption-key}. */
+    Optional<HalyxImportKey> key() {
+        return Optional.ofNullable(key);
     }
 
     public String providerName() {

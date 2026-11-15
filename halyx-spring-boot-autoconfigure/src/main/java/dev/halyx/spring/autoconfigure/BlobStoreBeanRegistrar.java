@@ -127,17 +127,29 @@ class BlobStoreBeanRegistrar implements ImportBeanDefinitionRegistrar, Environme
                     String property = "halyx.parameter-stores." + name;
                     String description = "Halyx " + store.kind().name().toLowerCase() + " store " + name;
                     RootBeanDefinition definition;
-                    if (store.serverSideKey() == null) {
+                    if (store.encryptionKey() == null && store.allowPlaintext()) {
+                        throw new IllegalStateException(property + ".allow-plaintext needs " + property
+                                + ".encryption-key: plaintext is what a store without one reads");
+                    }
+                    if (store.serverSideKey() == null && store.encryptionKey() == null) {
                         definition = serviceBean(ParameterStore.class, "parameterStore", property, store.provider());
                         definition.getConstructorArgumentValues().addIndexedArgumentValue(2, store.toStoreConfig());
                     } else {
-                        // the key is an inner bean on its store bean, created first and destroyed after this store
+                        // each key is an inner bean on its store bean, created first and destroyed after this store
                         definition = serviceBean(ParameterStore.class, "keyedParameterStore", property, store.provider());
-                        definition.getConstructorArgumentValues().addIndexedArgumentValue(2, store);
-                        definition.getConstructorArgumentValues().addIndexedArgumentValue(3, keyArgument(
-                                property + ".server-side-key", store.serverSideKey(),
+                        ConstructorArgumentValues args = definition.getConstructorArgumentValues();
+                        args.addIndexedArgumentValue(2, store);
+                        args.addIndexedArgumentValue(3, keyArgument(property + ".server-side-key", store.serverSideKey(),
                                 "the key the service encrypts values with", keyStoreNames));
-                        description += ", encrypted at rest with " + store.serverSideKey().name();
+                        args.addIndexedArgumentValue(4, keyArgument(property + ".encryption-key", store.encryptionKey(),
+                                "the key to seal values with", keyStoreNames));
+                        if (store.serverSideKey() != null) {
+                            description += ", encrypted at rest with " + store.serverSideKey().name();
+                        }
+                        if (store.encryptionKey() != null) {
+                            description += ", sealed with " + store.encryptionKey().name()
+                                    + (store.allowPlaintext() ? ", reading plaintext" : "");
+                        }
                     }
                     definition.setDescription(description);
                     names.register(name, property, null, definition);

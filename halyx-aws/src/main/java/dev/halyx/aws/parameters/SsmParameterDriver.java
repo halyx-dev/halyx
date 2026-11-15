@@ -37,6 +37,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.Supplier;
@@ -255,6 +256,12 @@ public final class SsmParameterDriver extends AbstractParameterDriver {
 
     private Parameter toPortable(software.amazon.awssdk.services.ssm.model.Parameter p) {
         return new Parameter(portable(p.name()), p.value(), String.valueOf(p.version()), p.lastModifiedDate());
+    }
+
+    /** SSM takes 8 KB in an advanced parameter, 4 KB in a standard one; the service refuses what the tier doesn't take. */
+    @Override
+    public OptionalInt maxValueBytes() {
+        return OptionalInt.of(8 * 1024);
     }
 
     @Override

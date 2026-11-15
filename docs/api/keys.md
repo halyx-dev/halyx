@@ -199,6 +199,10 @@ Other services take a key and do the sealing for you:
   Azure Blob Storage encrypt every write with a key from the same cloud: S3 SSE-KMS, a customer-managed key, an
   encryption scope. Presigned uploads and downloads keep working. See
   [Server-side encryption with a key](storage.md#server-side-encryption-with-a-key).
+- **Parameters and secrets:** `parameterStore.encryptedWith(key)` seals every value before it leaves the application,
+  as `hlxs1:` text bound to its name, with a cache of opened values, a key per name, and a way to move a store over
+  one value at a time. Spring's config import opens them at startup. See
+  [Client-side encryption](parameters.md#client-side-encryption).
 - **Parameters and secrets, encrypted at rest by the service:** `ParameterStoreConfig.Builder.serverSideKey(key)`
   has SSM Parameter Store, Secrets Manager, Secret Manager or Parameter Manager encrypt new values with a key from
   the same cloud. See [Server-side encryption with a key](parameters.md#server-side-encryption-with-a-key).

@@ -49,6 +49,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 
@@ -243,6 +244,12 @@ public final class SecretManagerDriver extends AbstractParameterDriver {
         return GcpFutures.of(client.deleteSecretCallable().futureCall(request)).<Void>thenApply(empty -> null)
                 .exceptionallyCompose(error -> GcpFutures.hasCode(error, StatusCode.Code.NOT_FOUND)
                         ? CompletableFuture.completedFuture(null) : CompletableFuture.failedFuture(error));
+    }
+
+    /** A Secret Manager version takes 64 KiB. */
+    @Override
+    public OptionalInt maxValueBytes() {
+        return OptionalInt.of(64 * 1024);
     }
 
     @Override

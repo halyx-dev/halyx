@@ -202,6 +202,45 @@ What to plan for:
 - **Latency and egress.** A read after the cache expires crosses clouds. A `cacheTtl` of minutes makes reads rare.
 - **Bootstrap credentials** stay each cloud's workload identity, since they can't come from the store.
 
+## Client-side encryption
+
+`parameterStore.encryptedWith(key)` returns an `EncryptedParameterStore`, a view that seals every value with a
+[key](keys.md) before it leaves the application and opens it on the way back. The backend holds HLXS text
+(`hlxs1:...`), so neither the service nor anyone who can read the store sees the value without the key. The key can
+be on any provider or cloud: a Vault Transit key can seal SSM parameters.
+
+```java
+CryptoKey key = halyx.provider("aws").keyStore().key("orders-config");
+EncryptedParameterStore secrets = halyx.provider("aws").parameterStore(
+        ParameterStoreConfig.secrets().prefix("orders").cacheTtl(Duration.ofMinutes(5)).build()).encryptedWith(key);
+secrets.put("db/password", password);                 // stored as hlxs1:..., one wrap call
+String password = secrets.require("db/password");      // one unwrap call, then cached for 5 minutes
+String user = secrets.require("db/creds", "username"); // opens the value, then reads the JSON field
+```
+
+- **Bound to the full name.** Each value's AAD is the parameter's full name, the store's prefix and the name, so a
+  value copied to another name fails to open (`DataIntegrityException`). The same parameter read through a store
+  with another prefix still opens, and so does a copy under the same name in another store or cloud.
+- **The cache holds opened values.** With `cacheTtl`, a cached read makes no key service call, as a plain store's
+  cache holds plaintext. Without one, every read unwraps once. A view is a store of its own, with its own cache and
+  statistics; writes through it drop its cache.
+- **Listings** (`getAll`, watches, config reloads) open up to 16 values at a time.
+- **A key per name:** `encryptedWith(keyStore, name -> "tenant-" + tenantOf(name))` picks the key for each value from
+  its name, relative to the store's prefix. Any key of the store opens what another sealed, since the sealed data
+  names its key.
+- **Values in the clear are refused,** with an error naming the parameter and never its value. To move a store to
+  encryption, read through `encryptedWith(key).allowPlaintext()`, which returns such values as they are, and put
+  each value again through it. A value that starts with `hlxs1:` is always opened.
+- **Size.** Sealing adds a header of about a hundred bytes to a few hundred, depending on the key, and base64 makes
+  the whole a third longer. A put whose sealed value is longer than the backend takes is refused before it is sent:
+  SSM 8 KB (4 KB for standard parameters, which the service refuses), App Configuration 10 KB, Key Vault 25 KB,
+  Secrets Manager and Secret Manager 64 KB, Parameter Manager 1 MB. Vault has no fixed limit. As a rule of thumb,
+  the sealed length is four thirds of the value plus the header, so a value up to about 2.5 KB fits a standard SSM
+  parameter.
+- **Combined with a server-side key,** values are sealed, then encrypted at rest by the service.
+
+In Spring Boot, set `encryption-key` on the store: see [Spring Boot](../spring-boot.md#parameters-and-secrets).
+
 ## Server-side encryption with a key
 
 The services encrypt values at rest with a key they manage. `ParameterStoreConfig.Builder.serverSideKey(key)` has
