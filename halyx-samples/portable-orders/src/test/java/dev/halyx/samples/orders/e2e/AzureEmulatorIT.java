@@ -15,16 +15,22 @@
  */
 package dev.halyx.samples.orders.e2e;
 
+import com.azure.core.credential.AccessToken;
 import com.azure.cosmos.CosmosClient;
 import com.azure.cosmos.CosmosClientBuilder;
 import com.azure.cosmos.models.CosmosContainerProperties;
+import com.azure.security.keyvault.keys.KeyClientBuilder;
+import com.azure.security.keyvault.keys.models.CreateRsaKeyOptions;
+import com.azure.security.keyvault.keys.models.KeyOperation;
 import com.azure.storage.blob.BlobContainerClient;
 import dev.halyx.Halyx;
+import dev.halyx.azure.parameters.ForceHttpPolicy;
 import dev.halyx.config.Credentials;
 import dev.halyx.config.ProviderConfig;
 import dev.halyx.parameters.ParameterStoreConfig;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Nested;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.Network;
 import org.testcontainers.containers.wait.strategy.Wait;
@@ -34,20 +40,24 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.utility.MountableFile;
+import reactor.core.publisher.Mono;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 /**
- * The suite on the {@code azure} profile against Floci-az (Blob Storage, Cosmos DB, Key Vault and App Configuration),
- * the Service Bus emulator, PostgreSQL, Valkey and Kafka. Event Grid has no emulator, so the {@code events} feature is
- * off here; the real-cloud run covers it.
+ * The suite on the {@code azure} profile against Floci-az (Blob Storage, Cosmos DB, Key Vault secrets and keys, and App
+ * Configuration), the Service Bus emulator, PostgreSQL, Valkey and Kafka. Event Grid has no emulator, so the
+ * {@code events} feature is off here; the real-cloud run covers it. It runs with {@code keys} off, then again with it
+ * on, sealing with a Key Vault key.
  */
 @Testcontainers(disabledWithoutDocker = true)
 class AzureEmulatorIT extends PortableOrdersSuite {
@@ -109,7 +119,11 @@ class AzureEmulatorIT extends PortableOrdersSuite {
     @Container
     static final KafkaContainer KAFKA = SharedContainers.kafka();
 
+    private static final List<String> PROFILES = List.of("azure", "streams", "cache", "sql");
+    private static final Set<String> FEATURES = Set.of("streams", "cache", "sql");
+
     private static InProcessService service;
+    private static Map<String, String> properties;
 
     @BeforeAll
     static void start() throws Exception {
@@ -128,7 +142,7 @@ class AzureEmulatorIT extends PortableOrdersSuite {
         provision(blobEndpoint, cosmosEndpoint, vaultUrl, appConfig);
         SharedContainers.createAuditTopic(KAFKA);
 
-        Map<String, String> properties = new LinkedHashMap<>(SharedContainers.properties(POSTGRES, VALKEY, KAFKA));
+        properties = new LinkedHashMap<>(SharedContainers.properties(POSTGRES, VALKEY, KAFKA));
         properties.put("ORDERS_STORAGE_ACCOUNT", ACCOUNT);
         properties.put("ORDERS_COSMOS_ENDPOINT", cosmosEndpoint);
         properties.put("ORDERS_SERVICEBUS_NAMESPACE", "sbemulatorns");
@@ -142,14 +156,12 @@ class AzureEmulatorIT extends PortableOrdersSuite {
         properties.put("halyx.parameter-stores.settings.properties.azure.appconfig.connection-string", appConfig);
         properties.put("halyx.parameter-stores.settings.properties.azure.emulator.insecure-http", "true");
         properties.put("halyx.parameter-stores.secrets.properties.azure.emulator.insecure-http", "true");
-        service = new InProcessService(List.of("azure", "streams", "cache", "sql"), properties);
+        service = new InProcessService(PROFILES, properties);
     }
 
     @AfterAll
     static void stop() {
-        if (service != null) {
-            service.close();
-        }
+        stopFirst();
         SERVICE_BUS.stop();
         SQL_EDGE.stop();
     }
@@ -161,11 +173,67 @@ class AzureEmulatorIT extends PortableOrdersSuite {
 
     @Override
     protected Expectations expected() {
-        return new Expectations("azure", Set.of("streams", "cache", "sql"), 6, "USD", SIGNING_KEY, Set.of("bulk-discount"),
-                Duration.ofSeconds(60));
+        return expectations(FEATURES);
     }
 
-    /** The receipts container, the Cosmos DB database and container, and the settings and signing key. */
+    @Override
+    protected Optional<StoredData> stored() {
+        return Optional.of(new StoredData(service.bean(Halyx.class).provider("azure")));
+    }
+
+    private static Expectations expectations(Set<String> features) {
+        return new Expectations("azure", features, 6, "USD", SIGNING_KEY, Set.of("bulk-discount"), Duration.ofSeconds(60));
+    }
+
+    private static void stopFirst() {
+        if (service != null) {
+            service.close();
+            service = null;
+        }
+    }
+
+    @Nested
+    class WithKeys extends PortableOrdersSuite {
+
+        private static InProcessService keyed;
+
+        /** After the outer tests: the first service stops, so it doesn't take this one's messages and records. */
+        @BeforeAll
+        static void start() {
+            stopFirst();
+            Map<String, String> keys = new LinkedHashMap<>(properties);
+            // Only with the profile: the setting alone would declare the key store, which has no vault without it.
+            keys.put("halyx.key-stores.order-keys.properties.azure.emulator.insecure-http", "true");
+            keyed = new InProcessService(Features.with(PROFILES, "keys"), keys);
+        }
+
+        @AfterAll
+        static void stop() {
+            if (keyed != null) {
+                keyed.close();
+            }
+        }
+
+        @Override
+        protected OrdersClient client() {
+            return keyed.client();
+        }
+
+        @Override
+        protected Expectations expected() {
+            return expectations(Features.with(FEATURES, "keys"));
+        }
+
+        @Override
+        protected Optional<StoredData> stored() {
+            return Optional.of(new StoredData(keyed.bean(Halyx.class).provider("azure")));
+        }
+    }
+
+    /**
+     * The receipts container, the Cosmos DB database and container, the settings and signing key, and the
+     * {@code keys} feature's Key Vault key: RSA, for wrapping data keys.
+     */
     private static void provision(String blobEndpoint, String cosmosEndpoint, String vaultUrl, String appConfig) {
         try (CosmosClient cosmos = new CosmosClientBuilder().endpoint(cosmosEndpoint).key(COSMOS_KEY).gatewayMode()
                 .endpointDiscoveryEnabled(false).buildClient()) {
@@ -189,6 +257,11 @@ class AzureEmulatorIT extends PortableOrdersSuite {
                             .location(vaultUrl).property("azure.emulator.insecure-http", "true").build())
                     .put("receipt-signing-key", SIGNING_KEY);
         }
+        new KeyClientBuilder().vaultUrl(vaultUrl)
+                .credential(request -> Mono.just(new AccessToken("emulator", OffsetDateTime.now().plusHours(1))))
+                .addPolicy(new ForceHttpPolicy()).disableChallengeResourceVerification().buildClient()
+                .createRsaKey(new CreateRsaKeyOptions("portable-orders-customer-data").setKeySize(2048)
+                        .setKeyOperations(KeyOperation.WRAP_KEY, KeyOperation.UNWRAP_KEY));
     }
 
     private static Path selfSignedKeystore() {

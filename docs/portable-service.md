@@ -27,24 +27,26 @@ POST /customers/{id}/orders ──► orders (DocumentStore, via a Spring Data r
                             │                                  └─► status CONFIRMED (DocumentStore.update)
                             ├─► order-events (EventPublisher) ──► notifications (@HalyxListener, CloudEvent)   events
                             ├─► order-audit (StreamProducer)  ──► auditor (@HalyxListener, stream consumer)    streams
-                            └─► idempotency (Cache): an Idempotency-Key header makes retries safe            cache
+                            ├─► idempotency (Cache): an Idempotency-Key header makes retries safe            cache
+                            └─► contact (@Encrypted in OrderContact), receipts sealed (KeyStore, CryptoKey)  keys
 spring.config.import: halyx:settings  ──► orders.max-lines, orders.currency (ParameterStore, reloaded every minute)
 settings features/* ──► flipjack (polled) ──► bulk-discount: BulkDiscountPricing, or StandardPricing when off
 ```
 
 | Endpoint | Returns |
 |---|---|
-| `POST /customers/{customerId}/orders` | `201` with the new order; `200` with the earlier order for a repeated `Idempotency-Key`; `400` for an invalid order |
+| `POST /customers/{customerId}/orders` | `201` with the new order; `200` with the earlier order for a repeated `Idempotency-Key`; `400` for an invalid order. The body is `{"lines": [...]}`, with an optional `"contact"` email that only `keys` accepts |
 | `GET /customers/{customerId}/orders` | the customer's orders, newest first |
 | `GET /customers/{customerId}/orders/{orderId}` | the order: its status, and whether it has been receipted, notified and audited |
 | `GET /customers/{customerId}/orders/{orderId}/receipt` | the signed receipt, once fulfilment has written it |
 | `GET /customers/{customerId}/ledger` | the customer's ledger entries (`sql` only) |
+| `GET /customers/{customerId}/orders/{orderId}/contact` | the order's contact email, opened with the key (`keys` only) |
 | `GET /deployment` | the cloud, the features on, the provider behind each Halyx bean, and the settings |
 | `GET /actuator/health` | Boot's health, with Halyx's indicators |
 
 ## Choosing the cloud and the features
 
-One profile names the cloud, and up to four more turn on optional features:
+One profile names the cloud, and up to five more turn on optional features:
 
 | Profile | Adds |
 |---|---|
@@ -54,6 +56,7 @@ One profile names the cloud, and up to four more turn on optional features:
 | `streams` | a Kafka stream cluster, a producer and a consumer group |
 | `cache` | a Redis or Valkey cache for idempotency keys |
 | `sql` | a PostgreSQL ledger, with IAM login and `schema.sql` |
+| `keys` | a key store and the `customer-data` key: receipts sealed before they're stored, and a contact email per order sealed by its repository |
 
 ```bash
 SPRING_PROFILES_ACTIVE=aws,events,cache,sql java -jar portable-orders.jar
@@ -80,10 +83,25 @@ names:
 | `AWS_REGION` | the AWS region | `eu-west-2` |
 | `ORDERS_STORAGE_ACCOUNT`, `ORDERS_COSMOS_ENDPOINT`, `ORDERS_SERVICEBUS_NAMESPACE`, `ORDERS_KEYVAULT_URL`, `ORDERS_APPCONFIG_ENDPOINT`, `ORDERS_EVENTGRID_ENDPOINT` | the Azure accounts and endpoints | |
 | `GOOGLE_CLOUD_PROJECT`, `ORDERS_PARAMETER_LOCATION` | the Google Cloud project, and the Parameter Manager location | location `global` |
+| `ORDERS_KEY_PREFIX`, `ORDERS_DATA_KEY` | the key's name, as prefix and name: an alias on AWS, a Key Vault key in `ORDERS_KEYVAULT_URL` on Azure, a crypto key on Google Cloud | `portable-orders-`, `customer-data` |
+| `ORDERS_KEY_RING`, `ORDERS_KEY_RING_LOCATION` | the Google Cloud key ring that holds the key | `portable-orders`, `global` |
 
 The settings (`orders/max-lines` and `orders/currency`), the feature flags (`features/bulk-discount`) and the
 `receipt-signing-key` secret live under the `portable-orders` prefix: in SSM Parameter Store and Secrets Manager, App
 Configuration and Key Vault, or Parameter Manager and Secret Manager.
+
+### Keys
+
+With `keys`, customer data is sealed in the application with a key from the cloud's key service, so the stores hold
+[HLXS](api/keys-format.md) sealed data, never the plaintext. One key, `portable-orders-customer-data`, does both
+jobs: the `receipts` store's `encryption-key`, and `@Encrypted("customer-data")` on `OrderContact.email`. The key is
+a symmetric KMS key on AWS, an RSA Key Vault key that allows `wrapKey` and `unwrapKey` on Azure, and an
+`ENCRYPT_DECRYPT` crypto key on Google Cloud; the identity needs to wrap and unwrap with it and read its metadata (see
+[Provider configuration](providers.md)).
+
+Contacts are their own entity, `OrderContact`, in the orders table under `contact#<customer id>`, through a repository
+that exists only with `keys`: an `@Encrypted` component needs its key bean, so a deployment without keys has neither,
+and refuses a contact rather than storing it in the clear. Without `keys`, receipts are stored as they are.
 
 ### Feature flags
 
@@ -146,6 +164,7 @@ reach them:
 | SQL | RDS, inside the VPC, IAM login | Cloud SQL through the Cloud SQL connector, IAM login | Azure Database for PostgreSQL, the identity as its Entra admin |
 | Streams | off: MSK isn't available on the test account | Managed Service for Apache Kafka, inside the VPC | Event Hubs' Kafka endpoint, Entra ID |
 | Settings, secrets | SSM Parameter Store, Secrets Manager | Parameter Manager, Secret Manager | App Configuration, Key Vault |
+| Keys | a KMS key and alias | a Cloud KMS key in the run's key ring | a Key Vault key in the run's vault |
 
 On Google Cloud, the Cloud SQL connector needs `com.google.cloud.sql:postgres-socket-factory` on the classpath; the
 sample declares it at runtime scope, as an application would.
@@ -155,16 +174,21 @@ sample declares it at runtime scope, as an application would.
 `PortableOrdersSuite` holds the end-to-end tests. They use only the HTTP API, so they run unchanged against every
 deployment. Each deployment states what it expects, such as its cloud, its features, the settings it seeded and its
 signing key, and the suite checks the service's `/deployment` report against that. Tests of features that are off are
-skipped, so the report shows what each deployment ran.
+skipped, so the report shows what each deployment ran. Deployments in process also read the stores directly, through
+plain stores on the service's own provider, to check that `keys` leaves only sealed data there, and which key service
+sealed it.
+
+The in-process deployments run twice: with `keys` off, then with it on, against the same emulators. The first service
+stops before the second starts, so it doesn't consume the second one's messages.
 
 | Deployment | Test | Services |
 |---|---|---|
-| `local` profile, in process | `LocalDeploymentTest` | the memory provider; every feature but SQL |
+| `local` profile, in process | `LocalDeploymentTest` | the memory provider; every feature but SQL, with `keys` off and on (a memory key) |
 | `local` profile, in process | `FeatureFlagsTest` | the memory provider: `bulk-discount` turned on, off and deleted while the service runs |
-| AWS emulators, in process | `AwsEmulatorIT` | Floci (S3, DynamoDB, SNS, SQS, EventBridge, SSM, Secrets Manager), PostgreSQL, Valkey, Kafka; every feature |
-| Azure emulators, in process | `AzureEmulatorIT` | Floci-az (Blob Storage, Cosmos DB, Key Vault, App Configuration), the Service Bus emulator, PostgreSQL, Valkey, Kafka; all but `events` |
-| Google Cloud emulators, in process | `GcpEmulatorIT` | Floci-gcp (Cloud Storage, Firestore, Pub/Sub, Secret Manager), PostgreSQL, Valkey, Kafka; all but `events` |
-| the image, on the AWS emulators | `ImageIT`, with `-Pimage` | as `AwsEmulatorIT`, with the image configured only through its environment |
+| AWS emulators, in process | `AwsEmulatorIT` | Floci (S3, DynamoDB, SNS, SQS, EventBridge, SSM, Secrets Manager, KMS), PostgreSQL, Valkey, Kafka; every feature, with `keys` off and on |
+| Azure emulators, in process | `AzureEmulatorIT` | Floci-az (Blob Storage, Cosmos DB, Key Vault secrets and keys, App Configuration), the Service Bus emulator, PostgreSQL, Valkey, Kafka; all but `events`, with `keys` off and on |
+| Google Cloud emulators, in process | `GcpEmulatorIT` | Floci-gcp (Cloud Storage, Firestore, Pub/Sub, Secret Manager, Cloud KMS), PostgreSQL, Valkey, Kafka; all but `events`, with `keys` off and on |
+| the image, on the AWS emulators | `ImageIT`, with `-Pimage` | as `AwsEmulatorIT` with every feature on, `keys` included, with the image configured only through its environment |
 | a running deployment | `DeployedServiceIT`, with `-Dorders.e2e.url=...` | whatever it runs on: the image on EKS, GKE and AKS, through the scripts above |
 
 The suite's `bulk-discount` test follows each deployment's flags: on for the AWS and Azure emulators, the image, EKS

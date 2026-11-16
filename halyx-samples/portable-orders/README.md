@@ -2,7 +2,7 @@
 
 A Spring Boot 4 orders service that uses every Halyx API, and runs unchanged on AWS, Azure and Google Cloud. One jar
 and one image hold all three providers. Spring profiles pick the cloud (`local`, `aws`, `azure` or `gcp`) and the
-optional features (`events`, `streams`, `cache` and `sql`). The guide is
+optional features (`events`, `streams`, `cache`, `sql` and `keys`). The guide is
 [Portable microservice](https://halyx.dev/docs/portable-service.html).
 
 ```bash

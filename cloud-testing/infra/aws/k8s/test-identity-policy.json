@@ -101,6 +101,28 @@
         "secretsmanager:TagResource", "secretsmanager:ListSecretVersionIds"
       ],
       "Resource": "arn:aws:secretsmanager:*:*:secret:halyx-*"
+    },
+    {
+      "Sid": "RunKeysCreate",
+      "Effect": "Allow",
+      "Action": ["kms:CreateKey", "kms:TagResource", "kms:ListAliases"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "RunKeys",
+      "Effect": "Allow",
+      "Action": [
+        "kms:DescribeKey", "kms:GetKeyPolicy", "kms:GetKeyRotationStatus", "kms:ListResourceTags",
+        "kms:ScheduleKeyDeletion", "kms:CreateAlias", "kms:DeleteAlias"
+      ],
+      "Resource": "arn:aws:kms:*:*:key/*",
+      "Condition": {"Null": {"aws:ResourceTag/halyx-test": "false"}}
+    },
+    {
+      "Sid": "RunKeyAliases",
+      "Effect": "Allow",
+      "Action": ["kms:CreateAlias", "kms:DeleteAlias"],
+      "Resource": "arn:aws:kms:*:*:alias/halyx-*"
     }
   ]
 }

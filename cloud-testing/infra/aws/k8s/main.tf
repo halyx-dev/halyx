@@ -244,8 +244,23 @@ resource "aws_iam_role_policy" "app" {
         Action   = ["elasticache:Connect"]
         Resource = [aws_elasticache_replication_group.cache.arn, aws_elasticache_user.app.arn]
       },
+      # The keys feature: wrapping and unwrapping data keys, and the key's metadata; the health check lists aliases.
+      { Effect = "Allow", Action = ["kms:Encrypt", "kms:Decrypt", "kms:DescribeKey"], Resource = aws_kms_key.customer_data.arn },
+      { Effect = "Allow", Action = ["kms:ListAliases"], Resource = "*" },
     ]
   })
+}
+
+# --- the keys feature's key: receipts and contact details are sealed with it ------------------------------------------
+
+resource "aws_kms_key" "customer_data" {
+  description             = "portable-orders customer data, run ${var.run_id}"
+  deletion_window_in_days = 7 # the shortest KMS allows
+}
+
+resource "aws_kms_alias" "customer_data" {
+  name          = "alias/${local.prefix}-customer-data"
+  target_key_id = aws_kms_key.customer_data.key_id
 }
 
 # --- receipts and orders ---------------------------------------------------------------------------------------------
@@ -531,5 +546,6 @@ output "env" {
     ORDERS_CACHE_NAME                 = aws_elasticache_replication_group.cache.replication_group_id
     ORDERS_DB_HOST                    = aws_db_instance.ledger.address
     ORDERS_DB_USER                    = local.db_user
+    ORDERS_KEY_PREFIX                 = "${local.prefix}-"
   }
 }

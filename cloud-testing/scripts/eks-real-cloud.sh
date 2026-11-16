@@ -143,10 +143,10 @@ PGPASSWORD="$TF_VAR_master_password" docker run --rm -e PGPASSWORD postgres:17-a
 # service account by name, so it needs no annotation.
 terraform -chdir="$TF_DIR" output -json env | python3 -c '
 import json, sys
-print(json.dumps({"profiles": ["aws", "events", "cache", "sql"], "env": json.load(sys.stdin)}, indent=2))' \
+print(json.dumps({"profiles": ["aws", "events", "cache", "sql", "keys"], "env": json.load(sys.stdin)}, indent=2))' \
   > "$WORK/values.yaml" || exit 1
 
-export ORDERS_E2E_FEATURES="events,cache,sql" ORDERS_E2E_MAX_LINES=8 ORDERS_E2E_CURRENCY=CAD ORDERS_E2E_FLAGS=bulk-discount
+export ORDERS_E2E_FEATURES="events,cache,sql,keys" ORDERS_E2E_MAX_LINES=8 ORDERS_E2E_CURRENCY=CAD ORDERS_E2E_FLAGS=bulk-discount
 ORDERS_E2E_SIGNING_KEY="$(tf signing_key)"
 export ORDERS_E2E_SIGNING_KEY
 deploy_and_test "$REPOSITORY" aws

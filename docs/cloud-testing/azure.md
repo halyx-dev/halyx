@@ -605,7 +605,7 @@ Event Hubs' Kafka endpoint found these:
 | Who | Role | Scope | Why |
 |---|---|---|---|
 | `halyx-test` service principal | Contributor | subscription | create and delete each run's resource group and its resources |
-| | Role Based Access Control Administrator, with a condition | subscription | assign and remove only Storage Blob Data Contributor, Azure Service Bus Data Owner, Key Vault Secrets Officer, App Configuration Data Owner, Azure Event Hubs Data Owner, EventGrid Data Sender and EventGrid Data Receiver |
+| | Role Based Access Control Administrator, with a condition | subscription | assign and remove only Storage Blob Data Contributor, Azure Service Bus Data Owner, Key Vault Secrets Officer, App Configuration Data Owner, Azure Event Hubs Data Owner, EventGrid Data Sender, EventGrid Data Receiver, Key Vault Crypto Officer and Key Vault Crypto User |
 | | Storage Blob Data Contributor, Azure Service Bus Data Owner, Key Vault Secrets Officer, App Configuration Data Owner | each run's resources (Terraform) | the data planes the tests use |
 | | EventGrid Data Sender, EventGrid Data Receiver | each run's Event Grid namespace (Terraform) | publishing events and receiving them from the pull subscription |
 | | Azure Event Hubs Data Owner (tier 4) | each run's Event Hubs namespaces (Terraform) | sending, receiving, and creating and deleting event hubs through the Kafka endpoint |
@@ -639,7 +639,9 @@ that account, as for the Google Cloud runs. Without `AZURE_FEDERATED_GOOGLE_SA`,
 needs nothing beyond tier 1's setup. Contributor creates the cluster, its registry and a user-assigned managed
 identity, and federates the identity to the service's Kubernetes service account. The identity gets the same
 data-plane roles the principal may assign: Storage Blob Data Contributor, Azure Service Bus Data Owner, Key Vault
-Secrets Officer, App Configuration Data Owner, Azure Event Hubs Data Owner, and EventGrid Data Sender and Receiver.
+Secrets Officer, App Configuration Data Owner, Azure Event Hubs Data Owner, and EventGrid Data Sender and Receiver,
+plus Key Vault Crypto User for the `keys` feature's key, which the principal creates in the run's vault as Key Vault
+Crypto Officer. With roles added to the condition, run `azure-setup-test-principal.sh` again to update it.
 It also gets Cosmos DB Built-in Data Contributor, the Managed Redis `default` access policy, and the PostgreSQL
 server's Entra admin. The pods pull images with the registry's admin credentials, because AcrPull isn't among the
 roles the principal may assign.

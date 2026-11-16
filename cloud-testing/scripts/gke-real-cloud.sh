@@ -168,7 +168,7 @@ terraform -chdir="$TF_DIR" output -json env | SA="$IMPERSONATE" CA="$(tf cache_c
     INSTANCE="$(tf db_instance)" python3 -c '
 import json, os, sys
 values = {
-    "profiles": ["gcp", "events", "streams", "cache", "sql"],
+    "profiles": ["gcp", "events", "streams", "cache", "sql", "keys"],
     "env": json.load(sys.stdin),
     "serviceAccount": {"name": "portable-orders",
                        "annotations": {"iam.gke.io/gcp-service-account": os.environ["SA"]}},
@@ -184,7 +184,7 @@ values = {
 }
 print(json.dumps(values, indent=2))' > "$WORK/values.yaml" || exit 1
 
-export ORDERS_E2E_FEATURES="events,streams,cache,sql" ORDERS_E2E_MAX_LINES=3 ORDERS_E2E_CURRENCY=JPY ORDERS_E2E_FLAGS=bulk-discount
+export ORDERS_E2E_FEATURES="events,streams,cache,sql,keys" ORDERS_E2E_MAX_LINES=3 ORDERS_E2E_CURRENCY=JPY ORDERS_E2E_FLAGS=bulk-discount
 ORDERS_E2E_SIGNING_KEY="$(tf signing_key)"
 export ORDERS_E2E_SIGNING_KEY
 deploy_and_test "$(tf repository)/portable-orders" gcp

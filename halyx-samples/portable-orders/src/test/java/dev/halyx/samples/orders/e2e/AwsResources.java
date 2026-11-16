@@ -29,6 +29,9 @@ import software.amazon.awssdk.services.dynamodb.model.KeySchemaElement;
 import software.amazon.awssdk.services.dynamodb.model.KeyType;
 import software.amazon.awssdk.services.dynamodb.model.ScalarAttributeType;
 import software.amazon.awssdk.services.eventbridge.EventBridgeClient;
+import software.amazon.awssdk.services.kms.KmsClient;
+import software.amazon.awssdk.services.kms.model.KeySpec;
+import software.amazon.awssdk.services.kms.model.KeyUsageType;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.sns.SnsClient;
 import software.amazon.awssdk.services.sqs.SqsClient;
@@ -46,7 +49,10 @@ final class AwsResources {
     private AwsResources() {
     }
 
-    /** The bucket, table, topic and queues, the event bus and its rule, and the settings and signing key. */
+    /**
+     * The bucket, table, topic and queues, the event bus and its rule, the settings and signing key, and the
+     * {@code keys} feature's KMS key with its alias.
+     */
     static void provision(URI endpoint, String signingKey) {
         var credentials = StaticCredentialsProvider.create(AwsBasicCredentials.create("test", "test"));
         try (S3Client s3 = S3Client.builder().region(Region.US_EAST_1).endpointOverride(endpoint)
@@ -58,6 +64,8 @@ final class AwsResources {
              SqsClient sqs = SqsClient.builder().region(Region.US_EAST_1).endpointOverride(endpoint)
                      .credentialsProvider(credentials).build();
              EventBridgeClient events = EventBridgeClient.builder().region(Region.US_EAST_1).endpointOverride(endpoint)
+                     .credentialsProvider(credentials).build();
+             KmsClient kms = KmsClient.builder().region(Region.US_EAST_1).endpointOverride(endpoint)
                      .credentialsProvider(credentials).build()) {
             s3.createBucket(b -> b.bucket("portable-orders-receipts"));
             dynamo.createTable(b -> b.tableName("portable-orders").billingMode(BillingMode.PAY_PER_REQUEST)
@@ -78,6 +86,10 @@ final class AwsResources {
                     .eventPattern("{\"source\":[\"/portable-orders\"]}"));
             events.putTargets(b -> b.rule("order-placed").eventBusName("portable-orders")
                     .targets(t -> t.id("notifications").arn(notifications)));
+
+            String keyId = kms.createKey(b -> b.keySpec(KeySpec.SYMMETRIC_DEFAULT)
+                    .keyUsage(KeyUsageType.ENCRYPT_DECRYPT)).keyMetadata().keyId();
+            kms.createAlias(b -> b.aliasName("alias/portable-orders-customer-data").targetKeyId(keyId));
         }
         try (Halyx halyx = Halyx.builder().register("aws", ProviderConfig.of("aws").region("us-east-1")
                 .endpoint(endpoint).credentials(Credentials.of("test", "test"))).build()) {

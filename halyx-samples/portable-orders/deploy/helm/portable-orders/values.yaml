@@ -7,11 +7,12 @@ imagePullSecrets: []
 
 replicas: 1
 
-# The Spring profiles: one cloud (local, aws, azure or gcp) and any of events, streams, cache and sql.
+# The Spring profiles: one cloud (local, aws, azure or gcp) and any of events, streams, cache, sql and keys.
 profiles:
   - local
 
-# Environment variables: the ORDERS_* resource names, AWS_REGION, GOOGLE_CLOUD_PROJECT and so on.
+# Environment variables: the ORDERS_* resource names, AWS_REGION, GOOGLE_CLOUD_PROJECT and so on; with keys,
+# ORDERS_KEY_PREFIX (and ORDERS_KEY_RING on Google Cloud) name the key.
 env: {}
 
 # More Spring configuration, as YAML, for what environment variables can't express, such as provider properties.

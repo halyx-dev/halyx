@@ -15,17 +15,20 @@
  */
 package dev.halyx.samples.orders.e2e;
 
+import dev.halyx.keys.SealedData;
 import dev.halyx.samples.orders.ReceiptService;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -34,9 +37,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
- * The end-to-end tests of the orders service, over its HTTP API only. Every deployment runs the same tests: in
- * process on the memory provider and on each cloud's emulators, the built image, and the image on real clouds. A
- * feature that a deployment doesn't turn on is skipped, so the test report lists what each cloud ran.
+ * The end-to-end tests of the orders service, over its HTTP API. Every deployment runs the same tests: in process on
+ * the memory provider and on each cloud's emulators, the built image, and the image on real clouds. A feature that a
+ * deployment doesn't turn on is skipped, so the test report lists what each cloud ran. Deployments run in process also
+ * check what the stores hold ({@link #stored()}).
  */
 @TestMethodOrder(MethodOrderer.DisplayName.class)
 public abstract class PortableOrdersSuite {
@@ -47,6 +51,11 @@ public abstract class PortableOrdersSuite {
     protected abstract OrdersClient client();
 
     protected abstract Expectations expected();
+
+    /** The stores as the service's provider holds them, where the test can reach them; empty over HTTP alone. */
+    protected Optional<StoredData> stored() {
+        return Optional.empty();
+    }
 
     @Test
     void describesItsDeploymentAndSettings() {
@@ -192,6 +201,54 @@ public abstract class PortableOrdersSuite {
     }
 
     @Test
+    void keysSealContactDetailsAndReceiptsAtRest() {
+        assumeTrue(expected().has("keys"), "keys are off in this deployment");
+        String customer = customer("alan");
+        OrdersClient.Response placed = client().post("/customers/" + customer + "/orders",
+                Map.of("lines", List.of(line("tea", 1, "2.00")), "contact", "alan@example.com"), null);
+
+        assertThat(placed.status()).as(placed.body()).isEqualTo(201);
+        String orderId = (String) placed.json().get("orderId");
+        OrdersClient.Response contact = client().get(orderPath(customer, orderId) + "/contact");
+        assertThat(contact.status()).as(contact.body()).isEqualTo(200);
+        assertThat(contact.json().get("email")).isEqualTo("alan@example.com");
+        assertThat(client().post("/customers/" + customer + "/orders",
+                Map.of("lines", List.of(line("tea", 1, "2.00")), "contact", "not an email"), null).status())
+                .isEqualTo(400);
+
+        awaitOrder(customer, orderId, o -> "CONFIRMED".equals(o.get("status")));
+        OrdersClient.Response receipt = client().get(orderPath(customer, orderId) + "/receipt");
+        assertThat(receipt.body()).as("opened for the reader").contains("Receipt for order " + orderId);
+
+        stored().ifPresent(stored -> {
+            byte[] sealedReceipt = stored.receipt(customer, orderId);
+            assertThat(new String(sealedReceipt, StandardCharsets.ISO_8859_1))
+                    .doesNotContain("Receipt for order");
+            assertThat(SealedData.parse(sealedReceipt).keys()).singleElement()
+                    .satisfies(entry -> assertThat(entry.keyId()).startsWith(keyIdPrefix()));
+            Object email = stored.contactEmail(customer, orderId);
+            assertThat(email).as("the email field holds sealed data").isInstanceOf(byte[].class);
+            assertThat(SealedData.parse((byte[]) email).keys()).singleElement()
+                    .satisfies(entry -> assertThat(entry.keyId()).startsWith(keyIdPrefix()));
+        });
+    }
+
+    @Test
+    void withoutKeysOrdersTakeNoContactDetails() {
+        assumeTrue(!expected().has("keys"), "keys are on in this deployment");
+        String customer = customer("alan");
+
+        OrdersClient.Response refused = client().post("/customers/" + customer + "/orders",
+                Map.of("lines", List.of(line("tea", 1, "2.00")), "contact", "alan@example.com"), null);
+
+        assertThat(refused.status()).isEqualTo(400);
+        assertThat(refused.json().get("detail"))
+                .isEqualTo("contact details are only kept with the keys feature, sealed with a key");
+        String orderId = (String) place(customer, null, line("tea", 1, "2.00")).json().get("orderId");
+        assertThat(client().get(orderPath(customer, orderId) + "/contact").status()).isEqualTo(404);
+    }
+
+    @Test
     void featuresThatAreOffHaveNoEndpoints() {
         assumeTrue(!expected().has("sql"), "SQL is on in this deployment");
 
@@ -199,6 +256,16 @@ public abstract class PortableOrdersSuite {
     }
 
     // -----------------------------------------------------------------------------------------------------------------
+
+    /** The provider prefix of key ids in sealed data (HLXS): which key service holds the key. */
+    private String keyIdPrefix() {
+        return switch (expected().cloud()) {
+            case "aws" -> "aws-kms:";
+            case "azure" -> "azure-kv:";
+            case "gcp" -> "gcp-kms:";
+            default -> "memory:";
+        };
+    }
 
     private String customer(String name) {
         return run + "-" + name;

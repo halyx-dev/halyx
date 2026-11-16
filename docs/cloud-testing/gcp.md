@@ -758,16 +758,18 @@ Creating the cluster and its registry does:
 |---|---|---|
 | `halyx-test` service account | `roles/container.admin` | create and delete the cluster and its node pool; deploy to it |
 | | `roles/artifactregistry.admin` | create and delete the run's repository and push the images; the nodes pull with it too |
+| | `roles/cloudkms.admin` | create the `keys` feature's key ring and key, destroy the key's versions, and grant itself `roles/cloudkms.cryptoKeyEncrypterDecrypter` and `roles/cloudkms.viewer` on the key ring, which the service uses |
 | the Kubernetes service account `portable-orders/portable-orders` | `roles/iam.workloadIdentityUser` on `halyx-test` | the pods act as `halyx-test` through Workload Identity Federation for GKE |
 
-The project also needs the Kubernetes Engine and Artifact Registry APIs (`container`, `artifactregistry`). The
+The project also needs the Kubernetes Engine, Artifact Registry and Cloud KMS APIs (`container`, `artifactregistry`,
+`cloudkms`). Key rings can never be deleted, so each run leaves its empty key ring behind; it costs nothing. The
 workload identity binding can only be made once the project's workload identity pool exists, which happens when the
 first cluster with Workload Identity is created. So the script makes the binding itself, right after the cluster is
 created, as the person running it; on later runs it changes nothing.
 
 ```bash
-gcloud services enable container.googleapis.com artifactregistry.googleapis.com
-for role in roles/container.admin roles/artifactregistry.admin; do
+gcloud services enable container.googleapis.com artifactregistry.googleapis.com cloudkms.googleapis.com
+for role in roles/container.admin roles/artifactregistry.admin roles/cloudkms.admin; do
   gcloud projects add-iam-policy-binding <project> --member=serviceAccount:halyx-test@<project>.iam.gserviceaccount.com \
       --role=$role --condition=None
 done
