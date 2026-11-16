@@ -118,6 +118,46 @@ Read every hit before recording it (see SKILL.md). "All clouds" means AWS, Azure
   and fall back to `invoke`; send keys rather than content; carry what the caller needs in the payload; keep
   `idempotent` false unless a second run is harmless; record where the function is deployed on each cloud.
 
+### C12. Key features one cloud handles differently
+- **Find:** `grep -rnE "\.mac\(|verifyMac\(|serverSideKey\(|withServerSideKey\(|@Encrypted|CryptoKeys\.encrypt|\.addTo\(|\.rewrap\(" src/main`,
+  and `halyx.key-stores`, `halyx.keys`, `server-side-key`, `encryption-key` and `data-key-*` in the configuration.
+- **Why:** from `docs/api/keys.md` and `docs/api/capabilities-and-unwrap.md`:
+  - `KeyCapability.MAC` holds on AWS KMS, Cloud KMS and Vault Transit, not on Azure Key Vault (Managed HSM only, which
+    Halyx doesn't support yet): `mac` and `verifyMac` fail there.
+  - `ParameterCapability.SERVER_SIDE_KMS` holds on SSM (with `aws.ssm.secure`), Secrets Manager, Secret Manager and
+    Parameter Manager, not Key Vault or App Configuration: a parameter store with `server-side-key` fails to start on
+    Azure. On blob stores, Azure needs the `azure.storage.encryption-scope` key option, or every write is refused.
+  - A server-side key must belong to the store's own provider; a client-side key (`encryption-key`, `@Encrypted`)
+    may be on any provider.
+  - An `@Encrypted` component needs its key bean in every profile that has the repository: without it, startup fails.
+  - Sealed data names the key service that wrapped it (`aws-kms:`, `azure-kv:`, `gcp-kms:`). Data sealed on one cloud
+    opens on another only if it was sealed for a key there too (`CryptoKeys.encrypt` with several keys, or
+    `addTo`), or the old cloud's key stays reachable as a second provider. A service moving clouds, or reading another
+    region's or cloud's data, needs that plan.
+  - Each encrypt or decrypt is a key service call. A Key Vault allows a few thousand RSA operations per 10 seconds;
+    a busy path without `data-key-cache` and `data-key-reuse` is throttled there first.
+- **Severity:** blocker for `mac` on Azure, `server-side-key` on an Azure parameter store, a blob store's server-side
+  key on Azure without its scope, and an `@Encrypted` entity in a profile without its key; risk for sealed data that
+  must open on another cloud with no key there, and for busy paths on Azure without the caches.
+- **Fix:** keep MACs off Azure (an HMAC with a key from a secrets store, or no MACs); put `server-side-key` in the
+  AWS and Google Cloud documents only, or use `encryption-key`, which works everywhere; give the Azure blob store's key
+  its scope in the `azure` document; `@Profile` the entity and repository with the key; seal for a key on each cloud
+  the data must open on; turn on the caches for busy paths.
+
+### C13. Encryption tied to one cloud
+- **Find:** `grep -rnE "KmsClient|KmsAsyncClient|AwsCrypto|KmsMasterKeyProvider|S3EncryptionClient|DynamoDbEncryption|ServerSideEncryption\.AWS_KMS|ssekmsKeyId|CryptographyClient|KeyClient|encryptionScope\(|KeyManagementServiceClient|KmsTemplate|setKmsKeyName|kmsKeyName|com\.google\.crypto\.tink|software\.amazon\.encryption|com\.amazonaws\.encryptionsdk|alias/|:key/" src/main`
+- **Why:** a key service's own client, an encryption library built on one (the AWS Encryption SDK, the S3 and
+  DynamoDB encryption clients, Tink's KMS AEAD, `KmsTemplate`), or server-side encryption set through `unwrap`
+  works on one cloud only. Their ciphertext is in a format only that library reads, so the data is tied to the cloud
+  too. Key ARNs and `alias/` names in code are C9's cloud names.
+- **Fine when:** the class only opens data written before the migration, isolated and documented as the legacy path,
+  with new data sealed through Halyx.
+- **Severity:** blocker for the other clouds when it encrypts or signs at runtime; risk for a legacy path whose data
+  isn't being resealed.
+- **Fix:** a `halyx.keys` key: `CryptoKey.encrypt`, `sign`, `mac`; `@Encrypted` for document fields;
+  `encryption-key` for blobs and parameters; `server-side-key` for SSE-KMS, encryption scopes and customer-managed
+  keys; `halyx.security.jwt.key` for JWTs signed with KMS. Plan how existing ciphertext is resealed.
+
 ## G: configuration
 
 ### G1. Cloud settings in the shared configuration
@@ -149,6 +189,8 @@ Read every hit before recording it (see SKILL.md). "All clouds" means AWS, Azure
   - Functions need `azure.functions.endpoint` on Azure and `gcp.functions.region` or `gcp.functions.url` on Google
     Cloud; a Lambda ARN in `name` fits AWS only.
   - SNS topics named, not given as ARNs, need `sns:ListTopics`.
+  - Key stores: no `location` on AWS (the account and region), the vault URL on Azure, the key ring on Google Cloud;
+    a key's `name` is an alias without `alias/` on AWS. A shared `location` fits one cloud at most.
 
   One value can't be right on every cloud.
 - **Severity:** blocker when a shared value only fits one cloud.
@@ -206,8 +248,9 @@ Read every hit before recording it (see SKILL.md). "All clouds" means AWS, Azure
 
 ### B2. Leftover cloud libraries
 - **Find:** `io.awspring.cloud`, `com.azure.spring`, `com.google.cloud:spring-cloud-gcp-*`, `aws-msk-iam-auth`,
-  `aws-advanced-jdbc-wrapper`, `managed-kafka-auth-login-handler`, and direct `software.amazon.awssdk`, `com.azure`
-  or `com.google.cloud` artifacts.
+  `aws-advanced-jdbc-wrapper`, `managed-kafka-auth-login-handler`, encryption libraries
+  (`aws-encryption-sdk-java`, `amazon-s3-encryption-client-java`, `aws-database-encryption-sdk-dynamodb`,
+  `com.google.crypto.tink`), and direct `software.amazon.awssdk`, `com.azure` or `com.google.cloud` artifacts.
 - **Why:**
   - Spring Cloud libraries auto-configure clients for whatever SDKs they find; Spring Cloud GCP fails at startup
     once `halyx-gcp` is present.
@@ -246,6 +289,11 @@ Read every hit before recording it (see SKILL.md). "All clouds" means AWS, Azure
   - **Azure caches:** a data access policy assignment
   - **functions:** `lambda:InvokeFunction` on the function and its qualifier, `roles/run.invoker` on a Cloud Run
     function, and on Azure read access to the Key Vault secret holding the function key
+  - **keys:** the key's metadata as well as its use (`kms:DescribeKey`, Key Vault Crypto User,
+    `roles/cloudkms.viewer`), and `kms:ListAliases` for the key store's health check
+  - **server-side keys:** the storage service's own identity on Azure and Google Cloud (the storage account's
+    identity, the Cloud Storage, Secret Manager or Parameter Manager service agent), and on AWS the service's role
+    (`kms:GenerateDataKey`, `kms:Decrypt`)
 - **Severity:** blocker where it fails; risk where only health is affected.
 - **Fix:** grant them, scoped to the service's resources.
 
@@ -270,7 +318,8 @@ Read every hit before recording it (see SKILL.md). "All clouds" means AWS, Azure
 
 ### D4. Services with no Halyx equivalent, or no form on another cloud
 - **Find:** the infrastructure and code for Kinesis, Step Functions, SES, DynamoDB Streams, Cosmos DB change feed,
-  Event Grid basic topics, Spanner, Bigtable, BigQuery, Cloud Tasks, and the like.
+  Event Grid basic topics, Spanner, Bigtable, BigQuery, Cloud Tasks, Managed HSM, key management (creating and
+  rotating keys, key policies), and the like.
 - **Why:** these stay on the native SDK. Event Grid basic topics are not namespace topics: Halyx publishes only to
   namespaces.
 - **Severity:** blocker for the other clouds, unless there's a per-cloud replacement.

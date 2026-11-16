@@ -16,6 +16,9 @@ for each area; check names there.
 | Joins, reports, constraints, transactions across rows | `databases.<key>: { engine, host, database, auth }`, a `DataSource` for JDBC, JPA and Flyway; or `r2dbc-databases` | RDS or Aurora (IAM login) | Azure Database for PostgreSQL or Azure SQL (Entra ID) | Cloud SQL (IAM login, the Cloud SQL connector) |
 | Settings that change without a deploy | `parameter-stores.<key>: { kind: parameters, prefix }`, and `spring.config.import: halyx:<key>` with `reload-interval` | SSM Parameter Store | App Configuration | Parameter Manager |
 | Secrets: keys, passwords, tokens | `parameter-stores.<key>: { kind: secrets, prefix }` | Secrets Manager | Key Vault | Secret Manager |
+| Personal or secret data encrypted before it's stored, so the store and its operators never see it | `key-stores.<key>` and `keys.<key>`, a `CryptoKey`; then `@Encrypted("<key>")` on record components, `encryption-key` on a blob or parameter store | a KMS key (symmetric) | a Key Vault RSA key allowing `wrapKey` and `unwrapKey` | a Cloud KMS key (`ENCRYPT_DECRYPT`) |
+| Data encrypted at rest with the service's own key, keeping presigned URLs | `server-side-key` on a blob store (and on parameter stores, not on Azure) | SSE-KMS | an encryption scope bound to a Key Vault key | a customer-managed key |
+| Signing tokens or documents with a key that never leaves the key service | a signing `CryptoKey`: `sign` and `verify`, or `security.jwt.key` for Spring Security JWTs and a JWK set | KMS `SIGN_VERIFY` key (RSA or ECC) | Key Vault RSA or EC key allowing `sign` | Cloud KMS `ASYMMETRIC_SIGN` key |
 | Calling a serverless function and using its answer | `functions.<key>: { name, timeout, idempotent }`, a `FunctionInvoker` | Lambda function | HTTP-triggered function in a function app | Cloud Run function (HTTP) |
 
 ## Choosing between neighbours
@@ -37,6 +40,13 @@ for each area; check names there.
   deployed; it doesn't deploy them or give a model for writing them, so the function itself is deployed to each
   target cloud separately, and the plan says who owns it. Fire-and-forget `trigger` is Lambda's alone: portable code
   uses messaging instead.
+- **Client-side or server-side encryption.** `@Encrypted` fields and `encryption-key` seal data in the service, in
+  one format on every cloud: the store, its backups and its operators see only sealed data, but nothing else can read
+  it without the key, presigned URLs are gone on encrypted blob stores, and encrypted fields can't be keys, indexes
+  or increments. `server-side-key` has the storage service encrypt with a key the service chooses: everything reads
+  as usual, presigned URLs included, but anyone the store's access policy allows reads plaintext. Encrypt the fields
+  that hold personal or secret data client-side; use server-side keys where a policy names the key but the data
+  isn't sensitive beyond that.
 - **`Cache` or `@Cacheable`.** `Cache<V>` for data the service owns in the cache (idempotency keys, counters, locks).
   `cache-manager` with `@Cacheable` for results computed elsewhere: set `fail-open: true`, so an unreachable cache
   makes them uncached rather than failing the writes that evict them. Health still shows the outage: the `halyx`
@@ -87,11 +97,15 @@ Each of these goes in the plan when the service uses it, with how the service st
 | Function retries | a non-idempotent function (the default) is retried only when it can't have run (throttling, a failed connect); a timeout throws `UnavailableException` while the function may still be running | mark a function `idempotent: true` only when running it twice is harmless; make it idempotent, or key its writes by a request id |
 | Function errors | Lambda functions return no HTTP status; a wrong Azure route, a missing function and a function's 404 are all `NotFoundException` | the function's contract reports rejections in its payload, and keeps statuses for failures |
 | Function login | IAM on AWS; on Azure, an Entra ID audience (App Service Authentication) or a function key; a Google ID token on Google Cloud | set them in the cloud's document: a function key from a secrets store, never inline |
+| MACs (`mac`, `verifyMac`) | AWS KMS, Cloud KMS and Vault Transit; not Azure Key Vault (Managed HSM only, which Halyx doesn't support yet) | HMAC with a key from a secrets store instead, or no MACs on Azure |
+| Key service quotas | every encrypt is one wrap call and every decrypt one unwrap; a Key Vault allows a few thousand RSA operations per 10 seconds, far fewer than KMS and Cloud KMS | `data-key-cache` and `data-key-reuse` on the key store for busy paths, a vault per busy service on Azure; seal a record's fields together (one call per document) |
+| Server-side keys on parameter stores | SSM (`aws.ssm.secure`), Secrets Manager, Secret Manager and Parameter Manager; not Key Vault or App Configuration | `server-side-key` only in the AWS and Google Cloud documents; or `encryption-key`, which works everywhere |
+| Sealed parameter sizes | sealing makes a value about a third longer plus a header: a standard SSM parameter fits about 2.5 KB | keep sealed values small, or use Secrets Manager |
 | No emulator | Event Grid namespaces, Eventarc Advanced, Parameter Manager | test them on the memory provider; the emulator runs read settings from Secret Manager on Google Cloud (`kind: secrets`) and leave events off on Azure and Google Cloud |
 
 ## Not covered by Halyx
 
-Deploying or writing functions, function triggers and bindings (the function's own code stays per cloud), Workflows
+Creating, rotating or deleting keys (infrastructure's job), key policies and grants, Azure Managed HSM, deploying or writing functions, function triggers and bindings (the function's own code stays per cloud), Workflows
 (Step Functions, Durable Functions, Workflows), email (SES, Communication Services), search, analytics
 stores (BigQuery, Synapse), change feeds (DynamoDB Streams, the Cosmos DB change feed), Spanner, Bigtable, Cloud
 Tasks and Event Grid basic topics. Propose a portable alternative from the table above where one fits (a scheduled

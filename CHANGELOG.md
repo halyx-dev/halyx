@@ -44,6 +44,13 @@
   - **JWTs:** `halyx.security.jwt.key` makes a Spring Security `JwtEncoder` that signs with a key, a JWK set endpoint,
     and optionally a `JwtDecoder`.
 
+- **The AI skills know keys** ([#47](https://github.com/halyx-dev/halyx/issues/47)): `halyx-ai-create` plans
+  encrypted fields, sealed blobs, server-side keys and signing, with their tests and permissions;
+  `halyx-ai-migrate` maps `KmsClient`, `CryptographyClient`, `KeyManagementServiceClient`, `KmsTemplate`, the AWS
+  Encryption SDK, Tink, SSE-KMS, encryption scopes and customer-managed keys, and plans for ciphertext already stored
+  in those formats; and `halyx-ai-review` checks key features a cloud lacks and encryption tied to one cloud (rules
+  C12 and C13).
+
 - **Conformance kits:** a key store kit, and kits for blob, document and parameter encryption. The blob store,
   document store, document repository, parameter store, messaging and stream kits run again through each encrypted
   view, on the memory provider and on each cloud's emulator with its own key service.

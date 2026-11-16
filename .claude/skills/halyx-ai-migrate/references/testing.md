@@ -45,6 +45,11 @@ class BillingTest { ... }
   that mocked `LambdaClient` or a `RestClient` to the function register a handler instead, so the real
   `FunctionInvoker` runs. A handler that throws raises `UnavailableException`; one that throws a Halyx exception has
   it passed through, standing in for a status.
+- Keys on `memory` are real JDK keys, created by the test before first use:
+  `keyStore.unwrap(InMemoryKeys.class).create("orders-data", KeyPurpose.ENCRYPTION)` (the full name, prefix
+  included), or `create(name, KeyPurpose.SIGNING, SigningAlgorithm.ECDSA_P256_SHA256)`. Tests that mocked
+  `KmsClient`, `CryptographyClient` or `KeyManagementServiceClient` create a key instead, so sealing really runs. A
+  test that reads the stored bytes through a plain store sees HLXS sealed data.
 - Listeners are asynchronous: wait for the effect with a deadline, and don't sleep a fixed time.
 - When there's no SQL stub: exclude Boot's `DataSourceAutoConfiguration` where the service has no database in that
   profile, or run PostgreSQL in a container.
@@ -126,6 +131,13 @@ setups. A service that doesn't own the function's code runs a stand-in with the 
 Functions host fails chunked request bodies with a 500: an old `RestClient` that streams its body needs buffering
 to pass its own baseline there (Halyx sends a length).
 
+Keys on emulators: Floci has KMS (symmetric, RSA, ECC and HMAC keys), Floci-az has Key Vault keys (RSA and EC; no
+MACs), and Floci-gcp has Cloud KMS (symmetric keys, RSA PKCS #1 and EC P-256 signing; no MAC, RSA-PSS or P-384 keys,
+and disabled versions still decrypt). Create the keys with the SDK the provider module brings, as the infrastructure
+would. A Key Vault key store takes `azure.emulator.insecure-http` too. Set it only when the key store is configured:
+the property alone declares the store. Floci-gcp accepts customer-managed keys on buckets and secrets without
+recording them, so server-side keys there are covered by memory tests and the real cloud.
+
 Azure emulators take connection strings or keys as provider and store properties (`azure.cosmos.key`,
 `azure.servicebus.connection-string`, `azure.appconfig.connection-string`, and `azure.emulator.insecure-http` for
 Key Vault and App Configuration). Google Cloud emulators take `endpoint` and `credentials.type: anonymous`. Some
@@ -145,6 +157,7 @@ old instances for the length of a rollout. Add one test class that seeds that st
 | Counters and keys others read | rate counters at the limit; lifetime counters | old and new instances share them; the key, format and expiry are unchanged |
 | Kafka | a record the old service handled, with the group's offset committed past it | the group carries on from the committed offset: **check the committed offset itself** with `Admin.listConsumerGroupOffsets`, since an idempotent handler hides a renamed group that reads the topic again |
 | Events and messages | the old format, published as an old instance would | migrated consumers read it; other consumers still get what they expect |
+| Encrypted and signed data | values the old code encrypted, signed or MACed with the key service | the old values open through the legacy path and are resealed as planned; new values are HLXS sealed data; stored signatures and MACs still verify |
 
 Then make one deliberate mistake per area (drop `namespace: ""`, rename the consumer group, remove a rule's
 old-format branch) and check that the test fails. A mistake the test doesn't notice shows the test is too weak.

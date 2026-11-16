@@ -68,9 +68,9 @@ and the code holds nothing from a cloud SDK.
 
 | Reference | Holds |
 |---|---|
-| `building-blocks.md` | each need mapped to a Halyx resource and the service on each cloud; choosing between neighbours; document keys and indexes; what differs per cloud |
+| `building-blocks.md` | each need mapped to a Halyx resource and the service on each cloud, encryption and signing included; choosing between neighbours, such as client-side or server-side encryption; document keys and indexes; what differs per cloud |
 | `project.md` | the build and the versions it resolves, the layout, bean and resource names, `application.yml` per cloud, and the checks before calling it done |
-| `code.md` | the sample's patterns: records and repositories, store then announce, listeners that can run twice, events, streams, caches, SQL, blobs and secrets, and function calls |
+| `code.md` | the sample's patterns: records and repositories, store then announce, listeners that can run twice, events, streams, caches, SQL, blobs and secrets, function calls, and keys: `@Encrypted` fields, sealed blobs and signing |
 | `testing.md` | the suite, the memory and emulator runs and how to provision them, the profile test, the packaged jar, and proving the tests can fail |
 | `deploy.md` | the image, the Helm chart, workload identity, permissions per resource on each cloud, and infrastructure as code |
 
@@ -108,6 +108,9 @@ Moves an existing Spring Boot service onto Halyx. It covers:
 - Redis with IAM, behind `@Cacheable` or `RedisTemplate`
 - JDBC with IAM login
 - `aws-parameterstore:`, `sm://` and Key Vault property sources
+- `KmsClient`, `CryptographyClient`, `KeyManagementServiceClient` and `KmsTemplate`, encryption libraries built on
+  them, and SSE-KMS, encryption scopes and customer-managed keys, with a plan for ciphertext already stored in their
+  formats
 
 **How it works:**
 1. **Inventory:** every cloud use, each with its Halyx equivalent and a risk.
@@ -150,11 +153,11 @@ read-only and never calls a cloud. It writes `PORTABILITY-REVIEW.md`: a verdict 
 risks* or *not ready*), then each finding with its file and line, the clouds it affects and the fix. It ends with
 what was checked, and what only a real-cloud run can show.
 
-Its 30 rules, in [`references/rules.md`](https://github.com/halyx-dev/halyx/blob/main/.claude/skills/halyx-ai-review/references/rules.md):
+Its 32 rules, in [`references/rules.md`](https://github.com/halyx-dev/halyx/blob/main/.claude/skills/halyx-ai-review/references/rules.md):
 
 | Group | Checks |
 |---|---|
-| Code | native clients outside one isolated class; SDK exceptions Halyx never throws; features a cloud lacks (delays, deduplication, ordering, `nack` delays, presigned URLs, stream transactions, function triggers); function payloads, retries and deployments; decimals compared by value; payload sizes; consumers relying on cloud-side filters; cloud names in code; bean-name clashes |
+| Code | native clients outside one isolated class; SDK exceptions Halyx never throws; features a cloud lacks (delays, deduplication, ordering, `nack` delays, presigned URLs, stream transactions, function triggers, MACs and server-side keys on Azure); function payloads, retries and deployments; key services called directly, and data sealed for one cloud's keys only; decimals compared by value; payload sizes; consumers relying on cloud-side filters; cloud names in code; bean-name clashes |
 | Configuration | cloud settings in the shared configuration; a profile per cloud and a default; names whose shape differs per cloud; Spring settings Halyx's beans make ineffective; credentials in configuration; a no-cloud profile's limits; cache codecs and key namespaces |
 | Build | a provider module per target cloud; leftover cloud libraries; SDK artifacts at test scope; cloud-specific runtime pieces such as the Cloud SQL connector |
 | Deployment | permissions Halyx needs beyond the old code's; workload identity per cloud; buildpack direct memory; services with no equivalent on another cloud |

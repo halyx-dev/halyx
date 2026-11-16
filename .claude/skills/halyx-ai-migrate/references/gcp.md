@@ -14,6 +14,7 @@ Resources keep their names.
 | `spring.config.import: sm://` and `${sm://db-password}` | `spring.config.import: halyx:secrets`, with `halyx.parameter-stores.secrets: { kind: secrets }`; then `${db-password}` |
 | Parameter Manager | `halyx.parameter-stores.settings: { kind: parameters, location: global }` (or a region) |
 | emulator hosts (`spring.cloud.gcp.pubsub.emulator-host`, `firestore.emulator.enabled`) | `halyx.providers.gcp.endpoint`, with `credentials.type: anonymous` |
+| Secret Manager secrets created with a customer-managed key (`Replication.Automatic.setCustomerManagedEncryption`), Parameter Manager `kms_key` | `server-side-key: { store, name }` on the parameter store, a key of `halyx.key-stores` (see [Keys](#keys-cloud-kms)). Secret Manager needs a key in a `global` key ring, Parameter Manager one in the store's location |
 
 Secret Manager and Parameter Manager names: the portable `orders/db/password` is stored as `orders__db__password`.
 A single segment (`db-password`) stays as it is. Existing names with underscores need `native-names: true`.
@@ -36,6 +37,11 @@ URI uri = invoices.presignDownload(BlobKey.of(name), Duration.ofMinutes(10)).uri
 
 Signed URLs need credentials that can sign (`PRESIGNED_URL`): a service account key, or impersonation with
 `iam.serviceAccounts.signBlob`. Check the capability rather than assuming it.
+
+**Customer-managed keys:** `BlobInfo.setKmsKeyName(...)` or `Storage.BlobTargetOption.kmsKeyName(...)` on writes
+becomes `server-side-key: { store, name }` on the blob store, or `PutOptions.builder().serverSideKey(key)` for one
+write. Signed upload URLs carry `x-goog-encryption-kms-key-name` in `PresignedUrl.headers()`. A bucket's default key
+needs nothing. Existing objects read as before.
 
 ## Documents: Firestore
 
@@ -117,6 +123,29 @@ String out = resize.invoke(FunctionRequest.of(json)).payloadAsString();
   them: impersonate a service account locally (`credentials: { type: impersonate, target: <email> }`).
 - `HttpResponseException` handling becomes Halyx's exceptions, as on Azure.
 
+## Keys: Cloud KMS
+
+`KeyManagementServiceClient` calls, and Spring Cloud GCP's `KmsTemplate`, become a `CryptoKey` bean:
+`halyx.key-stores.kms: { location: projects/<p>/locations/<l>/keyRings/<ring> }` (one key ring per store) and
+`halyx.keys.<key>: { name: <crypto key id> }`. Full crypto key names need `native-names: true`.
+
+| Before | After |
+|---|---|
+| `kms.encrypt(keyName, plaintext)`, `decrypt`; `kmsTemplate.encryptText` / `decryptText` | `key.encrypt(bytes, aad)` and `key.decrypt(SealedData.parse(stored), aad)`, or `toText()` and `SealedData.parseText` for text. **Not the same ciphertext**: see below. The CRC32C checks the old code did by hand are built in |
+| `asymmetricSign`, verifying with the public key from `getPublicKey` | `key.sign(data)` / `signDigest(digest)`, and `key.verify(data, signature)` with the cached public key |
+| `macSign`, `macVerify` | `key.mac(data)`, `key.verifyMac(data, mac)`: the same HMAC bytes, so stored MACs keep verifying |
+| `getCryptoKey`, `listCryptoKeyVersions` | `key.metadata()` (`versions()`, `enabled()`) |
+| Tink's KMS envelope AEAD (`gcp-kms://` key URIs) | `key.encrypt` / `decrypt`; Tink's ciphertext isn't HLXS |
+
+The additional authenticated data the old code passed carries over as the AAD. `NOT_FOUND` becomes
+`NotFoundException`; a disabled or destroyed version, and `PERMISSION_DENIED`, `AccessDeniedException`.
+
+**Existing data:** direct `encrypt` ciphertext (up to 64 KiB), `KmsTemplate` output and Tink ciphertext aren't HLXS
+sealed data, and Halyx doesn't open them. Keep a class on `unwrap(KeyManagementServiceClient.class)` for the old
+format and reseal values as they're read or in a batch, or keep the store on the old code (see
+[differences.md](differences.md#existing-data)). Signatures carry over: `new Signature(bytes, algorithm,
+Optional.of(version))`, DER for ECDSA as Cloud KMS returns it.
+
 ## Streams: Managed Service for Apache Kafka
 
 Spring Kafka with Google's login callback handler (`GcpLoginCallbackHandler`, `SASL_SSL` with `OAUTHBEARER`):
@@ -147,5 +176,6 @@ and no connector. MySQL takes the full email as the username.
 ## No Halyx equivalent
 
 Datastore mode, Spanner, Bigtable, BigQuery, Cloud Tasks, Cloud Scheduler, Firebase Auth, the Firestore real-time
-listeners, deploying functions, Storage notifications configuration, and Eventarc Standard triggers. Keep these on
+listeners, deploying functions, Storage notifications configuration, Eventarc Standard triggers, Cloud KMS key
+management (key rings, keys, versions and rotation schedules), asymmetric decryption and raw symmetric keys. Keep these on
 the client libraries and list them.

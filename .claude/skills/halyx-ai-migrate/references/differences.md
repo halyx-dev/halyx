@@ -19,6 +19,9 @@ layout. Read a few real items or objects before deciding.
 | `@Cacheable` entries | `halyx.cache-manager` keys `<cache>:<key>` (with `namespace-prefix` in front), values in its `jdk` or `json` codec (`{"@class", "v"}`) | never: Spring's `RedisCacheManager` keys `<cache>::<key>` | nothing to do for the service: old entries are misses, never errors, and expire with their TTL. Anything else that reads the entries (dashboards, other services) needs the new format |
 | `Cache` beans | `<namespace>:<key>`, the namespace **defaulting to the bean name** | `namespace: ""` (or the old prefix) and the same value format | without it, new instances use other keys: rate limits double during a rollout, and counters restart from zero |
 | Counters | decimal strings, `INCRBY`; `increment(key, delta)` never sets an expiry, and `default-ttl` doesn't apply to it | the old code used `INCR`/`INCRBY` on plain keys | — |
+| Data encrypted with a key (KMS `Encrypt`, `CryptographyClient.encrypt`, Cloud KMS `encrypt`, the AWS Encryption SDK, the S3 Encryption Client, Tink, `KmsTemplate`) | HLXS sealed data: `SealedData.toBytes()`, or `hlxs1:` text; encrypted blobs, fields and parameters hold it too | never: each of these has its own format | keep a class on the native client (through `unwrap`) that opens the old format, and reseal on read or in a batch; or leave that store on the old code. Encrypted views refuse what isn't sealed: blobs and fields with `InvalidArgumentException`, parameters unless `allowPlaintext()` |
+| Data encrypted at rest by the service (SSE-KMS, encryption scopes, CMEK on buckets and secrets) | the same: the service decrypts | always | — |
+| Signatures and MACs made with a key | `Signature` (`toBytes()` adds the algorithm and key version); `mac` returns the HMAC bytes | always: `new Signature(stored, algorithm, Optional.empty())` wraps a raw signature (empty means the current version), and stored MACs verify as they are | convert Key Vault's raw R‖S ECDSA signatures to DER |
 | Kafka with Spring for Apache Kafka | unchanged: `KafkaTemplate`, serializers (including `JsonSerializer`'s type headers) and `@KafkaListener` groups stay Spring's | the group ids stay the same, so committed offsets carry over | a renamed group reads its `auto-offset-reset` position again |
 
 Values: records map `BigDecimal`, `Instant`, `LocalDate`, `UUID`, enums, lists, maps and nested records. Fields the
@@ -40,6 +43,7 @@ the entity is changed.
 | **Consistency** | DynamoDB index queries and Secrets Manager listings are eventually consistent; Halyx never waits on the caller's behalf. Retry `UnavailableException` |
 | **Events** | Halyx sends CloudEvents 1.0. On EventBridge, `detail` is the whole CloudEvent, so rules and consumers matching on the old detail move to `detail.data` |
 | **Functions** | a function error (Lambda's `FunctionError`, a 500 from an HTTP function) raises `UnavailableException`, not a response to inspect. A non-idempotent function is retried only where it can't have run; the SDKs' and HTTP clients' own retries go. A timeout throws while the function may still run. `trigger` is Lambda's alone, and response headers are empty on Lambda. Payloads: 6 MB on Lambda, 100 MB on Azure, 32 MiB on Cloud Run functions |
+| **Keys** | Halyx never encrypts directly with the key service: every `encrypt` seals locally under a fresh data key and makes one wrap call, whatever the size, so KMS's 4 KB and Key Vault's RSA-sized limits are gone, and the ciphertext is larger by a header. MACs need AWS KMS, Cloud KMS or Vault Transit (not Azure). Calls are per request: on Azure a vault allows a few thousand wraps per 10 seconds, so busy paths turn on `data-key-cache` and `data-key-reuse`. Server-side keys on parameter stores exist on SSM, Secrets Manager, Secret Manager and Parameter Manager, not Key Vault or App Configuration |
 | **Bean names** | every `halyx.*` key is a bean name. Classes named like a key (`Receipts` next to `halyx.blob-stores.receipts`) fail at startup, naming both |
 
 ## Rollout: old and new instances side by side
@@ -75,6 +79,11 @@ Halyx needs a few permissions the old code may not have. Grant them when the IAM
   function; on Azure, read access to the Key Vault secret holding the function key, or the identity allowed by App
   Service Authentication.
 - **Secrets Manager `getAll`** (config imports with reload): `ListSecrets` and, for batches, `BatchGetSecretValue`.
+- **Keys:** besides encrypt and decrypt (or wrap and unwrap), Halyx reads each key's metadata
+  (`kms:DescribeKey`, Key Vault's get key, `roles/cloudkms.viewer`), and the key store's health check lists keys
+  (`kms:ListAliases`). Key Vault Crypto User and `roles/cloudkms.cryptoKeyEncrypterDecrypter` cover the calls;
+  signing adds `kms:Sign` and `kms:GetPublicKey`, or `roles/cloudkms.signerVerifier`. With S3 SSE-KMS, the
+  service's own role needs `kms:GenerateDataKey` and `kms:Decrypt` on the key, which it may already have.
 
 ## Runtime
 

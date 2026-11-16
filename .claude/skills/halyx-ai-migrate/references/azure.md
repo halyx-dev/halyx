@@ -38,6 +38,12 @@ URI uri = invoices.presignDownload(BlobKey.of(name), Duration.ofMinutes(10)).uri
 `BlobStorageException` with status `404` (`BlobNotFound`) becomes `NotFoundException`, and `412` becomes
 `PreconditionFailedException`. Access tiers map to `StorageTier` in `PutOptions`.
 
+**Encryption scopes:** a client built with `.encryptionScope("receipts-scope")` (or a container whose default scope
+the code relies on) becomes `server-side-key: { store, name, properties: { "[azure.storage.encryption-scope]":
+receipts-scope } }` on the blob store: the Key Vault key the scope is bound to, with the scope's name as a key
+option. Requests name the scope; existing blobs read as before. A server-side copy can't name a scope, so a copy
+through the store downloads and uploads.
+
 ## Documents: Cosmos DB (NoSQL API)
 
 | Before | After |
@@ -138,6 +144,35 @@ String out = resize.invoke(FunctionRequest.of(json)).payloadAsString();
   text, `body()` as bytes), so what its clients see doesn't change.
 - Halyx sends only `POST`. A function called with `GET` and query parameters needs to accept `POST`.
 
+## Keys: Key Vault keys
+
+`CryptographyClient` and `KeyClient` calls become a `CryptoKey` bean: `halyx.key-stores.vault-keys: { location:
+<vault URL> }` (the same vault as the secrets, or another) and `halyx.keys.<key>: { name: <Key Vault key name> }`.
+Key Vault names allow letters, digits and hyphens, the same as Halyx's portable names.
+
+| Before | After |
+|---|---|
+| `cryptographyClient.encrypt(RSA_OAEP_256, plaintext)`, `decrypt`; or `wrapKey` / `unwrapKey` around AES written in the service | `key.encrypt(bytes, aad)` and `key.decrypt(SealedData.parse(stored), aad)`: Halyx wraps a data key with `RSA-OAEP-256` and seals any size locally. **Not the same ciphertext**: see below |
+| `sign(ES256 \| PS256 \| RS256, digest)` / `signData`, `verify` | `key.signDigest(digest)` / `sign(data)`, and `key.verify(data, signature)`, checked locally. An RSA key that both wraps and signs needs `purpose` on the key, and RSA keys name `signing-algorithm` |
+| `keyClient.getKey(name).getKey()` for the public key | `key.publicKey(version)`, `currentPublicKey()`, `publicKeys()` (every enabled version) |
+| `keyClient.getKey(name).getProperties()` | `key.metadata()` |
+
+`ResourceNotFoundException` becomes `NotFoundException`; `403` and a disabled key or version `AccessDeniedException`;
+`429` `ThrottledException`.
+
+- **Key operations:** Halyx wraps with `wrapKey` and `unwrapKey`. A key created with only `encrypt` and `decrypt`
+  allowed refuses them: add the operations to the key (`updateKeyProperties` with `setKeyOperations`), which doesn't
+  change its material.
+- **Throughput:** every wrap and unwrap is an RSA operation on the vault, a few thousand per 10 seconds per vault.
+  Where the old code encrypted many small values, turn on the key store's `data-key-cache` and `data-key-reuse`
+  (`docs/api/keys.md#performance-and-caches`), and give a busy service its own vault.
+- **MACs** need Managed HSM, which Halyx doesn't support yet: keep them on the native client.
+- **Existing data:** `RSA-OAEP` ciphertext from `encrypt` and data wrapped by hand aren't HLXS sealed data, so
+  Halyx doesn't open them: keep a class on `unwrap(CryptographyClient.class)`, or the SDK, for the old format and
+  reseal (see [differences.md](differences.md#existing-data)). RSA signatures carry over as they are
+  (`new Signature(bytes, algorithm, Optional.of(version))`). ECDSA signatures from Key Vault are raw R‖S, as JWS
+  defines them, and Halyx's are DER: convert stored ones before verifying, or keep their check where it is.
+
 ## Streams: Event Hubs (Kafka endpoint)
 
 Spring Kafka against `<namespace>.servicebus.windows.net:9093` with OAUTHBEARER (Spring Cloud Azure's passwordless
@@ -166,4 +201,5 @@ serializer, and `trusted-packages`). Keep existing `StringRedisTemplate` keys wi
 
 Queue Storage, Table Storage, Azure Files, Event Grid basic topics and system topics, Functions bindings and triggers
 (the function's own side), Durable Functions, Cosmos DB change feed, Gremlin, Cassandra and MongoDB APIs,
-Notification Hubs, and SignalR. Keep these on the SDK and list them.
+Notification Hubs, SignalR, Managed HSM (MACs and `A256KW` keys), Key Vault key management (creating, rotating and
+importing keys) and certificates. Keep these on the SDK and list them.
