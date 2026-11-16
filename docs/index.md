@@ -1,7 +1,7 @@
 ---
 title: Home
 nav_order: 1
-description: "Halyx: one Java API for storage, NoSQL, messaging, streams, SQL, caches and secrets on AWS, Azure and Google Cloud — a portable library over the clouds' own SDKs."
+description: "Halyx: one Java API for storage, NoSQL, messaging, streams, SQL, caches, secrets and keys on AWS, Azure and Google Cloud — a portable library over the clouds' own SDKs."
 permalink: /
 ---
 
@@ -9,7 +9,7 @@ permalink: /
 {: .fs-9 }
 
 One Java API for AWS, Azure and Google Cloud. Halyx gives Java 21 microservices one consistent way to use cloud services (object storage, NoSQL,
-messaging, streams, SQL, caches, parameters and secrets) on AWS, Azure and Google Cloud. The services keep their
+messaging, streams, SQL, caches, parameters and secrets, keys) on AWS, Azure and Google Cloud. The services keep their
 own SDKs and strengths; your code stops depending on them.
 {: .fs-6 .fw-300 }
 
@@ -53,6 +53,7 @@ checks that for every provider, against emulators on every build and
 | [SQL databases](api/sql.md) | `Database` (a JDBC `DataSource`) | RDS, Aurora | Azure Database for PostgreSQL and MySQL, Azure SQL | Cloud SQL | any PostgreSQL, MySQL or SQL Server |
 | [Caches](api/caches.md) | `Cache` | ElastiCache | Azure Cache for Redis, Azure Managed Redis | Memorystore | any Redis or Valkey server, in-memory |
 | [Parameters and secrets](api/parameters.md) | `ParameterStore` | SSM Parameter Store, Secrets Manager | App Configuration, Key Vault | Parameter Manager, Secret Manager | HashiCorp Vault, in-memory |
+| [Keys and encryption](api/keys.md) | `KeyStore`, `CryptoKey` | KMS | Key Vault keys | Cloud KMS | HashiCorp Vault Transit, in-memory |
 
 ## Why teams use it
 
@@ -71,6 +72,10 @@ No lowest common denominator
 Passwordless by default
 : Databases, caches and streams log in with the cloud's identity (AWS IAM, Microsoft Entra ID, Google IAM), with
   tokens refreshed before they expire.
+
+Encryption that moves with the data
+: Blobs, document fields, parameters and claim checks are sealed with a cloud's keys in one
+  [published format](api/keys-format.md), so data sealed for keys on two clouds opens on either.
 
 Production behaviour built in
 : Parallel transfers, batching, checksums, presigned URLs, claim checks, listener concurrency,

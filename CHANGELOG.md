@@ -1,5 +1,68 @@
 # Changelog
 
+## 1.2.0 (unreleased)
+
+### Features
+
+- **Key management** ([#47](https://github.com/halyx-dev/halyx/issues/47)):
+  - `KeyStore` and `CryptoKey` (`dev.halyx.keys`) on AWS KMS, Azure Key Vault keys, Google Cloud KMS and Vault
+    Transit, through `CloudContext.keyStore`, and `InMemoryKeys` on the memory provider, which holds real JDK keys.
+    Halyx never creates, rotates or deletes keys.
+  - Envelope encryption: each `encrypt` seals the data locally with AES-256-GCM under a fresh data key, and the key
+    service only wraps the data key, so it's one call whatever the size. `encryptingStream` and
+    `decryptingStream`, and `encryptBody` and `decryptBody` in halyx-reactor, seal and open large data one segment at a
+    time.
+  - `SealedData` in **HLXS v1**, a published format ([`keys-format.md`](docs/api/keys-format.md)) with JSON test
+    vectors and a Python decoder that CI runs against them. The spec and vectors are under OWFa 1.0; the code stays
+    Apache-2.0. Sealed data can carry the data key wrapped by up to 16 keys on any providers, with a key commitment, so
+    data sealed for keys on two clouds opens on either. `rewrap`, `addTo` and `withoutKey` change only the header.
+  - Signing (RSA-PSS, RSA PKCS #1 v1.5, ECDSA P-256 and P-384) with local verification against cached public keys,
+    and HMAC-SHA256 MACs on AWS, Google Cloud and Vault (`KeyCapability.MAC`). `publicKeys()` for JWK sets.
+  - `DataKey` for your own formats, and for sealing several messages with one key service call.
+  - Optional `dataKeyReuse` and `dataKeyCache` to cut key service calls, both off by default; `statistics()`.
+  - Errors as for every service: a missing key is `NotFoundException`, a disabled one `AccessDeniedException`, and
+    wrong AAD or changed data `DataIntegrityException`. Key operations go through the interceptors as service `keys`.
+  - `async()` views, non-blocking on the cloud key services, and reactive views (`ReactiveKeyStore`,
+    `ReactiveCryptoKey`).
+  - Spring Boot: `halyx.key-stores` and `halyx.keys` beans, with health per store and per key, and
+    `check-on-startup`.
+
+- **Services that use keys** ([#47](https://github.com/halyx-dev/halyx/issues/47)):
+  - **Blob stores:** `encryptedWith(key)` seals every blob before it leaves the application, with ranged and parallel
+    reads, prefix views, a key per blob and copies; the view has no presigned URLs.
+    `withServerSideKey(key)` and `PutOptions.serverSideKey` have S3 (SSE-KMS), Cloud Storage (customer-managed keys)
+    or Azure Blob Storage (an encryption scope) encrypt writes at rest, with presigned URLs
+    (`StorageCapability.SERVER_SIDE_KMS`). Spring Boot: `encryption-key`, `encryption-prefix` and `server-side-key`.
+  - **Claim checks:** `ClaimCheck.of(blobStore.encryptedWith(key))` seals offloaded message bodies and stream values.
+  - **Document fields:** `TableConfig.Builder.encryptedField`, `withEncryptedField` and `@Encrypted` on Spring Data
+    record components, with one wrap per document write and one unwrap per document read.
+  - **Parameters and secrets:** `encryptedWith(key)` returns an `EncryptedParameterStore` that stores values as
+    `hlxs1:` text bound to their names, with `allowPlaintext()` for moving a store over. `serverSideKey(key)` has SSM
+    Parameter Store, Secrets Manager, Secret Manager or Parameter Manager encrypt new values with a chosen key
+    (`ParameterCapability.SERVER_SIDE_KMS`). Spring Boot: `encryption-key`, `allow-plaintext` and `server-side-key`,
+    and `spring.config.import` opens sealed values at startup and on reload.
+  - **JWTs:** `halyx.security.jwt.key` makes a Spring Security `JwtEncoder` that signs with a key, a JWK set endpoint,
+    and optionally a `JwtDecoder`.
+
+- **Conformance kits:** a key store kit, and kits for blob, document and parameter encryption. The blob store,
+  document store, document repository, parameter store, messaging and stream kits run again through each encrypted
+  view, on the memory provider and on each cloud's emulator with its own key service.
+
+### Provider SPI
+
+- `ProviderConnection.keyStore` and `KeyStoreDriver`, with `AbstractKeyStoreDriver`; `ParameterDriver.maxValueBytes`.
+  Every addition has a default, so existing providers compile unchanged.
+
+### Dependencies
+
+- `halyx-aws` adds the AWS SDK's `kms`, `halyx-azure` `azure-security-keyvault-keys`, and `halyx-gcp`
+  `google-cloud-kms`.
+
+### Samples
+
+- The portable orders samples evaluate a feature flag kept in their parameter store with flipjack, and the docs gain
+  a [Feature flags](docs/api/parameters.md#feature-flags) section.
+
 ## 1.1.0 (2026-11-02)
 
 ### Features

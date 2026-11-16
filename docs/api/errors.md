@@ -27,8 +27,8 @@ add types, so a `switch` over it is exhaustive and stays correct as providers ar
 | `NotFoundException` | the blob, item, secret, topic or other resource doesn't exist | no |
 | `AlreadyExistsException` | creating something that already exists | no |
 | `PreconditionFailedException` | a condition failed: `ifMatch`, `ifNotExists`, `ifVersion`, a transaction check, or a blob that changed mid-download | no |
-| `AccessDeniedException` | missing permissions, bad credentials, or an untrusted TLS certificate | no |
-| `InvalidArgumentException` | the request was rejected as invalid, such as a name the backend can't store | no |
+| `AccessDeniedException` | missing permissions, bad credentials, an untrusted TLS certificate, or a key or key version that's disabled, pending deletion or destroyed | no |
+| `InvalidArgumentException` | the request was rejected as invalid, such as a name the backend can't store, a key whose type doesn't fit what's asked of it, or data sealed under keys of another store | no |
 | `UnsupportedFeatureException` | a feature this provider doesn't support (see [capabilities](capabilities-and-unwrap.md)) | no |
 | `DataIntegrityException` | a checksum mismatch on upload or download, or sealed data failing authentication (wrong AAD, changed or truncated data) | no |
 | `ThrottledException` | the provider is rate limiting you; `retryAfter()` says for how long, when the provider says | **yes** |
@@ -117,8 +117,8 @@ the retryable `UnavailableException`, and your code, or your `RetryInterceptor`,
 
 ## Interceptors
 
-Interceptors wrap every operation on object storage, NoSQL, messaging, caches, and parameters and
-secrets (SQL goes straight through JDBC). That makes them the place for cross-cutting behaviour such as
+Interceptors wrap every operation on object storage, NoSQL, messaging, caches, parameters and secrets, and
+keys (SQL goes straight through JDBC). That makes them the place for cross-cutting behaviour such as
 retries, metrics, logging and auditing:
 
 ```java
@@ -144,8 +144,8 @@ Halyx halyx = Halyx.builder()
         .build();
 ```
 
-`OperationContext` describes the call: `service()` (`storage`, `nosql`, `messaging`, `cache` or
-`parameters`), `operation()` (such as
+`OperationContext` describes the call: `service()` (`storage`, `nosql`, `messaging`, `cache`,
+`parameters` or `keys`), `operation()` (such as
 `put`), `provider()`, `resource()` (the bucket, table, topic and so on) and `idempotent()`. Interceptors
 run in registration order, outermost first. Errors reaching an interceptor are already translated into
 `CloudException`s.

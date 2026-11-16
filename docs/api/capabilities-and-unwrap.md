@@ -75,6 +75,19 @@ provider: GCS can presign only with credentials that can sign.
 | `VERSIONS` | SSM Parameter Store, Secrets Manager, Key Vault, Secret Manager, Parameter Manager, Vault. Not App Configuration. |
 | `SERVER_SIDE_KMS` | SSM Parameter Store with `aws.ssm.secure`, Secrets Manager, Secret Manager, Parameter Manager. Not Key Vault, App Configuration or Vault. |
 
+### Keys
+
+A key store declares what its key service offers, and a key's `capabilities()` what that key can do, from its type:
+
+| `KeyCapability` | AWS KMS | Azure Key Vault | Google Cloud KMS | Vault Transit |
+|---|---|---|---|---|
+| `SIGN` | signing keys | RSA and EC keys that allow `sign` | signing keys | signing keys |
+| `MAC` | HMAC keys | no (Managed HSM only, not supported yet) | MAC keys | `hmac` keys |
+| `SERVER_SIDE_REWRAP` | yes (`ReEncrypt`) | no | no | yes (`rewrap`) |
+
+Encryption, decryption and `rewrap` work everywhere; without `SERVER_SIDE_REWRAP`, Halyx unwraps and wraps, with the
+same result. The memory provider declares `MAC` and `SERVER_SIDE_REWRAP`, and its signing keys `SIGN`.
+
 ## Native clients with `unwrap`
 
 Every service except `Database` can hand you the native SDK client it uses, already configured with the
@@ -97,11 +110,12 @@ for one cloud fails clearly on another instead of misbehaving. Prefer the portab
 | `Subscription` | `SqsClient` | `ServiceBusReceiverClient` (`ServiceBusSessionReceiverClient` for session entities) | `SubscriptionAdminClient` |
 | `ParameterStore` | `SsmClient`, `SecretsManagerClient` | `ConfigurationClient`, `SecretClient` | `ParameterManagerClient`, `SecretManagerServiceClient` |
 | `FunctionInvoker` | `LambdaClient` | `HttpPipeline` | `HttpRequestFactory` |
+| `KeyStore` | `KmsClient` | `KeyClient`, `KeyAsyncClient` | `KeyManagementServiceClient` |
 | `StreamProducer` | Kafka's `Producer` | (same) | (same) |
 | `StreamConsumer` | Kafka's `Consumer`, used only from the polling thread | (same) | (same) |
 | `Cache` | Lettuce `StatefulRedisConnection` / `StatefulRedisClusterConnection`, `RedisClient` / `RedisClusterClient` | (same) | (same) |
 
-HashiCorp Vault parameter stores unwrap to `VaultClient`, Halyx's own client. A `Database` has no
+HashiCorp Vault parameter stores and Transit key stores unwrap to `VaultClient`, Halyx's own client. A `Database` has no
 `unwrap`: its `dataSource()` is the HikariCP pool, which JDBC's own `DataSource.unwrap(HikariDataSource.class)`
 reaches.
 
