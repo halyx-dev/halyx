@@ -407,7 +407,7 @@ BlobKey key = BlobKey.of("orders/" + shard + "/2026-10-10/" + orderId + ".json")
 Azure and GCS scale per account or bucket rather than per prefix, but they still ramp up gradually, so
 increase the load on a new bucket over minutes, not seconds.
 
-See [benchmarks](../design.md#benchmarks) for what parallel transfers, batching and prefetching gain.
+See [benchmarks](../build-and-test.md#benchmarks) for what parallel transfers, batching and prefetching gain.
 
 ## Asynchronous calls
 
