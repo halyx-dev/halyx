@@ -339,6 +339,7 @@ path on Transit.
 ProviderConfig.of("memory")
 ```
 
-No settings. Object storage, NoSQL, messaging, events, streams, functions, caches, and parameters and secrets
-live in the JVM; functions are handlers registered with `InMemoryFunctions`. It's
+No settings. Object storage, NoSQL, messaging, events, streams, functions, caches, parameters and secrets, and keys
+live in the JVM; functions are handlers registered with `InMemoryFunctions`, and keys are real JDK keys created with
+`InMemoryKeys` (see [Testing with the memory provider](api/keys.md#testing-with-the-memory-provider)). It's
 ideal for unit tests.

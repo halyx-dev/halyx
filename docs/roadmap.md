@@ -22,8 +22,8 @@ end.
 | Stage | Work |
 |---|---|
 | **Released** | [1.1.0](#release-110), with Kotlin coroutines, function invocation and rotated keys, on 2 November 2026; [1.0.2](#release-102), a patch release, on 25 October 2026; [1.0.1](#release-101), a patch release, and [1.0.0](#release-100), the first release, both on 23 October 2026; all on Maven Central |
-| **Coming next** | [Planned additions](#coming-next): key management, R2DBC through the Cloud SQL connector, and more real-cloud test runs |
-| **Delivered** | [19 milestones](#delivered): every service on AWS, Azure and Google Cloud, Spring Boot 3.5 and 4, reactive and asynchronous APIs, Kotlin coroutines, function invocation, rotated keys and passwords, a portable microservice on EKS, GKE and AKS, and cloud logins across clouds |
+| **Coming next** | [Planned additions](#coming-next): R2DBC through the Cloud SQL connector, and more real-cloud test runs |
+| **Delivered** | [20 milestones](#delivered): every service on AWS, Azure and Google Cloud, Spring Boot 3.5 and 4, reactive and asynchronous APIs, Kotlin coroutines, function invocation, rotated keys and passwords, a portable microservice on EKS, GKE and AKS, cloud logins across clouds, and key management, for 1.2.0 |
 
 ## Released
 
@@ -87,7 +87,6 @@ Additions planned on top of 1.1.0.
 
 | Item | Area | Today |
 |---|---|---|
-| Key management: envelope encryption and signing with AWS KMS, Azure Key Vault keys, Google Cloud KMS and Vault Transit, in one format on every cloud ([#47](https://github.com/halyx-dev/halyx/issues/47)) | Keys | Halyx stores secrets but doesn't encrypt or sign with cloud-held keys: applications call each cloud's KMS SDK themselves |
 | R2DBC through the Cloud SQL connector ([#43](https://github.com/halyx-dev/halyx/issues/43)) | R2DBC | R2DBC connects to Cloud SQL directly, with IAM login; JDBC also works through the connector |
 | A real-cloud run on MSK Serverless with IAM, including transactions ([#44](https://github.com/halyx-dev/halyx/issues/44)) | Streams | Tested on Kafka 3.9 and 4.2.1 brokers, and on real Event Hubs and Managed Kafka. The run is ready ([AWS tier 4](cloud-testing/aws.md#tier-4-not-run)) and needs an AWS account plan that includes MSK |
 | A real-cloud run on Azure Database for MySQL with Entra ID ([#45](https://github.com/halyx-dev/halyx/issues/45)) | SQL databases | The run needs a directory-level grant in the test tenant |
@@ -116,6 +115,7 @@ Additions planned on top of 1.1.0.
 | 17 | Kotlin coroutines | `suspend fun` `@HalyxListener` methods for subscriptions and stream consumers; coroutine repositories with `suspend` CRUD and queries and `Flow` results, on `@JvmRecord` entities; `awaitSingle` and `asFlow` over the reactive services, with back-pressure and context. Tested on Boot 3.5 (Kotlin 1.9) and Boot 4 (Kotlin 2.3), in memory and on Kafka, SQS and DynamoDB emulators. In 1.1.0 | [Kotlin coroutines](spring-boot.md#reactive-applications) |
 | 18 | Function invocation | `FunctionInvoker`: AWS Lambda functions, Azure Functions and Cloud Run functions invoked by name with a payload and headers, with each cloud's login (IAM, Entra ID tokens or function keys, Google ID tokens) and the same exceptions on all three. Configured timeouts and headers, retries only for functions marked idempotent, fire-and-forget `trigger` on Lambda, `async()` and `ReactiveFunctionInvoker` views, trace context into the function, and Spring Boot `halyx.functions`. A failed invocation keeps what the function reported, whole, as a `FunctionError` cause. A function conformance kit on the memory provider, Floci's Lambda, the Azure Functions host and Google's Functions Framework. Real clouds (tier 1): Lambda 11/12, Cloud Run functions and Azure Functions 10/12 each, the skips expected; Spring 4/4 on each. In 1.1.0 | [Functions](api/functions.md) |
 | 19 | Rotated keys and passwords | Keys and passwords read from a parameter store as they're used, so a rotation takes effect without a restart: Azure function keys on every call, Cosmos DB and Event Grid keys every `azure.key-refresh-interval`, and cache and Kafka passwords at each login, as SQL passwords already were. Spring Boot `secrets` on providers, event buses, subscriptions and functions, and `auth.secret` on caches and stream clusters; a missing secret, or a `halyx.*` placeholder that didn't resolve, fails the start. The store can be on another cloud. Service Bus and App Configuration connection strings stay read once, as their SDKs copy the key: Entra ID login rotates instead. Emulators: a rotated key on the Azure Functions host, rotated passwords on Valkey and on Kafka 3.9 and 4.2. Real cloud (Azure tier 1): a function key, a Cosmos DB key and an Event Grid key rotated in Key Vault while the clients stay open, 3/3, and the function key through Spring Boot `secrets` on Boot 3.5 and 4. Cache and Kafka password rotation is tested on the emulators, as the clouds' caches and Kafka endpoints in the tests use Entra ID or IAM. In 1.1.0 | [Keys for other services](api/parameters.md#keys-for-other-services) |
+| 20 | Key management | `KeyStore` and `CryptoKey` on AWS KMS, Azure Key Vault keys, Google Cloud KMS and Vault Transit, with in-memory keys for tests: envelope encryption, signing checked locally, and MACs, with the same errors on every cloud. Sealed data uses [HLXS v1](api/keys-format.md), a published format with test vectors and an independent Python decoder in CI; it can carry up to 16 keys on any clouds, so data sealed for two clouds opens on either, and keys are added, rotated or moved without touching the body. Services that use keys: client-side encrypted blob stores with ranged and parallel reads, server-side KMS for blobs (S3 SSE-KMS, GCS customer-managed keys, Azure encryption scopes) with presigned URLs, encrypted claim checks, encrypted document fields and `@Encrypted` in repositories, client-side and server-side encrypted parameters with `spring.config.import`, and Spring Security JWTs signed by a key with a JWK set. Spring Boot `halyx.key-stores` and `halyx.keys`, health and reactive views. Kits for key stores and for each encrypted service, run on the memory provider and on Floci's KMS, Key Vault and Cloud KMS and Vault Transit; every service's own kit runs again through its encrypted view. Real-cloud runs and a cryptography review of the format come before the 1.2.0 release. In 1.2.0 ([#47](https://github.com/halyx-dev/halyx/issues/47)) | [Keys](api/keys.md) |
 
 ## On demand
 
@@ -126,7 +126,7 @@ Planned, and prioritised by demand:
 | Aurora fast failover | Faster failover through the AWS Advanced JDBC Wrapper |
 | Nested field paths | Updates to fields inside nested NoSQL documents |
 | Cross-instance cache stampede protection | One load per key across all instances; `getOrLoad` already shares loads within an instance |
-| Object storage extras | Archive restore, KMS encryption, versioning, tags and retention |
+| Object storage extras | Archive restore, versioning, tags and retention |
 
 ## Not planned
 

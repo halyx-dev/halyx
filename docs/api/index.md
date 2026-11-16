@@ -44,7 +44,7 @@ Halyx                                   one per application
 | `Halyx` | The registry of named providers. Build it once, share it, and close it on shutdown. |
 | `ProviderConfig` | Which cloud (`aws`, `azure`, `gcp`, `vault`, `memory`), plus region, endpoint, credentials and provider properties. See [Provider configuration](../providers.md). |
 | `CloudContext` | One provider connection: an account and region with its credentials. It hands out services, which share its HTTP clients and connection pools. Asking again with an equal configuration returns the same service (with its caches and statistics), except stream consumers and databases, which are new each time. |
-| Service interfaces | `BlobStore`, `DocumentStore`, `Publisher` and `Subscription`, `EventPublisher`, `StreamProducer` and `StreamConsumer`, `FunctionInvoker`, `Database`, `Cache<V>`, `ParameterStore`. |
+| Service interfaces | `BlobStore`, `DocumentStore`, `Publisher` and `Subscription`, `EventPublisher`, `StreamProducer` and `StreamConsumer`, `FunctionInvoker`, `Database`, `Cache<V>`, `ParameterStore`, `KeyStore` and its `CryptoKey`s. |
 
 ```java
 Halyx halyx = Halyx.builder()
@@ -96,7 +96,7 @@ calls on threads they choose, with `halyx-reactor`'s `Mono` and `Flux` views; se
 asking for a missing one fails rather than being ignored. See
 [Capabilities and native clients](capabilities-and-unwrap.md).
 
-**Infrastructure stays yours.** Halyx uses buckets, tables, topics, queues, caches and databases; it
+**Infrastructure stays yours.** Halyx uses buckets, tables, topics, queues, caches, databases and keys; it
 doesn't create them. Create them with Terraform, Bicep, CloudFormation or your usual tooling.
 
 ## Lifecycle
@@ -115,6 +115,8 @@ it per request:
 - Publishers and subscriptions may hold their own connections, for example Service Bus senders and
   receivers.
 - Caches share one connection per endpoint and credentials, whichever instance you use.
+- `keyStore(config)` returns the same store for an equal configuration, with its caches of key metadata, public
+  keys and data keys, and `key(name)` the same key.
 
 In Spring Boot, the starter builds the `Halyx` bean and one bean per configured service, and closes
 them with the application context. See [Spring Boot](../spring-boot.md).

@@ -370,6 +370,18 @@ CryptoKey key = keys.key("receipts", KeyOptions.builder()
         .property("azure.storage.encryption-scope", "receipts-scope").build());
 ```
 
+**Permissions.** Halyx reads the key's metadata for its id, so the application needs the metadata permission of
+[its key store](../providers.md) (`kms:DescribeKey`, Key Vault Crypto User, `roles/cloudkms.viewer`). Then:
+
+- **On AWS,** S3 uses the key with the caller's permissions: the application needs `kms:GenerateDataKey` on it for
+  writes and `kms:Decrypt` for reads. A presigned URL acts as the application that signed it, so the same applies.
+- **On Google Cloud,** the Cloud Storage service agent of the bucket's project needs
+  `roles/cloudkms.cryptoKeyEncrypterDecrypter` on the key; the application needs nothing more.
+- **On Azure,** the storage account's managed identity needs Key Vault Crypto Service Encryption User on the key the
+  scope is bound to; the application needs nothing more.
+
+In Spring Boot, set `server-side-key` on the store: see [Spring Boot](../spring-boot.md#object-storage).
+
 **With client-side encryption.** The two views stack: `withServerSideKey(serverKey).encryptedWith(sealingKey)`
 seals each blob in the application, then the storage service encrypts the sealed bytes at rest. Either order works.
 Server-side encryption alone protects data at rest. Anyone the bucket and key policies allow can read the

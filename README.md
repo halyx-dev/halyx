@@ -25,7 +25,7 @@
 </p>
 
 **Halyx** is a Java API that gives microservices one consistent way to use Cloud Native services like Storage, SQL, NoSQL,
-Caches, Messaging, Streams (managed Kafka), Functions, and Parameters and Secrets across **AWS**, **Azure** and **GCP**.
+Caches, Messaging, Streams (managed Kafka), Functions, Parameters and Secrets, and Keys across **AWS**, **Azure** and **GCP**.
 
 With Halyx you can build **portable multi-cloud microservices and applications**. A single microservice or application can work with
 services on several clouds at once, such as files on S3, a cache on Azure, events on Pub/Sub and secrets
@@ -33,9 +33,10 @@ in Vault. Each cloud is registered as a named provider and used through the same
 
 | | |
 |---|---|
-| **9 services, 3 clouds, 1 API** | storage, NoSQL, messaging, events, Kafka streams, functions, SQL, caches, parameters and secrets on AWS, Azure and Google Cloud |
+| **10 services, 3 clouds, 1 API** | storage, NoSQL, messaging, events, Kafka streams, functions, SQL, caches, parameters and secrets, and keys on AWS, Azure and Google Cloud |
 | **Same behaviour, proven** | one conformance kit per service, run against every provider on emulators and [on real cloud accounts, with published results](https://halyx.dev/docs/cloud-testing/) |
 | **No passwords** | databases, caches and Kafka log in with AWS IAM, Microsoft Entra ID or Google IAM |
+| **Encryption in one format** | data sealed with AWS KMS, Azure Key Vault, Google Cloud KMS or Vault Transit keys in one published format, for blobs, document fields, parameters and claim checks, and opened on any cloud that holds one of its keys |
 | **A library, not a platform** | runs inside your application: no sidecar, no agent, and the native SDK client is one `unwrap` away |
 | **Spring Boot 3.5 and 4** | a starter with listeners, Spring Data repositories, R2DBC, `@Cacheable`, health, metrics and `spring.config.import` |
 
@@ -114,7 +115,7 @@ Alibaba Cloud.
 ```
                               your microservice
                                      │
-  BlobStore · DocumentStore · Publisher · Subscription · Database · Cache · ParameterStore
+  BlobStore · DocumentStore · Publisher · Subscription · Database · Cache · ParameterStore · KeyStore
                                      │    one API · one error model · one set of tests
              ┌───────────────────────┼───────────────────────┐
             AWS                    Azure                Google Cloud       (+ HashiCorp Vault, in-memory)
@@ -143,6 +144,7 @@ service below, built once as one image, which runs on AWS, Azure or Google Cloud
 | SQL databases | `Database` (JDBC `DataSource`) | RDS, Aurora | Azure Database for PostgreSQL and MySQL, Azure SQL | Cloud SQL | any PostgreSQL, MySQL, SQL Server |
 | Caches | `Cache` | ElastiCache | Azure Cache for Redis, Azure Managed Redis | Memorystore | any Redis or Valkey, in-memory |
 | Parameters and secrets | `ParameterStore` | SSM Parameter Store, Secrets Manager | App Configuration, Key Vault | Parameter Manager, Secret Manager | HashiCorp Vault, in-memory |
+| Keys and encryption | `KeyStore`, `CryptoKey` | KMS | Key Vault keys | Cloud KMS | HashiCorp Vault Transit, in-memory |
 
 ## Using it with Spring Boot
 
@@ -263,7 +265,7 @@ Copy a skill's folder into your service's `.claude/skills` (or `~/.claude/skills
 | | |
 |---|---|
 | [Getting started](https://halyx.dev/docs/getting-started.html) | dependencies, your first calls, several clouds at once, testing |
-| [API guide](https://halyx.dev/docs/api/) | every service with examples: [storage](https://halyx.dev/docs/api/storage.html), [NoSQL](https://halyx.dev/docs/api/nosql.html), [messaging](https://halyx.dev/docs/api/messaging.html), [streams](https://halyx.dev/docs/api/streams.html), [SQL](https://halyx.dev/docs/api/sql.html), [caches](https://halyx.dev/docs/api/caches.html), [parameters and secrets](https://halyx.dev/docs/api/parameters.html) |
+| [API guide](https://halyx.dev/docs/api/) | every service with examples: [storage](https://halyx.dev/docs/api/storage.html), [NoSQL](https://halyx.dev/docs/api/nosql.html), [messaging](https://halyx.dev/docs/api/messaging.html), [streams](https://halyx.dev/docs/api/streams.html), [SQL](https://halyx.dev/docs/api/sql.html), [caches](https://halyx.dev/docs/api/caches.html), [parameters and secrets](https://halyx.dev/docs/api/parameters.html), [keys and encryption](https://halyx.dev/docs/api/keys.html) |
 | [Errors and retries](https://halyx.dev/docs/api/errors.html) | the portable error model, retries, throttling and interceptors |
 | [Capabilities and native clients](https://halyx.dev/docs/api/capabilities-and-unwrap.html) | provider differences, and `unwrap` for the native SDK clients |
 | [Provider configuration](https://halyx.dev/docs/providers.html) | credentials, regions, endpoints and every provider setting |
