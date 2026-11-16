@@ -1,6 +1,6 @@
 ---
 name: halyx-ai-migrate
-description: Migrate an existing Spring Boot microservice from AWS, Azure or Google Cloud SDKs (Spring Cloud AWS, Spring Cloud Azure, Spring Cloud GCP, or the raw SDKs) to Halyx, so it runs unchanged on any cloud. Use when asked to migrate, port or convert a service to Halyx, to make a service cloud-agnostic or portable, to assess how much work a migration is, or to replace S3Template, SqsTemplate, @SqsListener, DynamoDbTemplate, ServiceBusTemplate, @ServiceBusListener, CosmosRepository, PubSubTemplate, Firestore repositories, LambdaClient and HTTP calls to Azure Functions or Cloud Run functions, aws-parameterstore:, sm:// or Key Vault property sources with Halyx.
+description: Migrate an existing Spring Boot microservice from AWS, Azure or Google Cloud SDKs (Spring Cloud AWS, Spring Cloud Azure, Spring Cloud GCP, or the raw SDKs) to Halyx, so it runs unchanged on any cloud. Use when asked to migrate, port or convert a service to Halyx, to make a service cloud-agnostic or portable, to assess how much work a migration is, or to replace S3Template, SqsTemplate, @SqsListener, DynamoDbTemplate, ServiceBusTemplate, @ServiceBusListener, CosmosRepository, PubSubTemplate, Firestore repositories, LambdaClient and HTTP calls to Azure Functions or Cloud Run functions, KmsClient, CryptographyClient, KeyManagementServiceClient or KmsTemplate, the AWS Encryption SDK or Tink, SSE-KMS, encryption scopes or customer-managed key settings, aws-parameterstore:, sm:// or Key Vault property sources with Halyx.
 ---
 
 # Migrate a Spring Boot service to Halyx
@@ -38,8 +38,9 @@ Present:
 1. The inventory table.
 2. What stays out of scope, and why: services Halyx doesn't cover (see "No Halyx equivalent" in each mapping file),
    features with no portable form, and anything you are unsure of.
-3. **Data compatibility** for each document store and blob store: can Halyx read the existing data as it is
-   stored? Check it against [differences.md](references/differences.md#existing-data). If it can't, propose either a
+3. **Data compatibility** for each document store and blob store, and for everything encrypted or signed with a
+   key: can Halyx read the existing data as it is stored? Ciphertext from a key service's own `encrypt`, or from an
+   encryption library, never is. Check it against [differences.md](references/differences.md#existing-data). If it can't, propose either a
    data migration or leaving that store on its native client for now. Never quietly change a storage layout.
 4. **The rollout:** old and new instances run side by side during a deploy. For each event, record, counter and
    key that both versions (or other services) touch, say how both will work at once: rule changes made before the
@@ -62,16 +63,20 @@ Order, from lowest to highest risk (skip what the service doesn't use):
    Then start the service and run its tests: the provider module's SDK clients can switch on the old library's
    auto-configuration for services the code never used ([differences.md](references/differences.md#runtime)).
 2. **Configuration and secrets:** `spring.config.import: halyx:<store>` in place of the cloud's config import.
-3. **Object storage**
-4. **Documents:** a Spring Data `DocumentRepository`, or `DocumentStore`
-5. **Messaging:** `Publisher` and `@HalyxListener`
-6. **Events:** `EventPublisher` and CloudEvents
-7. **Functions:** `FunctionInvoker`, for `LambdaClient.invoke` and HTTP calls to Azure Functions and Cloud Run
+3. **Keys:** `halyx.key-stores` and `halyx.keys` for code that calls a key service (`KmsClient`,
+   `CryptographyClient`, `KeyManagementServiceClient`), before the areas whose data they protect. Server-side key
+   settings move with their store (`server-side-key`), and encrypted fields and blobs with theirs (`@Encrypted`,
+   `encryption-key`). Old ciphertext stays readable through the plan's legacy path until it's resealed.
+4. **Object storage**
+5. **Documents:** a Spring Data `DocumentRepository`, or `DocumentStore`
+6. **Messaging:** `Publisher` and `@HalyxListener`
+7. **Events:** `EventPublisher` and CloudEvents
+8. **Functions:** `FunctionInvoker`, for `LambdaClient.invoke` and HTTP calls to Azure Functions and Cloud Run
    functions
-8. **Streams:** `halyx.spring-kafka` (keeps `KafkaTemplate` and `@KafkaListener`), or `StreamProducer` and
+9. **Streams:** `halyx.spring-kafka` (keeps `KafkaTemplate` and `@KafkaListener`), or `StreamProducer` and
    `@HalyxListener`
-9. **Caches:** `halyx.caches` beans, or `halyx.cache-manager` behind `@Cacheable`
-10. **SQL:** `halyx.databases`, which gives JPA, JDBC and Flyway a `DataSource` with IAM login
+10. **Caches:** `halyx.caches` beans, or `halyx.cache-manager` behind `@Cacheable`
+11. **SQL:** `halyx.databases`, which gives JPA, JDBC and Flyway a `DataSource` with IAM login
 
 For each area:
 - Replace the code with the Halyx API and the configuration with `halyx.*` properties
@@ -124,8 +129,8 @@ Only do this phase if the user wants the service portable, not just migrated.
 
 ## Rules
 
-- Don't change behaviour silently. If Halyx works differently, such as nack delays, ordering, decimals or function
-  retries, say so in the plan and in the code review, and keep the service correct.
+- Don't change behaviour silently. If Halyx works differently, such as nack delays, ordering, decimals, function
+  retries or the format of encrypted data, say so in the plan and in the code review, and keep the service correct.
 - Don't invent API. Check method and property names against the Halyx docs (`docs/api/*.md`,
   `docs/spring-boot.md`, `docs/providers.md`) or the source, and not against memory.
 - A `halyx.*` key is a bean name. It must not clash with the service's own beans: a class `OrderListener` and a

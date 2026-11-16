@@ -55,6 +55,9 @@ lists the predefined roles that cover the same calls.
 | Database | `rds-db:connect` on `dbuser:<resource id>/<user>` | the identity as an Entra ID database user (or admin) | `roles/cloudsql.client` and `roles/cloudsql.instanceUser`; an IAM database user |
 | Parameter store, parameters | `ssm:GetParameter`, `GetParameters`, `GetParametersByPath` on the prefix | App Configuration Data Reader | `roles/parametermanager.parameterAccessor` |
 | Function | `lambda:InvokeFunction` on the function (and its qualifier, `function:<name>:<alias>`) | a function key from Key Vault (Key Vault Secrets User covers reading it), or the identity allowed by App Service Authentication's Entra ID app | `roles/run.invoker` on the function's Cloud Run service |
+| Key, encryption | `kms:Encrypt`, `Decrypt`, `DescribeKey` on the key; `kms:ListAliases` on `*` for health | Key Vault Crypto User on the vault | `roles/cloudkms.cryptoKeyEncrypterDecrypter` and `roles/cloudkms.viewer` on the key ring |
+| Key, signing | `kms:Sign`, `GetPublicKey`, `DescribeKey`; `kms:GenerateMac`, `VerifyMac` for MACs | Key Vault Crypto User | `roles/cloudkms.signerVerifier` and `roles/cloudkms.viewer` |
+| Server-side key | the service's own role: `kms:GenerateDataKey` and `Decrypt` on the key (S3, Secrets Manager); `kms:Encrypt` for SSM standard parameters | the storage account's managed identity: Key Vault Crypto Service Encryption User on the scope's key | the Cloud Storage, Secret Manager or Parameter Manager service agent: `roles/cloudkms.cryptoKeyEncrypterDecrypter` on the key |
 | Parameter store, secrets | `secretsmanager:GetSecretValue`, `DescribeSecret` on `secret:<prefix>/*`; `ListSecrets` and `BatchGetSecretValue` on `*` for config imports with reload | Key Vault Secrets User | `roles/secretmanager.secretAccessor`; `roles/secretmanager.viewer` to list them for config imports with reload |
 
 - **Health reads a probe name.** Each parameter store's health check reads `<prefix>/halyx-ping` and expects "not
@@ -92,3 +95,7 @@ Required settings that are easy to miss:
   invoke. On Azure, either store a function key (`azurerm_function_app_host_keys`, or a function-level key) as a Key
   Vault secret, or turn on App Service Authentication with an Entra ID app whose audience the service names.
 - **Cloud SQL:** IAM database authentication on, an IAM user, and the connector's instance connection name.
+- **Keys:** created by the infrastructure, never by Halyx. A KMS key can only be scheduled for deletion, after 7 days
+  at least; a Key Vault key needs `wrapKey` and `unwrapKey` among its operations and is purged with a vault that has
+  no purge protection; a Cloud KMS key ring can never be deleted, so create it once per environment, not per
+  deployment. The sample's `keys` feature has a working example for each cloud in the same `main.tf` files.

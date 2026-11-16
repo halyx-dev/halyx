@@ -7,8 +7,8 @@ description: Review a Spring Boot service that uses Halyx for anything that stil
 
 The question is: **would this service run, and behave correctly, on each cloud by changing only its profile?**
 Halyx's API makes most of that true, but services leak in predictable places: native clients outside one class,
-cloud settings in the shared configuration, features one cloud lacks (function triggers among them), decimals, bean
-names, permissions, and tests that only ever run one cloud. [references/rules.md](references/rules.md) lists every
+cloud settings in the shared configuration, features one cloud lacks (function triggers and MACs among them),
+encryption tied to one key service, decimals, bean names, permissions, and tests that only ever run one cloud. [references/rules.md](references/rules.md) lists every
 check, with how to detect it.
 
 This review is **read-only**: it changes nothing, and it never calls a cloud. Outside the Halyx repository the

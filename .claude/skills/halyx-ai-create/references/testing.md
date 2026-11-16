@@ -93,9 +93,9 @@ settings and secrets, then starts the service with the cloud's profile and the e
 
 | Cloud | Containers | Provider settings |
 |---|---|---|
-| AWS | `floci/floci:2.2.0` on 4566 (S3, DynamoDB, SNS, SQS, EventBridge, SSM, Secrets Manager) | `AWS_REGION=us-east-1`, `halyx.providers.aws.endpoint`, `credentials.type=static` with `id`/`secret` `test`, `properties.aws.s3.path-style=true` |
+| AWS | `floci/floci:2.2.0` on 4566 (S3, DynamoDB, SNS, SQS, EventBridge, SSM, Secrets Manager, KMS) | `AWS_REGION=us-east-1`, `halyx.providers.aws.endpoint`, `credentials.type=static` with `id`/`secret` `test`, `properties.aws.s3.path-style=true` |
 | Azure | `floci/floci-az:0.14.0` on 4577, and 4578 with a self-signed keystore for Cosmos DB; `mcr.microsoft.com/azure-messaging/servicebus-emulator:2.0.1` with `mcr.microsoft.com/azure-sql-edge:2.0.0`, its entities declared in `Config.json` | `halyx.providers.azure.endpoint` (blob), `credentials.type=anonymous`, `properties.azure.cosmos.key`, `properties.azure.servicebus.connection-string`, and on the parameter stores `azure.appconfig.connection-string` and `azure.emulator.insecure-http=true`; the system property `COSMOS.EMULATOR_SERVER_CERTIFICATE_VALIDATION_DISABLED=true` |
-| Google Cloud | `floci/floci-gcp:0.10.0` on 4588 (Cloud Storage, Firestore, Pub/Sub, Secret Manager) | `GOOGLE_CLOUD_PROJECT`, `halyx.providers.gcp.endpoint`, `credentials.type=anonymous`; settings from Secret Manager (`halyx.parameter-stores.<key>.kind=secrets`), since Parameter Manager has no emulator |
+| Google Cloud | `floci/floci-gcp:0.10.0` on 4588 (Cloud Storage, Firestore, Pub/Sub, Secret Manager, Cloud KMS) | `GOOGLE_CLOUD_PROJECT`, `halyx.providers.gcp.endpoint`, `credentials.type=anonymous`; settings from Secret Manager (`halyx.parameter-stores.<key>.kind=secrets`), since Parameter Manager has no emulator |
 | Shared | `postgres:17-alpine`, `valkey/valkey:9.1.2-alpine`, `apache/kafka:3.9.1` (`org.testcontainers.kafka.KafkaContainer`) | `halyx.databases.<key>` with `auth.type=password`, caches at `redis://host:port` with `auth.type=none`, stream clusters at the container's bootstrap servers with `auth.type=none` |
 
 Copy the provisioning from the sample's `AwsResources`, `AzureEmulatorIT.provision` and `GcpEmulatorIT.provision`:
@@ -104,6 +104,11 @@ Copy the provisioning from the sample's `AwsResources`, `AzureEmulatorIT.provisi
 - **Azure:** the Cosmos DB database and container partitioned on `/pk` with default TTL -1; the blob container;
   Service Bus topics and subscriptions in the emulator's `Config.json`.
 - **Google Cloud:** the bucket, Pub/Sub topic and subscription; Firestore needs nothing.
+- **Keys:** a KMS key and its alias (`createKey`, `createAlias`) on Floci; an RSA key allowing `wrapKey` and
+  `unwrapKey` in the vault on Floci-az (`KeyClient.createRsaKey`), with `azure.emulator.insecure-http` on the key
+  store; a key ring and an `ENCRYPT_DECRYPT` key on Floci-gcp (`KeyManagementServiceClient`). Floci-az has no MACs;
+  Floci-gcp has no MAC, RSA-PSS or P-384 keys and ignores customer-managed keys on buckets and secrets, so those run
+  in memory and on the real cloud.
 - **Everywhere:** settings and secrets through a `Halyx` built in the test against the emulator, and Kafka topics
   through `Admin.createTopics`.
 - **Indexes:** each declared index as the cloud needs it: a DynamoDB global secondary index of the index's name on
@@ -139,6 +144,12 @@ The tests' own clients use the SDKs the provider modules bring (never re-declare
 
 Event Grid namespaces and Eventarc Advanced have no emulators: run those ITs without the events feature, and say so
 in the class's Javadoc and in the report. The memory test and a real-cloud run cover them.
+
+**Encryption, checked at rest.** Through the API, a sealed field and a plain one look the same. Read what the store
+holds through a plain store on the service's own provider (the `Halyx` bean's `provider(...)`, the same bucket or
+table): a sealed value parses with `SealedData.parse`, its key id names the cloud's key service (`aws-kms:`,
+`azure-kv:`, `gcp-kms:`, `memory:`), and the plaintext isn't in it. With keys as an optional feature, run the suite
+with it off and on.
 
 Use `@Testcontainers(disabledWithoutDocker = true)`, and keep emulator tests in Failsafe: their system properties
 are JVM-wide and would leak into memory tests in the same JVM.

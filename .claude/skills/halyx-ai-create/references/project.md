@@ -195,6 +195,8 @@ Per cloud, the settings that differ:
 | Cache `auth` | `type: iam`, `username` the ElastiCache user id, `properties.aws.elasticache.cache-name` | `type: iam`, `username` the identity's object id | `type: iam`; a `rediss://` endpoint, and `properties.redis.ca-certificate` with the instance's CA file, in the deployment's configuration |
 | Database | `host`, `auth: { type: iam, username }` | `host`, `auth: { type: iam, username }` (the Entra ID name) | `host`, or through the Cloud SQL connector `properties.gcp.sql.instance: ${<SERVICE>_SQL_INSTANCE:}` (`<project>:<region>:<instance>`) with `host: ${<SERVICE>_DB_HOST:}`; `auth: { type: iam, username }` |
 | Stream cluster | `bootstrap-servers` (port 9098) | `<namespace>.servicebus.windows.net:9093` | the cluster's bootstrap address |
+| Key store `location` | none: the provider's account and region; key names are aliases without `alias/` | the Key Vault URL | the key ring, `projects/<p>/locations/<l>/keyRings/<ring>` |
+| Server-side keys | `server-side-key` on blob and parameter stores (SSM with `properties.aws.ssm.secure: true`) | on blob stores only, with `properties: { "[azure.storage.encryption-scope]": <scope> }`; none on parameter stores | on blob and parameter stores; a `global` key ring for Secret Manager |
 | Function `properties` | none; optional `aws.lambda.qualifier` (a version or alias) | `azure.functions.endpoint` (the function app's URL, no default), and `azure.functions.audience` (App Service Authentication's Entra ID app) or the key in the function's `secrets` (below) | `gcp.functions.region` for the default URL, or `gcp.functions.url` (a `run.app` URL) |
 
 A function's `name` and `timeout` go in the base document (`name: ${<SERVICE>_RESIZE_FUNCTION:<service>-resize}`),
@@ -256,6 +258,8 @@ The checks `halyx-ai-review` runs, in short. Each should hold:
   stream transactions on Azure, and presigned URLs only with the Google Cloud grant.
 - No function `trigger` (Lambda only), function keys only from a secrets store, and `idempotent: true` only on
   functions that are.
+- No MACs where Azure is a target, no `server-side-key` on a parameter store in the shared document, and no
+  `@Encrypted` entity in a profile without its key bean; personal data in encrypted fields, not in keys or indexes.
 - Decimals formatted explicitly and compared with `compareTo`.
 - Event listeners check the event's type and source.
 - No `halyx.*` key equal to a bean name.

@@ -13,6 +13,7 @@ Resources keep their names: bucket, table, topic and queue names stay as they ar
 | `spring.cloud.aws.endpoint`, `spring.cloud.aws.<service>.endpoint` (LocalStack) | `halyx.providers.aws.endpoint`, plus `properties.aws.s3.path-style: true` for S3 on emulators |
 | `spring.config.import: aws-parameterstore:/config/orders/` | `spring.config.import: halyx:settings`, with `halyx.parameter-stores.settings: { kind: parameters, prefix: config/orders }` |
 | `spring.config.import: aws-secretsmanager:/secret/orders` | `halyx:secrets`, with `halyx.parameter-stores.secrets: { kind: secrets, prefix: secret/orders }`. JSON secrets expand into fields (`db.password`) |
+| `PutParameter` with `KeyId` (a `SecureString` on a customer-managed key), `CreateSecret` with `KmsKeyId` | `server-side-key: { store, name }` on the parameter store, a key of `halyx.key-stores` (see [Keys](#keys-kms)). SSM needs `properties: { aws.ssm.secure: true }`. Reads need nothing: the service decrypts |
 
 Halyx's portable names are segments separated by `/` (`orders/db/password` is the SSM parameter
 `/orders/db/password`). Existing names that don't fit, such as dots or underscores, need `native-names: true` on the
@@ -40,6 +41,14 @@ URI uri = invoices.presignDownload(key, Duration.ofMinutes(10)).uri();
 `NoSuchKeyException` and a `404` become `NotFoundException`. Content type, metadata, conditional writes (`ifMatch`,
 `ifNotExists`) and storage classes go in `PutOptions`. `listObjectsV2` paging becomes `list(ListOptions)` or
 `listAll(prefix)`.
+
+**SSE-KMS:** `serverSideEncryption(ServerSideEncryption.AWS_KMS).ssekmsKeyId(...)` on puts, multipart uploads and
+copies (or `x-amz-server-side-encryption` headers on presigned uploads) becomes `server-side-key: { store, name }` on
+the blob store, or `PutOptions.builder().serverSideKey(key)` for one write. Presigned uploads carry the headers in
+`PresignedUrl.headers()`, which the client must send. Existing objects need nothing: S3 decrypts them. Code that
+relied on the bucket's default encryption changes nothing. The **S3 Encryption Client** (client-side) has its own
+object format, which Halyx's `encryptedWith(key)` view doesn't read: see
+[differences.md](differences.md#existing-data).
 
 ## Documents: DynamoDB
 
@@ -137,6 +146,37 @@ audit.trigger(FunctionRequest.of(json));                                 // Invo
   where the old retries were wanted.
 - `trigger` is Lambda's alone. For a portable service, publish a message that the function's trigger consumes.
 
+## Keys: KMS
+
+`KmsClient` calls become a `CryptoKey` bean: `halyx.key-stores.kms: { prefix: orders- }` (AWS's store is the
+provider's account and region, so no `location`) and `halyx.keys.orders-data: { name: data }`, the key whose alias is
+`alias/orders-data`. Portable names are letters, digits and hyphens; keys given as ARNs or key ids need
+`native-names: true` on the store.
+
+| Before | After |
+|---|---|
+| `kms.encrypt(b -> b.keyId(alias).plaintext(...))`, `decrypt` | `key.encrypt(bytes, aad)` and `key.decrypt(SealedData.parse(stored), aad)`: envelope encryption, any size, one call each. **Not the same ciphertext**: see below |
+| `generateDataKey` and AES by hand (envelope encryption written in the service) | `key.encrypt(...)`, or `key.generateDataKey()` for a `DataKey` (`plaintext`, `wrapped()`) when the service keeps its own format |
+| `reEncrypt` | `key.rewrap(sealed)` (`ReEncrypt` inside KMS) |
+| `sign` with `MessageType.RAW` or `DIGEST`, `verify` | `key.sign(data)` / `signDigest(digest)`, and `key.verify(data, signature)`, checked locally with the cached public key. RSA keys name `signing-algorithm` |
+| `getPublicKey` | `key.publicKey(version)`, `currentPublicKey()`, `publicKeys()` |
+| `generateMac`, `verifyMac` | `key.mac(data)`, `key.verifyMac(data, mac)`: the same HMAC bytes, so stored MACs keep verifying |
+| `describeKey` | `key.metadata()` |
+| a Nimbus `JWSSigner` over `KmsClient.sign` | `halyx.security.jwt.key: <key bean>`: a `JwtEncoder` and a JWK set endpoint (`docs/spring-boot.md#jwts-signed-by-a-key`) |
+| `AwsCrypto` (the AWS Encryption SDK) with a `KmsMasterKeyProvider` | `key.encrypt` / `decrypt`, or `CryptoKeys.encrypt(data, aad, awsKey, otherKey)` for several keys. Its messages aren't HLXS |
+| `DynamoDbEncryptionInterceptor` or attribute encryption written by hand | `@Encrypted("<key bean>")` on the record component (`docs/api/nosql.md#encrypted-fields`) |
+
+The encryption context becomes the AAD: the same bytes are needed to decrypt, so derive them from the record (an
+order id), as the context was. `KMSInvalidStateException` and `DisabledException` become `AccessDeniedException`,
+`NotFoundException` a missing key, `InvalidCiphertextException` `DataIntegrityException`.
+
+**Existing data:** direct `Encrypt` ciphertext, AWS Encryption SDK messages, AWS Database Encryption SDK items and
+S3 Encryption Client objects are not HLXS sealed data, and Halyx doesn't open them. Plan it per store
+([differences.md](differences.md#existing-data)): keep a small `unwrap(KmsClient.class)` class that decrypts the old
+format, and reseal values as they are read or in a batch, or keep the store on the old code. Signatures and MACs
+carry over: `new Signature(bytes, algorithm, Optional.empty())` wraps a stored raw signature (DER for ECDSA, as KMS
+returns it), and `verifyMac` takes the stored MAC as it is.
+
 ## Streams: MSK
 
 - Spring Kafka with `aws-msk-iam-auth` (`sasl.jaas.config: ...IAMLoginModule required;`): drop the SASL settings and
@@ -168,6 +208,7 @@ JDBC Wrapper's failover plugins have no Halyx equivalent yet: point `host` at th
 
 ## No Halyx equivalent
 
-Kinesis Data Streams, Step Functions, Lambda management (creating and updating functions), SES, Cognito, KMS encrypt
-and decrypt, S3 Select, S3 event notifications configuration, DynamoDB Streams, scans and PartiQL. Keep these on the
+Kinesis Data Streams, Step Functions, Lambda management (creating and updating functions), SES, Cognito, KMS key
+management (creating and rotating keys, key policies, grants), KMS `GenerateRandom` and asymmetric `Encrypt`, S3
+Select, S3 event notifications configuration, DynamoDB Streams, scans and PartiQL. Keep these on the
 SDK, behind one class per feature, and list them in the report.

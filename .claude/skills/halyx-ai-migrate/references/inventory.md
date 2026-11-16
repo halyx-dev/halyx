@@ -7,9 +7,9 @@ deployment files. The patterns below are starting points; follow each hit to see
 
 | Cloud | Look for |
 |---|---|
-| AWS | `software.amazon.awssdk:*` (`s3`, `dynamodb`, `dynamodb-enhanced`, `sqs`, `sns`, `eventbridge`, `ssm`, `secretsmanager`, `lambda`, `elasticache`, `rds`, `http-auth-aws` for hand-signed IAM tokens), `io.awspring.cloud:spring-cloud-aws-*`, `software.amazon.msk:aws-msk-iam-auth`, `software.amazon.jdbc:aws-advanced-jdbc-wrapper`, `com.amazonaws:*` (SDK v1) |
-| Azure | `com.azure:azure-*` (`storage-blob`, `cosmos`, `messaging-servicebus`, `messaging-eventgrid`, `messaging-eventhubs`, `security-keyvault-secrets`, `data-appconfiguration`, `identity`), `com.azure.spring:spring-cloud-azure-*`, `com.azure.spring:spring-messaging-azure-*` |
-| Google Cloud | `com.google.cloud:google-cloud-*` (`storage`, `firestore`, `pubsub`, `secretmanager`, `parametermanager`, `eventarc-publishing`), `com.google.cloud:spring-cloud-gcp-*`, `com.google.cloud.sql:*-socket-factory`, `com.google.cloud.hosted.kafka:managed-kafka-auth-login-handler` |
+| AWS | `software.amazon.awssdk:*` (`s3`, `dynamodb`, `dynamodb-enhanced`, `sqs`, `sns`, `eventbridge`, `ssm`, `secretsmanager`, `lambda`, `kms`, `elasticache`, `rds`, `http-auth-aws` for hand-signed IAM tokens), `com.amazonaws:aws-encryption-sdk-java`, `software.amazon.encryption.s3:amazon-s3-encryption-client-java`, `software.amazon.cryptography:aws-database-encryption-sdk-dynamodb`, `io.awspring.cloud:spring-cloud-aws-*`, `software.amazon.msk:aws-msk-iam-auth`, `software.amazon.jdbc:aws-advanced-jdbc-wrapper`, `com.amazonaws:*` (SDK v1) |
+| Azure | `com.azure:azure-*` (`storage-blob`, `cosmos`, `messaging-servicebus`, `messaging-eventgrid`, `messaging-eventhubs`, `security-keyvault-secrets`, `security-keyvault-keys`, `data-appconfiguration`, `identity`), `com.azure.spring:spring-cloud-azure-*`, `com.azure.spring:spring-messaging-azure-*` |
+| Google Cloud | `com.google.cloud:google-cloud-*` (`storage`, `firestore`, `pubsub`, `secretmanager`, `parametermanager`, `eventarc-publishing`, `kms`), `com.google.cloud:spring-cloud-gcp-*` (`spring-cloud-gcp-starter-kms`), `com.google.crypto.tink:*`, `com.google.cloud.sql:*-socket-factory`, `com.google.cloud.hosted.kafka:managed-kafka-auth-login-handler` |
 | Any | `org.springframework.cloud:spring-cloud-stream-binder-*` (Kafka, SQS, Pub/Sub, Service Bus), `spring-kafka`, `spring-boot-starter-data-redis`, `org.testcontainers:localstack` |
 
 ## Code
@@ -30,6 +30,8 @@ grep -rnE "LambdaClient|LambdaAsyncClient|InvokeRequest|InvocationType|AWSLambda
 # An HTTP function's URL often comes only from the deployment: read the RestClient, WebClient and RestTemplate calls
 # Events SDKs, and the clients built by hand around them
 grep -rnE "EventBridgeClient|putEvents|EventGridSenderClient|EventGridReceiverClient|eventarc\.publishing|PublisherClient|PublishRequest" src
+# Keys: key service clients, encryption libraries, and server-side encryption settings on writes
+grep -rnE "KmsClient|KmsAsyncClient|AWSKMS|AwsCrypto|KmsMasterKeyProvider|S3EncryptionClient|DynamoDbEncryption|ServerSideEncryption\.AWS_KMS|ssekmsKeyId|\.keyId\(|kmsKeyId|CryptographyClient|KeyClient|KeyWrapAlgorithm|EncryptionAlgorithm\.|SignatureAlgorithm\.|encryptionScope|KeyManagementServiceClient|KmsTemplate|setKmsKeyName|kmsKeyName|CustomerManagedEncryption|com\.google\.crypto\.tink|JWSSigner" src
 # Tests that wire containers into Boot's own beans (they won't reach Halyx's)
 grep -rnE "@ServiceConnection|@MockitoBean|@MockBean" src/test
 ```
@@ -69,5 +71,9 @@ grep -rnE "^\s*(aws|azure|gcp|kafka|redis|datasource|stream):|aws-parameterstore
 - **Functions called:** each function's name, URL or ARN, how it logs in (IAM, a function key and where the key
   lives, an Entra ID token, a Google ID token), its timeout and retries, and whether a second run is harmless. Who
   deploys the function on each target cloud: Halyx invokes functions, it doesn't deploy them.
+- **Encrypted and signed data:** for each key the service uses, what it protects, where the result is stored
+  (a column, an item attribute, an object, a parameter), its format, and the encryption context or AAD. Existing
+  ciphertext in a native format needs a plan before the code changes ([differences.md](differences.md#existing-data)).
+  Who else decrypts or verifies it (other services, a data platform), since they read the same format.
 - **Bean names:** every `@Component`, `@Service`, `@Configuration` class (in lower camel case) and `@Bean`
   method. The `halyx.*` keys you choose must not repeat them.

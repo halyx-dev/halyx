@@ -227,6 +227,45 @@ class LocalDevelopment implements ApplicationRunner {
 A handler that throws raises `UnavailableException`, as on the clouds; one that throws a Halyx exception, such as
 `InvalidArgumentException`, has it passed through, standing in for the status the function returns.
 
+## Keys and encryption
+
+The sample keeps customer data sealed with one key, `customer-data`, under its `keys` feature. A field that holds
+personal data is `@Encrypted` on its record, and the repository seals it on save and opens it on read:
+
+```java
+@DocumentTable("orders")
+public record OrderContact(@PartitionKey String contactOf, @SortKey String orderId,
+                           @Encrypted("customer-data") String email) { }    // a halyx.keys bean
+```
+
+```yaml
+halyx:
+  key-stores:
+    order-keys: { prefix: "${ORDERS_KEY_PREFIX:orders-}" }   # location per cloud: none on AWS, the vault URL, the key ring
+  keys:
+    customer-data: { name: customer-data }                  # alias/orders-customer-data on AWS
+  blob-stores:
+    receipts:
+      bucket: ${ORDERS_RECEIPTS_BUCKET:orders-receipts}
+      encryption-key: { name: customer-data }               # every blob sealed before it's stored
+```
+
+- **Bind sealed data to where it belongs.** Encrypted fields and blobs do it for you (the table, item key and
+  field; the blob key). With `CryptoKey.encrypt(data, aad)` directly, pass an AAD such as the record's id, and store
+  `sealed.toBytes()` (or `toText()` for a string column).
+- **Keys, index attributes and counters stay plain:** the store needs them to find items, and `update` can't add to
+  a sealed value. Put what queries need in plain attributes and the personal data in encrypted ones.
+- **One call per document:** all of a record's encrypted fields share one data key, so a save is one wrap and a read
+  one unwrap. A read-heavy table turns on the key store's `data-key-cache`.
+- **The key is infrastructure.** Halyx never creates it. On `local`, create it in the memory key store at startup
+  (below); on a cloud, the infrastructure does.
+- **Signing:** `CryptoKey.sign(data)` returns a `Signature` (`toBytes()` keeps the algorithm and key version for
+  storage), and `verify` checks it locally with the cached public key. For tokens the service issues,
+  `halyx.security.jwt.key` gives a `JwtEncoder` and a JWK set endpoint, with no signing code.
+- An `@Encrypted` component always needs its key bean: if keys are an optional feature, the entity and its
+  repository are `@Profile`'d with it, and without the feature the service refuses the data rather than storing it in
+  the clear.
+
 ## Settings that change without a deploy
 
 With `spring.config.import: halyx:settings` and `reload-interval`, the store's names, relative to its prefix, become
@@ -251,6 +290,8 @@ class LocalDevelopment implements ApplicationRunner {
         if (secrets.get("receipt-signing-key").isEmpty()) {
             secrets.put("receipt-signing-key", localKey);   // on a cloud, the infrastructure creates the secret
         }
+        // the memory key store's key, under its full name (the store's prefix and the key's name)
+        customerData.store().unwrap(InMemoryKeys.class).create(keyPrefix + customerData.name(), KeyPurpose.ENCRYPTION);
     }
 }
 ```
