@@ -32,7 +32,8 @@ mvn -pl halyx-aws -am verify -Dit.test='S3BlobStoreConformanceIT'   # one suite
 ```
 
 The integration tests are skipped when Docker isn't available. See
-[Design, build and test](https://halyx.dev/docs/design.html#build) for how the modules and tests fit together.
+[Architecture and design](https://halyx.dev/docs/design.html#modules) for how the modules fit together, and
+[Build and test](https://halyx.dev/docs/build-and-test.html#testing) for the tests.
 
 ## Making a change
 
@@ -79,7 +80,7 @@ Reviews check the rest:
   code before adding it.
 - **Comments say why**, not what the code already says, and are as dense as the code around them.
 - **Released API stays compatible.** `mvn verify` compares each published module with the last release and fails on a
-  change that breaks code using it ([japicmp](https://halyx.dev/docs/design.html#build)). Add next to what's there:
+  change that breaks code using it ([japicmp](https://halyx.dev/docs/build-and-test.html#build)). Add next to what's there:
   an overload, a delegating constructor, a default method.
 
 ## Branches

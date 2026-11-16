@@ -273,7 +273,8 @@ Copy a skill's folder into your service's `.claude/skills` (or `~/.claude/skills
 | [Portable microservice](https://halyx.dev/docs/portable-service.html) | a sample Spring Boot service that runs unchanged on every cloud, and how it's tested |
 | [Migrating to Halyx](https://halyx.dev/docs/migration.html) | moving an existing Spring Boot service onto Halyx, with an AI assistant or by hand: mappings, existing data, rollouts and testing |
 | [AI skills](https://halyx.dev/docs/ai-skills.html) | skills for AI coding assistants: creating a new service on Halyx, migrating one to it, and reviewing one for portability |
-| [Design, build and test](https://halyx.dev/docs/design.html) | architecture, building, the conformance kits and benchmarks |
+| [Architecture and design](https://halyx.dev/docs/design.html) | the API and driver split, patterns, principles and modules |
+| [Build and test](https://halyx.dev/docs/build-and-test.html) | building, the conformance kits, emulators and benchmarks |
 | [Cloud testing](https://halyx.dev/docs/cloud-testing/) | results on real [AWS](https://halyx.dev/docs/cloud-testing/aws.html), [Google Cloud](https://halyx.dev/docs/cloud-testing/gcp.html) and [Azure](https://halyx.dev/docs/cloud-testing/azure.html) |
 | [Roadmap](https://halyx.dev/docs/roadmap.html) | what's done and what's next |
 
@@ -285,7 +286,7 @@ The documentation is published at **[halyx.dev](https://halyx.dev/docs/)**, buil
 mvn verify      # unit tests and every conformance kit against emulators (needs Docker)
 ```
 
-Java 21+ and Maven 3.9+. See [Design, build and test](https://halyx.dev/docs/design.html#build).
+Java 21+ and Maven 3.9+. See [Build and test](https://halyx.dev/docs/build-and-test.html#build).
 
 ## Contributing
 

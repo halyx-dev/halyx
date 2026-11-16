@@ -1,6 +1,6 @@
 ---
 title: Cloud testing
-nav_order: 10
+nav_order: 11
 has_children: true
 permalink: /cloud-testing/
 ---
@@ -9,7 +9,7 @@ permalink: /cloud-testing/
 {: .no_toc }
 
 Every Halyx driver passes its conformance kit against emulators on every build (see
-[Design, build and test](../design.md#testing)). Emulators are fast and free, but they don't model
+[Build and test](../build-and-test.md#testing)). Emulators are fast and free, but they don't model
 everything that matters in production: IAM and Entra ID logins, eventual consistency, asynchronous
 deletes, throttling, private certificate authorities, or exactly how a service rejects a request. The
 real-cloud runs close that gap by running the **same conformance kits** against real AWS, Google Cloud

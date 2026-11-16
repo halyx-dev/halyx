@@ -91,6 +91,7 @@ Spring Boot ready
 - [API guide](api/index.md): every service, with examples, error handling and native-client access.
 - [Provider configuration](providers.md): credentials, regions, endpoints and every provider setting.
 - [Spring Boot](spring-boot.md): the starter, its properties, beans and integrations.
-- [Design, build and test](design.md): how Halyx is built, tested and benchmarked.
+- [Architecture and design](design.md): how Halyx is put together.
+- [Build and test](build-and-test.md): how Halyx is built, tested and benchmarked.
 - [Cloud testing](cloud-testing/index.md): results of the conformance kits on real AWS, Azure and Google Cloud.
 - [Roadmap](roadmap.md): what's done and what's next.
