@@ -289,8 +289,19 @@ resource "azurerm_role_assignment" "secrets" {
   principal_id         = each.value
 }
 
+# The keys feature: the principal creates the key, and the app wraps and unwraps data keys with it
+resource "azurerm_role_assignment" "keys" {
+  for_each = {
+    me  = { principal = local.me, role = "Key Vault Crypto Officer" }
+    app = { principal = local.app, role = "Key Vault Crypto User" }
+  }
+  scope                = azurerm_key_vault.secrets.id
+  role_definition_name = each.value.role
+  principal_id         = each.value.principal
+}
+
 resource "time_sleep" "data_roles" {
-  depends_on      = [azurerm_role_assignment.settings, azurerm_role_assignment.secrets]
+  depends_on      = [azurerm_role_assignment.settings, azurerm_role_assignment.secrets, azurerm_role_assignment.keys]
   create_duration = "90s"
 }
 
@@ -325,6 +336,16 @@ resource "azurerm_key_vault_secret" "signing_key" {
   name         = "${local.prefix}--receipt-signing-key"
   value        = random_password.signing_key.result
   key_vault_id = azurerm_key_vault.secrets.id
+  depends_on   = [time_sleep.data_roles]
+}
+
+# The keys feature's key, in the same vault: receipts and contact details are sealed with it. Purged with the vault.
+resource "azurerm_key_vault_key" "customer_data" {
+  name         = "${local.prefix}-customer-data"
+  key_vault_id = azurerm_key_vault.secrets.id
+  key_type     = "RSA"
+  key_size     = 2048
+  key_opts     = ["wrapKey", "unwrapKey"]
   depends_on   = [time_sleep.data_roles]
 }
 
@@ -538,5 +559,6 @@ output "env" {
     ORDERS_CACHE_USER                 = local.app
     ORDERS_DB_HOST                    = azurerm_postgresql_flexible_server.ledger.fqdn
     ORDERS_DB_USER                    = azurerm_user_assigned_identity.app.name
+    ORDERS_KEY_PREFIX                 = "${local.prefix}-"
   }
 }

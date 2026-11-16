@@ -37,7 +37,8 @@ import java.util.List;
 @RequestMapping("/customers/{customerId}/orders")
 class OrderController {
 
-    record PlaceOrder(List<OrderLine> lines) {
+    /** {@code contact} is an optional email address, kept only with the {@code keys} feature. */
+    record PlaceOrder(List<OrderLine> lines, String contact) {
     }
 
     /** An order as the API shows it; the stored version stays internal. */
@@ -63,7 +64,8 @@ class OrderController {
     @PostMapping
     ResponseEntity<OrderView> place(@PathVariable String customerId, @RequestBody PlaceOrder request,
                                     @RequestHeader(name = "Idempotency-Key", required = false) String idempotencyKey) {
-        OrderService.Placement placement = orders.place(customerId, request.lines(), idempotencyKey);
+        OrderService.Placement placement = orders.place(customerId, request.lines(), request.contact(),
+                idempotencyKey);
         OrderView view = OrderView.of(placement.order());
         if (placement.replayed()) {
             return ResponseEntity.ok(view);

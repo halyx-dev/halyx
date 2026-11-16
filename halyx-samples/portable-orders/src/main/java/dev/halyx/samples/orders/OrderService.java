@@ -33,7 +33,8 @@ import java.util.regex.Pattern;
 
 /**
  * Places orders: stores each in the {@code orders} document store through a Spring Data repository, then announces it
- * on the {@code order-placed} topic, which fulfilment receives, and to the optional features' hooks.
+ * on the {@code order-placed} topic, which fulfilment receives, and to the optional features' hooks. With the
+ * {@code keys} feature, an order's contact details are stored beside it, sealed.
  */
 @Service
 public class OrderService {
@@ -47,23 +48,34 @@ public class OrderService {
     private final ObjectProvider<IdempotencyKeys> idempotencyKeys;
     private final List<OrderPlacedHook> hooks;
     private final OrderPricing pricing;
+    private final ObjectProvider<OrderContacts> contacts;
 
     OrderService(OrderRepository orders, @Qualifier("order-placed") Publisher placed, Environment environment,
-                 ObjectProvider<IdempotencyKeys> idempotencyKeys, List<OrderPlacedHook> hooks, OrderPricing pricing) {
+                 ObjectProvider<IdempotencyKeys> idempotencyKeys, List<OrderPlacedHook> hooks, OrderPricing pricing,
+                 ObjectProvider<OrderContacts> contacts) {
         this.orders = orders;
         this.placed = placed;
         this.environment = environment;
         this.idempotencyKeys = idempotencyKeys;
         this.hooks = hooks;
         this.pricing = pricing;
+        this.contacts = contacts;
     }
 
     /** A placed order, and whether it was placed by an earlier request with the same idempotency key. */
     public record Placement(Order order, boolean replayed) {
     }
 
-    public Placement place(String customerId, List<OrderLine> lines, String idempotencyKey) {
+    /** Places an order; {@code contact}, an email address or null, needs the {@code keys} feature. */
+    public Placement place(String customerId, List<OrderLine> lines, String contact, String idempotencyKey) {
         validate(customerId, lines);
+        OrderContacts contacts = contact == null ? null : this.contacts.getIfAvailable();
+        if (contact != null) {
+            if (contacts == null) {
+                throw new InvalidOrderException("contact details are only kept with the keys feature, sealed with a key");
+            }
+            OrderContacts.validate(contact);
+        }
         String orderId = newOrderId();
         IdempotencyKeys keys = idempotencyKey == null ? null : idempotencyKeys.getIfAvailable();
         if (keys != null) {
@@ -77,6 +89,9 @@ public class OrderService {
         BigDecimal total = pricing.total(lines);
         Order order;
         try {
+            if (contacts != null) {
+                contacts.save(customerId, orderId, contact);
+            }
             order = orders.save(new Order(customerId, orderId, OrderStatus.PLACED, Instant.now(), List.copyOf(lines),
                     total, currency(), null, null, null, null));
         } catch (RuntimeException e) {

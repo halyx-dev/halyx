@@ -48,6 +48,11 @@ final class InProcessService implements AutoCloseable {
         return context.getBean(name, type);
     }
 
+    /** A bean of the running service by type, such as its {@code Halyx}. */
+    <T> T bean(Class<T> type) {
+        return context.getBean(type);
+    }
+
     @Override
     public void close() {
         context.close();

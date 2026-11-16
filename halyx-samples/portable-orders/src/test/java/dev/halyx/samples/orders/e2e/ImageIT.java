@@ -32,8 +32,8 @@ import java.util.Set;
 
 /**
  * The suite against the built image ({@code -Dorders.image=...}, set by the {@code image} Maven profile), configured
- * only through its environment, as a deployment configures it: the AWS profile and every feature, on Floci,
- * PostgreSQL, Valkey and Kafka in one Docker network.
+ * only through its environment, as a deployment configures it: the AWS profile and every feature, keys included, on
+ * Floci, PostgreSQL, Valkey and Kafka in one Docker network.
  */
 @EnabledIfSystemProperty(named = "orders.image", matches = ".+")
 class ImageIT extends PortableOrdersSuite {
@@ -64,7 +64,7 @@ class ImageIT extends PortableOrdersSuite {
 
         service = new GenericContainer<>(DockerImageName.parse(System.getProperty("orders.image")))
                 .withNetwork(NETWORK)
-                .withEnv("SPRING_PROFILES_ACTIVE", "aws,events,streams,cache,sql")
+                .withEnv("SPRING_PROFILES_ACTIVE", "aws,events,streams,cache,sql,keys")
                 .withEnv("AWS_REGION", "us-east-1")
                 .withEnv("ORDERS_DB_HOST", "postgres")
                 .withEnv("ORDERS_DB_AUTH", "password")
@@ -104,7 +104,7 @@ class ImageIT extends PortableOrdersSuite {
 
     @Override
     protected Expectations expected() {
-        return new Expectations("aws", Set.of("events", "streams", "cache", "sql"),
+        return new Expectations("aws", Set.of("events", "streams", "cache", "sql", "keys"),
                 Integer.parseInt(AwsResources.MAX_LINES), AwsResources.CURRENCY, SIGNING_KEY,
                 Set.of("bulk-discount"), Duration.ofSeconds(60));
     }

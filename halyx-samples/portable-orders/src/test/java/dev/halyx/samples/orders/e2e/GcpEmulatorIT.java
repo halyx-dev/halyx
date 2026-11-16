@@ -18,6 +18,12 @@ package dev.halyx.samples.orders.e2e;
 import com.google.api.gax.core.NoCredentialsProvider;
 import com.google.api.gax.grpc.GrpcTransportChannel;
 import com.google.api.gax.rpc.FixedTransportChannelProvider;
+import com.google.cloud.kms.v1.CryptoKey;
+import com.google.cloud.kms.v1.CryptoKeyVersion;
+import com.google.cloud.kms.v1.CryptoKeyVersionTemplate;
+import com.google.cloud.kms.v1.KeyManagementServiceClient;
+import com.google.cloud.kms.v1.KeyManagementServiceSettings;
+import com.google.cloud.kms.v1.KeyRing;
 import com.google.cloud.pubsub.v1.SubscriptionAdminClient;
 import com.google.cloud.pubsub.v1.SubscriptionAdminSettings;
 import com.google.cloud.pubsub.v1.TopicAdminClient;
@@ -33,6 +39,7 @@ import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Nested;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.junit.jupiter.Container;
@@ -46,13 +53,14 @@ import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 /**
  * The suite on the {@code gcp} profile against Floci-gcp (Cloud Storage, Firestore, Pub/Sub and Secret Manager),
  * PostgreSQL, Valkey and Kafka. Eventarc Advanced has no emulator, so the {@code events} feature is off here. Parameter
  * Manager has none either, so this run reads the settings store from Secret Manager ({@code kind: secrets}); on Google
- * Cloud it is Parameter Manager.
+ * Cloud it is Parameter Manager. It runs with {@code keys} off, then again with it on, sealing with a Cloud KMS key.
  */
 @Testcontainers(disabledWithoutDocker = true)
 class GcpEmulatorIT extends PortableOrdersSuite {
@@ -74,7 +82,11 @@ class GcpEmulatorIT extends PortableOrdersSuite {
     @Container
     static final KafkaContainer KAFKA = SharedContainers.kafka();
 
+    private static final List<String> PROFILES = List.of("gcp", "streams", "cache", "sql");
+    private static final Set<String> FEATURES = Set.of("streams", "cache", "sql");
+
     private static InProcessService service;
+    private static Map<String, String> properties;
 
     @BeforeAll
     static void start() throws Exception {
@@ -82,18 +94,23 @@ class GcpEmulatorIT extends PortableOrdersSuite {
         provision(endpoint);
         SharedContainers.createAuditTopic(KAFKA);
 
-        Map<String, String> properties = new LinkedHashMap<>(SharedContainers.properties(POSTGRES, VALKEY, KAFKA));
+        properties = new LinkedHashMap<>(SharedContainers.properties(POSTGRES, VALKEY, KAFKA));
         properties.put("GOOGLE_CLOUD_PROJECT", PROJECT);
         properties.put("halyx.providers.gcp.endpoint", endpoint.toString());
         properties.put("halyx.providers.gcp.credentials.type", "anonymous");
         properties.put("halyx.parameter-stores.settings.kind", "secrets");
-        service = new InProcessService(List.of("gcp", "streams", "cache", "sql"), properties);
+        service = new InProcessService(PROFILES, properties);
     }
 
     @AfterAll
     static void stop() {
+        stopFirst();
+    }
+
+    private static void stopFirst() {
         if (service != null) {
             service.close();
+            service = null;
         }
     }
 
@@ -104,11 +121,57 @@ class GcpEmulatorIT extends PortableOrdersSuite {
 
     @Override
     protected Expectations expected() {
-        return new Expectations("gcp", Set.of("streams", "cache", "sql"), 5, "AUD", SIGNING_KEY, Set.of(),
-                Duration.ofSeconds(60));
+        return expectations(FEATURES);
     }
 
-    /** The bucket, the Pub/Sub topic and subscription, and the settings and signing key; Firestore needs nothing. */
+    @Override
+    protected Optional<StoredData> stored() {
+        return Optional.of(new StoredData(service.bean(Halyx.class).provider("gcp")));
+    }
+
+    private static Expectations expectations(Set<String> features) {
+        return new Expectations("gcp", features, 5, "AUD", SIGNING_KEY, Set.of(), Duration.ofSeconds(60));
+    }
+
+    @Nested
+    class WithKeys extends PortableOrdersSuite {
+
+        private static InProcessService keyed;
+
+        /** After the outer tests: the first service stops, so it doesn't take this one's messages and records. */
+        @BeforeAll
+        static void start() {
+            stopFirst();
+            keyed = new InProcessService(Features.with(PROFILES, "keys"), properties);
+        }
+
+        @AfterAll
+        static void stop() {
+            if (keyed != null) {
+                keyed.close();
+            }
+        }
+
+        @Override
+        protected OrdersClient client() {
+            return keyed.client();
+        }
+
+        @Override
+        protected Expectations expected() {
+            return expectations(Features.with(FEATURES, "keys"));
+        }
+
+        @Override
+        protected Optional<StoredData> stored() {
+            return Optional.of(new StoredData(keyed.bean(Halyx.class).provider("gcp")));
+        }
+    }
+
+    /**
+     * The bucket, the Pub/Sub topic and subscription, the settings and signing key, and the {@code keys} feature's key
+     * ring and Cloud KMS key; Firestore needs nothing.
+     */
     private static void provision(URI endpoint) throws IOException {
         ManagedChannel channel = ManagedChannelBuilder.forAddress(endpoint.getHost(), endpoint.getPort()).usePlaintext()
                 .build();
@@ -116,12 +179,21 @@ class GcpEmulatorIT extends PortableOrdersSuite {
         try (TopicAdminClient topics = TopicAdminClient.create(TopicAdminSettings.newBuilder()
                      .setTransportChannelProvider(transport).setCredentialsProvider(NoCredentialsProvider.create()).build());
              SubscriptionAdminClient subscriptions = SubscriptionAdminClient.create(SubscriptionAdminSettings.newBuilder()
+                     .setTransportChannelProvider(transport).setCredentialsProvider(NoCredentialsProvider.create()).build());
+             KeyManagementServiceClient kms = KeyManagementServiceClient.create(KeyManagementServiceSettings.newBuilder()
                      .setTransportChannelProvider(transport).setCredentialsProvider(NoCredentialsProvider.create()).build())) {
             String topic = "projects/" + PROJECT + "/topics/portable-orders-placed";
             topics.createTopic(topic);
             subscriptions.createSubscription(Subscription.newBuilder()
                     .setName("projects/" + PROJECT + "/subscriptions/portable-orders-fulfilment").setTopic(topic)
                     .setAckDeadlineSeconds(30).build());
+            String locations = "projects/" + PROJECT + "/locations/global";
+            kms.createKeyRing(locations, "portable-orders", KeyRing.getDefaultInstance());
+            kms.createCryptoKey(locations + "/keyRings/portable-orders", "portable-orders-customer-data",
+                    CryptoKey.newBuilder().setPurpose(CryptoKey.CryptoKeyPurpose.ENCRYPT_DECRYPT)
+                            .setVersionTemplate(CryptoKeyVersionTemplate.newBuilder().setAlgorithm(
+                                    CryptoKeyVersion.CryptoKeyVersionAlgorithm.GOOGLE_SYMMETRIC_ENCRYPTION))
+                            .build());
         } finally {
             channel.shutdownNow();
         }

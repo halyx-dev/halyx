@@ -22,7 +22,8 @@ import java.util.Set;
  * What a deployment is expected to be, which the suite checks against what the service reports about itself.
  *
  * @param cloud      the {@code orders.cloud} of the active cloud profile
- * @param features   the optional features expected on, among {@code events}, {@code streams}, {@code cache} and {@code sql}
+ * @param features   the optional features expected on, among {@code events}, {@code streams}, {@code cache}, {@code sql}
+ *                   and {@code keys}
  * @param maxLines   {@code orders.max-lines}, as the settings store or the defaults give it
  * @param currency   {@code orders.currency}, likewise
  * @param signingKey the receipt signing key in the secrets store

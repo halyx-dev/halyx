@@ -272,6 +272,30 @@ resource "google_secret_manager_secret_version" "signing_key" {
   secret_data = random_password.signing_key.result
 }
 
+# --- the keys feature's key: receipts and contact details are sealed with it ----------------------------------------
+# Key rings can never be deleted: each run leaves its empty key ring behind, which costs nothing. Destroying the crypto
+# key destroys its versions.
+
+resource "google_kms_key_ring" "keys" {
+  name     = "${local.name}-keys"
+  location = var.region
+}
+
+resource "google_kms_crypto_key" "customer_data" {
+  name                       = "${local.prefix}-customer-data"
+  key_ring                   = google_kms_key_ring.keys.id
+  purpose                    = "ENCRYPT_DECRYPT"
+  destroy_scheduled_duration = "86400s" # the shortest Cloud KMS allows
+}
+
+# The pods run as the test service account: wrapping and unwrapping data keys, and reading the key's metadata
+resource "google_kms_key_ring_iam_member" "app" {
+  for_each    = toset(["roles/cloudkms.cryptoKeyEncrypterDecrypter", "roles/cloudkms.viewer"])
+  key_ring_id = google_kms_key_ring.keys.id
+  role        = each.value
+  member      = "serviceAccount:${var.service_account}"
+}
+
 # --- idempotency: Memorystore for Valkey, IAM auth and TLS, through the VPC ----------------------------------------
 
 resource "google_network_connectivity_service_connection_policy" "memorystore" {
@@ -465,5 +489,8 @@ output "env" {
     ORDERS_CACHE_ENDPOINT             = "rediss://${local.cache_primary.ip_address}:${local.cache_primary.port}"
     ORDERS_DB_NAME                    = google_sql_database.orders.name
     ORDERS_DB_USER                    = google_sql_user.app.name
+    ORDERS_KEY_RING_LOCATION          = google_kms_key_ring.keys.location
+    ORDERS_KEY_RING                   = google_kms_key_ring.keys.name
+    ORDERS_KEY_PREFIX                 = "${local.prefix}-"
   }
 }

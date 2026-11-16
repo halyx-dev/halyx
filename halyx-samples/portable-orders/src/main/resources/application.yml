@@ -16,7 +16,7 @@
 
 # The same jar and image on every cloud. Profiles pick:
 #   the cloud:     local (in-memory, no cloud), aws, azure or gcp
-#   the features:  events, streams, cache, sql (each optional; see the feature documents below)
+#   the features:  events, streams, cache, sql, keys (each optional; see the feature documents below)
 # for example SPRING_PROFILES_ACTIVE=aws,events,cache,sql. Cloud resource names come from ORDERS_* environment
 # variables, with defaults for a deployment that uses the sample's names. Endpoints only a deployment knows (the
 # cache, the Kafka bootstrap servers, the database host) have no default, so a deployment that leaves one out fails
@@ -298,3 +298,53 @@ halyx:
         type: ${ORDERS_DB_AUTH:iam}
         username: ${ORDERS_DB_USER:portable_orders}
         password: ${ORDERS_DB_PASSWORD:}
+
+---
+# Customer data sealed with a key from the cloud's key service: AWS KMS, Azure Key Vault or Google Cloud KMS. Receipts
+# are sealed before they reach the receipts store, and orders take a contact email, sealed by its repository
+# (OrderContact). The key is the same everywhere: portable-orders-customer-data, an alias on AWS.
+spring:
+  config:
+    activate:
+      on-profile: keys
+halyx:
+  key-stores:
+    order-keys:
+      prefix: ${ORDERS_KEY_PREFIX:portable-orders-}
+  keys:
+    customer-data:
+      name: ${ORDERS_DATA_KEY:customer-data}
+  blob-stores:
+    receipts:
+      encryption-key:
+        name: ${ORDERS_DATA_KEY:customer-data}
+
+---
+spring:
+  config:
+    activate:
+      on-profile: local & keys
+halyx:
+  key-stores:
+    order-keys:
+      location: portable-orders                     # a memory key store; LocalDevelopment creates the key
+
+---
+spring:
+  config:
+    activate:
+      on-profile: azure & keys
+halyx:
+  key-stores:
+    order-keys:
+      location: ${ORDERS_KEYVAULT_URL}              # the vault that holds the secrets holds the key too
+
+---
+spring:
+  config:
+    activate:
+      on-profile: gcp & keys
+halyx:
+  key-stores:
+    order-keys:
+      location: projects/${GOOGLE_CLOUD_PROJECT}/locations/${ORDERS_KEY_RING_LOCATION:global}/keyRings/${ORDERS_KEY_RING:portable-orders}

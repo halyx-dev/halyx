@@ -17,6 +17,7 @@ package dev.halyx.samples.orders;
 
 import dev.halyx.cache.Cache;
 import dev.halyx.events.EventPublisher;
+import dev.halyx.keys.KeyStore;
 import dev.halyx.messaging.Publisher;
 import dev.halyx.messaging.Subscription;
 import dev.halyx.nosql.DocumentStore;
@@ -42,7 +43,7 @@ import java.util.function.Function;
 @RestController
 class DeploymentController {
 
-    static final List<String> FEATURES = List.of("events", "streams", "cache", "sql");
+    static final List<String> FEATURES = List.of("events", "streams", "cache", "sql", "keys");
 
     record Deployment(String cloud, List<String> features, Map<String, String> providers, Map<String, Object> settings) {
     }
@@ -70,6 +71,7 @@ class DeploymentController {
         collect(providers, StreamConsumer.class, StreamConsumer::provider);
         collect(providers, Cache.class, Cache::provider);
         collect(providers, ParameterStore.class, ParameterStore::provider);
+        collect(providers, KeyStore.class, KeyStore::provider);
         return new Deployment(environment.getProperty("orders.cloud", "unknown"),
                 FEATURES.stream().filter(active::contains).toList(), providers,
                 Map.of("maxLines", orders.maxLines(), "currency", orders.currency()));

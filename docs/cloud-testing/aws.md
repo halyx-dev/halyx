@@ -861,7 +861,10 @@ needs tier 2's EC2 and RDS permissions and tier 3's ElastiCache ones, plus the c
 - IAM roles named `halyx-*`: the cluster's, the node's and the service's. Only the four AWS-managed EKS policies may
   be attached, and the roles may be passed only to EKS, EC2 and EKS Pod Identity.
 - the run's settings and signing key: SSM parameters and secrets under `halyx-*`
+- the run's KMS key for the `keys` feature: created and tagged, then read, aliased and deleted only while it carries
+  the `halyx-test` tag every run's resources get; aliases named `halyx-*`. Deleting a key schedules it for deletion
+  after 7 days, the shortest KMS allows
 
 The service's own role, which Terraform creates per run, may use only the run's bucket, table, topic, queues, bus,
-parameters, secret, database user and cache user.
+parameters, secret, KMS key, database user and cache user.
 
