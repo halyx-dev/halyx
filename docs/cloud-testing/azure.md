@@ -600,12 +600,51 @@ Event Hubs' Kafka endpoint found these:
 | A consumer starting at the latest offset fixes its position on its first fetch, which on Event Hubs came after its partitions were assigned, so a record sent right after assignment could be skipped | Test only: the kit sends until a record arrives. This is how Kafka behaves everywhere, and the API guide says where a new group starts |
 | Event Grid refuses an event with `"data": null` (400, "Event data must be encoded as json string or object"), which the Azure SDK writes for an event without data. Leaving `data` out, or an empty `data_base64`, is accepted | Events without data are sent with an empty `data_base64`, which reads back as no data |
 
+## Long-lived keys
+
+The key tests use Key Vault keys that are created once and kept, as on AWS and Google Cloud, rather than a vault
+per run. `cloud-testing/infra/azure/keys` holds a resource group `halyx-keys`, a vault in it (RBAC, no purge
+protection, named `halyx-keys-` and 8 characters derived from the subscription), the keys, and the test
+principal's roles on them. A subscription Owner applies it once; the run scripts never apply or destroy it:
+
+```bash
+terraform -chdir=cloud-testing/infra/azure/keys init
+terraform -chdir=cloud-testing/infra/azure/keys apply -var location=australiaeast \
+    -var test_principal=$(az ad sp list --display-name halyx-test --query '[0].id' -o tsv)
+```
+
+| Key | Type | Used for |
+|---|---|---|
+| `tck-data` | RSA 2048, wrap and unwrap | the encryption key; the key store kit rotates it |
+| `tck-other` | RSA 2048, wrap and unwrap | a second encryption key: re-wrapping, data sealed for two keys |
+| `tck-disposable` | RSA 2048, wrap and unwrap | disabled and enabled again by the key store kit |
+| `tck-server-side` | RSA 2048, wrap and unwrap | the run's blob encryption scope |
+| `tck-blobs`, `tck-fields`, `tck-parameters` | RSA 2048, wrap and unwrap | the blob, document and parameter encryption kits' keys |
+| `tck-tenant-a`, `tck-tenant-b` | RSA 2048, wrap and unwrap | the encryption kits' keys per tenant |
+| `tck-rsa` | RSA 2048, sign and verify | PS256 and RS256 signatures, JWTs |
+| `tck-p256` | EC P-256, sign and verify | ES256 signatures, JWTs |
+| `tck-p384` | EC P-384, sign and verify | ES384 signatures |
+
+- The tests use a key store with the prefix `tck-`, so the kits' own names (`data`, `blobs`, `tenant-a`) find
+  these keys. Key Vault Standard has no MAC keys (only
+  Managed HSM does), so there is no `tck-mac`.
+- The resource group and vault are tagged `halyx-keys=long-lived`, never `halyx-test`.
+- The test principal has Key Vault Crypto User on the vault, and Key Vault Crypto Officer only on the keys the kit
+  rotates or disables: `tck-data`, `tck-disposable` and the three signing keys.
+- Server-side encryption: when tier 1 is given the keys stack's `vault_id` and `server_side_key_id`, the run's
+  storage account gets a system-assigned identity, Key Vault Crypto Service Encryption User on `tck-server-side`,
+  and an encryption scope `halyxtckcmk` on it. The role assignment goes with the run. The test principal may assign
+  that role because [`azure-setup-test-principal.sh`](#iam) lists it; rerun the script once to update the
+  condition.
+- If a run stops after disabling `tck-disposable` and before enabling it again, enable its versions by hand.
+- Key Vault bills software keys per operation, and rotations add versions at no monthly cost.
+
 ## IAM
 
 | Who | Role | Scope | Why |
 |---|---|---|---|
 | `halyx-test` service principal | Contributor | subscription | create and delete each run's resource group and its resources |
-| | Role Based Access Control Administrator, with a condition | subscription | assign and remove only Storage Blob Data Contributor, Azure Service Bus Data Owner, Key Vault Secrets Officer, App Configuration Data Owner, Azure Event Hubs Data Owner, EventGrid Data Sender, EventGrid Data Receiver, Key Vault Crypto Officer and Key Vault Crypto User |
+| | Role Based Access Control Administrator, with a condition | subscription | assign and remove only Storage Blob Data Contributor, Azure Service Bus Data Owner, Key Vault Secrets Officer, App Configuration Data Owner, Azure Event Hubs Data Owner, EventGrid Data Sender, EventGrid Data Receiver, Key Vault Crypto Officer, Key Vault Crypto User and Key Vault Crypto Service Encryption User |
 | | Storage Blob Data Contributor, Azure Service Bus Data Owner, Key Vault Secrets Officer, App Configuration Data Owner | each run's resources (Terraform) | the data planes the tests use |
 | | EventGrid Data Sender, EventGrid Data Receiver | each run's Event Grid namespace (Terraform) | publishing events and receiving them from the pull subscription |
 | | Azure Event Hubs Data Owner (tier 4) | each run's Event Hubs namespaces (Terraform) | sending, receiving, and creating and deleting event hubs through the Kafka endpoint |
