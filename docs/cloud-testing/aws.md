@@ -653,6 +653,41 @@ Emulators missed all of these:
 | Lettuce resolves host names with Netty's own DNS client, which ignores JVM DNS settings (`jdk.net.hosts.file`, DNS cache TTLs, custom `InetAddressResolver`s) | New opt-in cache property `redis.dns-resolver=jdk` resolves like the rest of the JVM; the default is unchanged |
 | Not every policy grants `BatchGetSecretValue` | If batch reads are denied, `getAll` reads secrets one at a time and logs a warning |
 
+## Long-lived keys
+
+The key tests use KMS keys that are created once and kept, not per run. A KMS key can only be scheduled for
+deletion, 7 days ahead at least, so a key per run would leave keys pending deletion behind every run.
+`cloud-testing/infra/aws/keys` holds them and the test user's permission to use them. An administrator applies it
+once per account and region; the run scripts never apply or destroy it:
+
+```bash
+terraform -chdir=cloud-testing/infra/aws/keys init
+terraform -chdir=cloud-testing/infra/aws/keys apply -var region=ap-southeast-2 -var test_user=halyx_test
+```
+
+| Alias | Key | Used for |
+|---|---|---|
+| `tck-data` | symmetric | the encryption key; the key store kit rotates it on demand |
+| `tck-other` | symmetric | a second encryption key: re-wrapping, data sealed for two keys |
+| `tck-disposable` | symmetric | disabled and enabled again by the key store kit |
+| `tck-server-side` | symmetric | S3 SSE-KMS, SSM `SecureString` and Secrets Manager |
+| `tck-rsa` | RSA 2048, sign and verify | RSA-PSS and PKCS#1 signatures, JWTs |
+| `tck-p256` | ECC P-256, sign and verify | ES256 signatures, JWTs |
+| `tck-p384` | ECC P-384, sign and verify | ES384 signatures |
+| `tck-mac` | HMAC 256 | MACs |
+
+- The names match the emulator tests' (`AwsKeyStoreConformanceIT`).
+- The keys are tagged `halyx-keys=long-lived`, never `halyx-test`, so no run's permissions or teardown check reach
+  them. Their aliases start `tck-`, outside the `halyx-*` aliases a run may create and delete.
+- The customer-managed policy `halyx-test-keys`, attached to the test user, allows only what the tests do:
+  encrypting, decrypting, re-encrypting and data keys on the symmetric keys; signing and public keys on the
+  signing keys; MACs on the MAC key; on-demand rotation of `tck-data` only; disabling and enabling `tck-disposable`
+  only; and `kms:ListAliases`. Listing describes every key it finds, so the tests list under the `tck-` prefix.
+- If a run stops after disabling `tck-disposable` and before enabling it again, applying the Terraform again
+  enables it.
+- Each key costs USD 1 a month, and each of a key's first two rotations another USD 1 a month. On-demand rotations
+  per key are limited for the key's life, which the key store kit's rotation case counts against.
+
 ## IAM for tier 1
 
 The `halyx_test` user needs the following. Secrets are limited to the `tck-*` names the kits use.

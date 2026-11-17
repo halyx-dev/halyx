@@ -36,6 +36,10 @@ terraform {
       source  = "hashicorp/archive"
       version = "~> 2.4"
     }
+    time = {
+      source  = "hashicorp/time"
+      version = "~> 0.12"
+    }
   }
 }
 
@@ -45,6 +49,18 @@ variable "location" {
 
 variable "run_id" {
   type = string
+}
+
+# The long-lived vault and server-side key (infra/azure/keys outputs vault_id and server_side_key_id). When given,
+# the run's storage account gets an encryption scope protected by that key; when empty, it doesn't.
+variable "keys_vault_id" {
+  type    = string
+  default = ""
+}
+
+variable "server_side_key_id" {
+  type    = string
+  default = ""
 }
 
 # Credentials: ARM_CLIENT_ID, ARM_CLIENT_SECRET, ARM_TENANT_ID and ARM_SUBSCRIPTION_ID (the test principal).
@@ -91,6 +107,9 @@ resource "azurerm_storage_account" "blobs" {
   shared_access_key_enabled       = false
   allow_nested_items_to_be_public = false
   tags                            = local.tags
+  identity {
+    type = "SystemAssigned" # what an encryption scope reaches the key as
+  }
 }
 
 resource "azurerm_storage_container" "tck" {
@@ -102,6 +121,31 @@ resource "azurerm_role_assignment" "blobs" {
   scope                = azurerm_storage_account.blobs.id
   role_definition_name = "Storage Blob Data Contributor"
   principal_id         = local.me
+}
+
+# Server-side encryption with a customer-managed key: an encryption scope on the long-lived tck-server-side key. The
+# account's identity may use only that key, and the assignment goes with the run.
+resource "azurerm_role_assignment" "blobs_key" {
+  count                = var.server_side_key_id == "" ? 0 : 1
+  scope                = "${var.keys_vault_id}/keys/tck-server-side"
+  role_definition_name = "Key Vault Crypto Service Encryption User"
+  principal_id         = azurerm_storage_account.blobs.identity[0].principal_id
+  principal_type       = "ServicePrincipal"
+}
+
+resource "time_sleep" "blobs_key" {
+  count           = var.server_side_key_id == "" ? 0 : 1
+  depends_on      = [azurerm_role_assignment.blobs_key]
+  create_duration = "60s" # data-plane role assignments take a while to apply
+}
+
+resource "azurerm_storage_encryption_scope" "tck" {
+  count              = var.server_side_key_id == "" ? 0 : 1
+  name               = "halyxtckcmk" # letters and digits only
+  storage_account_id = azurerm_storage_account.blobs.id
+  source             = "Microsoft.KeyVault"
+  key_vault_key_id   = var.server_side_key_id
+  depends_on         = [time_sleep.blobs_key]
 }
 
 # --- Service Bus (Standard: topics, sessions, duplicate detection) -------------------------------------
@@ -383,6 +427,10 @@ output "cosmos_key" {
 output "cosmos_secondary_key" {
   value     = azurerm_cosmosdb_account.docs.secondary_key
   sensitive = true
+}
+
+output "encryption_scope" {
+  value = one(azurerm_storage_encryption_scope.tck[*].name)
 }
 
 output "key_vault_url" {

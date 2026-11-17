@@ -62,8 +62,9 @@ fi
 
 # Storage Blob Data Contributor, Azure Service Bus Data Owner, Key Vault Secrets Officer, App Configuration Data Owner,
 # Azure Event Hubs Data Owner (tier 4: the stream kit creates and deletes event hubs), EventGrid Data Sender,
-# EventGrid Data Receiver, Key Vault Crypto Officer (creating keys) and Key Vault Crypto User (using them)
-ROLES="ba92f5b4-2d11-453d-a403-e96b0029c9fe, 090c5cfd-751d-490a-894a-3ce6f1109419, b86a8fe4-44ce-4948-aee5-eccb2c155cd7, 5ae67dd6-50cb-40e7-96ff-dc2bfa4b606b, f526a384-b230-433a-b45c-95f59c4a2dec, d5a91429-5739-47e2-a06b-3470a27159e7, 78cbd9e7-9798-4e2e-9b5a-547d9ebb31fb, 14b46e9e-c2b7-41b4-b07b-48a6ebf60603, 12338af0-0e69-4776-bea7-57ae8d297424"
+# EventGrid Data Receiver, Key Vault Crypto Officer (creating keys), Key Vault Crypto User (using them) and Key Vault
+# Crypto Service Encryption User (tier 1: the run's storage account reaching the long-lived key of its encryption scope)
+ROLES="ba92f5b4-2d11-453d-a403-e96b0029c9fe, 090c5cfd-751d-490a-894a-3ce6f1109419, b86a8fe4-44ce-4948-aee5-eccb2c155cd7, 5ae67dd6-50cb-40e7-96ff-dc2bfa4b606b, f526a384-b230-433a-b45c-95f59c4a2dec, d5a91429-5739-47e2-a06b-3470a27159e7, 78cbd9e7-9798-4e2e-9b5a-547d9ebb31fb, 14b46e9e-c2b7-41b4-b07b-48a6ebf60603, 12338af0-0e69-4776-bea7-57ae8d297424, e147488a-f6f5-4113-8e2d-b22465e65bf6"
 CONDITION="((!(ActionMatches{'Microsoft.Authorization/roleAssignments/write'})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {$ROLES})) AND ((!(ActionMatches{'Microsoft.Authorization/roleAssignments/delete'})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {$ROLES}))"
 
 echo "== Allowing it to assign only the tests' data-plane roles"

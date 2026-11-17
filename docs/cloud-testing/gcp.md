@@ -705,6 +705,46 @@ The emulators (Floci-gcp, and Google's Pub/Sub and Firestore emulators) missed a
 | Pub/Sub refuses (400) a pipeline's publish of an event without data, so such events never arrive | Not fixable in Halyx: the kit declares it a known gap on Eventarc, and the API guide says to give events data on Google Cloud |
 | Secret Manager's `latest` alias is eventually consistent: a read right after a new version occasionally returned the previous one: 4 failed reads in 5 runs of the Secret Manager kit on 2026-10-16, after passing on every earlier run, but none in 39 probes (14 by REST, 25 by gRPC) | Google guarantees only reads by version number. The kit allows `overwriteLag()` on Secret Manager, as it allows listing and delete lag on AWS. The store doesn't wait |
 
+## Long-lived keys
+
+The key tests use Cloud KMS keys that are created once and kept. Key rings and keys can never be deleted, only
+their versions destroyed, so keys made per run would pile up for good. `cloud-testing/infra/gcp/keys` holds them
+and who may use them. A project Owner applies it once with their own credentials; the run scripts never apply or
+destroy it, and `prevent_destroy` stops a destroy there:
+
+```bash
+terraform -chdir=cloud-testing/infra/gcp/keys init
+terraform -chdir=cloud-testing/infra/gcp/keys apply -var project=<project> -var region=australia-southeast1 \
+    -var service_account=<test service account email>
+```
+
+Two key rings, both named `halyx-tck`: a global one with every key below, and one in the region with only
+`tck-server-side`, since a customer-managed key must be in the location of what it protects.
+
+| Key | Algorithm | Used for |
+|---|---|---|
+| `tck-data` | symmetric | the encryption key; the key store kit rotates it |
+| `tck-other` | symmetric | a second encryption key: re-wrapping, data sealed for two keys |
+| `tck-disposable` | symmetric | disabled and enabled again by the key store kit |
+| `tck-server-side` | symmetric | global: Secret Manager (automatic replication) and global parameters; regional: the run's bucket and regional parameters |
+| `tck-rsa` | RSA 2048, PKCS#1 | RS256 signatures, JWTs |
+| `tck-rsa-pss` | RSA 2048, PSS | PS256 signatures (a Cloud KMS key has one algorithm) |
+| `tck-p256` | EC P-256 | ES256 signatures, JWTs |
+| `tck-p384` | EC P-384 | ES384 signatures |
+| `tck-mac` | HMAC SHA-256 | MACs |
+
+- The names match the emulator tests' (`GcpKeyStoreConformanceIT`). The keys are labelled
+  `halyx-keys=long-lived`, never `halyx-test`.
+- The test service account has Encrypter/Decrypter, Signer/Verifier, Public Key Viewer and Viewer on the global
+  ring, and Viewer on the regional one.
+- A custom role, `halyxTestKeyRotation`, lets it create, enable, disable and destroy versions and change the primary,
+  only on the keys the kit rotates or disables: `tck-data`, `tck-disposable` and the four signing keys. Destroying is
+  for pruning the versions rotations leave behind.
+- The Cloud Storage, Secret Manager and Parameter Manager service agents have Encrypter/Decrypter on the
+  `tck-server-side` keys they use.
+- Each key version is billed while it's enabled or disabled, so every rotation adds to the monthly cost until the
+  old version is destroyed.
+
 ## IAM
 
 | Who | Role | Why |
