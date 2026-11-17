@@ -6,7 +6,8 @@
 
 - **Key management** ([#47](https://github.com/halyx-dev/halyx/issues/47)):
   - `KeyStore` and `CryptoKey` (`dev.halyx.keys`) on AWS KMS, Azure Key Vault keys, Google Cloud KMS and Vault
-    Transit, through `CloudContext.keyStore`, and `InMemoryKeys` on the memory provider, which holds real JDK keys.
+    Transit, through `CloudContext.keyStore`, and `InMemoryKeys` on the memory provider, which holds real JDK keys;
+    `InMemoryBlobs` and `InMemoryParameters` let tests check the server-side key a blob or parameter was stored with.
     Halyx never creates, rotates or deletes keys.
   - Envelope encryption: each `encrypt` seals the data locally with AES-256-GCM under a fresh data key, and the key
     service only wraps the data key, so it's one call whatever the size. `encryptingStream` and

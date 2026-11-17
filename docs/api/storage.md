@@ -352,6 +352,8 @@ PresignedUrl upload = receipts.presignUpload(BlobKey.of("o-1002/scan.png"), Dura
 ```
 
 For one write, `PutOptions.builder().serverSideKey(key)` does the same. It takes precedence over the view's key.
+On the memory provider, a test can check which key a blob was written with through `InMemoryBlobs` (see
+[Testing with the memory provider](keys.md#testing-with-the-memory-provider)).
 
 | | |
 |---|---|
