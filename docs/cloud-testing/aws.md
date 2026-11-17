@@ -657,12 +657,12 @@ Emulators missed all of these:
 
 The key tests use KMS keys that are created once and kept, not per run. A KMS key can only be scheduled for
 deletion, 7 days ahead at least, so a key per run would leave keys pending deletion behind every run.
-`cloud-testing/infra/aws/keys` holds them and the test user's permission to use them. An administrator applies it
-once per account and region; the run scripts never apply or destroy it:
+`cloud-testing/infra/aws/keys` holds them. An administrator applies it once per account and region; the run scripts
+never apply or destroy it:
 
 ```bash
 terraform -chdir=cloud-testing/infra/aws/keys init
-terraform -chdir=cloud-testing/infra/aws/keys apply -var region=ap-southeast-2 -var test_user=halyx_test
+terraform -chdir=cloud-testing/infra/aws/keys apply -var region=ap-southeast-2
 ```
 
 | Alias | Key | Used for |
@@ -682,10 +682,14 @@ terraform -chdir=cloud-testing/infra/aws/keys apply -var region=ap-southeast-2 -
   these keys, and listing stays within them.
 - The keys are tagged `halyx-keys=long-lived`, never `halyx-test`, so no run's permissions or teardown check reach
   them. Their aliases start `tck-`, outside the `halyx-*` aliases a run may create and delete.
-- The customer-managed policy `halyx-test-keys`, attached to the test user, allows only what the tests do:
-  encrypting, decrypting, re-encrypting and data keys on the symmetric keys; signing and public keys on the
-  signing keys; MACs on the MAC key; on-demand rotation of `tck-data` only; disabling and enabling `tck-disposable`
-  only; and `kms:ListAliases`. Listing describes every key it finds, so the tests list under the `tck-` prefix.
+- The Terraform creates no IAM: the test user's permissions are managed outside this project. Give the test user
+  the statements in
+  [`cloud-testing/infra/aws/keys/test-user-policy.json`](https://github.com/halyx-dev/halyx/blob/main/cloud-testing/infra/aws/keys/test-user-policy.json),
+  as a policy of its own or added to one it has. They allow only what the tests do, on keys whose alias starts
+  `tck-`: encrypting, decrypting, re-encrypting, data keys, signing, public keys and MACs (each key allows only what
+  its type supports); on-demand rotation of `tck-data` only; disabling and enabling `tck-disposable` only; and
+  `kms:ListAliases`. Listing describes every key it finds, so the tests list under the `tck-` prefix. Permissions
+  by alias take up to 5 minutes to apply after an alias is created.
 - If a run stops after disabling `tck-disposable` and before enabling it again, applying the Terraform again
   enables it.
 - Each of the 13 keys costs USD 1 a month, and each of a key's first two rotations another USD 1 a month. On-demand rotations

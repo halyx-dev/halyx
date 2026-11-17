@@ -14,13 +14,16 @@
 # limitations under the License.
 #
 
-# The KMS keys the real-cloud key tests use, and the test user's permission to use them. Unlike the tiers, this is
-# applied once, by an administrator, and kept: KMS keys can only be scheduled for deletion (7 days at least), so
-# creating them per run would leave a trail of keys pending deletion behind every run. The run scripts never apply
-# or destroy it.
+# The KMS keys the real-cloud key tests use. Unlike the tiers, this is applied once, by an administrator, and kept:
+# KMS keys can only be scheduled for deletion (7 days at least), so creating them per run would leave a trail of keys
+# pending deletion behind every run. The run scripts never apply or destroy it.
 #
 #   terraform -chdir=cloud-testing/infra/aws/keys init
-#   terraform -chdir=cloud-testing/infra/aws/keys apply -var region=ap-southeast-2 -var test_user=<test IAM user>
+#   terraform -chdir=cloud-testing/infra/aws/keys apply -var region=ap-southeast-2
+#
+# It creates no IAM: the test user's permissions are managed outside this project. test-user-policy.json, next to
+# this file, holds the statements the test user needs to use the keys; it names them by alias, so it doesn't change
+# when a key is created again.
 #
 # The keys are tagged halyx-keys=long-lived and never halyx-test: every run may delete keys tagged halyx-test (see
 # infra/aws/k8s/test-identity-policy.json), and the teardown checks list them. Their aliases start tck-, outside
@@ -38,11 +41,6 @@ terraform {
 
 variable "region" {
   type = string
-}
-
-variable "test_user" {
-  type        = string
-  description = "The IAM user the real-cloud scripts run as; the keys policy is attached to it"
 }
 
 provider "aws" {
@@ -71,11 +69,9 @@ locals {
     "tck-p384"        = { spec = "ECC_NIST_P384", usage = "SIGN_VERIFY", purpose = "ES384 signing" }
     "tck-mac"         = { spec = "HMAC_256", usage = "GENERATE_VERIFY_MAC", purpose = "MACs" }
   }
-  encryption = [for name, key in local.keys : aws_kms_key.this[name].arn if key.usage == "ENCRYPT_DECRYPT"]
-  signing    = [for name, key in local.keys : aws_kms_key.this[name].arn if key.usage == "SIGN_VERIFY"]
 }
 
-# The default key policy: the account's IAM policies decide who may use each key.
+# The default key policy: the account's IAM policies, managed outside this project, decide who may use each key.
 resource "aws_kms_key" "this" {
   for_each                 = local.keys
   description              = "Halyx real-cloud tests: ${each.value.purpose}"
@@ -90,63 +86,6 @@ resource "aws_kms_alias" "this" {
   for_each      = local.keys
   name          = "alias/${each.key}"
   target_key_id = aws_kms_key.this[each.key].key_id
-}
-
-# A customer-managed policy of its own: the test user's inline policies are near their size limit, and this one
-# changes with the keys above.
-resource "aws_iam_policy" "keys" {
-  name        = "halyx-test-keys"
-  description = "Use of the Halyx real-cloud test keys (cloud-testing/infra/aws/keys)"
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        # Wrapping and unwrapping data keys; GenerateDataKey for S3, SSM and Secrets Manager encrypting with a key.
-        Sid      = "Encrypt"
-        Effect   = "Allow"
-        Action   = ["kms:Encrypt", "kms:Decrypt", "kms:ReEncryptFrom", "kms:ReEncryptTo", "kms:GenerateDataKey", "kms:DescribeKey"]
-        Resource = local.encryption
-      },
-      {
-        # Signatures are verified locally, with the public key.
-        Sid      = "Sign"
-        Effect   = "Allow"
-        Action   = ["kms:Sign", "kms:GetPublicKey", "kms:DescribeKey"]
-        Resource = local.signing
-      },
-      {
-        Sid      = "Mac"
-        Effect   = "Allow"
-        Action   = ["kms:GenerateMac", "kms:VerifyMac", "kms:DescribeKey"]
-        Resource = aws_kms_key.this["tck-mac"].arn
-      },
-      {
-        # What the key store kit does to keys: rotate the encryption key, and disable and enable the disposable one.
-        Sid      = "KitRotates"
-        Effect   = "Allow"
-        Action   = ["kms:RotateKeyOnDemand"]
-        Resource = aws_kms_key.this["tck-data"].arn
-      },
-      {
-        Sid      = "KitDisables"
-        Effect   = "Allow"
-        Action   = ["kms:DisableKey", "kms:EnableKey"]
-        Resource = aws_kms_key.this["tck-disposable"].arn
-      },
-      {
-        # Listing keys and the health check. Listing describes each key it finds, so the tests list under tck-.
-        Sid      = "List"
-        Effect   = "Allow"
-        Action   = ["kms:ListAliases"]
-        Resource = "*"
-      },
-    ]
-  })
-}
-
-resource "aws_iam_user_policy_attachment" "keys" {
-  user       = var.test_user
-  policy_arn = aws_iam_policy.keys.arn
 }
 
 output "aliases" {

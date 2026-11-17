@@ -44,7 +44,7 @@ aws kms describe-key --key-id alias/tck-data --query KeyMetadata.KeyId --output 
 
 # Azure: the service principal's variables are exported for the JVM's default credential chain.
 CREDS="${AZURE_CREDENTIALS_FILE:-$HOME/.azure/halyx-test.env}"
-[[ -r "$CREDS" ]] || { echo "No service principal credentials at $CREDS"; exit 1; }
+[[ -r "$CREDS" ]] || { echo "No service principal credentials at $CREDS (see docs/cloud-testing/azure.md)"; exit 1; }
 set -a; source "$CREDS"; set +a
 for v in AZURE_CLIENT_ID AZURE_CLIENT_SECRET AZURE_TENANT_ID; do
   [[ -n "${!v:-}" ]] || { echo "$v is missing from $CREDS"; exit 1; }

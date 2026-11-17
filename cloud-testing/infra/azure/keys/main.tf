@@ -14,13 +14,15 @@
 # limitations under the License.
 #
 
-# The Key Vault keys the real-cloud key tests use, and the test principal's roles on them. Applied once, by a
-# subscription Owner signed in with the az CLI, and kept, as on AWS and GCP (infra/aws/keys, infra/gcp/keys). The run
-# scripts never apply or destroy it.
+# The Key Vault keys the real-cloud key tests use. Applied once, by a subscription Owner signed in with the az CLI,
+# and kept, as on AWS and GCP (infra/aws/keys, infra/gcp/keys). The run scripts never apply or destroy it.
 #
 #   terraform -chdir=cloud-testing/infra/azure/keys init
-#   terraform -chdir=cloud-testing/infra/azure/keys apply -var location=australiaeast \
-#       -var test_principal=$(az ad sp list --display-name halyx-test --query '[0].id' -o tsv)
+#   terraform -chdir=cloud-testing/infra/azure/keys apply -var location=australiaeast
+#
+# It gives the test principal no roles: test identities and their permissions are managed outside this project.
+# docs/cloud-testing/azure.md lists the roles the test principal needs on the vault and keys. The one role assigned
+# here is for whoever applies it, who needs it to create keys in a vault that uses Azure RBAC.
 #
 # The resource group and vault are tagged halyx-keys=long-lived, never halyx-test, so no run's teardown reaches them.
 # Each run's storage account gets Key Vault Crypto Service Encryption User on tck-server-side from tier 1, for its
@@ -44,13 +46,8 @@ variable "location" {
   type = string
 }
 
-variable "test_principal" {
-  type        = string
-  description = "The object ID of the test service principal (halyx-test) the real-cloud scripts sign in as"
-}
-
 provider "azurerm" {
-  resource_provider_registrations = "none" # registered by azure-setup-test-principal.sh
+  resource_provider_registrations = "none" # registered when the test principal is set up (docs/cloud-testing/azure.md)
   features {
     key_vault {
       purge_soft_delete_on_destroy    = true # if this is ever destroyed, free the vault's name
@@ -110,16 +107,8 @@ resource "azurerm_role_assignment" "admin" {
   principal_id         = data.azurerm_client_config.current.object_id
 }
 
-# The test principal uses every key: wrap, unwrap, sign, read and list.
-resource "azurerm_role_assignment" "use" {
-  scope                = azurerm_key_vault.keys.id
-  role_definition_name = "Key Vault Crypto User"
-  principal_id         = var.test_principal
-  principal_type       = "ServicePrincipal"
-}
-
 resource "time_sleep" "roles" {
-  depends_on      = [azurerm_role_assignment.admin, azurerm_role_assignment.use]
+  depends_on      = [azurerm_role_assignment.admin]
   create_duration = "60s" # data-plane role assignments take a while to apply
 }
 
@@ -133,17 +122,6 @@ resource "azurerm_key_vault_key" "this" {
   key_opts     = each.value.ops
   tags         = local.tags
   depends_on   = [time_sleep.roles]
-}
-
-# What the key store kit does to keys, on those keys only: rotate tck-data and the signing keys, and disable and
-# enable every version of tck-disposable.
-resource "azurerm_role_assignment" "kit" {
-  for_each             = toset(["tck-data", "tck-disposable", "tck-rsa", "tck-p256", "tck-p384"])
-  scope                = "${azurerm_key_vault.keys.id}/keys/${each.key}"
-  role_definition_name = "Key Vault Crypto Officer"
-  principal_id         = var.test_principal
-  principal_type       = "ServicePrincipal"
-  depends_on           = [azurerm_key_vault_key.this]
 }
 
 output "vault_id" {

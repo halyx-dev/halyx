@@ -28,18 +28,17 @@ the `halyx-test` service principal. Every run creates its own throwaway resource
 ## Tier 1: latest result
 
 ```bash
-cloud-testing/scripts/azure-setup-test-principal.sh      # once, as a subscription Owner
 cloud-testing/scripts/azure-real-cloud.sh                # AZURE_LOCATION=australiaeast by default
 IT_TEST='RealAzureIT$Cosmos' cloud-testing/scripts/azure-real-cloud.sh     # one suite only
 ```
 
 **Identity.** Terraform and the tests act as a dedicated `halyx-test` service principal. Its
 credentials live in `~/.azure/halyx-test.env`, outside the repository and readable only by its owner.
-The setup script:
-- registers the resource providers
-- creates the principal with Contributor on the subscription
-- gives it Role Based Access Control Administrator with a condition that lets it assign and remove only
-  the data-plane roles the tests use (listed under [IAM](#iam))
+The principal and its roles are managed outside this project; [Setting up the test principal](#setting-up-the-test-principal)
+lists them, with the commands. It has:
+- Contributor on the subscription
+- Role Based Access Control Administrator with a condition that lets it assign and remove only the data-plane
+  roles the tests use
 
 The tests reach every service through `DefaultAzureCredential`'s environment-variable path, as a deployed
 application would.
@@ -534,7 +533,7 @@ environment), and with `token-file`. **4/4; Spring 4/4**, run `r26102311158b75`,
 | `r26101122061ed2` | tier 2 | not run | clean | Creating the PostgreSQL flexible server failed with `InternalServerError` (no detail) on Azure's side; the subscription isn't restricted (`OfferRestricted` is disabled, Burstable available). Retried unchanged. |
 | `r2610112224c642` | tier 3 | **52/52** | clean | Latest tier 3 result, above, on the first run. |
 | `r26101122362e30` | tier 2 | **11/11** | clean | The same configuration succeeded on retry. |
-| `r2610121824c199` | tier 4 | not run | clean | Terraform couldn't assign Azure Event Hubs Data Owner: the principal's role-assignment condition allowed only tier 1's four roles. `azure-setup-test-principal.sh` now allows it, and updates the condition on rerun. |
+| `r2610121824c199` | tier 4 | not run | clean | Terraform couldn't assign Azure Event Hubs Data Owner: the principal's role-assignment condition allowed only tier 1's four roles. The principal's setup then added it to the condition. |
 | `r26101218310076` | tier 4 | 18 passed, 2 failed, 4 errors, 1 skipped | clean (the check printed `STILL PRESENT` for a stray newline; checked by hand, and the scripts now ignore whitespace) | Records with the same key arrived out of order: `[7, 10, …, 58, 1, 4]`. The last four topic creations failed with `PolicyViolationException`. `latestStartSkipsEarlierRecords` raced the consumer's first fetch. |
 | `r26101218441879` | tier 4 | 21 passed, 1 failed, 2 errors, 1 skipped | clean | Order fixed. A transactional producer failed in Event Hubs' `FindCoordinator` instead of with `UnsupportedFeatureException`. Topic creation still refused after about twenty, with two alive. |
 | `r26101219005a2c` | tier 4 | 22 passed, 2 errors, 1 skipped | clean | Three namespaces; nothing refused, and one topic listed before each creation. The test allowed only eight topics per namespace, two short of the kit's 26. |
@@ -604,13 +603,12 @@ Event Hubs' Kafka endpoint found these:
 
 The key tests use Key Vault keys that are created once and kept, as on AWS and Google Cloud, rather than a vault
 per run. `cloud-testing/infra/azure/keys` holds a resource group `halyx-keys`, a vault in it (RBAC, no purge
-protection, named `halyx-keys-` and 8 characters derived from the subscription), the keys, and the test
-principal's roles on them. A subscription Owner applies it once; the run scripts never apply or destroy it:
+protection, named `halyx-keys-` and 8 characters derived from the subscription) and the keys. A subscription Owner
+applies it once; the run scripts never apply or destroy it:
 
 ```bash
 terraform -chdir=cloud-testing/infra/azure/keys init
-terraform -chdir=cloud-testing/infra/azure/keys apply -var location=australiaeast \
-    -var test_principal=$(az ad sp list --display-name halyx-test --query '[0].id' -o tsv)
+terraform -chdir=cloud-testing/infra/azure/keys apply -var location=australiaeast
 ```
 
 | Key | Type | Used for |
@@ -629,13 +627,26 @@ terraform -chdir=cloud-testing/infra/azure/keys apply -var location=australiaeas
   these keys. Key Vault Standard has no MAC keys (only
   Managed HSM does), so there is no `tck-mac`.
 - The resource group and vault are tagged `halyx-keys=long-lived`, never `halyx-test`.
-- The test principal has Key Vault Crypto User on the vault, and Key Vault Crypto Officer only on the keys the kit
-  rotates or disables: `tck-data`, `tck-disposable` and the three signing keys.
+- The Terraform gives the test principal no roles: test identities and their permissions are managed outside this
+  project. The only role it assigns is Key Vault Crypto Officer on the vault for whoever applies it, who needs it to
+  create keys in a vault that uses Azure RBAC. The test principal needs Key Vault Crypto User on the vault, and Key
+  Vault Crypto Officer only on the keys the kit rotates or disables: `tck-data`, `tck-disposable` and the three
+  signing keys. As a subscription Owner, after the apply:
+
+  ```bash
+  VAULT_ID=$(terraform -chdir=cloud-testing/infra/azure/keys output -raw vault_id)
+  PRINCIPAL=$(az ad sp list --display-name halyx-test --query '[0].id' -o tsv)
+  az role assignment create --assignee-object-id "$PRINCIPAL" --assignee-principal-type ServicePrincipal \
+      --role "Key Vault Crypto User" --scope "$VAULT_ID"
+  for key in tck-data tck-disposable tck-rsa tck-p256 tck-p384; do
+    az role assignment create --assignee-object-id "$PRINCIPAL" --assignee-principal-type ServicePrincipal \
+        --role "Key Vault Crypto Officer" --scope "$VAULT_ID/keys/$key"
+  done
+  ```
 - Server-side encryption: when tier 1 is given the keys stack's `vault_id` and `server_side_key_id`, the run's
   storage account gets a system-assigned identity, Key Vault Crypto Service Encryption User on `tck-server-side`,
   and an encryption scope `halyxtckcmk` on it. The role assignment goes with the run. The test principal may assign
-  that role because [`azure-setup-test-principal.sh`](#iam) lists it; rerun the script once to update the
-  condition.
+  that role because its condition lists it (see [Setting up the test principal](#setting-up-the-test-principal)).
 - If a run stops after disabling `tck-disposable` and before enabling it again, enable its versions by hand.
 - Key Vault bills software keys per operation, and rotations add versions at no monthly cost, so the key store kit
   rotates keys on every run.
@@ -659,6 +670,62 @@ encrypted secrets store and a blob store writing in the encryption scope.
 | | Cosmos DB Built-in Data Contributor (Cosmos RBAC) | each run's Cosmos account (Terraform) | Cosmos' own data-plane roles |
 | | Entra admin (tier 2) | each run's PostgreSQL server and Azure SQL server (Terraform) | the database logins under test |
 | | `default` access policy (tier 3) | each run's Managed Redis cache (Terraform) | the cache's data plane |
+
+### Setting up the test principal
+
+The test principal and its roles are managed outside this project; nothing in `cloud-testing` creates or changes
+them. As a subscription Owner, with the az CLI signed in, set it up once:
+
+1. Register the resource providers the tiers use:
+
+   ```bash
+   for ns in Microsoft.Storage Microsoft.ServiceBus Microsoft.DocumentDB Microsoft.KeyVault \
+       Microsoft.AppConfiguration Microsoft.EventHub Microsoft.EventGrid; do
+     az provider register --namespace "$ns"
+   done
+   ```
+
+2. Create the service principal with Contributor on the subscription, and keep its credentials in
+   `~/.azure/halyx-test.env`, readable only by you, where the run scripts read them (`AZURE_CREDENTIALS_FILE` names
+   another file):
+
+   ```bash
+   SUB=$(az account show --query id -o tsv)
+   (umask 077; az ad sp create-for-rbac --name halyx-test --role Contributor --scopes "/subscriptions/$SUB" \
+       --query '[appId, password, tenant]' -o tsv | {
+     read -r id; read -r secret; read -r tenant
+     printf 'AZURE_CLIENT_ID=%s\nAZURE_CLIENT_SECRET=%s\nAZURE_TENANT_ID=%s\nAZURE_SUBSCRIPTION_ID=%s\n' \
+         "$id" "$secret" "$tenant" "$SUB" > ~/.azure/halyx-test.env; })
+   ```
+
+3. Give it Role Based Access Control Administrator on the subscription, with a condition that lets it assign and
+   remove only the data-plane roles the tests use, so it can't grant itself anything else:
+
+   | Role | ID | Used by |
+   |---|---|---|
+   | Storage Blob Data Contributor | `ba92f5b4-2d11-453d-a403-e96b0029c9fe` | tier 1, tier 5, the AKS run |
+   | Azure Service Bus Data Owner | `090c5cfd-751d-490a-894a-3ce6f1109419` | tier 1, the AKS run |
+   | Key Vault Secrets Officer | `b86a8fe4-44ce-4948-aee5-eccb2c155cd7` | tier 1, the AKS run |
+   | App Configuration Data Owner | `5ae67dd6-50cb-40e7-96ff-dc2bfa4b606b` | tier 1, the AKS run |
+   | Azure Event Hubs Data Owner | `f526a384-b230-433a-b45c-95f59c4a2dec` | tier 4 (the stream kit creates and deletes event hubs), the AKS run |
+   | EventGrid Data Sender | `d5a91429-5739-47e2-a06b-3470a27159e7` | tier 1, the AKS run |
+   | EventGrid Data Receiver | `78cbd9e7-9798-4e2e-9b5a-547d9ebb31fb` | tier 1, the AKS run |
+   | Key Vault Crypto Officer | `14b46e9e-c2b7-41b4-b07b-48a6ebf60603` | the AKS run (creating the `keys` feature's key) |
+   | Key Vault Crypto User | `12338af0-0e69-4776-bea7-57ae8d297424` | the AKS run (the service using that key) |
+   | Key Vault Crypto Service Encryption User | `e147488a-f6f5-4113-8e2d-b22465e65bf6` | tier 1 (the run's storage account reaching the long-lived key of its encryption scope) |
+
+   ```bash
+   APP_ID=$(sed -n 's/^AZURE_CLIENT_ID=//p' ~/.azure/halyx-test.env)
+   ROLES="ba92f5b4-2d11-453d-a403-e96b0029c9fe, 090c5cfd-751d-490a-894a-3ce6f1109419, b86a8fe4-44ce-4948-aee5-eccb2c155cd7, 5ae67dd6-50cb-40e7-96ff-dc2bfa4b606b, f526a384-b230-433a-b45c-95f59c4a2dec, d5a91429-5739-47e2-a06b-3470a27159e7, 78cbd9e7-9798-4e2e-9b5a-547d9ebb31fb, 14b46e9e-c2b7-41b4-b07b-48a6ebf60603, 12338af0-0e69-4776-bea7-57ae8d297424, e147488a-f6f5-4113-8e2d-b22465e65bf6"
+   az role assignment create --assignee "$APP_ID" --role "Role Based Access Control Administrator" \
+       --scope "/subscriptions/$SUB" --condition-version 2.0 --condition "((!(ActionMatches{'Microsoft.Authorization/roleAssignments/write'})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {$ROLES})) AND ((!(ActionMatches{'Microsoft.Authorization/roleAssignments/delete'})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {$ROLES}))"
+   ```
+
+   A new service principal can take a minute to appear for role assignments; if the command says it can't find
+   it, run it again. When a role is added to the list, delete this assignment and create it again with the new
+   list.
+
+4. For the key tests, give it its roles on the long-lived keys; see [Long-lived keys](#long-lived-keys).
 
 Tiers 2 and 3 need nothing beyond tier 1's setup: Contributor covers registering their resource providers,
 creating the servers and caches, and naming the principal as their Entra admin or access-policy holder.
@@ -688,8 +755,7 @@ identity, and federates the identity to the service's Kubernetes service account
 data-plane roles the principal may assign: Storage Blob Data Contributor, Azure Service Bus Data Owner, Key Vault
 Secrets Officer, App Configuration Data Owner, Azure Event Hubs Data Owner, and EventGrid Data Sender and Receiver,
 plus Key Vault Crypto User for the `keys` feature's key, which the principal creates in the run's vault as Key Vault
-Crypto Officer. With roles added to the condition, run `azure-setup-test-principal.sh` again to update it.
-It also gets Cosmos DB Built-in Data Contributor, the Managed Redis `default` access policy, and the PostgreSQL
+Crypto Officer. It also gets Cosmos DB Built-in Data Contributor, the Managed Redis `default` access policy, and the PostgreSQL
 server's Entra admin. The pods pull images with the registry's admin credentials, because AcrPull isn't among the
 roles the principal may assign.
 

@@ -1,0 +1,35 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "UseTestKeys",
+      "Effect": "Allow",
+      "Action": [
+        "kms:Encrypt", "kms:Decrypt", "kms:ReEncryptFrom", "kms:ReEncryptTo", "kms:GenerateDataKey",
+        "kms:DescribeKey", "kms:Sign", "kms:GetPublicKey", "kms:GenerateMac", "kms:VerifyMac"
+      ],
+      "Resource": "arn:aws:kms:*:*:key/*",
+      "Condition": { "ForAnyValue:StringLike": { "kms:ResourceAliases": "alias/tck-*" } }
+    },
+    {
+      "Sid": "KitRotates",
+      "Effect": "Allow",
+      "Action": "kms:RotateKeyOnDemand",
+      "Resource": "arn:aws:kms:*:*:key/*",
+      "Condition": { "ForAnyValue:StringEquals": { "kms:ResourceAliases": "alias/tck-data" } }
+    },
+    {
+      "Sid": "KitDisables",
+      "Effect": "Allow",
+      "Action": ["kms:DisableKey", "kms:EnableKey"],
+      "Resource": "arn:aws:kms:*:*:key/*",
+      "Condition": { "ForAnyValue:StringEquals": { "kms:ResourceAliases": "alias/tck-disposable" } }
+    },
+    {
+      "Sid": "List",
+      "Effect": "Allow",
+      "Action": "kms:ListAliases",
+      "Resource": "*"
+    }
+  ]
+}

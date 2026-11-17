@@ -708,14 +708,13 @@ The emulators (Floci-gcp, and Google's Pub/Sub and Firestore emulators) missed a
 ## Long-lived keys
 
 The key tests use Cloud KMS keys that are created once and kept. Key rings and keys can never be deleted, only
-their versions destroyed, so keys made per run would pile up for good. `cloud-testing/infra/gcp/keys` holds them
-and who may use them. A project Owner applies it once with their own credentials; the run scripts never apply or
-destroy it, and `prevent_destroy` stops a destroy there:
+their versions destroyed, so keys made per run would pile up for good. `cloud-testing/infra/gcp/keys` holds them.
+A project Owner applies it once with their own credentials; the run scripts never apply or destroy it, and
+`prevent_destroy` stops a destroy there:
 
 ```bash
 terraform -chdir=cloud-testing/infra/gcp/keys init
-terraform -chdir=cloud-testing/infra/gcp/keys apply -var project=<project> -var region=australia-southeast1 \
-    -var service_account=<test service account email>
+terraform -chdir=cloud-testing/infra/gcp/keys apply -var project=<project> -var region=australia-southeast1
 ```
 
 Two key rings, both named `halyx-tck`: a global one with every key below, and one in the region with only
@@ -738,13 +737,32 @@ Two key rings, both named `halyx-tck`: a global one with every key below, and on
 - The tests use a key store with the prefix `tck-`, so the kits' own names (`data`, `blobs`, `tenant-a`) find
   these keys. The keys are labelled
   `halyx-keys=long-lived`, never `halyx-test`.
-- The test service account has Encrypter/Decrypter, Signer/Verifier, Public Key Viewer and Viewer on the global
-  ring, and Viewer on the regional one.
-- A custom role, `halyxTestKeyRotation`, lets it create, enable, disable and destroy versions and change the primary,
-  only on the keys the kit rotates or disables: `tck-data`, `tck-disposable` and the four signing keys. Destroying is
-  for pruning the versions rotations leave behind.
-- The Cloud Storage, Secret Manager and Parameter Manager service agents have Encrypter/Decrypter on the
-  `tck-server-side` keys they use.
+- The Terraform grants the test service account nothing: test identities and their permissions are managed outside
+  this project. It needs Encrypter/Decrypter, Signer/Verifier, Public Key Viewer and Viewer on the global ring, and
+  Viewer on the regional one. A custom role,
+  [`test-key-rotation-role.yml`](https://github.com/halyx-dev/halyx/blob/main/cloud-testing/infra/gcp/keys/test-key-rotation-role.yml),
+  lets it create, enable, disable and destroy versions and change the primary, granted only on the keys the kit
+  rotates or disables: `tck-data`, `tck-disposable` and the four signing keys. Destroying is for pruning the
+  versions rotations leave behind. As a project Owner, after the apply:
+
+  ```bash
+  PROJECT=<project> REGION=australia-southeast1 SA=serviceAccount:<test service account email>
+  for role in cryptoKeyEncrypterDecrypter signerVerifier publicKeyViewer viewer; do
+    gcloud kms keyrings add-iam-policy-binding halyx-tck --location global --project "$PROJECT" \
+        --member "$SA" --role "roles/cloudkms.$role"
+  done
+  gcloud kms keyrings add-iam-policy-binding halyx-tck --location "$REGION" --project "$PROJECT" \
+      --member "$SA" --role roles/cloudkms.viewer
+  gcloud iam roles create halyxTestKeyRotation --project "$PROJECT" \
+      --file cloud-testing/infra/gcp/keys/test-key-rotation-role.yml
+  for key in tck-data tck-disposable tck-rsa tck-rsa-pss tck-p256 tck-p384; do
+    gcloud kms keys add-iam-policy-binding "$key" --keyring halyx-tck --location global --project "$PROJECT" \
+        --member "$SA" --role "projects/$PROJECT/roles/halyxTestKeyRotation"
+  done
+  ```
+- The Cloud Storage, Secret Manager and Parameter Manager service agents, Google's own identities, get
+  Encrypter/Decrypter on the `tck-server-side` keys they use from the Terraform: they are created with the project,
+  not managed as test identities.
 - Each key version is billed while it's enabled or disabled, so every rotation adds to the monthly cost until the
   old version is destroyed. The key store kit rotates keys only with `KEY_ROTATION=1`, and that run's teardown
   destroys every version but the newest of each key it rotated.

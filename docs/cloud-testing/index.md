@@ -108,7 +108,7 @@ the tiers need:
 |---|---|---|
 | AWS | IAM user `halyx_test` | a named AWS CLI profile |
 | GCP | service account `halyx-test`, impersonated | your `gcloud` Application Default Credentials |
-| Azure | service principal `halyx-test` | `~/.azure/halyx-test.env`, created by `cloud-testing/scripts/azure-setup-test-principal.sh` |
+| Azure | service principal `halyx-test` | `~/.azure/halyx-test.env` (see [Azure](azure.md#setting-up-the-test-principal)) |
 
 The exact policies and roles are on each provider's page. Credentials never enter the repository.
 
