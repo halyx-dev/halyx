@@ -637,7 +637,15 @@ terraform -chdir=cloud-testing/infra/azure/keys apply -var location=australiaeas
   that role because [`azure-setup-test-principal.sh`](#iam) lists it; rerun the script once to update the
   condition.
 - If a run stops after disabling `tck-disposable` and before enabling it again, enable its versions by hand.
-- Key Vault bills software keys per operation, and rotations add versions at no monthly cost.
+- Key Vault bills software keys per operation, and rotations add versions at no monthly cost, so the key store kit
+  rotates keys on every run.
+
+A tier 1 run reads the vault and key from the keys stack's Terraform state on the machine it runs on, and without it
+skips the key tests with a note. `RealAzureKeysIT` runs the key store kit on the keys; the blob, document, Key Vault
+secrets and App Configuration kits through views sealed with them; the blob and parameter encryption kits; and the
+server-side key kit on the run's encryption scope, which checks the scope Blob Storage records. `RealSpringKeysIT`,
+on Boot 3.5 and 4, configures keys from properties, signs JWTs on Key Vault, and uses an encrypted blob store, an
+encrypted secrets store and a blob store writing in the encryption scope.
 
 ## IAM
 

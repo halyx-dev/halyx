@@ -25,6 +25,7 @@
 #   TIER=3 cloud-testing/scripts/gcp-real-cloud.sh                            # Memorystore for Valkey with IAM auth
 #   TIER=4 cloud-testing/scripts/gcp-real-cloud.sh                            # streams on Managed Kafka with IAM, plus Spring Boot
 #   TIER=5 cloud-testing/scripts/gcp-real-cloud.sh                            # cloud logins: an impersonated service account
+#   KEY_ROTATION=1 cloud-testing/scripts/gcp-real-cloud.sh                    # tier 1, rotating the test keys too
 #
 # The tests and Terraform act as the test service account (GCP_IMPERSONATE, default halyx-test@<project>),
 # through Application Default Credentials that impersonate it:
@@ -34,7 +35,13 @@
 #    document store kit queries (labelled halyx-test=<run id>).
 # 2. RealGcpIT runs the blob, document store, messaging and parameter kits; it creates Pub/Sub topics and
 #    subscriptions named after the run, and secrets and parameters under tck-<random> names, and deletes them.
-# 3. Always, even if tests fail or the script is interrupted: sweep anything of this run the tests left behind,
+# 3. RealGcpKeysIT runs the key store kit on the long-lived Cloud KMS keys (cloud-testing/infra/gcp/keys, applied
+#    once by a project Owner; its Terraform state is read here for the key rings), the blob, document and parameter
+#    kits through encrypted views, and Cloud Storage, Secret Manager and Parameter Manager with customer-managed
+#    keys. Without the keys stack's state, the key tests are skipped, with a note. Every key version is billed while
+#    it exists, so the kit rotates keys only with KEY_ROTATION=1, and the teardown then destroys every version but
+#    the newest of each key it rotated.
+# 4. Always, even if tests fail or the script is interrupted: sweep anything of this run the tests left behind,
 #    terraform destroy, and list what remains (expected: nothing).
 #
 # Tier 2: Terraform creates Cloud SQL for PostgreSQL and MySQL (shared-core, IAM auth on, no backups) whose
@@ -76,6 +83,23 @@ RUN="r$(date +%y%m%d%H%M)$(openssl rand -hex 2)"
 START="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 TF_VARS=(-var "project=$PROJECT" -var "region=$REGION" -var "run_id=$RUN")
 GCLOUD=(gcloud --project "$PROJECT" --quiet)
+# The long-lived keys: their key rings, read from the keys stack's Terraform state on this machine.
+KEYS_DIR="$ROOT/cloud-testing/infra/gcp/keys"
+KEYS=false
+KEY_RING=""
+REGIONAL_KEY_RING=""
+if [[ "$TIER" == 1 ]]; then
+  if KEY_RING="$(terraform -chdir="$KEYS_DIR" output -raw global_key_ring 2>/dev/null)" && [[ "$KEY_RING" == projects/* ]]; then
+    KEYS=true
+    REGIONAL_KEY="$(terraform -chdir="$KEYS_DIR" output -raw regional_server_side_key)"
+    REGIONAL_KEY_RING="${REGIONAL_KEY%/cryptoKeys/*}"
+  else
+    KEY_RING=""
+    echo "No state in cloud-testing/infra/gcp/keys: the key tests are skipped. See docs/cloud-testing/gcp.md."
+  fi
+fi
+ROTATE=false
+[[ "${KEY_ROTATION:-}" == 1 ]] && ROTATE=true
 if [[ "$TIER" == 2 || "$TIER" == 3 || "$TIER" == 4 ]]; then
   CLIENT_IP=$(dig -4 +short myip.opendns.com A @208.67.222.222 | tail -1)
   [[ "$CLIENT_IP" =~ ^[0-9.]+$ ]] || { echo "Could not find this machine's public IPv4 address"; exit 1; }
@@ -156,9 +180,29 @@ sweep() {
   done
 }
 
+# The kit's rotations leave a version behind on each key they rotate, billed while it exists: destroy every version
+# but the newest (the primary, on a symmetric key) of each. Destroying takes a day, the shortest the keys allow.
+prune_key_versions() {
+  log "Destroying the key versions the rotations left behind"
+  local key primary version newest
+  for key in tck-data tck-rsa tck-rsa-pss tck-p256 tck-p384; do
+    local where=(--keyring "${KEY_RING##*/}" --location global)
+    primary=$("${GCLOUD[@]}" kms keys describe "$key" "${where[@]}" --format='value(primary.name)')
+    newest=1
+    for version in $("${GCLOUD[@]}" kms keys versions list --key "$key" "${where[@]}" \
+        --filter='state=ENABLED OR state=DISABLED' --sort-by=~createTime --format='value(name)'); do
+      if [[ $newest == 1 ]]; then newest=0; continue; fi
+      [[ "$version" == "$primary" ]] && continue
+      echo "  destroying $key version ${version##*/}"
+      "${GCLOUD[@]}" kms keys versions destroy "${version##*/}" --key "$key" "${where[@]}" >/dev/null
+    done
+  done
+}
+
 teardown() {
   local status=$?
   trap - EXIT INT TERM
+  [[ "$KEYS" == true && "$ROTATE" == true ]] && prune_key_versions
   if [[ "$TIER" == 3 && -n "${WORK:-}" ]]; then
     [[ -S "$WORK/ssh" ]] && ssh -S "$WORK/ssh" -O exit bastion 2>/dev/null && echo "  tunnel closed"
   fi
@@ -340,7 +384,10 @@ EVENTS_INBOX=$(terraform -chdir="$TF_DIR" output -raw events_inbox)
 FUNCTION=$(terraform -chdir="$TF_DIR" output -raw function)
 FUNCTION_URL=$(terraform -chdir="$TF_DIR" output -raw function_url)
 log "Running the conformance kits against real GCP"
-mvn -o verify -pl halyx-gcp -Dit.test="${IT_TEST:-RealGcpIT}" -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+mvn -o verify -pl halyx-gcp -Dit.test="${IT_TEST:-RealGcpIT,RealGcpKeysIT}" -Dtest=none \
+    -Dsurefire.failIfNoSpecifiedTests=false \
+    -Dhalyx.real.gcp.keys="$KEYS" -Dhalyx.real.keys.rotate="$ROTATE" \
+    -Dhalyx.real.gcp.key-ring="$KEY_RING" -Dhalyx.real.gcp.regional-key-ring="$REGIONAL_KEY_RING" \
     -Dhalyx.real.gcp=true -Dhalyx.real.gcp.run="$RUN" -Dhalyx.real.gcp.project="$PROJECT" \
     -Dhalyx.real.gcp.region="$REGION" \
     -Dhalyx.real.gcp.bucket="$(terraform -chdir="$TF_DIR" output -raw bucket)" \
@@ -353,12 +400,16 @@ status=$?
 # Spring Boot 3 and 4: an auto-configured repository on the run's table with a sort key, the event bus,
 # halyx-reactor's WebFlux, reactive repository and event beans over the bucket, table and message bus,
 # @HalyxListener on the run's Pub/Sub topic with a claim check, spring.config.import from Secret Manager and
-# Parameter Manager, and a FunctionInvoker bean on the run's function at its default cloudfunctions.net URL.
+# Parameter Manager, a FunctionInvoker bean on the run's function at its default cloudfunctions.net URL; and keys
+# from properties on the long-lived Cloud KMS keys, JWTs signed there, and encrypted and server-side-keyed stores
+# (the bucket is regional, so its server-side key comes from the regional key ring).
 mvn -o -q install -DskipTests -pl halyx-spring-boot-autoconfigure -am || exit 1
 for module in halyx-spring-boot-autoconfigure halyx-spring-boot4-tests; do
   log "Running the Spring Boot repository, event and reactive tests ($module) against real GCP"
-  mvn -o verify -pl "$module" -Dit.test="${SPRING_IT_TEST:-RealSpringRepositoryIT,RealSpringEventIT,RealSpringReactiveIT,RealSpringMessagingIT,RealSpringParametersIT,RealSpringFunctionIT}" -Dtest=none \
+  mvn -o verify -pl "$module" -Dit.test="${SPRING_IT_TEST:-RealSpringRepositoryIT,RealSpringEventIT,RealSpringReactiveIT,RealSpringMessagingIT,RealSpringParametersIT,RealSpringFunctionIT,RealSpringKeysIT}" -Dtest=none \
       -Dsurefire.failIfNoSpecifiedTests=false \
+      -Dhalyx.real.spring.keys="$KEYS" -Dhalyx.real.spring.key-store-location="$KEY_RING" \
+      -Dhalyx.real.spring.server-side-key-properties="halyx.key-stores.regional.location=$REGIONAL_KEY_RING,halyx.key-stores.regional.prefix=tck-,halyx.blob-stores.receipts.server-side-key.store=regional" \
       -Dhalyx.real.spring.repositories=true -Dhalyx.real.spring.events=true -Dhalyx.real.spring.reactive=true \
       -Dhalyx.real.spring.messaging=true -Dhalyx.real.spring.parameters=true -Dhalyx.real.spring.functions=true \
       -Dhalyx.real.spring.function="$FUNCTION" -Dhalyx.real.spring.function-properties="gcp.functions.region=$REGION" \

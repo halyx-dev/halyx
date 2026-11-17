@@ -689,7 +689,19 @@ terraform -chdir=cloud-testing/infra/aws/keys apply -var region=ap-southeast-2 -
 - If a run stops after disabling `tck-disposable` and before enabling it again, applying the Terraform again
   enables it.
 - Each of the 13 keys costs USD 1 a month, and each of a key's first two rotations another USD 1 a month. On-demand rotations
-  per key are limited for the key's life, which the key store kit's rotation case counts against.
+  per key are limited for the key's life, so the key store kit rotates `tck-data` only with `KEY_ROTATION=1`.
+
+A tier 1 run uses the keys when `alias/tck-data` exists in its region, and otherwise skips the key tests with a note.
+`RealAwsKeysIT` runs the key store kit on them; the blob, document, parameter and secrets kits through views sealed
+with them; the blob and parameter encryption kits; and S3, SSM and Secrets Manager encrypted by `tck-server-side`
+(the whole parameter kit on keyed stores, and the server-side key kits, which check the key AWS records).
+`RealSpringKeysIT`, on Boot 3.5 and 4, configures keys from properties, signs JWTs on KMS, and uses an encrypted
+blob store, an encrypted secrets store and an SSE-KMS blob store. Through views, SSM's `largeValues` doesn't apply:
+3,500 bytes seal to about 4.8 KB, over the 4 KB a standard parameter holds.
+
+```bash
+KEY_ROTATION=1 AWS_PROFILE=default AWS_REGION=ap-southeast-2 cloud-testing/scripts/aws-real-cloud.sh
+```
 
 ## IAM for tier 1
 
