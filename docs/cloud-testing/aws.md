@@ -686,6 +686,10 @@ terraform -chdir=cloud-testing/infra/aws/keys apply -var region=ap-southeast-2 -
   encrypting, decrypting, re-encrypting and data keys on the symmetric keys; signing and public keys on the
   signing keys; MACs on the MAC key; on-demand rotation of `tck-data` only; disabling and enabling `tck-disposable`
   only; and `kms:ListAliases`. Listing describes every key it finds, so the tests list under the `tck-` prefix.
+- Where the test user's permissions are managed by hand, apply with `-var manage_policy=false` and no `test_user`:
+  only the keys and aliases are created, and `terraform -chdir=cloud-testing/infra/aws/keys output -raw policy`
+  prints the statements to add to one of the user's own policies. A user can have 10 managed policies attached by
+  default, so a test user that already has 10 needs this.
 - If a run stops after disabling `tck-disposable` and before enabling it again, applying the Terraform again
   enables it.
 - Each of the 13 keys costs USD 1 a month, and each of a key's first two rotations another USD 1 a month. On-demand rotations

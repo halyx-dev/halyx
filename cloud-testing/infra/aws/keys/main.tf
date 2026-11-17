@@ -22,6 +22,10 @@
 #   terraform -chdir=cloud-testing/infra/aws/keys init
 #   terraform -chdir=cloud-testing/infra/aws/keys apply -var region=ap-southeast-2 -var test_user=<test IAM user>
 #
+# Where the test user's permissions are managed by hand (for example, it already has the 10 managed policies IAM
+# allows by default), apply with -var manage_policy=false and no test_user: only the keys and aliases are created,
+# and `terraform output -raw policy` prints the statements the test user needs.
+#
 # The keys are tagged halyx-keys=long-lived and never halyx-test: every run may delete keys tagged halyx-test (see
 # infra/aws/k8s/test-identity-policy.json), and the teardown checks list them. Their aliases start tck-, outside
 # the halyx-* aliases a run may create and delete.
@@ -42,7 +46,14 @@ variable "region" {
 
 variable "test_user" {
   type        = string
+  default     = ""
   description = "The IAM user the real-cloud scripts run as; the keys policy is attached to it"
+}
+
+variable "manage_policy" {
+  type        = bool
+  default     = true
+  description = "Create the halyx-test-keys policy and attach it to test_user; false when the test user's permissions are managed by hand"
 }
 
 provider "aws" {
@@ -95,8 +106,37 @@ resource "aws_kms_alias" "this" {
 # A customer-managed policy of its own: the test user's inline policies are near their size limit, and this one
 # changes with the keys above.
 resource "aws_iam_policy" "keys" {
+  count       = var.manage_policy ? 1 : 0
   name        = "halyx-test-keys"
   description = "Use of the Halyx real-cloud test keys (cloud-testing/infra/aws/keys)"
+  policy      = local.policy
+
+  lifecycle {
+    precondition {
+      condition     = var.test_user != ""
+      error_message = "Set test_user, or apply with -var manage_policy=false to manage the test user's permissions by hand."
+    }
+  }
+}
+
+resource "aws_iam_user_policy_attachment" "keys" {
+  count      = var.manage_policy ? 1 : 0
+  user       = var.test_user
+  policy_arn = aws_iam_policy.keys[0].arn
+}
+
+# State from before manage_policy keeps its policy.
+moved {
+  from = aws_iam_policy.keys
+  to   = aws_iam_policy.keys[0]
+}
+
+moved {
+  from = aws_iam_user_policy_attachment.keys
+  to   = aws_iam_user_policy_attachment.keys[0]
+}
+
+locals {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -144,14 +184,14 @@ resource "aws_iam_policy" "keys" {
   })
 }
 
-resource "aws_iam_user_policy_attachment" "keys" {
-  user       = var.test_user
-  policy_arn = aws_iam_policy.keys.arn
-}
-
 output "aliases" {
   description = "Each key's alias name, as the tests name it, and its ARN"
   value       = { for name in keys(local.keys) : name => aws_kms_key.this[name].arn }
+}
+
+output "policy" {
+  description = "The test user's permissions on the keys, as a policy document: attach it by hand when manage_policy is false"
+  value       = local.policy
 }
 
 output "server_side_key" {
