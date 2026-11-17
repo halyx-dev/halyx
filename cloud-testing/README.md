@@ -11,7 +11,7 @@ Everything needed to run Halyx' tests outside the unit and emulator tests the bu
 | `scripts/in-vpc-runner.sh` | Runs a test suite on a VM inside a VPC, for services with no public endpoint; sourced by the cloud scripts |
 | `scripts/vault-kubernetes-it.sh` | Vault's Kubernetes login against a real minikube cluster |
 | `infra/<cloud>/tier<n>/` | The Terraform for each cloud and tier |
-| `infra/<cloud>/keys/` | The long-lived keys the key tests use; applied once by an administrator, never by the run scripts. On AWS it creates no IAM: `infra/aws/keys/test-user-policy.json` is what the test user needs, applied outside this project |
+| `infra/<cloud>/keys/` | The long-lived keys the key tests use; applied once by an administrator, never by the run scripts. They grant the test identities nothing, which are managed outside this project: `infra/aws/keys/test-user-policy.json` and `infra/gcp/keys/test-key-rotation-role.yml` are applied by hand, and the cloud docs list the rest |
 | `infra/<cloud>/k8s/` | The Terraform for each cloud's cluster run; `infra/aws/k8s/test-identity-policy.json` is the extra IAM the EKS run needs |
 | `reports/` | The end-to-end reports of the cluster runs (not committed) |
 | `docker-compose.yml` | The Floci emulators, for manual experiments (the integration tests start their own containers) |

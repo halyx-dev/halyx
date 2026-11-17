@@ -14,14 +14,19 @@
 # limitations under the License.
 #
 
-# The Cloud KMS keys the real-cloud key tests use, and who may use them. Applied once, by a project Owner with their
+# The Cloud KMS keys the real-cloud key tests use. Applied once, by a project Owner with their
 # own credentials (not the test service account), and kept: Cloud KMS key rings and keys can never be deleted, only
 # their versions destroyed, so keys made per run would pile up for good. The run scripts never apply or destroy it,
 # and prevent_destroy stops a destroy here from destroying every key's versions.
 #
 #   terraform -chdir=cloud-testing/infra/gcp/keys init
-#   terraform -chdir=cloud-testing/infra/gcp/keys apply -var project=<project> -var region=australia-southeast1 \
-#       -var service_account=<test service account email>
+#   terraform -chdir=cloud-testing/infra/gcp/keys apply -var project=<project> -var region=australia-southeast1
+#
+# It grants the test service account nothing: test identities and their permissions are managed outside this
+# project. docs/cloud-testing/gcp.md lists the roles it needs on the key rings and keys, and
+# test-key-rotation-role.yaml, next to this file, is the custom role for what the key store kit does to keys. Only
+# Google's own service agents get a role here, so Cloud Storage, Secret Manager and Parameter Manager can use
+# tck-server-side.
 #
 # Two key rings, both named halyx-tck: a global one with every key, and one in the region with only tck-server-side,
 # since a customer-managed key must be in the location of what it protects. Secret Manager's automatic replication
@@ -47,11 +52,6 @@ variable "project" {
 
 variable "region" {
   type = string
-}
-
-variable "service_account" {
-  type        = string
-  description = "The test service account the real-cloud scripts impersonate"
 }
 
 provider "google" {
@@ -83,12 +83,7 @@ locals {
     "tck-p384"        = { purpose = "ASYMMETRIC_SIGN", algorithm = "EC_SIGN_P384_SHA384" }        # ES384
     "tck-mac"         = { purpose = "MAC", algorithm = "HMAC_SHA256" }                            # MACs
   }
-  # The key store kit rotates the encryption key and every signing key, and disables and enables tck-disposable.
-  kit = ["tck-data", "tck-disposable", "tck-rsa", "tck-rsa-pss", "tck-p256", "tck-p384"]
-  sa  = "serviceAccount:${var.service_account}"
 }
-
-data "google_project" "this" {}
 
 resource "google_kms_key_ring" "global" {
   name     = "halyx-tck"
@@ -130,45 +125,6 @@ resource "google_kms_crypto_key" "regional_server_side" {
   lifecycle {
     prevent_destroy = true
   }
-}
-
-# --- the test service account ---------------------------------------------------------------------------------------
-
-# Every key on the global ring: encrypt and decrypt, sign and MAC, public keys, and reading and listing keys.
-resource "google_kms_key_ring_iam_member" "global" {
-  for_each = toset([
-    "roles/cloudkms.cryptoKeyEncrypterDecrypter", "roles/cloudkms.signerVerifier", "roles/cloudkms.publicKeyViewer",
-    "roles/cloudkms.viewer",
-  ])
-  key_ring_id = google_kms_key_ring.global.id
-  role        = each.value
-  member      = local.sa
-}
-
-resource "google_kms_key_ring_iam_member" "regional" {
-  key_ring_id = google_kms_key_ring.regional.id
-  role        = "roles/cloudkms.viewer"
-  member      = local.sa
-}
-
-# Only what the kit does to keys, and only on the keys it does it to. Destroying versions is for pruning the versions
-# the kit's rotations leave behind, each of which is billed while it's enabled or disabled.
-resource "google_project_iam_custom_role" "kit" {
-  role_id     = "halyxTestKeyRotation"
-  title       = "Halyx test key rotation"
-  description = "Rotating, disabling and enabling the Halyx real-cloud test keys (cloud-testing/infra/gcp/keys)"
-  permissions = [
-    "cloudkms.cryptoKeys.get", "cloudkms.cryptoKeys.update",
-    "cloudkms.cryptoKeyVersions.create", "cloudkms.cryptoKeyVersions.get", "cloudkms.cryptoKeyVersions.list",
-    "cloudkms.cryptoKeyVersions.update", "cloudkms.cryptoKeyVersions.destroy",
-  ]
-}
-
-resource "google_kms_crypto_key_iam_member" "kit" {
-  for_each      = toset(local.kit)
-  crypto_key_id = google_kms_crypto_key.this[each.key].id
-  role          = google_project_iam_custom_role.kit.id
-  member        = local.sa
 }
 
 # --- the services that encrypt with tck-server-side -----------------------------------------------------------------

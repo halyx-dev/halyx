@@ -604,13 +604,12 @@ Event Hubs' Kafka endpoint found these:
 
 The key tests use Key Vault keys that are created once and kept, as on AWS and Google Cloud, rather than a vault
 per run. `cloud-testing/infra/azure/keys` holds a resource group `halyx-keys`, a vault in it (RBAC, no purge
-protection, named `halyx-keys-` and 8 characters derived from the subscription), the keys, and the test
-principal's roles on them. A subscription Owner applies it once; the run scripts never apply or destroy it:
+protection, named `halyx-keys-` and 8 characters derived from the subscription) and the keys. A subscription Owner
+applies it once; the run scripts never apply or destroy it:
 
 ```bash
 terraform -chdir=cloud-testing/infra/azure/keys init
-terraform -chdir=cloud-testing/infra/azure/keys apply -var location=australiaeast \
-    -var test_principal=$(az ad sp list --display-name halyx-test --query '[0].id' -o tsv)
+terraform -chdir=cloud-testing/infra/azure/keys apply -var location=australiaeast
 ```
 
 | Key | Type | Used for |
@@ -629,8 +628,22 @@ terraform -chdir=cloud-testing/infra/azure/keys apply -var location=australiaeas
   these keys. Key Vault Standard has no MAC keys (only
   Managed HSM does), so there is no `tck-mac`.
 - The resource group and vault are tagged `halyx-keys=long-lived`, never `halyx-test`.
-- The test principal has Key Vault Crypto User on the vault, and Key Vault Crypto Officer only on the keys the kit
-  rotates or disables: `tck-data`, `tck-disposable` and the three signing keys.
+- The Terraform gives the test principal no roles: test identities and their permissions are managed outside this
+  project. The only role it assigns is Key Vault Crypto Officer on the vault for whoever applies it, who needs it to
+  create keys in a vault that uses Azure RBAC. The test principal needs Key Vault Crypto User on the vault, and Key
+  Vault Crypto Officer only on the keys the kit rotates or disables: `tck-data`, `tck-disposable` and the three
+  signing keys. As a subscription Owner, after the apply:
+
+  ```bash
+  VAULT_ID=$(terraform -chdir=cloud-testing/infra/azure/keys output -raw vault_id)
+  PRINCIPAL=$(az ad sp list --display-name halyx-test --query '[0].id' -o tsv)
+  az role assignment create --assignee-object-id "$PRINCIPAL" --assignee-principal-type ServicePrincipal \
+      --role "Key Vault Crypto User" --scope "$VAULT_ID"
+  for key in tck-data tck-disposable tck-rsa tck-p256 tck-p384; do
+    az role assignment create --assignee-object-id "$PRINCIPAL" --assignee-principal-type ServicePrincipal \
+        --role "Key Vault Crypto Officer" --scope "$VAULT_ID/keys/$key"
+  done
+  ```
 - Server-side encryption: when tier 1 is given the keys stack's `vault_id` and `server_side_key_id`, the run's
   storage account gets a system-assigned identity, Key Vault Crypto Service Encryption User on `tck-server-side`,
   and an encryption scope `halyxtckcmk` on it. The role assignment goes with the run. The test principal may assign
