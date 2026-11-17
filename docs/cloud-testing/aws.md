@@ -671,12 +671,15 @@ terraform -chdir=cloud-testing/infra/aws/keys apply -var region=ap-southeast-2 -
 | `tck-other` | symmetric | a second encryption key: re-wrapping, data sealed for two keys |
 | `tck-disposable` | symmetric | disabled and enabled again by the key store kit |
 | `tck-server-side` | symmetric | S3 SSE-KMS, SSM `SecureString` and Secrets Manager |
+| `tck-blobs`, `tck-fields`, `tck-parameters` | symmetric | the blob, document and parameter encryption kits' keys |
+| `tck-tenant-a`, `tck-tenant-b` | symmetric | the encryption kits' keys per tenant |
 | `tck-rsa` | RSA 2048, sign and verify | RSA-PSS and PKCS#1 signatures, JWTs |
 | `tck-p256` | ECC P-256, sign and verify | ES256 signatures, JWTs |
 | `tck-p384` | ECC P-384, sign and verify | ES384 signatures |
 | `tck-mac` | HMAC 256 | MACs |
 
-- The names match the emulator tests' (`AwsKeyStoreConformanceIT`).
+- The tests use a key store with the prefix `tck-`, so the kits' own names (`data`, `blobs`, `tenant-a`) find
+  these keys, and listing stays within them.
 - The keys are tagged `halyx-keys=long-lived`, never `halyx-test`, so no run's permissions or teardown check reach
   them. Their aliases start `tck-`, outside the `halyx-*` aliases a run may create and delete.
 - The customer-managed policy `halyx-test-keys`, attached to the test user, allows only what the tests do:
@@ -685,7 +688,7 @@ terraform -chdir=cloud-testing/infra/aws/keys apply -var region=ap-southeast-2 -
   only; and `kms:ListAliases`. Listing describes every key it finds, so the tests list under the `tck-` prefix.
 - If a run stops after disabling `tck-disposable` and before enabling it again, applying the Terraform again
   enables it.
-- Each key costs USD 1 a month, and each of a key's first two rotations another USD 1 a month. On-demand rotations
+- Each of the 13 keys costs USD 1 a month, and each of a key's first two rotations another USD 1 a month. On-demand rotations
   per key are limited for the key's life, which the key store kit's rotation case counts against.
 
 ## IAM for tier 1

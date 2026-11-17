@@ -727,13 +727,16 @@ Two key rings, both named `halyx-tck`: a global one with every key below, and on
 | `tck-other` | symmetric | a second encryption key: re-wrapping, data sealed for two keys |
 | `tck-disposable` | symmetric | disabled and enabled again by the key store kit |
 | `tck-server-side` | symmetric | global: Secret Manager (automatic replication) and global parameters; regional: the run's bucket and regional parameters |
+| `tck-blobs`, `tck-fields`, `tck-parameters` | symmetric | the blob, document and parameter encryption kits' keys |
+| `tck-tenant-a`, `tck-tenant-b` | symmetric | the encryption kits' keys per tenant |
 | `tck-rsa` | RSA 2048, PKCS#1 | RS256 signatures, JWTs |
 | `tck-rsa-pss` | RSA 2048, PSS | PS256 signatures (a Cloud KMS key has one algorithm) |
 | `tck-p256` | EC P-256 | ES256 signatures, JWTs |
 | `tck-p384` | EC P-384 | ES384 signatures |
 | `tck-mac` | HMAC SHA-256 | MACs |
 
-- The names match the emulator tests' (`GcpKeyStoreConformanceIT`). The keys are labelled
+- The tests use a key store with the prefix `tck-`, so the kits' own names (`data`, `blobs`, `tenant-a`) find
+  these keys. The keys are labelled
   `halyx-keys=long-lived`, never `halyx-test`.
 - The test service account has Encrypter/Decrypter, Signer/Verifier, Public Key Viewer and Viewer on the global
   ring, and Viewer on the regional one.

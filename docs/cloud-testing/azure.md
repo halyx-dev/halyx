@@ -619,11 +619,14 @@ terraform -chdir=cloud-testing/infra/azure/keys apply -var location=australiaeas
 | `tck-other` | RSA 2048, wrap and unwrap | a second encryption key: re-wrapping, data sealed for two keys |
 | `tck-disposable` | RSA 2048, wrap and unwrap | disabled and enabled again by the key store kit |
 | `tck-server-side` | RSA 2048, wrap and unwrap | the run's blob encryption scope |
+| `tck-blobs`, `tck-fields`, `tck-parameters` | RSA 2048, wrap and unwrap | the blob, document and parameter encryption kits' keys |
+| `tck-tenant-a`, `tck-tenant-b` | RSA 2048, wrap and unwrap | the encryption kits' keys per tenant |
 | `tck-rsa` | RSA 2048, sign and verify | PS256 and RS256 signatures, JWTs |
 | `tck-p256` | EC P-256, sign and verify | ES256 signatures, JWTs |
 | `tck-p384` | EC P-384, sign and verify | ES384 signatures |
 
-- The names match the emulator tests' (`AzureKeyStoreConformanceIT`). Key Vault Standard has no MAC keys (only
+- The tests use a key store with the prefix `tck-`, so the kits' own names (`data`, `blobs`, `tenant-a`) find
+  these keys. Key Vault Standard has no MAC keys (only
   Managed HSM does), so there is no `tck-mac`.
 - The resource group and vault are tagged `halyx-keys=long-lived`, never `halyx-test`.
 - The test principal has Key Vault Crypto User on the vault, and Key Vault Crypto Officer only on the keys the kit

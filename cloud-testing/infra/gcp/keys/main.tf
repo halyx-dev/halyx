@@ -65,18 +65,23 @@ provider "google-beta" {
 }
 
 locals {
-  # The names match the emulator tests' (GcpKeyStoreConformanceIT), so the real-cloud tests can use the same ones.
+  # The tests use a key store with the prefix tck-, so the kits' own names (data, blobs, tenant-a, ...) find these.
   # A Cloud KMS key has one algorithm, so RSA-PSS needs a key of its own.
   keys = {
     "tck-data"        = { purpose = "ENCRYPT_DECRYPT", algorithm = "GOOGLE_SYMMETRIC_ENCRYPTION" } # the kit rotates it
     "tck-other"       = { purpose = "ENCRYPT_DECRYPT", algorithm = "GOOGLE_SYMMETRIC_ENCRYPTION" } # re-wrapping, two keys
     "tck-disposable"  = { purpose = "ENCRYPT_DECRYPT", algorithm = "GOOGLE_SYMMETRIC_ENCRYPTION" } # the kit disables it
     "tck-server-side" = { purpose = "ENCRYPT_DECRYPT", algorithm = "GOOGLE_SYMMETRIC_ENCRYPTION" } # Secret and Parameter Manager
-    "tck-rsa"         = { purpose = "ASYMMETRIC_SIGN", algorithm = "RSA_SIGN_PKCS1_2048_SHA256" }  # RS256, JWTs
-    "tck-rsa-pss"     = { purpose = "ASYMMETRIC_SIGN", algorithm = "RSA_SIGN_PSS_2048_SHA256" }    # PS256
-    "tck-p256"        = { purpose = "ASYMMETRIC_SIGN", algorithm = "EC_SIGN_P256_SHA256" }         # ES256, JWTs
-    "tck-p384"        = { purpose = "ASYMMETRIC_SIGN", algorithm = "EC_SIGN_P384_SHA384" }         # ES384
-    "tck-mac"         = { purpose = "MAC", algorithm = "HMAC_SHA256" }                             # MACs
+    "tck-blobs"       = { purpose = "ENCRYPT_DECRYPT", algorithm = "GOOGLE_SYMMETRIC_ENCRYPTION" } # the blob encryption kit
+    "tck-fields"      = { purpose = "ENCRYPT_DECRYPT", algorithm = "GOOGLE_SYMMETRIC_ENCRYPTION" } # the document encryption kit
+    "tck-parameters"  = { purpose = "ENCRYPT_DECRYPT", algorithm = "GOOGLE_SYMMETRIC_ENCRYPTION" } # the parameter encryption kit
+    "tck-tenant-a"    = { purpose = "ENCRYPT_DECRYPT", algorithm = "GOOGLE_SYMMETRIC_ENCRYPTION" } # the kits' keys per tenant
+    "tck-tenant-b"    = { purpose = "ENCRYPT_DECRYPT", algorithm = "GOOGLE_SYMMETRIC_ENCRYPTION" }
+    "tck-rsa"         = { purpose = "ASYMMETRIC_SIGN", algorithm = "RSA_SIGN_PKCS1_2048_SHA256" } # RS256, JWTs
+    "tck-rsa-pss"     = { purpose = "ASYMMETRIC_SIGN", algorithm = "RSA_SIGN_PSS_2048_SHA256" }   # PS256
+    "tck-p256"        = { purpose = "ASYMMETRIC_SIGN", algorithm = "EC_SIGN_P256_SHA256" }        # ES256, JWTs
+    "tck-p384"        = { purpose = "ASYMMETRIC_SIGN", algorithm = "EC_SIGN_P384_SHA384" }        # ES384
+    "tck-mac"         = { purpose = "MAC", algorithm = "HMAC_SHA256" }                            # MACs
   }
   # The key store kit rotates the encryption key and every signing key, and disables and enables tck-disposable.
   kit = ["tck-data", "tck-disposable", "tck-rsa", "tck-rsa-pss", "tck-p256", "tck-p384"]

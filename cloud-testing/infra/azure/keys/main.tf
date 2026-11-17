@@ -65,15 +65,20 @@ locals {
   tags = { halyx-keys = "long-lived" }
   # Vault names are global; this one is stable per subscription.
   vault = "halyx-keys-${substr(sha1(data.azurerm_client_config.current.subscription_id), 0, 8)}"
-  # The names match the emulator tests' (AzureKeyStoreConformanceIT), so the real-cloud tests can use the same ones.
+  # The tests use a key store with the prefix tck-, so the kits' own names (data, blobs, tenant-a, ...) find these.
   # Key Vault Standard has no MAC keys (only Managed HSM does), so there's no tck-mac here.
   wrap = ["wrapKey", "unwrapKey"]
   sign = ["sign", "verify"]
   keys = {
-    "tck-data"        = { type = "RSA", size = 2048, curve = null, ops = local.wrap }   # the kit rotates it
-    "tck-other"       = { type = "RSA", size = 2048, curve = null, ops = local.wrap }   # re-wrapping, two keys
-    "tck-disposable"  = { type = "RSA", size = 2048, curve = null, ops = local.wrap }   # the kit disables it
-    "tck-server-side" = { type = "RSA", size = 2048, curve = null, ops = local.wrap }   # blob encryption scopes
+    "tck-data"        = { type = "RSA", size = 2048, curve = null, ops = local.wrap } # the kit rotates it
+    "tck-other"       = { type = "RSA", size = 2048, curve = null, ops = local.wrap } # re-wrapping, two keys
+    "tck-disposable"  = { type = "RSA", size = 2048, curve = null, ops = local.wrap } # the kit disables it
+    "tck-server-side" = { type = "RSA", size = 2048, curve = null, ops = local.wrap } # blob encryption scopes
+    "tck-blobs"       = { type = "RSA", size = 2048, curve = null, ops = local.wrap } # the blob encryption kit
+    "tck-fields"      = { type = "RSA", size = 2048, curve = null, ops = local.wrap } # the document encryption kit
+    "tck-parameters"  = { type = "RSA", size = 2048, curve = null, ops = local.wrap } # the parameter encryption kit
+    "tck-tenant-a"    = { type = "RSA", size = 2048, curve = null, ops = local.wrap } # the kits' keys per tenant
+    "tck-tenant-b"    = { type = "RSA", size = 2048, curve = null, ops = local.wrap }
     "tck-rsa"         = { type = "RSA", size = 2048, curve = null, ops = local.sign }   # PS256, RS256, JWTs
     "tck-p256"        = { type = "EC", size = null, curve = "P-256", ops = local.sign } # ES256, JWTs
     "tck-p384"        = { type = "EC", size = null, curve = "P-384", ops = local.sign } # ES384

@@ -55,12 +55,17 @@ provider "aws" {
 }
 
 locals {
-  # The names match the emulator tests' (AwsKeyStoreConformanceIT), so the real-cloud tests can use the same ones.
+  # The tests use a key store with the prefix tck-, so the kits' own names (data, blobs, tenant-a, ...) find these.
   keys = {
     "tck-data"        = { spec = "SYMMETRIC_DEFAULT", usage = "ENCRYPT_DECRYPT", purpose = "the encryption key; the key store kit rotates it on demand" }
     "tck-other"       = { spec = "SYMMETRIC_DEFAULT", usage = "ENCRYPT_DECRYPT", purpose = "a second encryption key, for re-wrapping and data sealed for two keys" }
     "tck-disposable"  = { spec = "SYMMETRIC_DEFAULT", usage = "ENCRYPT_DECRYPT", purpose = "disabled and enabled again by the key store kit" }
     "tck-server-side" = { spec = "SYMMETRIC_DEFAULT", usage = "ENCRYPT_DECRYPT", purpose = "server-side encryption: S3 SSE-KMS, SSM SecureString, Secrets Manager" }
+    "tck-blobs"       = { spec = "SYMMETRIC_DEFAULT", usage = "ENCRYPT_DECRYPT", purpose = "the blob encryption kit's key" }
+    "tck-fields"      = { spec = "SYMMETRIC_DEFAULT", usage = "ENCRYPT_DECRYPT", purpose = "the document encryption kit's key" }
+    "tck-parameters"  = { spec = "SYMMETRIC_DEFAULT", usage = "ENCRYPT_DECRYPT", purpose = "the parameter encryption kit's key" }
+    "tck-tenant-a"    = { spec = "SYMMETRIC_DEFAULT", usage = "ENCRYPT_DECRYPT", purpose = "the encryption kits' first key per tenant" }
+    "tck-tenant-b"    = { spec = "SYMMETRIC_DEFAULT", usage = "ENCRYPT_DECRYPT", purpose = "the encryption kits' second key per tenant" }
     "tck-rsa"         = { spec = "RSA_2048", usage = "SIGN_VERIFY", purpose = "RSA-PSS and PKCS#1 signing, and JWTs" }
     "tck-p256"        = { spec = "ECC_NIST_P256", usage = "SIGN_VERIFY", purpose = "ES256 signing, and JWTs" }
     "tck-p384"        = { spec = "ECC_NIST_P384", usage = "SIGN_VERIFY", purpose = "ES384 signing" }
