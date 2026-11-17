@@ -47,7 +47,7 @@ variable "location" {
 }
 
 provider "azurerm" {
-  resource_provider_registrations = "none" # registered by azure-setup-test-principal.sh
+  resource_provider_registrations = "none" # registered when the test principal is set up (docs/cloud-testing/azure.md)
   features {
     key_vault {
       purge_soft_delete_on_destroy    = true # if this is ever destroyed, free the vault's name

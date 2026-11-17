@@ -31,12 +31,12 @@
 # 3. Always, even if tests fail or the script is interrupted: terraform destroy, and list what remains (expected:
 #    nothing).
 #
-# Acts as the test service principal (~/.azure/halyx-test.env, see azure-setup-test-principal.sh), which may assign
+# Acts as the test service principal (~/.azure/halyx-test.env, set up as docs/cloud-testing/azure.md says), which may assign
 # only the data-plane roles the tests use; the registry's admin credentials stand in for AcrPull.
 set -uo pipefail
 
 CREDS="${AZURE_CREDENTIALS_FILE:-$HOME/.azure/halyx-test.env}"
-[[ -r "$CREDS" ]] || { echo "No service principal credentials at $CREDS"; exit 1; }
+[[ -r "$CREDS" ]] || { echo "No service principal credentials at $CREDS (see docs/cloud-testing/azure.md)"; exit 1; }
 set -a; source "$CREDS"; set +a
 for v in AZURE_CLIENT_ID AZURE_CLIENT_SECRET AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID; do
   [[ -n "${!v:-}" ]] || { echo "$v is missing from $CREDS"; exit 1; }
