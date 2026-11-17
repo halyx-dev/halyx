@@ -185,6 +185,22 @@ What the runs found:
   credentials), and Service Bus and Event Hubs namespaces share one DNS zone, so their names must differ. The
   subscription offers `Standard_B2s_v2` for AKS but not `Standard_B2s`.
 
+## Keys across clouds
+
+Data can be sealed for keys on several clouds at once, and any one of them opens it (see
+[Keys](../api/keys.md#several-keys-rotation-and-moving-data)). `cloud-testing/scripts/cross-cloud-keys.sh` tests that
+with the long-lived `tck-data` keys on AWS KMS, Azure Key Vault and Google Cloud KMS, from one Spring Boot
+application on Boot 3.5 and 4:
+
+- data sealed for all three keys opens on each cloud with the other two entries removed, and on no other cloud;
+- adding a key on another cloud, moving an entry from one cloud to another and removing entries leave the encrypted
+  body unchanged;
+- a stream and the reactive view seal for all three keys as well.
+
+The script needs each cloud's test identity, set up as for that cloud's tier 1 run, and the keys stacks' Terraform
+state on the machine that applied them. It creates nothing, so it has no teardown; a run makes a few dozen key
+operations. It hasn't run against the real clouds yet.
+
 ## Not yet tested on a real cloud
 
 | Cloud | Service | Why |
