@@ -278,6 +278,9 @@ secrets.put("db/password", password);   // a new secret, encrypted with orders-s
   Google Cloud, the Secret Manager or Parameter Manager service agent needs
   `roles/cloudkms.cryptoKeyEncrypterDecrypter` on it.
 
+On the memory provider, a test can check which key a parameter was created with through `InMemoryParameters` (see
+[Testing with the memory provider](keys.md#testing-with-the-memory-provider)).
+
 In Spring Boot, set `server-side-key` on the store: see [Spring Boot](../spring-boot.md#parameters-and-secrets).
 
 ## Native names

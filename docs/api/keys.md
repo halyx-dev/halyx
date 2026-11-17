@@ -311,3 +311,22 @@ memory.remove("orders-data");     // every use raises NotFoundException
 ```
 
 It declares every capability.
+
+The memory provider's blob and parameter stores take server-side keys too
+([blobs](storage.md#server-side-encryption-with-a-key), [parameters](parameters.md#server-side-encryption-with-a-key)).
+The portable API doesn't report which key a cloud service encrypted something with, so the memory provider records
+it, and `InMemoryBlobs` and `InMemoryParameters` let a test check it. Each answers with the key's native id, empty
+for the service's default encryption or when there is no such blob or parameter:
+
+```java
+BlobStore blobs = memoryProvider.blobStore("receipts");
+blobs.withServerSideKey(key).put(BlobKey.of("o-1001.pdf"), BlobContent.ofBytes(pdf));
+assertThat(blobs.unwrap(InMemoryBlobs.class).serverSideKey(BlobKey.of("o-1001.pdf")))
+        .contains(key.metadata().nativeId());
+
+ParameterStore secrets = memoryProvider.parameterStore(
+        ParameterStoreConfig.secrets().prefix("orders").serverSideKey(key).build());
+secrets.put("db/password", password);
+assertThat(secrets.unwrap(InMemoryParameters.class).serverSideKey("orders/db/password"))   // the full name
+        .contains(key.metadata().nativeId());
+```

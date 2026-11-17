@@ -341,5 +341,6 @@ ProviderConfig.of("memory")
 
 No settings. Object storage, NoSQL, messaging, events, streams, functions, caches, parameters and secrets, and keys
 live in the JVM; functions are handlers registered with `InMemoryFunctions`, and keys are real JDK keys created with
-`InMemoryKeys` (see [Testing with the memory provider](api/keys.md#testing-with-the-memory-provider)). It's
+`InMemoryKeys`; `InMemoryBlobs` and `InMemoryParameters` report the server-side key each blob and parameter was
+stored with (see [Testing with the memory provider](api/keys.md#testing-with-the-memory-provider)). It's
 ideal for unit tests.
