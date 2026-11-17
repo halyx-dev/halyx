@@ -24,12 +24,17 @@
 #   TIER=3 cloud-testing/scripts/aws-real-cloud.sh                                  # ElastiCache for Valkey with IAM auth
 #   TIER=4 cloud-testing/scripts/aws-real-cloud.sh                                  # streams on MSK Serverless with IAM
 #   TIER=5 cloud-testing/scripts/aws-real-cloud.sh                                  # cloud logins: an assumed role
+#   KEY_ROTATION=1 cloud-testing/scripts/aws-real-cloud.sh                          # tier 1, rotating tck-data too
 #
 # Tier 1 (the default):
 # 1. Terraform creates an S3 bucket and two DynamoDB tables named after a fresh run id (tagged halyx-test=<id>).
 # 2. RealAwsIT runs the blob, document store, messaging and parameter kits; it creates SNS topics and SQS queues
 #    named after the run, and parameters and secrets under tck-<random> names, and deletes them as it goes.
-# 3. Always, even if tests fail or the script is interrupted: sweep anything of this run the tests left behind,
+# 3. RealAwsKeysIT runs the key store kit on the long-lived KMS keys (cloud-testing/infra/aws/keys, applied once by
+#    an administrator), and the blob, document and parameter kits through encrypted views and with server-side keys.
+#    It's skipped, with a note, when those keys aren't there. On-demand rotations per KMS key are limited for the
+#    key's life, so the kit rotates tck-data only with KEY_ROTATION=1.
+# 4. Always, even if tests fail or the script is interrupted: sweep anything of this run the tests left behind,
 #    terraform destroy, and list what remains (expected: nothing).
 #
 # Tier 2: Terraform creates RDS PostgreSQL and MySQL instances (db.t4g.micro, IAM auth on, no backups) that
@@ -313,8 +318,19 @@ EVENT_BUS=$(terraform -chdir="$TF_DIR" output -raw event_bus)
 EVENTS_INBOX=$(terraform -chdir="$TF_DIR" output -raw events_inbox)
 FUNCTION=$(terraform -chdir="$TF_DIR" output -raw function)
 
+# The long-lived keys: present once cloud-testing/infra/aws/keys has been applied in this account and region.
+KEYS=false
+if aws kms describe-key --key-id alias/tck-data >/dev/null 2>&1; then
+  KEYS=true
+else
+  echo "No long-lived keys (alias/tck-data) in $AWS_REGION: the key tests are skipped. See docs/cloud-testing/aws.md."
+fi
+ROTATE=false
+[[ "${KEY_ROTATION:-}" == 1 ]] && ROTATE=true
+
 log "Running the conformance kits against real AWS"
-mvn -o verify -pl halyx-aws -Dit.test="${IT_TEST:-RealAwsIT}" -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+mvn -o verify -pl halyx-aws -Dit.test="${IT_TEST:-RealAwsIT,RealAwsKeysIT}" -Dtest=none \
+    -Dsurefire.failIfNoSpecifiedTests=false -Dhalyx.real.aws.keys="$KEYS" -Dhalyx.real.keys.rotate="$ROTATE" \
     -Dhalyx.real.aws=true -Dhalyx.real.aws.run="$RUN" -Dhalyx.real.aws.bucket="$BUCKET" \
     -Dhalyx.real.aws.items-table="$ITEMS" -Dhalyx.real.aws.items-sorted-table="$ITEMS_SORTED" \
     -Dhalyx.real.aws.event-bus="$EVENT_BUS" -Dhalyx.real.aws.events-inbox="$EVENTS_INBOX" \
@@ -325,12 +341,13 @@ status=$?
 # Spring Boot 3 and 4: an auto-configured repository on the run's table with a sort key, the event bus,
 # halyx-reactor's WebFlux, reactive repository and event beans over the bucket, table and bus, @HalyxListener on
 # the run's SNS topic and queue with a claim check, spring.config.import from SSM and Secrets Manager, and a
-# FunctionInvoker bean on the run's function.
+# FunctionInvoker bean on the run's function; and keys from properties on the long-lived KMS keys, JWTs signed by
+# KMS, and encrypted and server-side-keyed stores.
 mvn -o -q install -DskipTests -pl halyx-spring-boot-autoconfigure -am || exit 1
 for module in halyx-spring-boot-autoconfigure halyx-spring-boot4-tests; do
   log "Running the Spring Boot repository, event and reactive tests ($module) against real AWS"
-  mvn -o verify -pl "$module" -Dit.test="${SPRING_IT_TEST:-RealSpringRepositoryIT,RealSpringEventIT,RealSpringReactiveIT,RealSpringMessagingIT,RealSpringParametersIT,RealSpringFunctionIT}" -Dtest=none \
-      -Dsurefire.failIfNoSpecifiedTests=false \
+  mvn -o verify -pl "$module" -Dit.test="${SPRING_IT_TEST:-RealSpringRepositoryIT,RealSpringEventIT,RealSpringReactiveIT,RealSpringMessagingIT,RealSpringParametersIT,RealSpringFunctionIT,RealSpringKeysIT}" -Dtest=none \
+      -Dsurefire.failIfNoSpecifiedTests=false -Dhalyx.real.spring.keys="$KEYS" \
       -Dhalyx.real.spring.repositories=true -Dhalyx.real.spring.events=true -Dhalyx.real.spring.reactive=true \
       -Dhalyx.real.spring.messaging=true -Dhalyx.real.spring.parameters=true -Dhalyx.real.spring.functions=true \
       -Dhalyx.real.spring.function="$FUNCTION" \

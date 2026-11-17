@@ -746,7 +746,20 @@ Two key rings, both named `halyx-tck`: a global one with every key below, and on
 - The Cloud Storage, Secret Manager and Parameter Manager service agents have Encrypter/Decrypter on the
   `tck-server-side` keys they use.
 - Each key version is billed while it's enabled or disabled, so every rotation adds to the monthly cost until the
-  old version is destroyed.
+  old version is destroyed. The key store kit rotates keys only with `KEY_ROTATION=1`, and that run's teardown
+  destroys every version but the newest of each key it rotated.
+
+A tier 1 run reads the key rings from the keys stack's Terraform state on the machine it runs on, and without it
+skips the key tests with a note. `RealGcpKeysIT` runs the key store kit on the keys (RSA-PSS, P-384 and MACs
+included, which the emulator lacks); the blob, document, Secret Manager and Parameter Manager kits through views
+sealed with them; the blob and parameter encryption kits; and the server-side key kits for Cloud Storage (regional
+key), Secret Manager (global key) and Parameter Manager (both), which check the key each service records.
+`RealSpringKeysIT`, on Boot 3.5 and 4, configures keys from properties, signs JWTs on Cloud KMS, and uses an
+encrypted blob store, an encrypted secrets store and a blob store with the regional server-side key.
+
+```bash
+KEY_ROTATION=1 GCP_PROJECT=<project> GCP_IMPERSONATE=<test service account> cloud-testing/scripts/gcp-real-cloud.sh
+```
 
 ## IAM
 

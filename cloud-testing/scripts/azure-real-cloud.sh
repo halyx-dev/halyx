@@ -37,7 +37,12 @@
 # 2. RealAzureIT runs the blob, document store, messaging and parameter kits; it creates Service Bus topics,
 #    subscriptions and queues named after the run. Its key rotation tests keep keys in the run's Key Vault and
 #    change them there while clients are open.
-# 3. Always, even if tests fail or the script is interrupted: terraform destroy (the resource group with
+# 3. RealAzureKeysIT runs the key store kit on the long-lived Key Vault keys (cloud-testing/infra/azure/keys, applied
+#    once by a subscription Owner; its Terraform state is read here for the vault), and the blob, document and
+#    parameter kits through encrypted views. Tier 1 gives the run's storage account an encryption scope on the
+#    long-lived tck-server-side key for the server-side key kit. Without the keys stack's state, the key tests are
+#    skipped, with a note.
+# 4. Always, even if tests fail or the script is interrupted: terraform destroy (the resource group with
 #    everything in it; the Key Vault and App Configuration store are purged, not left soft-deleted), and list
 #    what remains (expected: nothing).
 #
@@ -72,6 +77,20 @@ TIER="${TIER:-1}"
 TF_DIR="$ROOT/cloud-testing/infra/azure/tier$TIER"
 RUN="r$(date +%y%m%d%H%M)$(openssl rand -hex 2)"
 TF_VARS=(-var "location=$LOCATION" -var "run_id=$RUN")
+# The long-lived keys: their vault, read from the keys stack's Terraform state on this machine.
+KEYS_DIR="$ROOT/cloud-testing/infra/azure/keys"
+KEYS=false
+KEYS_VAULT_URL=""
+if [[ "$TIER" == 1 ]]; then
+  if KEYS_VAULT_URL="$(terraform -chdir="$KEYS_DIR" output -raw vault_url 2>/dev/null)" && [[ "$KEYS_VAULT_URL" == https://* ]]; then
+    KEYS=true
+    TF_VARS+=(-var "keys_vault_id=$(terraform -chdir="$KEYS_DIR" output -raw vault_id)"
+              -var "server_side_key_id=$(terraform -chdir="$KEYS_DIR" output -raw server_side_key_id)")
+  else
+    KEYS_VAULT_URL=""
+    echo "No state in cloud-testing/infra/azure/keys: the key tests are skipped. See docs/cloud-testing/azure.md."
+  fi
+fi
 # az takes --subscription after the command, not before it.
 az_() { az "$@" --subscription "$AZURE_SUBSCRIPTION_ID" --only-show-errors; }
 
@@ -298,7 +317,11 @@ wait_for_blob_access
 sleep 30 # the other services' assignments were made at the same time; give them a little longer
 
 log "Running the conformance kits against real Azure"
-mvn -o verify -pl halyx-azure -Dit.test="${IT_TEST:-RealAzureIT}" -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+ENCRYPTION_SCOPE="$(terraform -chdir="$TF_DIR" output -raw encryption_scope 2>/dev/null || true)"
+mvn -o verify -pl halyx-azure -Dit.test="${IT_TEST:-RealAzureIT,RealAzureKeysIT}" -Dtest=none \
+    -Dsurefire.failIfNoSpecifiedTests=false \
+    -Dhalyx.real.azure.keys="$KEYS" -Dhalyx.real.azure.keys-vault-url="$KEYS_VAULT_URL" \
+    -Dhalyx.real.azure.encryption-scope="$ENCRYPTION_SCOPE" \
     -Dhalyx.real.azure=true -Dhalyx.real.azure.run="$RUN" \
     -Dhalyx.real.azure.storage-account="$STORAGE" -Dhalyx.real.azure.container="$CONTAINER" \
     -Dhalyx.real.azure.servicebus-namespace="$(terraform -chdir="$TF_DIR" output -raw servicebus_namespace)" \
@@ -313,12 +336,15 @@ status=$?
 [[ -n "${IT_TEST:-}" && -z "${SPRING_IT_TEST:-}" ]] && exit $status
 # Spring Boot 3 and 4: an auto-configured repository on the run's table with a sort key, the event bus, the
 # reactive beans, @HalyxListener on the run's Service Bus topic with a claim check, spring.config.import from
-# Key Vault and App Configuration, and a FunctionInvoker bean on the run's function with its function key.
+# Key Vault and App Configuration, a FunctionInvoker bean on the run's function with its function key; and keys from
+# properties on the long-lived Key Vault keys, JWTs signed there, and encrypted and server-side-keyed stores.
 mvn -o -q install -DskipTests -pl halyx-spring-boot-autoconfigure -am || exit 1
 for module in halyx-spring-boot-autoconfigure halyx-spring-boot4-tests; do
   log "Running the Spring Boot repository, event and reactive tests ($module) against real Azure"
-  mvn -o verify -pl "$module" -Dit.test="${SPRING_IT_TEST:-RealSpringRepositoryIT,RealSpringEventIT,RealSpringReactiveIT,RealSpringMessagingIT,RealSpringParametersIT,RealSpringFunctionIT}" -Dtest=none \
+  mvn -o verify -pl "$module" -Dit.test="${SPRING_IT_TEST:-RealSpringRepositoryIT,RealSpringEventIT,RealSpringReactiveIT,RealSpringMessagingIT,RealSpringParametersIT,RealSpringFunctionIT,RealSpringKeysIT}" -Dtest=none \
       -Dsurefire.failIfNoSpecifiedTests=false \
+      -Dhalyx.real.spring.keys="$KEYS" -Dhalyx.real.spring.key-store-location="$KEYS_VAULT_URL" \
+      -Dhalyx.real.spring.server-side-key-properties="halyx.blob-stores.receipts.server-side-key.properties.azure.storage.encryption-scope=$ENCRYPTION_SCOPE" \
       -Dhalyx.real.spring.repositories=true -Dhalyx.real.spring.events=true -Dhalyx.real.spring.reactive=true \
       -Dhalyx.real.spring.messaging=true -Dhalyx.real.spring.parameters=true -Dhalyx.real.spring.functions=true \
       -Dhalyx.real.spring.function=tck \
