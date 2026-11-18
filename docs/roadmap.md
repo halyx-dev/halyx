@@ -22,7 +22,7 @@ end.
 | Stage | Work |
 |---|---|
 | **Released** | [1.1.0](#release-110), with Kotlin coroutines, function invocation and rotated keys, on 2 November 2026; [1.0.2](#release-102), a patch release, on 25 October 2026; [1.0.1](#release-101), a patch release, and [1.0.0](#release-100), the first release, both on 23 October 2026; all on Maven Central |
-| **Coming next** | [Planned additions](#coming-next): R2DBC through the Cloud SQL connector, and more real-cloud test runs |
+| **Coming next** | [1.2.0](#release-120-planned): key management, R2DBC through the Cloud SQL connector, and non-blocking I/O for the last blocking calls; [1.3.0](#release-130-planned): more real-cloud test runs |
 | **Delivered** | [20 milestones](#delivered): every service on AWS, Azure and Google Cloud, Spring Boot 3.5 and 4, reactive and asynchronous APIs, Kotlin coroutines, function invocation, rotated keys and passwords, a portable microservice on EKS, GKE and AKS, cloud logins across clouds, and key management, for 1.2.0 |
 
 ## Released
@@ -83,14 +83,23 @@ The first release on Maven Central, on 23 October 2026.
 
 ## Coming next
 
-Additions planned on top of 1.1.0.
+### Release 1.2.0 (planned)
+
+1.2.x will be the long-term support line. 1.2.0 adds [key management](#delivered) (milestone 20,
+[#47](https://github.com/halyx-dev/halyx/issues/47)), released once the real-cloud runs and a cryptography review of
+its format are done, and:
 
 | Item | Area | Today |
 |---|---|---|
 | R2DBC through the Cloud SQL connector ([#43](https://github.com/halyx-dev/halyx/issues/43)) | R2DBC | R2DBC connects to Cloud SQL directly, with IAM login; JDBC also works through the connector |
+| Fully non-blocking I/O for Google Cloud Storage, Service Bus receives, and Cosmos DB and Firestore read-then-write calls ([#46](https://github.com/halyx-dev/halyx/issues/46)) | Asynchronous I/O | These calls work and run on virtual threads, so they hold no platform thread while they wait; they become non-blocking when the SDKs allow it |
+
+### Release 1.3.0 (planned)
+
+| Item | Area | Today |
+|---|---|---|
 | A real-cloud run on MSK Serverless with IAM, including transactions ([#44](https://github.com/halyx-dev/halyx/issues/44)) | Streams | Tested on Kafka 3.9 and 4.2.1 brokers, and on real Event Hubs and Managed Kafka. The run is ready ([AWS tier 4](cloud-testing/aws.md#tier-4-not-run)) and needs an AWS account plan that includes MSK |
 | A real-cloud run on Azure Database for MySQL with Entra ID ([#45](https://github.com/halyx-dev/halyx/issues/45)) | SQL databases | The run needs a directory-level grant in the test tenant |
-| Fully non-blocking I/O for Google Cloud Storage, Service Bus receives, and Cosmos DB and Firestore read-then-write calls ([#46](https://github.com/halyx-dev/halyx/issues/46)) | Asynchronous I/O | These calls work and run on virtual threads, so they hold no platform thread while they wait; they become non-blocking when the SDKs allow it |
 
 ## Delivered
 
