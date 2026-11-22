@@ -141,6 +141,7 @@ final class AwsConnection implements ProviderConnection {
     private KmsAsyncClient kmsAsync;
     private AwsCredentialsProvider credentials;
     private StsClient sts;
+    private String callerAccount;
 
     AwsConnection(ProviderConfig config) {
         this.config = config;
@@ -249,6 +250,22 @@ final class AwsConnection implements ProviderConnection {
     }
 
     /** The non-blocking KMS client, made on the first asynchronous call. */
+    /**
+     * The account the connection's credentials belong to, from STS {@code GetCallerIdentity} (which needs no
+     * permission), asked once: a KMS key store's own keys are this account's.
+     */
+    private synchronized String callerAccount() {
+        if (callerAccount == null) {
+            var builder = StsClient.builder().region(region()).credentialsProvider(credentials()).httpClient(http())
+                    .overrideConfiguration(overrides());
+            config.endpoint().ifPresent(builder::endpointOverride);
+            try (StsClient client = builder.build()) {
+                callerAccount = client.getCallerIdentity().account();
+            }
+        }
+        return callerAccount;
+    }
+
     private synchronized KmsAsyncClient kmsAsync() {
         if (kmsAsync == null) {
             var builder = KmsAsyncClient.builder().region(region()).credentialsProvider(credentials())
@@ -332,7 +349,8 @@ final class AwsConnection implements ProviderConnection {
             config.endpoint().ifPresent(builder::endpointOverride);
             kms = builder.build();
         }
-        return new KmsKeyStoreDriver(kms, region().id(), storeConfig.nativeNames(), this::kmsAsync);
+        return new KmsKeyStoreDriver(kms, region().id(), this::callerAccount, storeConfig.nativeNames(),
+                this::kmsAsync);
     }
 
     private ElastiCacheIamTokens iamTokens(CacheConfig cacheConfig, CacheAuth.Iam iam) {

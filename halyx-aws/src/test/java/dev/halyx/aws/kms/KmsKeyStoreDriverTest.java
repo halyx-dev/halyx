@@ -24,10 +24,18 @@ import dev.halyx.error.UnavailableException;
 import dev.halyx.keys.KeyMetadata;
 import dev.halyx.keys.KeyPurpose;
 import dev.halyx.keys.SigningAlgorithm;
+import dev.halyx.keys.WrappedKey;
 import org.junit.jupiter.api.Test;
 import software.amazon.awssdk.awscore.exception.AwsErrorDetails;
+import software.amazon.awssdk.core.SdkBytes;
 import software.amazon.awssdk.services.kms.KmsClient;
 import software.amazon.awssdk.services.kms.model.AliasListEntry;
+import software.amazon.awssdk.services.kms.model.DecryptRequest;
+import software.amazon.awssdk.services.kms.model.DecryptResponse;
+import software.amazon.awssdk.services.kms.model.EncryptRequest;
+import software.amazon.awssdk.services.kms.model.EncryptResponse;
+import software.amazon.awssdk.services.kms.model.ReEncryptRequest;
+import software.amazon.awssdk.services.kms.model.ReEncryptResponse;
 import software.amazon.awssdk.services.kms.model.DescribeKeyRequest;
 import software.amazon.awssdk.services.kms.model.DescribeKeyResponse;
 import software.amazon.awssdk.services.kms.model.KeyState;
@@ -69,6 +77,60 @@ class KmsKeyStoreDriverTest {
         assertThat(driver.inLocation("gcp-kms:" + ARN)).isFalse();
         assertThat(driver.inLocation("aws-kms:arn:aws-cn:kms:eu-west-2:111122223333:key/x"))
                 .as("any partition").isTrue();
+    }
+
+    @Test
+    void theStoresOwnKeysAreTheCallersAccountsWithAnAliasInItsPrefix() {
+        List<String> asked = new ArrayList<>();
+        KmsClient kms = kms(Map.of("listAliases", request -> {
+            ListAliasesRequest list = (ListAliasesRequest) request;
+            asked.add(list.keyId() + "@" + list.marker());
+            return list.marker() == null
+                    ? ListAliasesResponse.builder().truncated(true).nextMarker("page-2")
+                            .aliases(alias("alias/aws/orders-x", ARN), alias("alias/billing-data", ARN)).build()
+                    : ListAliasesResponse.builder().truncated(false).aliases(alias("alias/orders-data", ARN)).build();
+        }));
+        KmsKeyStoreDriver driver = driver(kms, false);
+        String foreign = "aws-kms:" + ARN.replace("111122223333", "444455556666");
+
+        assertThat(driver.inStore("aws-kms:" + ARN, "")).isTrue();
+        assertThat(driver.inStore(foreign, "")).as("another account, even when its key policy allows us").isFalse();
+        assertThat(driver.inStore(foreign, "orders-")).isFalse();
+        assertThat(asked).as("no alias lookup without a prefix, or for another account's key").isEmpty();
+
+        assertThat(driver.inStore("aws-kms:" + ARN, "orders-")).isTrue();
+        assertThat(asked).containsExactly(ARN + "@null", ARN + "@page-2");
+        assertThat(driver.inStore("aws-kms:" + ARN, "shipping-")).isFalse();
+        assertThat(driver(kms, true).inStore("aws-kms:" + ARN, "alias/billing-")).isTrue();
+    }
+
+    @Test
+    void dataKeysAreWrappedWithTheHlxsEncryptionContext() {
+        List<Map<String, String>> contexts = new ArrayList<>();
+        KmsClient kms = kms(Map.of(
+                "encrypt", request -> {
+                    contexts.add(((EncryptRequest) request).encryptionContext());
+                    return EncryptResponse.builder().keyId(ARN).ciphertextBlob(SdkBytes.fromByteArray(new byte[8]))
+                            .build();
+                },
+                "decrypt", request -> {
+                    contexts.add(((DecryptRequest) request).encryptionContext());
+                    return DecryptResponse.builder().keyId(ARN).plaintext(SdkBytes.fromByteArray(new byte[32]))
+                            .build();
+                },
+                "reEncrypt", request -> {
+                    contexts.add(((ReEncryptRequest) request).sourceEncryptionContext());
+                    contexts.add(((ReEncryptRequest) request).destinationEncryptionContext());
+                    return ReEncryptResponse.builder().keyId(ARN).ciphertextBlob(SdkBytes.fromByteArray(new byte[8]))
+                            .build();
+                }));
+        KmsKeyStoreDriver driver = driver(kms, false);
+
+        WrappedKey wrapped = driver.wrapKey("orders-data", Optional.empty(), new byte[32]);
+        driver.unwrapKey(wrapped);
+        driver.rewrapKey(wrapped, "orders-other");
+
+        assertThat(contexts).hasSize(4).allSatisfy(context -> assertThat(context).isEqualTo(Map.of("hlxs", "1")));
     }
 
     @Test
@@ -186,7 +248,7 @@ class KmsKeyStoreDriverTest {
     // Helpers
 
     private static KmsKeyStoreDriver driver(KmsClient kms, boolean nativeNames) {
-        return new KmsKeyStoreDriver(kms, "eu-west-2", nativeNames, () -> {
+        return new KmsKeyStoreDriver(kms, "eu-west-2", () -> "111122223333", nativeNames, () -> {
             throw new AssertionError("no asynchronous calls here");
         });
     }
@@ -221,6 +283,21 @@ class KmsKeyStoreDriverTest {
             case "describeKey" -> {
                 var builder = DescribeKeyRequest.builder();
                 ((Consumer<DescribeKeyRequest.Builder>) consumer).accept(builder);
+                yield builder.build();
+            }
+            case "encrypt" -> {
+                var builder = EncryptRequest.builder();
+                ((Consumer<EncryptRequest.Builder>) consumer).accept(builder);
+                yield builder.build();
+            }
+            case "decrypt" -> {
+                var builder = DecryptRequest.builder();
+                ((Consumer<DecryptRequest.Builder>) consumer).accept(builder);
+                yield builder.build();
+            }
+            case "reEncrypt" -> {
+                var builder = ReEncryptRequest.builder();
+                ((Consumer<ReEncryptRequest.Builder>) consumer).accept(builder);
                 yield builder.build();
             }
             case "verifyMac" -> {

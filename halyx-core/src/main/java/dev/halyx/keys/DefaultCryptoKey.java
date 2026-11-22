@@ -17,7 +17,9 @@ package dev.halyx.keys;
 
 import dev.halyx.capability.Capabilities;
 import dev.halyx.capability.Capability;
+import dev.halyx.error.AccessDeniedException;
 import dev.halyx.error.CloudException;
+import dev.halyx.error.DataIntegrityException;
 import dev.halyx.error.InvalidArgumentException;
 import dev.halyx.error.NotFoundException;
 import dev.halyx.interceptor.AsyncInvocation;
@@ -215,6 +217,7 @@ final class DefaultCryptoKey implements CryptoKey {
         });
         metadata = named;
         metadataReadAtNanos = System.nanoTime();
+        store.resolved(named.keyId());
         return named;
     }
 
@@ -450,9 +453,9 @@ final class DefaultCryptoKey implements CryptoKey {
         WrappedKey replacement;
         if (from == store && store.capabilities().supports(KeyCapability.SERVER_SIDE_REWRAP)) {
             // The data key never leaves the key service; a forged entry still fails the commitment when opened.
-            source = store.entryInLocation(sealed.keys());
-            replacement = store.call("rewrap", nativeName, () -> store.driver().rewrapKey(source, nativeName));
-            store.stats().wrapped();
+            WrappedKey[] rewrapped = serverSideRewrap(sealed);
+            source = rewrapped[0];
+            replacement = rewrapped[1];
         } else {
             Opened opened = open(sealed, from);
             source = opened.entry();
@@ -498,22 +501,54 @@ final class DefaultCryptoKey implements CryptoKey {
     private record Opened(WrappedKey entry, byte[] dek) {
     }
 
-    /** The data key of {@code sealed}, through the first entry {@code from} can open, checked against the commitment. */
+    /**
+     * Rewraps the first of the store's entries the key service accepts, inside the key service; returns the source
+     * entry and its replacement. An entry whose key is disabled, deleted or refuses it is skipped, as when opening.
+     */
+    private WrappedKey[] serverSideRewrap(SealedData sealed) {
+        CloudException first = null;
+        for (WrappedKey source : store.discoverableEntries(sealed.keys())) {
+            try {
+                WrappedKey replacement = store.call("rewrap", nativeName,
+                        () -> store.driver().rewrapKey(source, nativeName));
+                store.stats().wrapped();
+                return new WrappedKey[] {source, replacement};
+            } catch (AccessDeniedException | NotFoundException | DataIntegrityException e) {
+                if (first == null) {
+                    first = e;
+                }
+            }
+        }
+        throw first;
+    }
+
+    /**
+     * The data key of {@code sealed}, through the first entry {@code from} can open whose data key passes the
+     * commitment check. Entries that aren't {@code from}'s, or whose key is disabled, deleted or unwraps to another
+     * data key, are skipped.
+     */
     private static Opened open(SealedData sealed, KeyStore from) {
         if (from instanceof DefaultKeyStore portable) {
-            WrappedKey entry = portable.entryInLocation(sealed.keys());
-            byte[] dek = portable.unwrap(entry);
-            return committed(sealed, entry, dek);
+            DefaultKeyStore.Opened opened = portable.openDataKey(sealed.header());
+            return new Opened(opened.entry(), opened.dek());
         }
+        CloudException notOurs = null;
         CloudException failure = null;
         for (WrappedKey entry : sealed.keys()) {
             try (DataKey dataKey = from.decryptDataKey(entry)) {
                 return committed(sealed, entry, dataKey.plaintext());
             } catch (InvalidArgumentException e) {
-                failure = e; // not this store's key: try the next entry
+                notOurs = e; // not this store's key: try the next entry
+            } catch (AccessDeniedException | NotFoundException | DataIntegrityException e) {
+                if (failure == null) {
+                    failure = e;
+                }
             }
         }
-        throw failure != null ? failure : new InvalidArgumentException("The sealed data has no key entries");
+        if (failure != null) {
+            throw failure;
+        }
+        throw notOurs != null ? notOurs : new InvalidArgumentException("The sealed data has no key entries");
     }
 
     private static Opened committed(SealedData sealed, WrappedKey entry, byte[] dek) {

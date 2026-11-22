@@ -96,6 +96,8 @@ public final class CloudKmsKeyStoreDriver extends AbstractKeyStoreDriver {
     private static final Pattern KEY_RING = Pattern.compile("projects/[^/]+/locations/[^/]+/keyRings/[^/]+");
     private static final Pattern RSA_SIZE = Pattern.compile("_(\\d{4})_");
     private static final Capabilities CAPABILITIES = Capabilities.of(KeyCapability.MAC);
+    /** The fixed additional authenticated data of the HLXS {@code gcp-kms} wrapping profile. */
+    static final ByteString WRAP_AAD = ByteString.copyFromUtf8("HLXS1 data key");
 
     private final KeyManagementServiceClient kms;
     private final String keyRing;
@@ -228,19 +230,25 @@ public final class CloudKmsKeyStoreDriver extends AbstractKeyStoreDriver {
                 .thenApply(response -> wrapped(key, request, response));
     }
 
-    /** On the crypto key, Cloud KMS encrypts with its primary version; a pinned version is named instead. */
+    /**
+     * On the crypto key, Cloud KMS encrypts with its primary version; a pinned version is named instead. The additional
+     * authenticated data is the HLXS {@code gcp-kms} profile's fixed {@code "HLXS1 data key"}, so a wrapped key unwraps
+     * only as an HLXS data key, and other ciphertext under the same key never does.
+     */
     private static EncryptRequest encrypt(String key, Optional<String> version, byte[] dek) {
         ByteString plaintext = ByteString.copyFrom(dek);
         return EncryptRequest.newBuilder()
                 .setName(version.map(v -> key + "/cryptoKeyVersions/" + v).orElse(key))
                 .setPlaintext(plaintext)
                 .setPlaintextCrc32C(crc(plaintext))
+                .setAdditionalAuthenticatedData(WRAP_AAD)
+                .setAdditionalAuthenticatedDataCrc32C(crc(WRAP_AAD))
                 .build();
     }
 
     private WrappedKey wrapped(String key, EncryptRequest request, EncryptResponse response) {
-        if (!response.getVerifiedPlaintextCrc32C()) {
-            throw integrity("Cloud KMS didn't verify the data key's checksum for key " + key);
+        if (!response.getVerifiedPlaintextCrc32C() || !response.getVerifiedAdditionalAuthenticatedDataCrc32C()) {
+            throw integrity("Cloud KMS didn't verify the data key's checksums for key " + key);
         }
         check(response.getCiphertext(), response.hasCiphertextCrc32C() ? response.getCiphertextCrc32C() : null,
                 "wrapped key", key);
@@ -287,6 +295,7 @@ public final class CloudKmsKeyStoreDriver extends AbstractKeyStoreDriver {
     private static DecryptRequest decrypt(String key, WrappedKey wrapped) {
         ByteString ciphertext = ByteString.copyFrom(wrapped.bytes());
         return DecryptRequest.newBuilder().setName(key).setCiphertext(ciphertext).setCiphertextCrc32C(crc(ciphertext))
+                .setAdditionalAuthenticatedData(WRAP_AAD).setAdditionalAuthenticatedDataCrc32C(crc(WRAP_AAD))
                 .build();
     }
 
@@ -639,6 +648,17 @@ public final class CloudKmsKeyStoreDriver extends AbstractKeyStoreDriver {
     public boolean inLocation(String keyId) {
         return keyId.startsWith(idPrefix) && keyId.length() > idPrefix.length()
                 && keyId.indexOf('/', idPrefix.length()) < 0;
+    }
+
+    /** A native prefix that is a full crypto key name prefix is matched against the full name. */
+    @Override
+    public boolean inStore(String keyId, String nativePrefix) {
+        if (!inLocation(keyId)) {
+            return false;
+        }
+        return nativePrefix.startsWith("projects/")
+                ? keyId.startsWith(nativePrefix, SCHEME.length() + 1)
+                : keyId.startsWith(nativePrefix, idPrefix.length());
     }
 
     @Override

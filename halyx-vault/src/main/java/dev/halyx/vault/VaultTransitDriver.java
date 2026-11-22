@@ -432,6 +432,11 @@ final class VaultTransitDriver extends AbstractKeyStoreDriver {
     }
 
     @Override
+    public boolean inStore(String keyId, String nativePrefix) {
+        return inLocation(keyId) && keyId.startsWith(nativePrefix, idPrefix.length());
+    }
+
+    @Override
     public boolean unwraps(WrapAlgorithm algorithm) {
         return algorithm == WrapAlgorithm.VAULT_TRANSIT;
     }

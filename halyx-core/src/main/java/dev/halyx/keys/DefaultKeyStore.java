@@ -16,8 +16,11 @@
 package dev.halyx.keys;
 
 import dev.halyx.capability.Capabilities;
+import dev.halyx.error.AccessDeniedException;
+import dev.halyx.error.CloudException;
 import dev.halyx.error.DataIntegrityException;
 import dev.halyx.error.InvalidArgumentException;
+import dev.halyx.error.NotFoundException;
 import dev.halyx.interceptor.AsyncInvocation;
 import dev.halyx.interceptor.InterceptorChain;
 import dev.halyx.interceptor.OperationContext;
@@ -28,11 +31,14 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.security.PublicKey;
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
@@ -57,10 +63,25 @@ public final class DefaultKeyStore implements KeyStore, AutoCloseable {
     private final DataKeyCacheMap dataKeyCache;
     private final Map<String, PublicKey> publicKeys = new ConcurrentHashMap<>();
     private final Map<KeyHandle, DefaultCryptoKey> keys = new ConcurrentHashMap<>();
+    /** The canonical ids of keys this store resolved by name: always its own, whatever the driver says. */
+    private final Set<String> resolvedKeyIds = ConcurrentHashMap.newKeySet();
+    /** The driver's answers to whether a key id is one of this store's own, each until its expiry (nanos). */
+    private final Map<String, Membership> membership = new ConcurrentHashMap<>();
     private final AsyncKeyStore async = new Async(InterceptorChain.blocking());
 
     private record KeyHandle(String name, KeyOptions options) {
     }
+
+    private record Membership(boolean member, long expiresAtNanos) {
+    }
+
+    /** A data key unwrapped from {@code entry} and checked against the commitment; the caller zeroes it. */
+    record Opened(WrappedKey entry, byte[] dek) {
+    }
+
+    /** How long the driver's answer to whether a key is the store's own is kept: as long as key metadata. */
+    static final Duration MEMBERSHIP_TTL = Duration.ofMinutes(5);
+    private static final int MEMBERSHIP_ENTRIES = 1_024;
 
     public DefaultKeyStore(KeyStoreConfig config, KeyStoreDriver driver, InterceptorChain interceptors) {
         this.config = Objects.requireNonNull(config, "config");
@@ -106,8 +127,7 @@ public final class DefaultKeyStore implements KeyStore, AutoCloseable {
     public byte[] decrypt(SealedData sealed, byte[] aad) {
         Objects.requireNonNull(sealed, "sealed");
         Objects.requireNonNull(aad, "aad");
-        WrappedKey entry = entryInLocation(sealed.keys());
-        byte[] dek = unwrap(entry);
+        byte[] dek = openDataKey(sealed.header()).dek();
         try {
             return Hlxs.open(dek, sealed.header(), sealed.bytesUnsafe(), aad);
         } finally {
@@ -118,8 +138,8 @@ public final class DefaultKeyStore implements KeyStore, AutoCloseable {
     @Override
     public DataKey decryptDataKey(WrappedKey wrapped) {
         Objects.requireNonNull(wrapped, "wrapped");
-        if (!opens(wrapped)) {
-            throw notInLocation(List.of(wrapped));
+        if (!discoverable(wrapped)) {
+            throw notInStore(List.of(wrapped));
         }
         return new DataKey(unwrap(wrapped), wrapped);
     }
@@ -135,9 +155,8 @@ public final class DefaultKeyStore implements KeyStore, AutoCloseable {
         } catch (IOException e) {
             throw new UncheckedIOException("Could not read the sealed data's header", e);
         }
-        byte[] dek = unwrap(entryInLocation(header.keys()));
+        byte[] dek = openDataKey(header).dek();
         try {
-            Hlxs.checkCommitment(dek, header);
             return new OpeningInputStream(in, new Hlxs.Segments(dek, header.salt(), header.noncePrefix(),
                     header.segmentSize(), aad));
         } finally {
@@ -158,10 +177,9 @@ public final class DefaultKeyStore implements KeyStore, AutoCloseable {
                     + " is outside the sealed data's " + total + " bytes");
         }
         Hlxs.Header parsed = header.header();
-        byte[] dek = unwrap(entryInLocation(parsed.keys()));
+        byte[] dek = openDataKey(parsed).dek();
         Hlxs.Segments opened;
         try {
-            Hlxs.checkCommitment(dek, parsed);
             opened = new Hlxs.Segments(dek, parsed.salt(), parsed.noncePrefix(), parsed.segmentSize(), aad);
         } finally {
             Arrays.fill(dek, (byte) 0);
@@ -268,26 +286,143 @@ public final class DefaultKeyStore implements KeyStore, AutoCloseable {
     }
 
     /**
-     * Whether this store can open {@code entry}: a key in its location, wrapped with an algorithm the driver implements.
-     * An algorithm this version of Halyx doesn't know is never one.
+     * Whether this store's driver can unwrap {@code entry}: a key in its location, wrapped with an algorithm the driver
+     * implements. An algorithm this version of Halyx doesn't know is never one. A {@link CryptoKey} opening its own
+     * entry needs only this; a reader that takes the key from the sealed data needs {@link #discoverable}.
      */
     boolean opens(WrappedKey entry) {
         return driver.inLocation(entry.keyId()) && entry.algorithm().filter(driver::unwraps).isPresent();
     }
 
-    /** The first entry this store can open. */
-    WrappedKey entryInLocation(List<WrappedKey> entries) {
-        for (WrappedKey entry : entries) {
-            if (opens(entry)) {
-                return entry;
-            }
+    /**
+     * Whether a reader that takes the key from the sealed data may use {@code entry}: one of this store's own keys,
+     * so sealed data can't make the store call a key it wasn't configured for, such as a key outside its prefix or,
+     * on AWS, in another account. A key this store resolved by name is always its own.
+     */
+    boolean discoverable(WrappedKey entry) {
+        if (!opens(entry)) {
+            return false;
         }
-        throw notInLocation(entries);
+        String keyId = entry.keyId();
+        if (resolvedKeyIds.contains(keyId)) {
+            return true;
+        }
+        Membership known = membership.get(keyId);
+        if (known != null && System.nanoTime() - known.expiresAtNanos() < 0) {
+            return known.member();
+        }
+        boolean member = call("inStore", keyId, () -> driver.inStore(keyId, config.prefix()));
+        if (membership.size() >= MEMBERSHIP_ENTRIES) {
+            membership.clear();
+        }
+        membership.put(keyId, new Membership(member, System.nanoTime() + MEMBERSHIP_TTL.toNanos()));
+        return member;
     }
 
-    private InvalidArgumentException notInLocation(List<WrappedKey> entries) {
+    /** Whether {@link #discoverable} can answer for every entry without calling the key service. */
+    private boolean decidedWithoutCalls(List<WrappedKey> entries) {
+        long now = System.nanoTime();
+        for (WrappedKey entry : entries) {
+            if (opens(entry) && !resolvedKeyIds.contains(entry.keyId())) {
+                Membership known = membership.get(entry.keyId());
+                if (known == null || now - known.expiresAtNanos() >= 0) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    /** Records that {@code keyId} is the key this store resolved for one of its names. */
+    void resolved(String keyId) {
+        resolvedKeyIds.add(keyId);
+    }
+
+    /** The entries a reader that takes the key from the sealed data may use, in their order. */
+    List<WrappedKey> discoverableEntries(List<WrappedKey> entries) {
+        List<WrappedKey> usable = new ArrayList<>(entries.size());
+        for (WrappedKey entry : entries) {
+            if (discoverable(entry)) {
+                usable.add(entry);
+            }
+        }
+        if (usable.isEmpty()) {
+            throw notInStore(entries);
+        }
+        return usable;
+    }
+
+    /**
+     * The data key of the sealed data with {@code header}, through the first of this store's entries that unwraps to a
+     * key passing the commitment check. An entry whose key is disabled, deleted or refuses the wrapped key, or which
+     * unwraps to another data key, is skipped for the next, since the commitment fixes the one right data key; any
+     * other failure, such as throttling, ends the read. With every entry failing, the first failure is thrown.
+     */
+    Opened openDataKey(Hlxs.Header header) {
+        CloudException first = null;
+        for (WrappedKey entry : discoverableEntries(header.keys())) {
+            try {
+                byte[] dek = unwrap(entry);
+                try {
+                    Hlxs.checkCommitment(dek, header);
+                } catch (RuntimeException e) {
+                    Arrays.fill(dek, (byte) 0);
+                    throw e;
+                }
+                return new Opened(entry, dek);
+            } catch (AccessDeniedException | NotFoundException | DataIntegrityException e) {
+                if (first == null) {
+                    first = e;
+                }
+            }
+        }
+        throw first;
+    }
+
+    /** {@link #openDataKey}, without blocking where the driver allows it. */
+    CompletableFuture<Opened> openDataKeyAsync(Hlxs.Header header, Executor blocking) {
+        List<WrappedKey> entries = header.keys();
+        CompletableFuture<List<WrappedKey>> usable;
+        if (decidedWithoutCalls(entries)) {
+            try {
+                usable = CompletableFuture.completedFuture(discoverableEntries(entries));
+            } catch (RuntimeException e) {
+                return CompletableFuture.failedFuture(e);
+            }
+        } else {
+            usable = CompletableFuture.supplyAsync(() -> discoverableEntries(entries), blocking);
+        }
+        return usable.thenCompose(candidates -> openFrom(candidates, 0, header, blocking, null));
+    }
+
+    private CompletableFuture<Opened> openFrom(List<WrappedKey> candidates, int index, Hlxs.Header header,
+                                               Executor blocking, CloudException first) {
+        if (index == candidates.size()) {
+            return CompletableFuture.failedFuture(first);
+        }
+        WrappedKey entry = candidates.get(index);
+        return unwrapAsync(entry, blocking).thenApply(dek -> {
+            try {
+                Hlxs.checkCommitment(dek, header);
+            } catch (RuntimeException e) {
+                Arrays.fill(dek, (byte) 0);
+                throw e;
+            }
+            return new Opened(entry, dek);
+        }).exceptionallyCompose(error -> {
+            Throwable cause = AsyncInvocation.unwrap(error);
+            if (cause instanceof AccessDeniedException || cause instanceof NotFoundException
+                    || cause instanceof DataIntegrityException) {
+                return openFrom(candidates, index + 1, header, blocking,
+                        first != null ? first : (CloudException) cause);
+            }
+            return CompletableFuture.failedFuture(cause);
+        });
+    }
+
+    private InvalidArgumentException notInStore(List<WrappedKey> entries) {
         return new InvalidArgumentException("The sealed data's keys " + entries.stream().map(WrappedKey::keyId).toList()
-                + " aren't in " + this, null, provider(), null);
+                + " aren't keys of " + this, null, provider(), null);
     }
 
     /** The data key in {@code wrapped}, from the cache if it's on, checked for length. The caller zeroes it. */
@@ -411,15 +546,14 @@ public final class DefaultKeyStore implements KeyStore, AutoCloseable {
 
         @Override
         public CompletableFuture<byte[]> decrypt(SealedData sealed, byte[] aad) {
-            WrappedKey entry;
             try {
                 Objects.requireNonNull(sealed, "sealed");
                 Objects.requireNonNull(aad, "aad");
-                entry = entryInLocation(sealed.keys());
             } catch (RuntimeException e) {
                 return CompletableFuture.failedFuture(e);
             }
-            return unwrapAsync(entry, blocking).thenApply(dek -> {
+            return openDataKeyAsync(sealed.header(), blocking).thenApply(opened -> {
+                byte[] dek = opened.dek();
                 try {
                     return Hlxs.open(dek, sealed.header(), sealed.bytesUnsafe(), aad);
                 } finally {
@@ -432,13 +566,22 @@ public final class DefaultKeyStore implements KeyStore, AutoCloseable {
         public CompletableFuture<DataKey> decryptDataKey(WrappedKey wrapped) {
             try {
                 Objects.requireNonNull(wrapped, "wrapped");
-                if (!opens(wrapped)) {
-                    throw notInLocation(List.of(wrapped));
-                }
             } catch (RuntimeException e) {
                 return CompletableFuture.failedFuture(e);
             }
-            return unwrapAsync(wrapped, blocking).thenApply(dek -> new DataKey(dek, wrapped));
+            CompletableFuture<Boolean> mine;
+            if (decidedWithoutCalls(List.of(wrapped))) {
+                try {
+                    mine = CompletableFuture.completedFuture(discoverable(wrapped));
+                } catch (RuntimeException e) {
+                    return CompletableFuture.failedFuture(e);
+                }
+            } else {
+                mine = CompletableFuture.supplyAsync(() -> discoverable(wrapped), blocking);
+            }
+            return mine.thenCompose(member -> member
+                    ? unwrapAsync(wrapped, blocking).thenApply(dek -> new DataKey(dek, wrapped))
+                    : CompletableFuture.failedFuture(notInStore(List.of(wrapped))));
         }
 
         @Override

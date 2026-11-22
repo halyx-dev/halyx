@@ -109,6 +109,20 @@ public interface KeyStoreDriver extends AutoCloseable {
     boolean inLocation(String keyId);
 
     /**
+     * Whether the provider-prefixed {@code keyId} is one of this store's own keys: in its location and, when
+     * {@code nativePrefix} isn't empty, with a native name that starts with it. A reader that takes the key from the
+     * sealed data ({@code KeyStore.decrypt}) only unwraps with such keys, so sealed data can't make the store call a key
+     * it wasn't configured for. A driver whose {@link #inLocation location} is wider than the store, such as every
+     * account in an AWS region, narrows it here. It may call the key service; Halyx keeps the answer for a few minutes.
+     *
+     * <p>By default, a key in the location of a store without a prefix: a driver must override this for a prefixed
+     * store to open sealed data by its keys alone.
+     */
+    default boolean inStore(String keyId, String nativePrefix) {
+        return inLocation(keyId) && nativePrefix.isEmpty();
+    }
+
+    /**
      * Whether this driver unwraps data keys wrapped with {@code algorithm}. HLXS readers skip entries they can't open
      * rather than fail on them, so an entry from a newer writer doesn't stop an older one using another entry. All of
      * them by default; a driver that knows several algorithms for its scheme lists only those it implements.

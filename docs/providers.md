@@ -160,8 +160,10 @@ Give the application these actions on its keys:
 }
 ```
 
-plus `kms:ListAliases` on `*` for `keys(prefix)` and health checks. Wrapping, unwrapping, signing, MACs and metadata
-and public key reads have a non-blocking path on KMS.
+plus `kms:ListAliases` on `*` for `keys(prefix)`, health checks, and a key store with a prefix opening sealed data
+(it checks that the key's alias is in the prefix). Halyx wraps data keys with the encryption context
+`{"hlxs": "1"}`, so a key policy can limit `kms:Encrypt` and `kms:Decrypt` to it with `kms:EncryptionContext:hlxs`.
+Wrapping, unwrapping, signing, MACs and metadata and public key reads have a non-blocking path on KMS.
 
 ## Azure
 

@@ -93,6 +93,19 @@ class CloudKmsKeyStoreDriverTest {
     }
 
     @Test
+    void theStoresOwnKeysAreInItsKeyRingAndPrefix() {
+        CloudKmsKeyStoreDriver driver = driver(new FakeKms(), false);
+
+        assertThat(driver.inStore("gcp-kms:" + RING + "/cryptoKeys/orders-data", "")).isTrue();
+        assertThat(driver.inStore("gcp-kms:" + RING + "/cryptoKeys/orders-data", "orders-")).isTrue();
+        assertThat(driver.inStore("gcp-kms:" + RING + "/cryptoKeys/billing-data", "orders-")).isFalse();
+        assertThat(driver.inStore("gcp-kms:" + RING + "/cryptoKeys/orders-data", RING + "/cryptoKeys/orders-"))
+                .as("a native prefix with the key ring").isTrue();
+        assertThat(driver.inStore("gcp-kms:projects/acme/locations/global/keyRings/other/cryptoKeys/orders-data",
+                "")).isFalse();
+    }
+
+    @Test
     void nativeNamesAlsoTakeTheFullNameInTheKeyRing() {
         CloudKmsKeyStoreDriver nativeNames = driver(new FakeKms(), true);
 
@@ -215,6 +228,7 @@ class CloudKmsKeyStoreDriverTest {
         FakeKms kms = new FakeKms();
         kms.encrypt = request -> EncryptResponse.newBuilder().setName(request.getName() + "/cryptoKeyVersions/1")
                 .setCiphertext(ByteString.copyFromUtf8("wrapped")).setVerifiedPlaintextCrc32C(true)
+                .setVerifiedAdditionalAuthenticatedDataCrc32C(true)
                 .setCiphertextCrc32C(com.google.protobuf.Int64Value.of(1)).build();
 
         assertThatThrownBy(() -> driver(kms, false).wrapKey("data", Optional.empty(), new byte[32]))
@@ -237,9 +251,12 @@ class CloudKmsKeyStoreDriverTest {
         FakeKms kms = new FakeKms();
         kms.encrypt = request -> {
             ByteString ciphertext = ByteString.copyFromUtf8("wrapped");
+            assertThat(request.getAdditionalAuthenticatedData().toStringUtf8()).isEqualTo("HLXS1 data key");
+            assertThat(request.getAdditionalAuthenticatedDataCrc32C())
+                    .isEqualTo(CloudKmsKeyStoreDriver.crc(request.getAdditionalAuthenticatedData()));
             return EncryptResponse.newBuilder().setName(request.getName() + "/cryptoKeyVersions/7")
                     .setCiphertext(ciphertext).setCiphertextCrc32C(CloudKmsKeyStoreDriver.crc(ciphertext))
-                    .setVerifiedPlaintextCrc32C(true).build();
+                    .setVerifiedPlaintextCrc32C(true).setVerifiedAdditionalAuthenticatedDataCrc32C(true).build();
         };
 
         WrappedKey wrapped = driver(kms, false).wrapKey("data", Optional.empty(), new byte[32]);
@@ -247,6 +264,29 @@ class CloudKmsKeyStoreDriverTest {
         assertThat(wrapped.keyId()).isEqualTo("gcp-kms:" + RING + "/cryptoKeys/data");
         assertThat(wrapped.version()).contains("7");
         assertThat(kms.encryptedWith).as("the crypto key, so its primary encrypts").isEqualTo(RING + "/cryptoKeys/data");
+    }
+
+    @Test
+    void theWrapAadIsSentAndItsChecksumMustBeVerified() {
+        FakeKms kms = new FakeKms();
+        ByteString ciphertext = ByteString.copyFromUtf8("wrapped");
+        kms.encrypt = request -> EncryptResponse.newBuilder().setName(request.getName() + "/cryptoKeyVersions/1")
+                .setCiphertext(ciphertext).setCiphertextCrc32C(CloudKmsKeyStoreDriver.crc(ciphertext))
+                .setVerifiedPlaintextCrc32C(true).build();
+        List<String> unwrappedWith = new ArrayList<>();
+        kms.decrypt = request -> {
+            unwrappedWith.add(request.getAdditionalAuthenticatedData().toStringUtf8());
+            ByteString plaintext = ByteString.copyFrom(new byte[32]);
+            return DecryptResponse.newBuilder().setPlaintext(plaintext)
+                    .setPlaintextCrc32C(CloudKmsKeyStoreDriver.crc(plaintext)).build();
+        };
+        CloudKmsKeyStoreDriver driver = driver(kms, false);
+
+        assertThatThrownBy(() -> driver.wrapKey("data", Optional.empty(), new byte[32]))
+                .as("the AAD's checksum unverified").isInstanceOf(DataIntegrityException.class);
+        driver.unwrapKey(new WrappedKey("gcp-kms:" + RING + "/cryptoKeys/data", Optional.of("1"),
+                WrapAlgorithm.GCP_KMS, ciphertext.toByteArray()));
+        assertThat(unwrappedWith).containsExactly("HLXS1 data key");
     }
 
     @Test

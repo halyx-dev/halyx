@@ -331,7 +331,9 @@ through as plain blobs, keep presigned URLs, and copy on the server when both si
 into or out of the prefix is sealed or opened on the way.
 
 **A key per blob.** `encryptedWith(keys, blobKey -> "tenant-" + tenantOf(blobKey))` names a key of a key store for
-each blob, such as a key per tenant; any key of the store opens what any other sealed.
+each blob, such as a key per tenant; any key of the store opens what any other sealed. The AAD, the blob's key, stops
+a blob copied to another key from opening. To keep tenants' keys apart when reading too, give each tenant a key
+store with its own prefix: a store never opens data sealed under a key outside it.
 
 Each write wraps a new data key and each read unwraps one, so the key service sees a call per blob. On busy paths,
 turn on the key store's `dataKeyReuse` and `dataKeyCache` (see [Performance and caches](keys.md#performance-and-caches)).

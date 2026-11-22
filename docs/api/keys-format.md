@@ -97,7 +97,8 @@ nonce = nonce prefix (7 bytes) ‖ u32 i ‖ u8 last      last = 1 for the final
 AAD   = u32 length of the caller's AAD ‖ caller's AAD
 ```
 
-The caller's additional authenticated data isn't stored: a reader supplies it again. It may be empty.
+The caller's additional authenticated data isn't stored: a reader supplies it again. It may be empty, and MUST be
+shorter than 2^32 bytes.
 
 The segment number in the nonce means segments can't be reordered; the last flag means the data can't be truncated
 at a segment boundary or extended.
@@ -109,8 +110,13 @@ plaintexts under different data keys. HLXS stores a key commitment derived from 
 [Derivation](#derivation)). A reader MUST recompute it from the data key it unwrapped, and MUST compare it with the
 stored value in constant time, **before** decrypting any segment. A mismatch is an integrity error.
 
-The commitment is also what protects the key entries: a replaced or forged entry unwraps to a different data key, and
-fails the check.
+The commitment also guards the key entries: a replaced or forged entry unwraps to a different data key, and fails
+the check. The entries themselves aren't authenticated. Their order, their key versions, and entries added or removed
+by someone who holds the data key aren't detected (see [Security considerations](#security-considerations)).
+
+The commitment is to the data key alone, not to the AAD or the plaintext. Someone who holds the data key can find a
+second AAD under which a segment also opens. This only matters against holders of the data key, who can seal any data
+for its keys anyway.
 
 ## Reading
 
@@ -125,18 +131,31 @@ A reader MUST perform these steps in order:
    - an entry's key id has no `:` after a non-empty scheme, or its wrapped key is empty
 
    Data that ends inside the header is an integrity error.
-2. **Choose an entry.** Use the first entry the reader can open: one whose scheme and wrap algorithm it implements,
-   for a key it has access to. Entries with an unknown scheme or wrap algorithm MUST be skipped, not rejected. With
-   no usable entry, the data can't be opened; that is a format error, not an integrity error.
-3. **Unwrap the data key** as the entry's [wrapping profile](#wrapping-profiles) says. A result that isn't 32 bytes is
-   an integrity error.
+2. **Choose the usable entries.** An entry is usable if the reader implements its scheme and wrap algorithm, and its
+   key is one the application configured the reader to use. A reader MUST NOT unwrap with a key just because the
+   entry names it and the reader's credentials allow it. Sealed data is untrusted input, and an entry can name any
+   key, such as a key in another account whose owner lets the reader decrypt with it. Entries with an unknown scheme
+   or wrap algorithm MUST be skipped, not rejected. With no usable entry, the data can't be opened; that is a format
+   error, not an integrity error.
+3. **Unwrap the data key** from the first usable entry, as its [wrapping profile](#wrapping-profiles) says. A result
+   that isn't 32 bytes is an integrity error.
 4. **Check the key commitment**, as in [Key commitment](#key-commitment).
+
+   If step 3 or 4 fails because the key refuses the request (disabled, deleted, no access), the wrapped key is
+   refused, the result isn't 32 bytes, or the commitment doesn't match, the reader SHOULD repeat steps 3 and 4 with
+   the next usable entry. It reports the first failure if every entry fails. This is safe: the commitment admits
+   only the one data key the data was sealed with, whichever entry yields it. Other failures, such as throttling,
+   SHOULD end the read.
 5. **Derive the subkey and open the segments** in order. A body shorter than 16 bytes, a segment shorter than 16
    bytes, or any failed tag is an integrity error.
 
 A reader that streams the plaintext MUST NOT release a segment's bytes before its tag is verified. It MUST report an
 integrity error, rather than a normal end of data, when the data ends without a segment marked last. Plaintext
 released before the end SHOULD be treated as untrusted until the final segment has been verified.
+
+A reader that opens a range of segments, from data whose total length it knows, works out which segments to read and
+which one is last from that length. The length isn't authenticated until the final segment is verified. A range that
+doesn't reach the final segment proves its own segments genuine, but not that the data wasn't truncated after them.
 
 ### Error classes
 
@@ -157,7 +176,8 @@ A writer:
 - MUST use a fresh random 16-byte salt for every message, and a random 7-byte nonce prefix.
 - MUST use a segment size from 4 KiB (4,096) to 16 MiB. The RECOMMENDED size is 64 KiB (65,536). Readers accept
   any size from 1 byte to 16 MiB, which the test vectors use.
-- MUST NOT write more than 2^32 segments.
+- MUST NOT write more than 2^32 segments. It SHOULD keep one message below 2^48 bytes: AES-GCM's security bound
+  under the message's single subkey weakens as the number of blocks grows.
 - MUST write 1 to 16 key entries with distinct key ids, every one wrapping the same data key.
 - MUST mark exactly the final segment as last. An empty plaintext is one final segment with no ciphertext bytes.
 - MUST write the commitment for the data key it used.
@@ -182,10 +202,14 @@ Each wrap algorithm defines exactly how a data key is wrapped and unwrapped, so 
 interoperate.
 
 **1, `aws-kms` (AWS KMS, symmetric key).**
-- Wrap: `Encrypt` with `KeyId` = the key ARN, alias or key id; `Plaintext` = the data key; no `EncryptionContext`;
-  `EncryptionAlgorithm` = `SYMMETRIC_DEFAULT`. The entry's key id is `aws-kms:` and the `KeyId` in the response (the
-  ARN). The key version is empty. The wrapped key is the `CiphertextBlob`.
-- Unwrap: `Decrypt` with `CiphertextBlob` = the wrapped key and `KeyId` = the ARN from the key id.
+- Wrap: `Encrypt` with `KeyId` = the key ARN, alias or key id; `Plaintext` = the data key; `EncryptionContext` =
+  `{"hlxs": "1"}`; `EncryptionAlgorithm` = `SYMMETRIC_DEFAULT`. The entry's key id is `aws-kms:` and the `KeyId` in
+  the response (the ARN). The key version is empty. The wrapped key is the `CiphertextBlob`.
+- Unwrap: `Decrypt` with `CiphertextBlob` = the wrapped key, `KeyId` = the ARN from the key id, and the same
+  `EncryptionContext`.
+- The fixed encryption context separates HLXS data keys from other ciphertext under the same key. Other ciphertext
+  never unwraps as a data key, and a wrapped data key never decrypts without the context. Key policies can allow
+  HLXS use alone with the condition key `kms:EncryptionContext:hlxs`.
 
 **2, `azure-kv` with `RSA-OAEP-256` (Azure Key Vault, RSA key of 2048 bits or more).**
 - Wrap: `wrapKey` with `alg` = `RSA-OAEP-256` and `value` = the data key, on the key's specific version
@@ -198,10 +222,15 @@ interoperate.
 
 **4, `gcp-kms` (Google Cloud KMS, `ENCRYPT_DECRYPT` key).**
 - Wrap: `Encrypt` with `name` = the crypto key (its primary version is used) or a specific version; `plaintext` = the
-  data key; no `additionalAuthenticatedData`. The key version is the version number from the response's `name`.
-- Unwrap: `Decrypt` with `name` = the crypto key, without a version, and `ciphertext` = the wrapped key.
-- Implementations SHOULD send and check the CRC32C fields (`plaintextCrc32c`, `ciphertextCrc32c`, and the
-  `verified...` flags) as Google recommends. A mismatch is an integrity error.
+  data key; `additionalAuthenticatedData` = the 14 ASCII bytes `HLXS1 data key`. The key version is the version
+  number from the response's `name`.
+- Unwrap: `Decrypt` with `name` = the crypto key, without a version, `ciphertext` = the wrapped key, and the same
+  `additionalAuthenticatedData`.
+- The fixed additional authenticated data separates HLXS data keys from other ciphertext under the same key, as the
+  `aws-kms` encryption context does.
+- Implementations SHOULD send and check the CRC32C fields (`plaintextCrc32c`, `ciphertextCrc32c`,
+  `additionalAuthenticatedDataCrc32c`, and the `verified...` flags) as Google recommends. A mismatch is an integrity
+  error.
 
 **5, `vault-transit` (HashiCorp Vault Transit, `aes256-gcm96` or another symmetric key type).**
 - Wrap: `POST {mount}/encrypt/{name}` with `plaintext` = the base64 of the data key, and no `context`. The wrapped
@@ -257,7 +286,11 @@ readers keep reading version 1.
 - **The header isn't secret.** Key ids name keys, and on some services an account or project. The lengths of the
   plaintext and of each key entry are visible.
 - **Key entries can be removed** without detection; that is how a key is retired. Removing every entry but one leaves
-  the data readable by that key alone.
+  the data readable by that key alone. Anyone who has opened the data can also add an entry for another key.
+- **Readers choose keys, not the data.** An entry names its key, and the name is untrusted. A reader that unwraps
+  with whatever key an entry names, as far as its credentials reach, accepts data sealed under keys it never meant
+  to trust (see [Reading](#reading), step 2). For the same reason, a reader with several keys should limit each read
+  to the keys that data may be sealed under, such as one tenant's.
 - **Data key reuse** spreads one wrapped key over more data, so a single unwrapped data key opens more messages.
   Writers SHOULD limit it by age and count.
 - **Not provided:** proof of who sealed the data. Anyone who can wrap with one of the keys can seal data for it. Use a
