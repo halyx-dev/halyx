@@ -228,7 +228,7 @@ String user = secrets.require("db/creds", "username"); // opens the value, then 
   key service call on the caller's thread, so interceptors such as tracing see the caller's context.
 - **A key per name:** `encryptedWith(keyStore, name -> "tenant-" + tenantOf(name))` picks the key for each value from
   its name, relative to the store's prefix. Any key of the store opens what another sealed, since the sealed data
-  names its key.
+  names its key. Keys outside the key store, such as outside its prefix, never do.
 - **Values in the clear are refused,** with an error naming the parameter and never its value. To move a store to
   encryption, read through `encryptedWith(key).allowPlaintext()`, which returns such values as they are, and put
   each value again through it. A value that starts with `hlxs1:` is always opened.

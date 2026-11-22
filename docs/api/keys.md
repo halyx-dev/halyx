@@ -85,7 +85,12 @@ copied onto another record. It may be empty.
 other text fields; `SealedData.parseText` reads it back.
 
 `keys.decrypt(sealed, aad)` opens data sealed under any key of the store, taking the key from the sealed data itself:
-readers don't need to know which key sealed it.
+readers don't need to know which key sealed it. It uses only the store's own keys, never a key the data merely
+names. A store's own keys are those in its location (on AWS, the caller's account and region) whose names start
+with its prefix. So a store with prefix `tenant-a-` refuses data sealed under `tenant-b-data`, even when the
+application's credentials could use that key. A key this store resolved by name with `key(name)` is always its own,
+which keeps a key in another AWS account usable through native names. If data names several of the store's keys,
+and one is disabled or deleted, or its entry doesn't open, the next is tried.
 
 ### Large data
 
@@ -247,7 +252,8 @@ KeyStore keys = halyx.provider("cloud").keyStore(KeyStoreConfig.builder()
 - **`dataKeyReuse`** seals many messages with one data key, so one wrapped copy covers more data. Each message still
   gets its own subkey and nonces.
 - **`dataKeyCache`** keeps unwrapped data keys in memory, keyed by their wrapped form, so data sealed with one data key
-  opens with one call. Keys are zeroed when they expire or are evicted.
+  opens with one call. Keys are zeroed when they expire or are evicted. A cached data key opens its data without
+  asking the key service, so disabling a key takes effect for data already opened once its cache entries expire.
 
 Public keys are always cached, by version, since they aren't secret. `keys.statistics()` counts the calls that reached
 the key service and the ones the caches saved.

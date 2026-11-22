@@ -331,6 +331,51 @@ public abstract class KeyStoreConformanceTest {
                 .isInstanceOf(InvalidArgumentException.class);
     }
 
+    @Test
+    void aPrefixedStoreOpensOnlyItsOwnKeys() {
+        // Sealed data names its keys, so a reader that takes the key from it must check the key is the store's own:
+        // otherwise data sealed under another key the caller can use opens through a store that should refuse it.
+        String own = encryptionKey();
+        String other = otherEncryptionKey();
+        int common = 0;
+        while (common < own.length() && common < other.length() && own.charAt(common) == other.charAt(common)) {
+            common++;
+        }
+        assumeTrue(common + 1 < own.length(), "the encryption keys' names differ only in their last character");
+        KeyStore prefixed = context().keyStore(config().prefix(own.substring(0, common + 1)).build());
+        SealedData mine = store().key(own).encrypt(DATA, AAD);
+        SealedData theirs = store().key(other).encrypt(DATA, AAD);
+
+        assertThat(prefixed.decrypt(mine, AAD)).isEqualTo(DATA);
+        assertThat(prefixed.async().decrypt(mine, AAD).join()).isEqualTo(DATA);
+        assertThatThrownBy(() -> prefixed.decrypt(theirs, AAD)).isInstanceOf(InvalidArgumentException.class);
+        assertThatThrownBy(() -> readAll(prefixed.decryptingStream(new ByteArrayInputStream(theirs.toBytes()), AAD)))
+                .isInstanceOf(InvalidArgumentException.class);
+        assertThatThrownBy(() -> prefixed.decryptDataKey(theirs.keys().get(0)))
+                .isInstanceOf(InvalidArgumentException.class);
+        assertThatThrownBy(() -> prefixed.async().decrypt(theirs, AAD).join())
+                .hasCauseInstanceOf(InvalidArgumentException.class);
+        assertThatThrownBy(() -> prefixed.async().decryptDataKey(theirs.keys().get(0)).join())
+                .hasCauseInstanceOf(InvalidArgumentException.class);
+        assertThat(store().decrypt(theirs, AAD)).as("through the store without a prefix").isEqualTo(DATA);
+    }
+
+    @Test
+    void anEntryThatFailsFallsBackToTheNext() {
+        // An entry unwrapping to another data key fails the commitment; the next entry's data key is the right one.
+        KeyStore store = store();
+        CryptoKey own = store.key(encryptionKey());
+        Envelope sealed = Envelope.of(CryptoKeys.encrypt(DATA, AAD, own, store.key(otherEncryptionKey())));
+        Envelope.Entry wrong = Envelope.Entry.of(own.encrypt(DATA, AAD).keys().get(0));
+        byte[] forged = sealed.withEntries(wrong, sealed.entries.get(1)).encode();
+
+        assertThat(store.decrypt(SealedData.parse(forged), AAD)).isEqualTo(DATA);
+        assertThat(store.async().decrypt(SealedData.parse(forged), AAD).join()).isEqualTo(DATA);
+        assertThat(readAll(store.decryptingStream(new ByteArrayInputStream(forged), AAD))).isEqualTo(DATA);
+        assertThatThrownBy(() -> own.decrypt(SealedData.parse(forged), AAD))
+                .as("the key whose entry is wrong").isInstanceOf(DataIntegrityException.class);
+    }
+
     // Several keys (D16)
 
     @Test
@@ -723,6 +768,8 @@ public abstract class KeyStoreConformanceTest {
     void aDisabledKeyRefusesDecryption() {
         KeyStore store = store();
         SealedData sealed = store.key(disposableKey()).encrypt(DATA, AAD);
+        SealedData alsoForAnother = CryptoKeys.encrypt(DATA, AAD, store.key(disposableKey()),
+                store.key(encryptionKey()));
         disable(disposableKey());
         try {
             eventually(() -> {
@@ -730,6 +777,8 @@ public abstract class KeyStoreConformanceTest {
                         .satisfies(e -> assertThat(((AccessDeniedException) e).isRetryable()).isFalse());
                 return null;
             });
+            assertThat(store.decrypt(alsoForAnother, AAD)).as("through the next entry").isEqualTo(DATA);
+            assertThat(store.async().decrypt(alsoForAnother, AAD).join()).as("asynchronously").isEqualTo(DATA);
             assertThat(freshKey(store, disposableKey(), KeyOptions.defaults()).metadata().enabled()).isFalse();
         } finally {
             enable(disposableKey());

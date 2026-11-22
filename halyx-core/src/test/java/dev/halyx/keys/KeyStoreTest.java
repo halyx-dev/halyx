@@ -137,7 +137,33 @@ class KeyStoreTest {
 
         KeyStore elsewhere = halyx.provider("local").keyStore(KeyStoreConfig.builder().location("ring-2").build());
         assertThatThrownBy(() -> elsewhere.decrypt(sealed, AAD)).isInstanceOf(InvalidArgumentException.class)
-                .hasMessageContaining("aren't in");
+                .hasMessageContaining("aren't keys of");
+    }
+
+    @Test
+    void aPrefixedStoreAsksOnceWhetherAKeyIsItsOwn() {
+        KeyStore prefixed = halyx.provider("local").keyStore(KeyStoreConfig.builder().prefix("da").build());
+        SealedData own = store.key("data").encrypt(DATA, AAD);
+        SealedData other = store.key("other-data").encrypt(DATA, AAD);
+        operations.clear();
+
+        assertThat(prefixed.decrypt(own, AAD)).isEqualTo(DATA);
+        assertThat(prefixed.decrypt(own, AAD)).isEqualTo(DATA);
+        assertThatThrownBy(() -> prefixed.decrypt(other, AAD)).isInstanceOf(InvalidArgumentException.class)
+                .hasMessageContaining("aren't keys of");
+        assertThatThrownBy(() -> prefixed.decrypt(other, AAD)).isInstanceOf(InvalidArgumentException.class);
+        assertThat(operations).filteredOn("keys:inStore"::equals).as("once per key, either answer").hasSize(2);
+        assertThat(operations).filteredOn("keys:unwrap"::equals).as("never for the other store's key").hasSize(2);
+    }
+
+    @Test
+    void aKeyTheStoreResolvedIsItsOwnWithoutAsking() {
+        CryptoKey data = store.key("data");
+        SealedData sealed = data.encrypt(DATA, AAD);
+        operations.clear();
+
+        assertThat(store.decrypt(sealed, AAD)).isEqualTo(DATA);
+        assertThat(operations).doesNotContain("keys:inStore");
     }
 
     @Test

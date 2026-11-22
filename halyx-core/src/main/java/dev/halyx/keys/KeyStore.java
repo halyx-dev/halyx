@@ -45,9 +45,11 @@ public interface KeyStore {
     List<KeyMetadata> keys(String prefix);
 
     /**
-     * Opens data sealed under any key of this store, using the first key entry in the store's location. Throws
-     * {@code InvalidArgumentException} if no entry is, and {@code DataIntegrityException} for wrong {@code aad} or
-     * changed data. {@code aad} may be empty.
+     * Opens data sealed under any key of this store: a key in its location (on AWS, the caller's account and region)
+     * whose name starts with its prefix, or a key it resolved by name. A key the data names but the store doesn't own
+     * is never used. Entries are tried in order: one whose key is disabled or deleted, or which doesn't open, is
+     * skipped for the next. Throws {@code InvalidArgumentException} if no entry is the store's, and
+     * {@code DataIntegrityException} for wrong {@code aad} or changed data. {@code aad} may be empty.
      */
     byte[] decrypt(SealedData sealed, byte[] aad);
 

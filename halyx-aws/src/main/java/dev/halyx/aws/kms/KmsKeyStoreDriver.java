@@ -55,6 +55,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -80,19 +81,30 @@ public final class KmsKeyStoreDriver extends AbstractKeyStoreDriver {
     private static final Capabilities CAPABILITIES = Capabilities.of(KeyCapability.MAC,
             KeyCapability.SERVER_SIDE_REWRAP);
 
+    /**
+     * The HLXS {@code aws-kms} profile's fixed encryption context: a wrapped key decrypts only as an HLXS data key, other
+     * ciphertext under the same key never does, and key policies can allow HLXS use alone
+     * ({@code kms:EncryptionContext:hlxs}).
+     */
+    static final Map<String, String> CONTEXT = Map.of("hlxs", "1");
+
     private final KmsClient kms;
     private final Supplier<KmsAsyncClient> kmsAsync;
     private final String region;
+    private final Supplier<String> account;
     private final boolean nativeNames;
 
     /**
      * @param region   the region the clients call, which is the store's location
+     * @param account  the caller's account id, the store's own keys' account, asked for when first needed
      * @param kmsAsync the non-blocking client for asynchronous calls, made when first asked for
      */
-    public KmsKeyStoreDriver(KmsClient kms, String region, boolean nativeNames, Supplier<KmsAsyncClient> kmsAsync) {
+    public KmsKeyStoreDriver(KmsClient kms, String region, Supplier<String> account, boolean nativeNames,
+                             Supplier<KmsAsyncClient> kmsAsync) {
         super(AwsProvider.ID);
         this.kms = kms;
         this.region = region;
+        this.account = account;
         this.nativeNames = nativeNames;
         this.kmsAsync = kmsAsync;
     }
@@ -162,7 +174,7 @@ public final class KmsKeyStoreDriver extends AbstractKeyStoreDriver {
     public WrappedKey wrapKey(String nativeName, Optional<String> version, byte[] dek) {
         noVersion(nativeName, version);
         var response = kms.encrypt(b -> b.keyId(keyIdOf(nativeName)).plaintext(SdkBytes.fromByteArray(dek))
-                .encryptionAlgorithm(EncryptionAlgorithmSpec.SYMMETRIC_DEFAULT));
+                .encryptionAlgorithm(EncryptionAlgorithmSpec.SYMMETRIC_DEFAULT).encryptionContext(CONTEXT));
         return wrapped(response.keyId(), response.ciphertextBlob());
     }
 
@@ -171,7 +183,7 @@ public final class KmsKeyStoreDriver extends AbstractKeyStoreDriver {
                                                      Executor blocking) {
         noVersion(nativeName, version);
         return kmsAsync.get().encrypt(b -> b.keyId(keyIdOf(nativeName)).plaintext(SdkBytes.fromByteArray(dek))
-                        .encryptionAlgorithm(EncryptionAlgorithmSpec.SYMMETRIC_DEFAULT))
+                        .encryptionAlgorithm(EncryptionAlgorithmSpec.SYMMETRIC_DEFAULT).encryptionContext(CONTEXT))
                 .thenApply(response -> wrapped(response.keyId(), response.ciphertextBlob()));
     }
 
@@ -184,7 +196,7 @@ public final class KmsKeyStoreDriver extends AbstractKeyStoreDriver {
     public byte[] unwrapKey(WrappedKey wrapped) {
         String arn = arnIn(wrapped);
         return kms.decrypt(b -> b.keyId(arn).ciphertextBlob(SdkBytes.fromByteArray(wrapped.bytes()))
-                .encryptionAlgorithm(EncryptionAlgorithmSpec.SYMMETRIC_DEFAULT)).plaintext().asByteArray();
+                .encryptionAlgorithm(EncryptionAlgorithmSpec.SYMMETRIC_DEFAULT).encryptionContext(CONTEXT)).plaintext().asByteArray();
     }
 
     @Override
@@ -196,7 +208,7 @@ public final class KmsKeyStoreDriver extends AbstractKeyStoreDriver {
             return CompletableFuture.failedFuture(e);
         }
         return kmsAsync.get().decrypt(b -> b.keyId(arn).ciphertextBlob(SdkBytes.fromByteArray(wrapped.bytes()))
-                        .encryptionAlgorithm(EncryptionAlgorithmSpec.SYMMETRIC_DEFAULT))
+                        .encryptionAlgorithm(EncryptionAlgorithmSpec.SYMMETRIC_DEFAULT).encryptionContext(CONTEXT))
                 .thenApply(response -> response.plaintext().asByteArray());
     }
 
@@ -209,6 +221,7 @@ public final class KmsKeyStoreDriver extends AbstractKeyStoreDriver {
         String arn = arnIn(wrapped);
         var response = kms.reEncrypt(b -> b.ciphertextBlob(SdkBytes.fromByteArray(wrapped.bytes()))
                 .sourceKeyId(arn).sourceEncryptionAlgorithm(EncryptionAlgorithmSpec.SYMMETRIC_DEFAULT)
+                .sourceEncryptionContext(CONTEXT).destinationEncryptionContext(CONTEXT)
                 .destinationKeyId(keyIdOf(targetNativeName))
                 .destinationEncryptionAlgorithm(EncryptionAlgorithmSpec.SYMMETRIC_DEFAULT));
         return wrapped(response.keyId(), response.ciphertextBlob());
@@ -340,6 +353,39 @@ public final class KmsKeyStoreDriver extends AbstractKeyStoreDriver {
         String[] arn = keyId.substring(SCHEME.length() + 1).split(":", 6);
         return arn.length == 6 && arn[2].equals("kms") && arn[3].equals(region) && !arn[4].isEmpty()
                 && arn[5].startsWith("key/") && arn[5].length() > "key/".length();
+    }
+
+    /**
+     * A key ARN in the caller's account and this region, with an alias (without {@code alias/} for portable names)
+     * starting with {@code nativePrefix}, when it isn't empty. A key in another account is never the store's own,
+     * even when its key policy lets this caller use it: name it to use it.
+     */
+    @Override
+    public boolean inStore(String keyId, String nativePrefix) {
+        if (!inLocation(keyId) || !keyId.split(":", 7)[5].equals(account.get())) {
+            return false;
+        }
+        if (nativePrefix.isEmpty()) {
+            return true;
+        }
+        String arn = keyId.substring(SCHEME.length() + 1);
+        String marker = null;
+        do {
+            String from = marker;
+            ListAliasesResponse page = kms.listAliases(b -> b.keyId(arn).marker(from));
+            for (AliasListEntry alias : page.aliases()) {
+                String aliasName = alias.aliasName();
+                if (aliasName == null || aliasName.startsWith(MANAGED)) {
+                    continue;
+                }
+                String name = nativeNames ? aliasName : aliasName.substring(ALIAS.length());
+                if (name.startsWith(nativePrefix)) {
+                    return true;
+                }
+            }
+            marker = Boolean.TRUE.equals(page.truncated()) ? page.nextMarker() : null;
+        } while (marker != null);
+        return false;
     }
 
     @Override

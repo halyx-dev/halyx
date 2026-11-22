@@ -424,6 +424,12 @@ public final class KeyVaultKeyDriver extends AbstractKeyStoreDriver {
                 && keyId.indexOf('/', idPrefix.length()) < 0;
     }
 
+    /** Key Vault's key names are case-insensitive, so the prefix is too. */
+    @Override
+    public boolean inStore(String keyId, String nativePrefix) {
+        return inLocation(keyId) && keyId.regionMatches(true, idPrefix.length(), nativePrefix, 0, nativePrefix.length());
+    }
+
     @Override
     public boolean unwraps(WrapAlgorithm algorithm) {
         return algorithm == WrapAlgorithm.AZURE_RSA_OAEP_256;
